@@ -49,6 +49,9 @@ use tokio::sync::watch;
 type TestProviderFactory =
     reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>;
 
+const TEST_SELFDESTRUCT_BENEFICIARY: Address = Address::new([0x77; 20]);
+const TEST_CREATE2_SALT: B256 = B256::with_last_byte(0x42);
+
 /// Scenario coverage:
 /// 1. Cross-batch pre-Cancun wipe writes plain slot keys into storage changesets.
 /// 2. Preimage DB exists and is usable across multiple stage executions.
@@ -290,10 +293,8 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let beneficiary = Address::new([0x77; 20]);
     let selfdestruct_contract = Address::new([0x66; 20]);
-    let chain_spec =
-        build_selfdestruct_chain_spec(signer_address, beneficiary, selfdestruct_contract);
+    let chain_spec = build_selfdestruct_chain_spec(signer_address, selfdestruct_contract);
     let blocks = {
         // Build blocks via direct execution first, so each header has a valid state root.
         // The pipeline test then replays these exact blocks in phase-separated ranges.
@@ -330,7 +331,7 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
                 36_u64,
                 2_u64,
                 Bytes::new(),
-                TxKind::Call(beneficiary),
+                TxKind::Call(TEST_SELFDESTRUCT_BENEFICIARY),
                 21_000_u64,
                 U256::from(1),
             ),
@@ -403,7 +404,6 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let beneficiary = Address::new([0x55; 20]);
     let selfdestruct_contract = Address::new([0x33; 20]);
     let slot = B256::with_last_byte(0x03);
     let original_value = B256::with_last_byte(0x07);
@@ -423,7 +423,7 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
                     (
                         selfdestruct_contract,
                         GenesisAccount {
-                            code: Some(write_restore_or_selfdestruct_runtime_code(beneficiary)),
+                            code: Some(WRITE_RESTORE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
                             storage: Some(BTreeMap::from([(slot, original_value)])),
                             ..Default::default()
                         },
@@ -494,12 +494,10 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let beneficiary = Address::new([0x99; 20]);
     let factory_contract = Address::new([0xaa; 20]);
-    let salt = B256::with_last_byte(0x42);
-    let child_runtime = write_or_selfdestruct_runtime_code(beneficiary);
+    let child_runtime = WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone();
     let child_init = init_code_for_runtime(&child_runtime);
-    let child_contract = create2_address(factory_contract, salt, &child_init);
+    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -516,7 +514,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
                     (
                         factory_contract,
                         GenesisAccount {
-                            code: Some(create2_factory_runtime_code(salt)),
+                            code: Some(CREATE2_FACTORY_RUNTIME_CODE.clone()),
                             ..Default::default()
                         },
                     ),
@@ -593,7 +591,6 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let beneficiary = Address::new([0x88; 20]);
     let multi_tx_contract = Address::new([0x44; 20]);
     let intra_tx_contract = Address::new([0x55; 20]);
 
@@ -612,14 +609,14 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
                     (
                         multi_tx_contract,
                         GenesisAccount {
-                            code: Some(write_or_selfdestruct_runtime_code(beneficiary)),
+                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
                             ..Default::default()
                         },
                     ),
                     (
                         intra_tx_contract,
                         GenesisAccount {
-                            code: Some(write_restore_then_selfdestruct_runtime_code(beneficiary)),
+                            code: Some(WRITE_RESTORE_THEN_SELFDESTRUCT_RUNTIME_CODE.clone()),
                             ..Default::default()
                         },
                     ),
@@ -791,7 +788,6 @@ fn execute_and_commit_block(
 
 fn build_selfdestruct_chain_spec(
     signer_address: Address,
-    beneficiary: Address,
     selfdestruct_contract: Address,
 ) -> Arc<reth_chainspec::ChainSpec> {
     let initial_balance = U256::from(ETH_TO_WEI) * U256::from(1000);
@@ -808,7 +804,7 @@ fn build_selfdestruct_chain_spec(
                     (
                         selfdestruct_contract,
                         GenesisAccount {
-                            code: Some(write_or_selfdestruct_runtime_code(beneficiary)),
+                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
                             ..Default::default()
                         },
                     ),
@@ -986,60 +982,39 @@ async fn run_pipeline_range(
 /// - non-empty calldata: selfdestructs to `beneficiary` and stops
 ///
 /// The known slot/value pairs are used for deterministic assertions in changesets and preimages.
-fn write_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
-    let mut runtime = Vec::with_capacity(40);
-    runtime.extend_from_slice(&bytes!(
-        "3615601c57" // CALLDATASIZE; ISZERO; PUSH1 0x1c; JUMPI
-    ));
-    runtime.push(0x73); // PUSH20
-    runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&bytes!(
-        "ff00" // SELFDESTRUCT; STOP
-        "5b" // JUMPDEST (0x1c)
-        "602a600155" // SSTORE(1, 0x2a)
-        "6099600255" // SSTORE(2, 0x99)
-        "00" // STOP
-    ));
-    runtime.into()
-}
+const WRITE_OR_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
+    "3615601c57" // CALLDATASIZE; ISZERO; PUSH1 0x1c; JUMPI
+    "737777777777777777777777777777777777777777" // PUSH20 beneficiary
+    "ff00" // SELFDESTRUCT; STOP
+    "5b" // JUMPDEST (0x1c)
+    "602a600155" // SSTORE(1, 0x2a)
+    "6099600255" // SSTORE(2, 0x99)
+    "00" // STOP
+);
 
 /// Builds tiny runtime bytecode with three value-based paths:
 /// - `msg.value == 0`: SSTORE(3, 0x2b)
 /// - `msg.value == 1`: SSTORE(3, 0x07)
 /// - `msg.value == 2`: SELFDESTRUCT to `beneficiary`
-fn write_restore_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
-    let mut runtime = Vec::with_capacity(64);
-    runtime.extend_from_slice(&bytes!(
-        "34600214601b57" // if callvalue == 2 jump selfdestruct
-        "34600114601457" // if callvalue == 1 jump restore
-        "602b60035500" // default: SSTORE(3, 0x2b); STOP
-        "5b" // JUMPDEST (0x14)
-        "600760035500" // restore: SSTORE(3, 0x07); STOP
-        "5b" // JUMPDEST (0x1b)
-    ));
-    runtime.push(0x73); // PUSH20
-    runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&bytes!(
-        "ff00" // SELFDESTRUCT; STOP
-    ));
-    runtime.into()
-}
+const WRITE_RESTORE_OR_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
+    "34600214601b57" // if callvalue == 2 jump selfdestruct
+    "34600114601457" // if callvalue == 1 jump restore
+    "602b60035500" // default: SSTORE(3, 0x2b); STOP
+    "5b" // JUMPDEST (0x14)
+    "600760035500" // restore: SSTORE(3, 0x07); STOP
+    "5b" // JUMPDEST (0x1b)
+    "737777777777777777777777777777777777777777" // PUSH20 beneficiary
+    "ff00" // SELFDESTRUCT; STOP
+);
 
 /// Builds tiny runtime bytecode that performs all actions in one call:
 /// SSTORE(3, 0x2b) -> SSTORE(3, 0x07) -> SELFDESTRUCT.
-fn write_restore_then_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
-    let mut runtime = Vec::with_capacity(40);
-    runtime.extend_from_slice(&bytes!(
-        "602b600355" // SSTORE(3, 0x2b)
-        "6007600355" // SSTORE(3, 0x07)
-    ));
-    runtime.push(0x73); // PUSH20
-    runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&bytes!(
-        "ff00" // SELFDESTRUCT; STOP
-    ));
-    runtime.into()
-}
+const WRITE_RESTORE_THEN_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
+    "602b600355" // SSTORE(3, 0x2b)
+    "6007600355" // SSTORE(3, 0x07)
+    "737777777777777777777777777777777777777777" // PUSH20 beneficiary
+    "ff00" // SELFDESTRUCT; STOP
+);
 
 /// Converts contract runtime bytecode into init code that returns the runtime.
 fn init_code_for_runtime(runtime: &Bytes) -> Bytes {
@@ -1061,18 +1036,11 @@ fn init_code_for_runtime(runtime: &Bytes) -> Bytes {
 /// Runtime bytecode for a minimal CREATE2 factory:
 /// - calldata is treated as init code
 /// - deploys with fixed `salt`
-fn create2_factory_runtime_code(salt: B256) -> Bytes {
-    let mut runtime = Vec::with_capacity(46);
-    runtime.extend_from_slice(&bytes!(
-        "366000600037" // CALLDATACOPY(0, 0, calldatasize)
-    ));
-    runtime.push(0x7f); // PUSH32
-    runtime.extend_from_slice(salt.as_slice());
-    runtime.extend_from_slice(&bytes!(
-        "3660006000f500" // CREATE2(0, 0, calldatasize, salt); STOP
-    ));
-    runtime.into()
-}
+const CREATE2_FACTORY_RUNTIME_CODE: Bytes = bytes!(
+    "366000600037" // CALLDATACOPY(0, 0, calldatasize)
+    "7f0000000000000000000000000000000000000000000000000000000000000042" // PUSH32 salt
+    "3660006000f500" // CREATE2(0, 0, calldatasize, salt); STOP
+);
 
 fn create2_address(factory: Address, salt: B256, init_code: &Bytes) -> Address {
     let init_hash = keccak256(init_code.as_ref());
