@@ -166,6 +166,7 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
 
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 2, "pipeline should sync blocks 1..=2");
+    assert_preimage_rows_for_provider(&provider, &scenario.expected_slots)?;
     assert_destroyed_changeset_entries(&provider, scenario.selfdestruct_contract)?;
 
     Ok(())
@@ -198,6 +199,7 @@ async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changeset
 
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 3, "pipeline should sync blocks 1..=3");
+    assert_preimage_rows_for_provider(&provider, &[scenario.expected_slot.0])?;
     assert_destroyed_changeset_entries_in_block(
         &provider,
         3,
@@ -232,6 +234,8 @@ async fn test_pipeline_v2_single_batch_same_address_double_wipe_changesets_plain
 
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 6, "pipeline should sync blocks 1..=6");
+    let expected_preimages = scenario.expected_slots.map(|(slot, _)| slot);
+    assert_preimage_rows_for_provider(&provider, &expected_preimages)?;
     assert_destroyed_changeset_entries_in_block(
         &provider,
         3,
@@ -272,6 +276,8 @@ async fn test_pipeline_v2_single_block_intra_block_and_intra_tx_wipes_use_plain_
 
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 1, "pipeline should sync block 1");
+    // Net-zero wipe scenarios do not require any specific preimage rows for changeset emission.
+    assert_preimage_rows_for_provider(&provider, &[])?;
     assert_destroyed_changeset_entries_in_block(
         &provider,
         1,
@@ -1079,4 +1085,17 @@ fn assert_preimage_rows(preimage_path: &Path, slots: &[B256]) -> eyre::Result<()
     }
 
     Ok(())
+}
+
+fn assert_preimage_rows_for_provider<P>(provider: &P, slots: &[B256]) -> eyre::Result<()>
+where
+    P: StoragePath,
+{
+    let preimage_path = provider.storage_path().join("preimage");
+    assert!(
+        preimage_path.exists(),
+        "preimage dir should exist for pre-Cancun execution at {}",
+        preimage_path.display()
+    );
+    assert_preimage_rows(&preimage_path, slots)
 }
