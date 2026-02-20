@@ -512,6 +512,11 @@ jobs:
             cargo install --git https://github.com/tempoxyz/schelk --locked
           fi
 
+          # samply (optional CPU profiler)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! command -v samply &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+          fi
+
           # Clean up git auth
           git config --global --unset url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf
 
@@ -530,13 +535,6 @@ jobs:
             exit 1
           fi
           echo "All dependencies found"
-
-      - name: Install samply
-        if: env.BENCH_SAMPLY == 'true'
-        run: |
-          if ! command -v samply &>/dev/null; then
-            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
-          fi
 
       # Build binaries
       - name: Resolve PR head branch
