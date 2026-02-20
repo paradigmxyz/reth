@@ -1,46 +1,54 @@
-# Runs mutation testing on changed code in pull requests.
+# Runs mutation testing nightly on code that changed since the last run.
 #
 # Mutation testing injects small faults (operator swaps, deleted lines, etc.)
-# into the code touched by a PR and checks whether existing tests catch them.
-# Surviving mutants indicate gaps in test coverage.
+# and checks whether existing tests catch them. Surviving mutants indicate
+# test gaps where bugs could land without any test failing.
 
 name: mutants
 
 on:
-  pull_request:
+  schedule:
+    # Run nightly at 03:00 UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   mutants:
     name: mutation testing
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Generate diff
+      - name: Generate diff from last 24h
         run: |
-          git diff origin/${{ github.base_ref }}.. | tee git.diff
+          git diff $(git log --since="24 hours ago" --format="%H" | tail -1)..HEAD | tee git.diff
+          if [ ! -s git.diff ]; then
+            echo "No changes in the last 24 hours, skipping"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          fi
 
       - uses: rui314/setup-mold@v1
+        if: env.SKIP != 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: env.SKIP != 'true'
       - uses: Swatinem/rust-cache@v2
+        if: env.SKIP != 'true'
         with:
           cache-on-failure: true
 
       - uses: taiki-e/install-action@v2
+        if: env.SKIP != 'true'
         with:
           tool: cargo-mutants
 
       - name: Run mutation tests on diff
+        if: env.SKIP != 'true'
         run: |
           cargo mutants --no-shuffle -vV --in-diff git.diff \
             --timeout=300 \
@@ -49,7 +57,7 @@ jobs:
 
       - name: Archive results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.SKIP != 'true'
         with:
           name: mutants.out
           path: mutants.out
