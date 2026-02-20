@@ -93,35 +93,28 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        while self.run_iteration()? {}
+        loop {
+            let indexing_pending = self.deferred_indexing_enabled &&
+                self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
 
-        Ok(())
-    }
-
-    /// Runs a single persistence-service iteration.
-    ///
-    /// Returns `Ok(false)` when the incoming channel is disconnected and the service should stop.
-    fn run_iteration(&mut self) -> Result<bool, PersistenceError> {
-        let indexing_pending = self.deferred_indexing_enabled &&
-            self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
-
-        // When indexing work is pending, use try_recv so we can do indexing ticks between
-        // persistence actions. Otherwise block on recv.
-        if indexing_pending {
-            match self.incoming.try_recv() {
-                Ok(action) => self.handle_action(action)?,
-                Err(TryRecvError::Empty) => self.run_deferred_indexing_tick(),
-                Err(TryRecvError::Disconnected) => return Ok(false),
+            // When indexing work is pending, use try_recv so we can do indexing ticks between
+            // persistence actions. Otherwise block on recv.
+            if indexing_pending {
+                match self.incoming.try_recv() {
+                    Ok(action) => self.handle_action(action)?,
+                    Err(TryRecvError::Empty) => self.run_deferred_indexing_tick(),
+                    Err(TryRecvError::Disconnected) => break,
+                }
+            } else {
+                let action = match self.incoming.recv() {
+                    Ok(action) => action,
+                    Err(_) => break,
+                };
+                self.handle_action(action)?;
             }
-        } else {
-            let action = match self.incoming.recv() {
-                Ok(action) => action,
-                Err(_) => return Ok(false),
-            };
-            self.handle_action(action)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 
     /// No persistence work pending, opportunistically run one deferred indexing tick.
