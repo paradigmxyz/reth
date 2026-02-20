@@ -821,7 +821,7 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 
 /// Represents transactions that were propagated over the network.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub struct PropagatedTransactions(HashMap<TxHash, Vec<PropagateKind>>);
+pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
 
 impl PropagatedTransactions {
     /// Records a propagation of a transaction to a peer.
@@ -840,8 +840,8 @@ impl PropagatedTransactions {
     }
 
     /// Returns the propagation info for a specific transaction.
-    pub fn get(&self, hash: &TxHash) -> Option<&Vec<PropagateKind>> {
-        self.0.get(hash)
+    pub fn get(&self, hash: &TxHash) -> Option<&[PropagateKind]> {
+        self.0.get(hash).map(Vec::as_slice)
     }
 }
 
