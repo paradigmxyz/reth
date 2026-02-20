@@ -1,5 +1,5 @@
 use crate::metrics::PersistenceMetrics;
-use crate::deferred_indexer::DeferredHistoryIndexer;
+use crate::deferred_indexer::{DeferredHistoryIndexer, DeferredHistoryIndexerConfig};
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -8,10 +8,10 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
@@ -52,7 +52,7 @@ where
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
     /// Optional deferred history indexer that runs inside this service's thread.
-    deferred_indexer: Option<DeferredHistoryIndexer<N>>,
+    deferred_indexer: Option<DeferredHistoryIndexer>,
 }
 
 impl<N> PersistenceService<N>
@@ -65,7 +65,7 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<DeferredHistoryIndexer<N>>,
+        deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
     ) -> Self {
         Self {
             provider,
@@ -75,7 +75,9 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
-            deferred_indexer,
+            deferred_indexer: deferred_indexer_config.map(|config| {
+                DeferredHistoryIndexer::new(&config.stages, &config.prune_modes)
+            }),
         }
     }
 }
@@ -119,10 +121,33 @@ where
 
     /// No persistence work pending, opportunistically run one deferred indexing tick.
     fn run_deferred_indexing_tick(&mut self) {
-        if let Some(indexer) = &mut self.deferred_indexer &&
-            let Err(err) = indexer.tick()
-        {
+        let Some(indexer) = &mut self.deferred_indexer else {
+            return;
+        };
+
+        let provider_rw = match self.provider.database_provider_rw() {
+            Ok(provider_rw) => provider_rw,
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Failed to open RW provider for deferred indexing tick");
+                return;
+            }
+        };
+
+        let tip = match provider_rw.get_stage_checkpoint(StageId::Finish) {
+            Ok(checkpoint) => checkpoint.map(|c| c.block_number).unwrap_or(0),
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Failed to read Finish checkpoint for deferred indexing tick");
+                return;
+            }
+        };
+
+        if let Err(err) = indexer.tick_with_provider(&provider_rw, tip) {
             warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
+            return;
+        }
+
+        if let Err(err) = provider_rw.commit() {
+            warn!(target: "engine::persistence", %err, "Failed to commit deferred indexing tick");
         }
     }
 
@@ -299,7 +324,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<DeferredHistoryIndexer<N>>,
+        deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -313,7 +338,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
             db_service_rx,
             pruner,
             sync_metrics_tx,
-            deferred_indexer,
+            deferred_indexer_config,
         );
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {

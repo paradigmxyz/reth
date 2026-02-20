@@ -13,7 +13,7 @@ use futures::{stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
-    deferred_indexer::DeferredHistoryIndexer,
+    deferred_indexer::DeferredHistoryIndexerConfig,
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
     tree::TreeConfig,
@@ -243,19 +243,18 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             changeset_cache,
             {
-                // Create deferred history indexer if enabled in config
-                let deferred_indexer = if ctx.toml_config().stages.deferred_history_indexing {
+                // Configure deferred history indexing if enabled in config.
+                let deferred_indexer_config = if ctx.toml_config().stages.deferred_history_indexing
+                {
                     info!(target: "reth::cli", "Deferred history indexing enabled, embedding indexer in persistence service");
-                    let indexer = DeferredHistoryIndexer::new(
-                        ctx.provider_factory().clone(),
-                        &ctx.toml_config().stages,
-                        &ctx.prune_config().segments,
-                    );
-                    Some(indexer)
+                    Some(DeferredHistoryIndexerConfig::new(
+                        ctx.toml_config().stages.clone(),
+                        ctx.prune_config().segments.clone(),
+                    ))
                 } else {
                     None
                 };
-                deferred_indexer
+                deferred_indexer_config
             },
         );
 

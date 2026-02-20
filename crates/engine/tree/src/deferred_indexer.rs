@@ -5,10 +5,7 @@
 //! MDBX write-lock contention that would occur if these stages ran on a separate thread.
 
 use reth_config::config::StageConfig;
-use reth_provider::{
-    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter,
-};
+use reth_provider::{StageCheckpointReader, StageCheckpointWriter};
 use reth_prune::PruneModes;
 use reth_stages::{
     stages::{IndexAccountHistoryStage, IndexStorageHistoryStage, TransactionLookupStage},
@@ -19,12 +16,27 @@ use tracing::{debug, info, warn};
 /// Maximum number of blocks to index per tick.
 const DEFAULT_BATCH_SIZE: u64 = 10_000;
 
+/// Construction configuration for the deferred history indexer.
+#[derive(Debug, Clone)]
+pub struct DeferredHistoryIndexerConfig {
+    /// Stage-level execution configuration.
+    pub stages: StageConfig,
+    /// Pruning modes that affect index stage behavior.
+    pub prune_modes: PruneModes,
+}
+
+impl DeferredHistoryIndexerConfig {
+    /// Creates a new deferred history indexer config.
+    pub fn new(stages: StageConfig, prune_modes: PruneModes) -> Self {
+        Self { stages, prune_modes }
+    }
+}
+
 /// Deferred history indexer that runs pipeline stages inside the persistence service.
 ///
 /// Processes history indexing in small batches, round-robining between the three deferred
 /// stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`).
-pub struct DeferredHistoryIndexer<N: ProviderNodeTypes> {
-    provider_factory: ProviderFactory<N>,
+pub struct DeferredHistoryIndexer {
     tx_lookup: TransactionLookupStage,
     index_storage: IndexStorageHistoryStage,
     index_account: IndexAccountHistoryStage,
@@ -34,7 +46,7 @@ pub struct DeferredHistoryIndexer<N: ProviderNodeTypes> {
     next_stage: usize,
 }
 
-impl<N: ProviderNodeTypes> std::fmt::Debug for DeferredHistoryIndexer<N> {
+impl std::fmt::Debug for DeferredHistoryIndexer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeferredHistoryIndexer")
             .field("batch_size", &self.batch_size)
@@ -44,17 +56,12 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for DeferredHistoryIndexer<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
+impl DeferredHistoryIndexer {
     /// Creates a new deferred history indexer.
-    pub fn new(
-        provider_factory: ProviderFactory<N>,
-        stages_config: &StageConfig,
-        prune_modes: &PruneModes,
-    ) -> Self {
+    pub fn new(stages_config: &StageConfig, prune_modes: &PruneModes) -> Self {
         let etl = stages_config.etl.clone();
 
         Self {
-            provider_factory,
             tx_lookup: TransactionLookupStage::new(
                 stages_config.transaction_lookup,
                 etl.clone(),
@@ -77,17 +84,17 @@ impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
     }
 
     /// Runs one stage batch and returns whether work was done.
-    fn run_stage_batch(
+    fn run_stage_batch<Provider>(
         &mut self,
+        provider_rw: &Provider,
         stage_idx: usize,
         tip: u64,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
     where
-        TransactionLookupStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
-        IndexStorageHistoryStage:
-            Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
-        IndexAccountHistoryStage:
-            Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
+        Provider: StageCheckpointReader + StageCheckpointWriter,
+        TransactionLookupStage: Stage<Provider>,
+        IndexStorageHistoryStage: Stage<Provider>,
+        IndexAccountHistoryStage: Stage<Provider>,
     {
         let stage_id = match stage_idx {
             0 => StageId::TransactionLookup,
@@ -96,16 +103,13 @@ impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
             _ => unreachable!(),
         };
 
-        let provider_rw = self.provider_factory.database_provider_rw()?;
         let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
 
         if checkpoint.block_number >= tip {
-            provider_rw.commit()?;
             return Ok(false);
         }
 
-        let batch_target =
-            std::cmp::min(tip, checkpoint.block_number.saturating_add(self.batch_size));
+        let batch_target = std::cmp::min(tip, checkpoint.block_number.saturating_add(self.batch_size));
         let input = ExecInput { target: Some(batch_target), checkpoint: Some(checkpoint) };
 
         debug!(
@@ -118,16 +122,15 @@ impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
         );
 
         let result = match stage_idx {
-            0 => self.tx_lookup.execute(&provider_rw, input),
-            1 => self.index_storage.execute(&provider_rw, input),
-            2 => self.index_account.execute(&provider_rw, input),
+            0 => self.tx_lookup.execute(provider_rw, input),
+            1 => self.index_storage.execute(provider_rw, input),
+            2 => self.index_account.execute(provider_rw, input),
             _ => unreachable!(),
         };
 
         match result {
             Ok(output) => {
                 provider_rw.save_stage_checkpoint(stage_id, output.checkpoint)?;
-                provider_rw.commit()?;
                 info!(
                     target: "engine::persistence::deferred_indexer",
                     %stage_id,
@@ -144,31 +147,33 @@ impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
                     %err,
                     "Deferred indexing batch failed, will retry"
                 );
-                drop(provider_rw);
                 Ok(false)
             }
         }
     }
 
-    /// Check if all three stages have caught up to the pipeline tip.
-    fn check_caught_up(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let provider_ro = self.provider_factory.database_provider_ro()?;
-        let tip =
-            provider_ro.get_stage_checkpoint(StageId::Finish)?.map(|c| c.block_number).unwrap_or(0);
-
+    /// Check if all three stages have caught up to the provided pipeline tip.
+    fn check_caught_up<Provider>(
+        &self,
+        provider: &Provider,
+        tip: u64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
+    where
+        Provider: StageCheckpointReader,
+    {
         if tip == 0 {
             return Ok(false);
         }
 
-        let tx_lookup = provider_ro
+        let tx_lookup = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|c| c.block_number)
             .unwrap_or(0);
-        let storage = provider_ro
+        let storage = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
             .map(|c| c.block_number)
             .unwrap_or(0);
-        let account = provider_ro
+        let account = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
             .map(|c| c.block_number)
             .unwrap_or(0);
@@ -177,37 +182,32 @@ impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
     }
 }
 
-impl<N> DeferredHistoryIndexer<N>
-where
-    N: ProviderNodeTypes,
-    TransactionLookupStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
-    IndexStorageHistoryStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
-    IndexAccountHistoryStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
-{
-    /// Runs a single deferred indexing tick.
-    pub fn tick(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Read the current pipeline tip
-        let tip = {
-            let provider_ro = self.provider_factory.database_provider_ro()?;
-            provider_ro.get_stage_checkpoint(StageId::Finish)?.map(|c| c.block_number).unwrap_or(0)
-        };
-
+impl DeferredHistoryIndexer {
+    /// Runs a single deferred indexing tick using the caller-provided transaction/provider.
+    pub fn tick_with_provider<Provider>(
+        &mut self,
+        provider_rw: &Provider,
+        tip: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        Provider: StageCheckpointReader + StageCheckpointWriter,
+        TransactionLookupStage: Stage<Provider>,
+        IndexStorageHistoryStage: Stage<Provider>,
+        IndexAccountHistoryStage: Stage<Provider>,
+    {
         if tip == 0 {
             return Ok(());
         }
 
-        // Run one batch for the current stage
+        // Run one batch for the current stage.
         let current = self.next_stage;
-        let did_work = self.run_stage_batch(current, tip)?;
+        let _did_work = self.run_stage_batch(provider_rw, current, tip)?;
 
-        // Advance to next stage (round-robin)
+        // Advance to next stage (round-robin).
         self.next_stage = (self.next_stage + 1) % 3;
 
-        // Check if all stages are caught up
-        if (!did_work || self.check_caught_up()?) &&
-            !self.caught_up &&
-            self.check_caught_up().unwrap_or(false)
-        {
+        // Check if all stages are caught up.
+        if self.check_caught_up(provider_rw, tip)? && !self.caught_up {
             info!(target: "engine::persistence::deferred_indexer", "Deferred history indexing caught up to tip");
             self.caught_up = true;
         }
