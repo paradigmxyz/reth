@@ -46,6 +46,7 @@ env:
   BASELINE: base
   SEED: reth
   RUSTC_WRAPPER: "sccache"
+  BENCH_RUNNERS: 2
 
 name: bench
 
@@ -267,9 +268,11 @@ jobs:
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-            // Count queued/waiting bench runs ahead of this one
+            // Count queued/waiting bench runs ahead of this one.
+            // BENCH_RUNNERS is the number of self-hosted runners available.
             let queueMsg = '';
             let ahead = 0;
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
             try {
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
@@ -287,13 +290,13 @@ jobs:
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              ahead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              ahead = Math.max(0, totalAhead - numRunners + 1);
               if (ahead > 0) {
-                queueMsg = `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`;
+                queueMsg = `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`;
               }
             } catch (e) {
-              // Non-fatal — queue info is best-effort
-              core.info(`Could not fetch queue info: ${e.message}`);
+              core.info(`Skipping queue tracking: ${e.message}`);
             }
 
             const actor = '${{ steps.args.outputs.actor }}';
@@ -332,6 +335,7 @@ jobs:
             const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
             async function getQueuePosition() {
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
@@ -348,7 +352,8 @@ jobs:
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              return benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              return { ahead: Math.max(0, totalAhead - numRunners + 1), numRunners };
             }
 
             let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
@@ -357,11 +362,11 @@ jobs:
             while (true) {
               await sleep(10_000);
               try {
-                const ahead = await getQueuePosition();
+                const { ahead, numRunners } = await getQueuePosition();
                 if (ahead !== lastPosition) {
                   lastPosition = ahead;
                   const queueMsg = ahead > 0
-                    ? `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`
+                    ? `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`
                     : '';
                   await github.rest.issues.updateComment({
                     owner: context.repo.owner,
@@ -381,9 +386,6 @@ jobs:
     name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
-    concurrency:
-      group: reth-bench-queue
-      cancel-in-progress: false
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
@@ -458,6 +460,52 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
 
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # apt packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          # uv (Python package manager)
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+          fi
+
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # thin-provisioning-tools (era_invalidate, required by schelk)
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+          # samply (optional CPU profiler, invoked via sudo)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+            sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
+          fi
+
       # Verify all required tools are available
       - name: Check dependencies
         run: |
@@ -473,13 +521,6 @@ jobs:
             exit 1
           fi
           echo "All dependencies found"
-
-      - name: Install samply
-        if: env.BENCH_SAMPLY == 'true'
-        run: |
-          if ! command -v samply &>/dev/null; then
-            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
-          fi
 
       # Build binaries
       - name: Resolve PR head branch
