@@ -945,8 +945,25 @@ where
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
         // We skip the era stage if it's not enabled
         let era_enabled = self.era_import_source().is_some();
-        let mut all_stages =
-            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+        let deferred_history_indexing = self.toml_config().stages.deferred_history_indexing;
+        let mut all_stages = StageId::ALL.into_iter().filter(|id| {
+            if !era_enabled && *id == StageId::Era {
+                return false
+            }
+
+            if deferred_history_indexing &&
+                matches!(
+                    id,
+                    StageId::TransactionLookup |
+                        StageId::IndexStorageHistory |
+                        StageId::IndexAccountHistory
+                )
+            {
+                return false
+            }
+
+            true
+        });
 
         // Get the expected first stage based on config.
         let first_stage = all_stages.next().expect("there must be at least one stage");

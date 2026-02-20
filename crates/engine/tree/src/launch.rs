@@ -66,6 +66,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     evm_config: C,
     changeset_cache: ChangesetCache,
     deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
+    deferred_indexing_enabled: bool,
 ) -> ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
@@ -89,6 +90,7 @@ where
         pruner,
         sync_metrics_tx,
         deferred_indexer_config,
+        deferred_indexing_enabled,
     );
 
     let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();

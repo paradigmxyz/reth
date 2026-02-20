@@ -53,6 +53,8 @@ where
     pending_safe_block: Option<u64>,
     /// Optional deferred history indexer that runs inside this service's thread.
     deferred_indexer: Option<DeferredHistoryIndexer>,
+    /// Whether deferred indexing ticks are enabled.
+    deferred_indexing_enabled: bool,
 }
 
 impl<N> PersistenceService<N>
@@ -66,6 +68,7 @@ where
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
         deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
+        deferred_indexing_enabled: bool,
     ) -> Self {
         Self {
             provider,
@@ -78,6 +81,7 @@ where
             deferred_indexer: deferred_indexer_config.map(|config| {
                 DeferredHistoryIndexer::new(&config.stages, &config.prune_modes)
             }),
+            deferred_indexing_enabled,
         }
     }
 }
@@ -98,7 +102,8 @@ where
     ///
     /// Returns `Ok(false)` when the incoming channel is disconnected and the service should stop.
     fn run_iteration(&mut self) -> Result<bool, PersistenceError> {
-        let indexing_pending = self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
+        let indexing_pending = self.deferred_indexing_enabled &&
+            self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
 
         // When indexing work is pending, use try_recv so we can do indexing ticks between
         // persistence actions. Otherwise block on recv.
@@ -196,6 +201,14 @@ where
             }
             PersistenceAction::SaveSafeBlock(safe_block) => {
                 self.pending_safe_block = Some(safe_block);
+            }
+            PersistenceAction::SetDeferredIndexingEnabled(enabled) => {
+                self.deferred_indexing_enabled = enabled;
+                debug!(
+                    target: "engine::persistence",
+                    enabled,
+                    "Updated deferred history indexing state"
+                );
             }
         }
         Ok(())
@@ -308,6 +321,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+
+    /// Enables or disables deferred indexing ticks.
+    SetDeferredIndexingEnabled(bool),
 }
 
 /// A handle to the persistence service
@@ -339,6 +355,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
         deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
+        deferred_indexing_enabled: bool,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -353,6 +370,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
             pruner,
             sync_metrics_tx,
             deferred_indexer_config,
+            deferred_indexing_enabled,
         );
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
@@ -413,6 +431,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
+    /// Enables or disables deferred indexing ticks in the persistence thread.
+    pub fn set_deferred_indexing_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        self.send_action(PersistenceAction::SetDeferredIndexingEnabled(enabled))
+    }
+
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
@@ -468,7 +494,13 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx, None)
+        PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            None,
+            true,
+        )
     }
 
     #[test]
