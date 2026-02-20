@@ -35,6 +35,11 @@ on:
         required: false
         default: ""
         type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -104,6 +109,7 @@ jobs:
       feature: ${{ steps.args.outputs.feature }}
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
+      samply: ${{ steps.args.outputs.samply }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -131,7 +137,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature;
+            let pr, actor, blocks, warmup, baseline, feature, samply;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -139,6 +145,7 @@ jobs:
               warmup = '${{ github.event.inputs.warmup }}' || '100';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
+              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -160,7 +167,8 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['blocks', 'warmup']);
               const refArgs = new Set(['baseline', 'feature']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
+              const boolArgs = new Set(['samply']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -184,6 +192,12 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
+                } else if (boolArgs.has(key)) {
+                  if (value !== 'true' && value !== 'false') {
+                    invalid.push(`\`${key}=${value}\` (must be \`true\` or \`false\`)`);
+                  } else {
+                    defaults[key] = value;
+                  }
                 } else {
                   unknown.push(key);
                 }
@@ -192,7 +206,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -206,6 +220,7 @@ jobs:
               warmup = defaults.warmup;
               baseline = defaults.baseline;
               feature = defaults.feature;
+              samply = defaults.samply;
             }
 
             // Resolve display names for baseline/feature
@@ -232,6 +247,7 @@ jobs:
             core.setOutput('feature', feature);
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
+            core.setOutput('samply', samply);
 
       - name: Acknowledge request
         id: ack
@@ -287,7 +303,9 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -311,7 +329,9 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             async function getQueuePosition() {
@@ -374,6 +394,7 @@ jobs:
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
       - name: Resolve checkout ref
@@ -423,7 +444,9 @@ jobs:
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
+            const samply = process.env.BENCH_SAMPLY === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -452,6 +475,13 @@ jobs:
             exit 1
           fi
           echo "All dependencies found"
+
+      - name: Install samply
+        if: env.BENCH_SAMPLY == 'true'
+        run: |
+          if ! command -v samply &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+          fi
 
       # Build binaries
       - name: Resolve PR head branch

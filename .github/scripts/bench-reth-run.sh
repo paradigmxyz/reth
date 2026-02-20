@@ -47,17 +47,30 @@ grep Cached /proc/meminfo
 RETH_BENCH="$(which reth-bench)"
 ONLINE=$(nproc --all)
 RETH_CPUS="1-$(( ONLINE - 1 ))"
-sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
-  --datadir "$DATADIR" \
-  --engine.accept-execution-requests-hash \
-  --http \
-  --http.port 8545 \
-  --ws \
-  --ws.api all \
-  --authrpc.port 8551 \
-  --disable-discovery \
-  --no-persist-peers \
-  > "$LOG" 2>&1 &
+
+RETH_ARGS=(
+  node
+  --datadir "$DATADIR"
+  --engine.accept-execution-requests-hash
+  --http
+  --http.port 8545
+  --ws
+  --ws.api all
+  --authrpc.port 8551
+  --disable-discovery
+  --no-persist-peers
+)
+
+if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+    samply record --save-only --presymbolicate \
+    --output "$OUTPUT_DIR/samply-profile.json.gz" \
+    -- "$BINARY" "${RETH_ARGS[@]}" \
+    > "$LOG" 2>&1 &
+else
+  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+    > "$LOG" 2>&1 &
+fi
 
 RETH_PID=$!
 stdbuf -oL tail -f "$LOG" | sed -u "s/^/[reth] /" &
