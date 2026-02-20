@@ -175,7 +175,11 @@ jobs:
               for (const part of args.split(/\s+/).filter(Boolean)) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
-                  unknown.push(part);
+                  if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else {
+                    unknown.push(part);
+                  }
                   continue;
                 }
                 const key = part.slice(0, eq);
