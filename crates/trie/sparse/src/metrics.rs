@@ -72,6 +72,10 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_skipped_storage_nodes: Histogram,
     /// Histogram of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: Histogram,
+    /// Histogram of the number of nodes in the in-memory cached sparse trie for a storage
+    /// account at the time a new proof is revealed. 0 means the account had no cached sparse
+    /// trie (it was either absent or blind).
+    pub(crate) storage_trie_cached_nodes: Histogram,
 }
 
 /// Metrics for the parallel sparse trie

@@ -454,6 +454,19 @@ where
         account: B256,
         nodes: Vec<ProofTrieNodeV2>,
     ) -> SparseStateTrieResult<()> {
+        #[cfg(feature = "metrics")]
+        {
+            // Record the number of nodes in the existing cached sparse trie for this account
+            // before revealing new proof nodes. 0 if absent or blind.
+            let cached_nodes = self
+                .storage
+                .tries
+                .get(&account)
+                .and_then(|t| t.as_revealed_ref())
+                .map_or(0, |t| t.size_hint());
+            self.metrics.histograms.storage_trie_cached_nodes.record(cached_nodes as f64);
+        }
+
         let (trie, revealed_paths) = self.storage.get_trie_and_revealed_paths_mut(account);
         let _metric_values = Self::reveal_storage_v2_proof_nodes_inner(
             account,
