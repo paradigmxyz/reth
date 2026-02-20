@@ -30,8 +30,9 @@ pub enum SelectionResult {
 }
 
 /// Ordered presets for cycling through distance options on chunked components.
-const DISTANCE_PRESETS: [ComponentSelection; 5] = [
+const DISTANCE_PRESETS: [ComponentSelection; 6] = [
     ComponentSelection::None,
+    ComponentSelection::Distance(64),
     ComponentSelection::Distance(10_064),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
@@ -119,19 +120,8 @@ impl SelectorApp {
     fn new(manifest: SnapshotManifest) -> Self {
         let groups = build_groups(&manifest);
 
-        // Default selections: required=All, minimal groups=Distance(10064), rest=None
-        let selections = groups
-            .iter()
-            .map(|g| {
-                if g.required {
-                    ComponentSelection::All
-                } else if g.types.iter().any(|ty| ty.is_minimal()) {
-                    ComponentSelection::Distance(10_064)
-                } else {
-                    ComponentSelection::None
-                }
-            })
-            .collect();
+        // Default to the minimal preset (matches --minimal prune config)
+        let selections = groups.iter().map(|g| g.types[0].minimal_selection()).collect();
 
         let mut list_state = ListState::default();
         list_state.select(Some(0));
@@ -170,13 +160,7 @@ impl SelectorApp {
 
     fn select_minimal(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
-            if group.required {
-                self.selections[i] = ComponentSelection::All;
-            } else if group.types.iter().any(|ty| ty.is_minimal()) {
-                self.selections[i] = ComponentSelection::Distance(10_064);
-            } else {
-                self.selections[i] = ComponentSelection::None;
-            }
+            self.selections[i] = group.types[0].minimal_selection();
         }
     }
 

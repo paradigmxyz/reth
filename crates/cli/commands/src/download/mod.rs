@@ -385,20 +385,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         if self.non_interactive {
-            // Minimal defaults
+            // Minimal defaults (matches --minimal prune config)
             let mut selections = BTreeMap::new();
             for ty in SnapshotComponentType::ALL.iter().copied().filter(|ty| available(*ty)) {
-                let sel = if ty.is_required() {
-                    ComponentSelection::All
-                } else if ty.is_minimal() {
-                    ComponentSelection::Distance(10_064)
-                } else {
-                    ComponentSelection::None
-                };
-                // Only include components that are not None
-                if sel != ComponentSelection::None {
-                    selections.insert(ty, sel);
-                }
+                let sel = ty.minimal_selection();
+                selections.insert(ty, sel);
             }
             return Ok(selections);
         }
