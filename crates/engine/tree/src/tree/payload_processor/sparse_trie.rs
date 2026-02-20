@@ -36,6 +36,16 @@ use tracing::{debug, debug_span, error, instrument};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Maximum number of state updates to buffer for small-block batching in the hashing task.
+///
+/// For blocks with fewer state updates than this threshold, all hashed updates are merged
+/// into a single `HashedPostState` and forwarded as one message. This eliminates per-update
+/// channel send/wakeup overhead between the hashing thread and the main sparse trie loop.
+///
+/// Above this threshold, updates are flushed incrementally to maintain pipeline overlap
+/// between hashing and proof computation.
+const SMALL_BLOCK_HASHING_BATCH_THRESHOLD: usize = 128;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
@@ -148,32 +158,97 @@ where
 
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
+    ///
+    /// For small blocks (fewer than [`SMALL_BLOCK_HASHING_BATCH_THRESHOLD`] state updates),
+    /// all hashed updates are buffered and merged into a single `HashedState` message on
+    /// `FinishedStateUpdates`. This eliminates per-update channel overhead between the
+    /// hashing thread and the main sparse trie loop.
     fn run_hashing_task(
         updates: CrossbeamReceiver<MultiProofMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
     ) {
+        let mut buffer: Vec<HashedPostState> =
+            Vec::with_capacity(SMALL_BLOCK_HASHING_BATCH_THRESHOLD);
+        let mut batching = true;
+
         while let Ok(message) = updates.recv() {
-            let msg = match message {
+            match message {
                 MultiProofMessage::PrefetchProofs(targets) => {
-                    SparseTrieTaskMessage::PrefetchProofs(targets)
+                    if hashed_state_tx
+                        .send(SparseTrieTaskMessage::PrefetchProofs(targets))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 MultiProofMessage::StateUpdate(_, state) => {
                     let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
-                    SparseTrieTaskMessage::HashedState(hashed)
+
+                    if batching {
+                        buffer.push(hashed);
+                        if buffer.len() >= SMALL_BLOCK_HASHING_BATCH_THRESHOLD {
+                            // Exceeded threshold — flush all buffered updates individually
+                            // and disable batching for the rest of this block.
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                buffered = buffer.len(),
+                                "Exceeded small-block batch threshold, flushing to per-update pipeline"
+                            );
+                            for buffered in buffer.drain(..) {
+                                if hashed_state_tx
+                                    .send(SparseTrieTaskMessage::HashedState(buffered))
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            batching = false;
+                        }
+                    } else if hashed_state_tx
+                        .send(SparseTrieTaskMessage::HashedState(hashed))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 MultiProofMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
+                    // Flush any remaining buffered updates as a single merged message.
+                    if !buffer.is_empty() {
+                        let mut merged = HashedPostState::default();
+                        let count = buffer.len();
+                        for update in buffer.drain(..) {
+                            merged.extend(update);
+                        }
+                        debug!(
+                            target: "engine::tree::payload_processor::sparse_trie",
+                            updates = count,
+                            accounts = merged.accounts.len(),
+                            storages = merged.storages.len(),
+                            "Flushing small-block batch as single merged state update"
+                        );
+                        if hashed_state_tx
+                            .send(SparseTrieTaskMessage::HashedState(merged))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    if hashed_state_tx
+                        .send(SparseTrieTaskMessage::FinishedStateUpdates)
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
                     continue
                 }
                 MultiProofMessage::HashedStateUpdate(state) => {
-                    SparseTrieTaskMessage::HashedState(state)
+                    if hashed_state_tx.send(SparseTrieTaskMessage::HashedState(state)).is_err() {
+                        break;
+                    }
                 }
-            };
-            if hashed_state_tx.send(msg).is_err() {
-                break;
             }
         }
     }
