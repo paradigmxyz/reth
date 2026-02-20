@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError};
+use parking_lot::RwLock;
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
     NewCanonicalChain,
@@ -39,9 +40,9 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
+use reth_trie::StorageAccountFilter;
 use reth_trie_db::{ChangesetCache, StorageFilterFactoryBuilder};
 use revm::interpreter::debug_unreachable;
-use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -279,7 +280,7 @@ where
     use_hashed_state: bool,
     /// Cuckoo filter for tracking accounts with storage.
     /// Used to skip storage proof calculations for accounts without storage.
-    storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    storage_filter: Arc<RwLock<StorageAccountFilter>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -289,8 +290,8 @@ where
     C: Debug + ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = f.debug_struct("EngineApiTreeHandler");
-        s.field("provider", &self.provider)
+        f.debug_struct("EngineApiTreeHandler")
+            .field("provider", &self.provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
@@ -347,7 +348,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
-        storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+        storage_filter: Arc<RwLock<StorageAccountFilter>>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -415,7 +416,7 @@ where
         let filter = provider
             .build_storage_filter_parallel(num_threads)
             .expect("failed to build storage filter");
-        let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(filter));
+        let storage_filter = Arc::new(RwLock::new(filter));
 
         // Set the storage filter on the payload validator for use in proof calculation
         let mut payload_validator = payload_validator;

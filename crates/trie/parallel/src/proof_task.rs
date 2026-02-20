@@ -1318,11 +1318,11 @@ fn dispatch_v2_storage_proofs(
         }
 
         // Skip dispatch if the filter says this account has no storage
-        if let Some(filter) = storage_filter {
-            if !filter.may_have_storage(hashed_address) {
-                cached_storage_roots.insert(hashed_address, EMPTY_ROOT_HASH);
-                continue
-            }
+        if let Some(filter) = storage_filter &&
+            !filter.may_have_storage(hashed_address)
+        {
+            cached_storage_roots.insert(hashed_address, EMPTY_ROOT_HASH);
+            continue
         }
 
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
