@@ -348,8 +348,14 @@ mod tests {
 
     #[test]
     fn minimal_components_prunes_txs_and_receipts() {
-        let selected: Vec<_> =
-            SnapshotComponentType::ALL.iter().copied().filter(|ty| ty.is_minimal()).collect();
+        // Minimal set: state + headers + txs + changesets (no receipts)
+        let selected = vec![
+            SnapshotComponentType::State,
+            SnapshotComponentType::Headers,
+            SnapshotComponentType::Transactions,
+            SnapshotComponentType::AccountChangesets,
+            SnapshotComponentType::StorageChangesets,
+        ];
         let config = config_for_components(&selected);
 
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
