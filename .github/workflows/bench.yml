@@ -543,32 +543,51 @@ jobs:
 
       - name: Resolve refs
         id: refs
-        run: |
-          BASELINE_ARG="${{ needs.reth-bench-ack.outputs.baseline }}"
-          FEATURE_ARG="${{ needs.reth-bench-ack.outputs.feature }}"
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 
-          if [ -n "$BASELINE_ARG" ]; then
-            git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
-            BASELINE_REF=$(git rev-parse "$BASELINE_ARG" 2>/dev/null || git rev-parse "origin/$BASELINE_ARG" 2>/dev/null)
-            BASELINE_NAME="$BASELINE_ARG"
-          else
-            BASELINE_REF=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
-            BASELINE_NAME="main"
-          fi
+            const baselineArg = '${{ needs.reth-bench-ack.outputs.baseline }}';
+            const featureArg = '${{ needs.reth-bench-ack.outputs.feature }}';
 
-          if [ -n "$FEATURE_ARG" ]; then
-            git fetch origin "$FEATURE_ARG" --quiet 2>/dev/null || true
-            FEATURE_REF=$(git rev-parse "$FEATURE_ARG" 2>/dev/null || git rev-parse "origin/$FEATURE_ARG" 2>/dev/null)
-            FEATURE_NAME="$FEATURE_ARG"
-          else
-            FEATURE_REF="${{ steps.pr-info.outputs.head-sha }}"
-            FEATURE_NAME="${{ steps.pr-info.outputs.head-ref }}"
-          fi
+            let baselineRef, baselineName, featureRef, featureName;
 
-          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
-          echo "baseline-name=$BASELINE_NAME" >> "$GITHUB_OUTPUT"
-          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
-          echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+            if (baselineArg) {
+              try { run(`git fetch origin "${baselineArg}" --quiet`); } catch {}
+              try {
+                baselineRef = run(`git rev-parse "${baselineArg}"`);
+              } catch {
+                baselineRef = run(`git rev-parse "origin/${baselineArg}"`);
+              }
+              baselineName = baselineArg;
+            } else {
+              try {
+                baselineRef = run('git merge-base HEAD origin/main');
+              } catch {
+                baselineRef = '${{ github.sha }}';
+              }
+              baselineName = 'main';
+            }
+
+            if (featureArg) {
+              try { run(`git fetch origin "${featureArg}" --quiet`); } catch {}
+              try {
+                featureRef = run(`git rev-parse "${featureArg}"`);
+              } catch {
+                featureRef = run(`git rev-parse "origin/${featureArg}"`);
+              }
+              featureName = featureArg;
+            } else {
+              featureRef = '${{ steps.pr-info.outputs.head-sha }}';
+              featureName = '${{ steps.pr-info.outputs.head-ref }}';
+            }
+
+            core.setOutput('baseline-ref', baselineRef);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-ref', featureRef);
+            core.setOutput('feature-name', featureName);
 
       - name: Check if snapshot needs update
         id: snapshot-check

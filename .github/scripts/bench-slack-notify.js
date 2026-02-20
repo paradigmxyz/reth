@@ -322,11 +322,7 @@ async function failure({ core, context, failedStep }) {
     core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
   }
 
-  // Always post failures to public channel
-  const channel = process.env.SLACK_BENCH_CHANNEL;
-  if (channel) {
-    await postToSlack(token, channel, blocks, text, core);
-  }
+  // Only DM for failures, don't post to public channel
 }
 
 module.exports = { success, failure };
