@@ -141,7 +141,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
         }
     }
     for block_reverts in state.bundle.reverts.iter() {
-        for (_, revert) in block_reverts.iter() {
+        for (_, revert) in block_reverts {
             for &slot_key in revert.storage.keys() {
                 let plain = B256::from(slot_key.to_be_bytes());
                 let hashed = keccak256(plain);

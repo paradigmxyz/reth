@@ -480,7 +480,7 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
                     (
                         selfdestruct_contract,
                         GenesisAccount {
-                            code: Some(WRITE_RESTORE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
+                            code: Some(WRITE_RESTORE_OR_SELFDESTRUCT_RUNTIME_CODE),
                             storage: Some(BTreeMap::from([(slot, original_value)])),
                             ..Default::default()
                         },
@@ -552,8 +552,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
     let factory_contract = Address::new([0xaa; 20]);
-    let child_runtime = WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone();
-    let child_init = init_code_for_runtime(&child_runtime);
+    let child_init = init_code_for_runtime(&WRITE_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
@@ -571,7 +570,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
                     (
                         factory_contract,
                         GenesisAccount {
-                            code: Some(CREATE2_FACTORY_RUNTIME_CODE.clone()),
+                            code: Some(CREATE2_FACTORY_RUNTIME_CODE),
                             ..Default::default()
                         },
                     ),
@@ -598,7 +597,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
             (1_u64, 4_u64, 0_u64, TxKind::Call(factory_contract), child_init.clone()),
             (2_u64, 8_u64, 1_u64, TxKind::Call(child_contract), Bytes::new()),
             (3_u64, 12_u64, 2_u64, TxKind::Call(child_contract), Bytes::from(vec![0x01])),
-            (4_u64, 16_u64, 3_u64, TxKind::Call(factory_contract), child_init.clone()),
+            (4_u64, 16_u64, 3_u64, TxKind::Call(factory_contract), child_init),
             (5_u64, 20_u64, 4_u64, TxKind::Call(child_contract), Bytes::new()),
             (6_u64, 24_u64, 5_u64, TxKind::Call(child_contract), Bytes::from(vec![0x01])),
         ] {
@@ -649,8 +648,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
     let factory_contract = Address::new([0xaa; 20]);
-    let child_runtime = WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE.clone();
-    let child_init = init_code_for_runtime(&child_runtime);
+    let child_init = init_code_for_runtime(&WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
@@ -668,7 +666,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
                     (
                         factory_contract,
                         GenesisAccount {
-                            code: Some(CREATE2_FACTORY_RUNTIME_CODE.clone()),
+                            code: Some(CREATE2_FACTORY_RUNTIME_CODE),
                             ..Default::default()
                         },
                     ),
@@ -749,7 +747,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
             4,
             16,
             vec![
-                mk_tx(3, TxKind::Call(factory_contract), U256::ZERO, child_init.clone()),
+                mk_tx(3, TxKind::Call(factory_contract), U256::ZERO, child_init),
                 mk_tx(4, TxKind::Call(child_contract), U256::from(2), Bytes::new()),
             ],
         )?;
@@ -812,14 +810,14 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
                     (
                         multi_tx_contract,
                         GenesisAccount {
-                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
+                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE),
                             ..Default::default()
                         },
                     ),
                     (
                         intra_tx_contract,
                         GenesisAccount {
-                            code: Some(WRITE_RESTORE_THEN_SELFDESTRUCT_RUNTIME_CODE.clone()),
+                            code: Some(WRITE_RESTORE_THEN_SELFDESTRUCT_RUNTIME_CODE),
                             ..Default::default()
                         },
                     ),
@@ -937,7 +935,7 @@ fn execute_and_commit_block(
     let provider = provider_factory.database_provider_rw()?;
     let block_with_senders = RecoveredBlock::new_unhashed(
         Block::new(
-            temp_header.clone(),
+            temp_header,
             BlockBody { transactions: transactions.clone(), ommers: Vec::new(), withdrawals: None },
         ),
         vec![signer_address; transactions.len()],
@@ -1007,7 +1005,7 @@ fn build_selfdestruct_chain_spec(
                     (
                         selfdestruct_contract,
                         GenesisAccount {
-                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE.clone()),
+                            code: Some(WRITE_OR_SELFDESTRUCT_RUNTIME_CODE),
                             ..Default::default()
                         },
                     ),
