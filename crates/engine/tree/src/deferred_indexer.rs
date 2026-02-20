@@ -1,13 +1,12 @@
 //! Deferred history indexer implementation using pipeline stages.
 //!
 //! This implements
-//! [`DeferredHistoryIndexer`](reth_engine_tree::persistence::DeferredHistoryIndexer) by running the
+//! [`DeferredHistoryIndexer`](crate::persistence::DeferredHistoryIndexer) by running the
 //! history indexing stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`)
 //! incrementally inside the persistence service's thread. This eliminates MDBX write-lock
 //! contention that would occur if these stages ran on a separate thread.
 
 use reth_config::config::StageConfig;
-use reth_engine_tree::persistence::DeferredHistoryIndexer;
 use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter,
@@ -18,6 +17,8 @@ use reth_stages::{
     ExecInput, Stage, StageId,
 };
 use tracing::{debug, info, warn};
+
+use crate::persistence::DeferredHistoryIndexer;
 
 /// Maximum number of blocks to index per tick.
 const DEFAULT_BATCH_SIZE: u64 = 10_000;

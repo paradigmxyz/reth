@@ -11,9 +11,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-/// Deferred history indexer implementation.
-pub mod deferred_indexer;
-
 /// Node event hooks.
 pub mod hooks;
 

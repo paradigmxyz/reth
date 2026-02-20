@@ -2,7 +2,6 @@
 
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
-    deferred_indexer::StageDeferredHistoryIndexer,
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
@@ -14,6 +13,7 @@ use futures::{stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
+    deferred_indexer::StageDeferredHistoryIndexer,
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
     tree::TreeConfig,

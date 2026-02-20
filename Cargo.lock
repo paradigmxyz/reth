@@ -8350,6 +8350,7 @@ dependencies = [
  "rayon",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-config",
  "reth-consensus",
  "reth-db",
  "reth-db-common",

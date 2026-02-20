@@ -98,6 +98,8 @@ pub mod backfill;
 pub mod chain;
 /// Support for downloading blocks on demand for live sync.
 pub mod download;
+/// Deferred history indexer implementation.
+pub mod deferred_indexer;
 /// Engine Api chain handler support.
 pub mod engine;
 /// Engine orchestrator launch helper.
