@@ -91,7 +91,7 @@ jobs:
 
   reth-bench-ack:
     if: |
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
       github.event_name == 'workflow_dispatch'
     name: reth-bench-ack
     runs-on: ubuntu-latest
@@ -129,6 +129,7 @@ jobs:
         id: args
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             let pr, actor, blocks, warmup, baseline, feature;
 
@@ -162,7 +163,7 @@ jobs:
               const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
               const unknown = [];
               const invalid = [];
-              const args = body.replace(/^derek bench\s*/, '');
+              const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
               for (const part of args.split(/\s+/).filter(Boolean)) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
@@ -191,7 +192,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -236,6 +237,7 @@ jobs:
         id: ack
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             if (context.eventName === 'issue_comment') {
               await github.rest.reactions.createForIssueComment({
@@ -300,6 +302,7 @@ jobs:
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const pr = '${{ steps.args.outputs.pr }}';
             const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
@@ -405,6 +408,7 @@ jobs:
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
@@ -510,6 +514,7 @@ jobs:
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Building binaries & downloading snapshot...'});
@@ -617,6 +622,7 @@ jobs:
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Running benchmarks...'});
@@ -700,7 +706,7 @@ jobs:
           PR_NUMBER="${BENCH_PR:-0}"
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
-          CHARTS_REPO="https://x-access-token:${{ secrets.BENCH_BOT_PAT }}@github.com/decofe/reth-bench-charts.git"
+          CHARTS_REPO="https://x-access-token:${{ secrets.DEREK_TOKEN }}@github.com/decofe/reth-bench-charts.git"
 
           TMP_DIR=$(mktemp -d)
           if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
@@ -723,6 +729,7 @@ jobs:
         if: success()
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const fs = require('fs');
 
@@ -773,6 +780,7 @@ jobs:
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const steps_status = [
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
@@ -794,6 +802,7 @@ jobs:
         if: cancelled() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.updateComment({
