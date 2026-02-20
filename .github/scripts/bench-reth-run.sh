@@ -18,11 +18,23 @@ LOG="${OUTPUT_DIR}/node.log"
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
-    sudo kill "$RETH_PID"
-    for i in $(seq 1 30); do
-      sudo kill -0 "$RETH_PID" 2>/dev/null || break
-      sleep 1
-    done
+    if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+      # Send SIGINT so samply can finalize the profile when reth exits
+      sudo kill -INT "$RETH_PID" 2>/dev/null || true
+      for i in $(seq 1 120); do
+        sudo kill -0 "$RETH_PID" 2>/dev/null || break
+        if [ $((i % 10)) -eq 0 ]; then
+          echo "Waiting for samply to finish writing profile... (${i}s)"
+        fi
+        sleep 1
+      done
+    else
+      sudo kill "$RETH_PID"
+      for i in $(seq 1 30); do
+        sudo kill -0 "$RETH_PID" 2>/dev/null || break
+        sleep 1
+      done
+    fi
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
     sleep 1
   fi
