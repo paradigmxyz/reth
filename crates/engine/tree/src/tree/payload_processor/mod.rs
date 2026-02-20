@@ -89,7 +89,7 @@ pub trait WaitForCaches {
 /// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
 /// would deteriorate to the point where PST might as well not be used.
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
-    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
+    ParallelismThresholds { min_revealed_nodes: usize::MAX, min_updated_nodes: usize::MAX };
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
