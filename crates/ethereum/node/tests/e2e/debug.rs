@@ -44,7 +44,7 @@ async fn test_debug_get_block_access_list() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -126,7 +126,7 @@ async fn test_debug_get_block_access_list_empty_block() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -162,7 +162,7 @@ async fn test_debug_get_block_access_list_multiple_txs() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
