@@ -223,8 +223,12 @@ where
 
         // For small blocks, skip the expensive cache state insertion since the
         // cache warmth benefit is minimal relative to the serialization cost.
+        //
+        // Treat a transaction_count of 0 as unknown, which should not trigger
+        // this fast-path.
         const SMALL_BLOCK_CACHE_TX_THRESHOLD: usize = 50;
-        let skip_state_insert = env.transaction_count <= SMALL_BLOCK_CACHE_TX_THRESHOLD;
+        let skip_state_insert = env.transaction_count > 0 &&
+            env.transaction_count <= SMALL_BLOCK_CACHE_TX_THRESHOLD;
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, skip_state_insert, "Updating execution cache");
