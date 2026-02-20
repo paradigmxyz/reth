@@ -5,8 +5,8 @@ use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    tables,
     table::DupSort,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
