@@ -59,7 +59,7 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
-function buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls }) {
+function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
   const b = summary.baseline.stats;
   const f = summary.feature.stats;
   const c = summary.changes;
@@ -100,7 +100,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls
   // Meta line
   const metaParts = [];
   if (prNumber) metaParts.push(`*<${prUrl}|PR #${prNumber}>*`);
-  metaParts.push(`triggered by @${actor}`);
+  metaParts.push(`triggered by ${actorSlackId ? `<@${actorSlackId}>` : `@${actor}`}`);
 
   // Baseline/feature lines with samply profile links
   let baselineLine = `*Baseline:* ${baselineLink}`;
@@ -198,11 +198,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls
   return { blocks, threadBlocks };
 }
 
-function buildFailureBlocks({ prNumber, actor, jobUrl, repo, failedStep }) {
+function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, failedStep }) {
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
+  const actorMention = actorSlackId ? `<@${actorSlackId}>` : `@${actor}`;
   const parts = [
     prNumber ? `*<${prUrl}|PR #${prNumber}>*` : '',
-    `by @${actor}`,
+    `by ${actorMention}`,
     `failed while *${failedStep}*`,
   ].filter(Boolean);
 
@@ -263,9 +264,11 @@ async function success({ core, context }) {
     } catch {}
   }
 
-  const { blocks, threadBlocks } = buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls });
-  const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
+  const actorSlackId = slackUsers[actor];
+
+  const { blocks, threadBlocks } = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
+  const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
 
   async function sendWithThread(ch) {
     const res = await postToSlack(token, ch, blocks, text, core);
@@ -277,7 +280,6 @@ async function success({ core, context }) {
   }
 
   // Always DM the actor
-  const actorSlackId = slackUsers[actor];
   if (actorSlackId) {
     await sendWithThread(actorSlackId);
   } else {
@@ -310,12 +312,13 @@ async function failure({ core, context, failedStep }) {
   const jobUrl = process.env.BENCH_JOB_URL ||
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-  const blocks = buildFailureBlocks({ prNumber, actor, jobUrl, repo, failedStep });
-  const text = `Bench failed while ${failedStep}`;
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
+  const actorSlackId = slackUsers[actor];
+
+  const blocks = buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, failedStep });
+  const text = `Bench failed while ${failedStep}`;
 
   // Always DM the actor
-  const actorSlackId = slackUsers[actor];
   if (actorSlackId) {
     await postToSlack(token, actorSlackId, blocks, text, core);
   } else {
