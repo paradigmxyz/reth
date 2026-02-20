@@ -98,6 +98,10 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
+
+    /// Tracks the number of modified storage slots per account for diagnostics.
+    /// Used to dispatch storage trie diagnostics jobs that measure cached trie node counts.
+    modified_storage_slots: B256Map<u32>,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -143,6 +147,7 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             metrics,
+            modified_storage_slots: Default::default(),
         }
     }
 
@@ -315,6 +320,11 @@ where
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
+        // Dispatch diagnostics jobs to measure cached trie node counts per modified storage trie.
+        for (address, slots) in self.modified_storage_slots.drain() {
+            self.proof_worker_handle.dispatch_storage_trie_diagnostics(address, slots);
+        }
+
         let start = Instant::now();
         let (state_root, trie_updates) =
             self.trie.root_with_updates(&self.proof_worker_handle).map_err(|e| {
@@ -382,6 +392,9 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
+            *self.modified_storage_slots.entry(address).or_default() +=
+                storage.storage.len() as u32;
+
             for (slot, value) in storage.storage {
                 let encoded = if value.is_zero() {
                     Vec::new()

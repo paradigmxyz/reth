@@ -48,7 +48,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{TrieCursor, TrieCursorFactory},
     DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
@@ -369,6 +369,14 @@ impl ProofWorkerHandle {
         Ok(rx)
     }
 
+    /// Dispatch a storage trie diagnostics job to count cached trie nodes.
+    #[cfg(feature = "metrics")]
+    pub fn dispatch_storage_trie_diagnostics(&self, hashed_address: B256, modified_slots: u32) {
+        let _ = self
+            .storage_work_tx
+            .send(StorageWorkerJob::StorageTrieDiagnostics { hashed_address, modified_slots });
+    }
+
     /// Dispatch blinded account node request to account worker pool
     pub(crate) fn dispatch_blinded_account_node(
         &self,
@@ -618,6 +626,15 @@ pub(crate) enum StorageWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
+    /// Diagnostic job to count cached trie nodes for a modified storage trie.
+    /// Used to measure the distribution of small vs large storage tries.
+    #[cfg(feature = "metrics")]
+    StorageTrieDiagnostics {
+        /// Target account
+        hashed_address: B256,
+        /// Number of modified storage slots for this account in the current block
+        modified_slots: u32,
+    },
 }
 
 /// Worker for storage trie operations.
@@ -737,6 +754,15 @@ where
                         path,
                         result_sender,
                         &mut storage_nodes_processed,
+                    );
+                }
+
+                #[cfg(feature = "metrics")]
+                StorageWorkerJob::StorageTrieDiagnostics { hashed_address, modified_slots } => {
+                    self.process_storage_trie_diagnostics(
+                        &proof_tx,
+                        hashed_address,
+                        modified_slots,
                     );
                 }
             }
@@ -867,6 +893,53 @@ where
             elapsed_us = elapsed.as_micros(),
             total_processed = storage_nodes_processed,
             "Blinded storage node completed"
+        );
+    }
+
+    /// Processes a storage trie diagnostics request by counting cached trie nodes.
+    #[cfg(feature = "metrics")]
+    fn process_storage_trie_diagnostics<Provider>(
+        &self,
+        proof_tx: &ProofTaskTx<Provider>,
+        hashed_address: B256,
+        modified_slots: u32,
+    ) where
+        Provider: TrieCursorFactory + HashedCursorFactory,
+    {
+        // Count cached trie nodes by iterating the storage trie cursor.
+        // Cap at 4096 to bound overhead on large tries.
+        const MAX_COUNT: usize = 4096;
+
+        let count = match proof_tx.provider.storage_trie_cursor(hashed_address) {
+            Ok(mut cursor) => {
+                let mut count = 0usize;
+                // Seek to the beginning and iterate
+                if let Ok(Some(_)) = cursor.seek(Nibbles::default()) {
+                    count = 1;
+                    while count < MAX_COUNT {
+                        match cursor.next() {
+                            Ok(Some(_)) => count += 1,
+                            Ok(None) | Err(_) => break,
+                        }
+                    }
+                }
+                count
+            }
+            Err(_) => return,
+        };
+
+        self.metrics.record_storage_trie_cached_nodes(count);
+        if count == 0 {
+            self.metrics.record_modified_slots_when_uncached(modified_slots as usize);
+        }
+
+        trace!(
+            target: "trie::proof_task",
+            worker_id = self.worker_id,
+            ?hashed_address,
+            cached_nodes = count,
+            modified_slots,
+            "Storage trie diagnostics"
         );
     }
 }

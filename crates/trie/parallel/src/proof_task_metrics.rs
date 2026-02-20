@@ -32,6 +32,12 @@ pub struct ProofTaskTrieMetrics {
     /// (seconds). This is the portion of account worker idle time attributable to storage
     /// worker latency rather than queue wait.
     account_worker_storage_wait_seconds: Histogram,
+    /// Histogram for the number of cached trie nodes in `StoragesTrie` per modified storage trie.
+    /// Used to identify small storage tries that could benefit from a flat trie optimization.
+    storage_trie_cached_nodes: Histogram,
+    /// Histogram for the number of modified storage slots for accounts with zero cached trie
+    /// nodes. Used to determine the size distribution of small storage tries.
+    modified_slots_when_no_cached_nodes: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
@@ -63,6 +69,16 @@ impl ProofTaskTrieMetrics {
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);
         self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
+    }
+
+    /// Record the number of cached storage trie nodes for a modified account.
+    pub fn record_storage_trie_cached_nodes(&self, count: usize) {
+        self.storage_trie_cached_nodes.record(count as f64);
+    }
+
+    /// Record the number of modified storage slots for an account with no cached trie nodes.
+    pub fn record_modified_slots_when_uncached(&self, slots: usize) {
+        self.modified_slots_when_no_cached_nodes.record(slots as f64);
     }
 }
 
