@@ -18,6 +18,7 @@ reth-engine-primitives.workspace = true
 reth-network-peers.workspace = true
 reth-trie-common.workspace = true
 reth-chain-state.workspace = true
+reth-execution-types = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-eip7928 = { workspace = true, features = ["serde"] }

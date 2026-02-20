@@ -1,8 +1,8 @@
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{map::AddressMap, Bytes, B256, U256};
+use alloy_primitives::{map::AddressMap, U256, U64};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -12,9 +12,9 @@ use reth_chain_state::{
 };
 use reth_errors::RethResult;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_rpc_api::{AccountStateChanges, BlockExecutionOutcomeResponse, RethApiServer};
+use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
@@ -53,51 +53,6 @@ impl<Provider, EvmConfig> RethApi<Provider, EvmConfig> {
         let inner =
             Arc::new(RethApiInner { provider, evm_config, blocking_task_guard, task_spawner });
         Self { inner }
-    }
-
-    /// Converts a [`BlockExecutionOutput`] into a serializable
-    /// [`BlockExecutionOutcomeResponse`].
-    fn convert_execution_output<R: Serialize>(
-        output: BlockExecutionOutput<R>,
-    ) -> Result<BlockExecutionOutcomeResponse, serde_json::Error> {
-        let receipts = output
-            .result
-            .receipts
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut state_changes = HashMap::default();
-        for (address, account) in &output.state.state {
-            let mut storage = HashMap::default();
-            for (slot, value) in &account.storage {
-                storage.insert(B256::from(slot.to_be_bytes::<32>()), value.present_value);
-            }
-
-            state_changes.insert(
-                *address,
-                AccountStateChanges {
-                    nonce: account.info.as_ref().map(|i| i.nonce),
-                    balance: account.info.as_ref().map(|i| i.balance),
-                    code_hash: account.info.as_ref().map(|i| i.code_hash),
-                    storage,
-                },
-            );
-        }
-
-        let mut contracts = HashMap::default();
-        for (hash, bytecode) in &output.state.contracts {
-            contracts.insert(*hash, Bytes::copy_from_slice(bytecode.original_byte_slice()));
-        }
-
-        Ok(BlockExecutionOutcomeResponse {
-            gas_used: output.result.gas_used,
-            blob_gas_used: output.result.blob_gas_used,
-            receipts,
-            requests: output.result.requests,
-            state_changes,
-            contracts,
-        })
     }
 }
 
@@ -163,12 +118,12 @@ where
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     N::Receipt: Serialize,
 {
-    /// Re-executes a block and returns the execution outcome.
+    /// Re-executes one or more consecutive blocks and returns the execution outcome.
     pub async fn block_execution_outcome(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<BlockExecutionOutcomeResponse>> {
-        // Acquire a permit to limit concurrent block re-executions (shared with debug_trace*).
+        count: Option<U64>,
+    ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
         let permit = self
             .inner
             .blocking_task_guard
@@ -178,7 +133,7 @@ where
             .map_err(|_| EthApiError::InternalEthError)?;
         self.on_blocking_task(move |this| async move {
             let _permit = permit;
-            this.try_block_execution_outcome(block_id)
+            this.try_block_execution_outcome(block_id, count)
         })
         .await
     }
@@ -186,36 +141,46 @@ where
     fn try_block_execution_outcome(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<BlockExecutionOutcomeResponse>> {
-        let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
+        count: Option<U64>,
+    ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
+        let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
             return Ok(None)
         };
 
-        if block_number == 0 {
+        if start_block == 0 {
             return Err(EthApiError::InvalidParams(
                 "cannot re-execute genesis block (no parent state)".to_string(),
             ));
         }
 
-        let Some(block) =
-            self.provider().recovered_block(block_number.into(), TransactionVariant::WithHash)?
-        else {
-            return Ok(None)
-        };
+        const MAX_BLOCK_COUNT: u64 = 256;
 
-        let state_provider = self.provider().history_by_block_number(block_number - 1)?;
+        let block_count = count.map(|c| c.to::<u64>()).unwrap_or(1).clamp(1, MAX_BLOCK_COUNT);
+
+        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
         let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
 
-        let output = self.evm_config().executor(db).execute(&block).map_err(
+        let mut blocks = Vec::with_capacity(block_count as usize);
+        for block_number in start_block..start_block + block_count {
+            let Some(block) = self
+                .provider()
+                .recovered_block(block_number.into(), TransactionVariant::WithHash)?
+            else {
+                if block_number == start_block {
+                    return Ok(None)
+                }
+                break;
+            };
+            blocks.push(block);
+        }
+
+        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
             |e: reth_evm::execute::BlockExecutionError| {
                 EthApiError::Internal(reth_errors::RethError::Other(e.into()))
             },
         )?;
 
-        let response = Self::convert_execution_output(output)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::Other(e.into())))?;
-
-        Ok(Some(response))
+        Ok(Some(outcome))
     }
 }
 
@@ -231,7 +196,7 @@ where
         + PersistedBlockSubscriptions
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
-    <Provider::Primitives as NodePrimitives>::Receipt: Serialize,
+    Provider::Primitives: NodePrimitives<Receipt = reth_ethereum_primitives::Receipt>,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -245,8 +210,9 @@ where
     async fn reth_get_block_execution_outcome(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<Option<BlockExecutionOutcomeResponse>> {
-        Ok(Self::block_execution_outcome(self, block_id).await?)
+        count: Option<U64>,
+    ) -> RpcResult<Option<ExecutionOutcome>> {
+        Ok(Self::block_execution_outcome(self, block_id, count).await?)
     }
 
     /// Handler for `reth_subscribeChainNotifications`
@@ -413,8 +379,9 @@ struct RethApiInner<Provider, EvmConfig> {
 mod tests {
     use super::*;
     use alloy_evm::block::BlockExecutionResult;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, B256, U256};
     use reth_ethereum_primitives::Receipt;
+
     use revm::{
         database::{
             states::{BundleState, StorageSlot},
@@ -422,6 +389,7 @@ mod tests {
         },
         state::AccountInfo,
     };
+    use std::collections::HashMap;
 
     fn test_receipt() -> Receipt {
         Receipt {
@@ -433,90 +401,113 @@ mod tests {
     }
 
     #[test]
-    fn convert_empty_execution_output() {
-        let output = BlockExecutionOutput::<Receipt>::default();
-        let response = RethApi::<(), ()>::convert_execution_output(output).unwrap();
+    fn execution_outcome_multi_block() {
+        let addr_a = address!("0x0000000000000000000000000000000000000001");
+        let addr_b = address!("0x0000000000000000000000000000000000000002");
 
-        assert_eq!(response.gas_used, 0);
-        assert_eq!(response.blob_gas_used, 0);
-        assert!(response.receipts.is_empty());
-        assert!(response.state_changes.is_empty());
-        assert!(response.contracts.is_empty());
-    }
+        let mut state_a = HashMap::default();
+        state_a.insert(
+            addr_a,
+            BundleAccount {
+                info: Some(AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(500),
+                    code_hash: B256::ZERO,
+                    ..Default::default()
+                }),
+                original_info: None,
+                storage: Default::default(),
+                status: AccountStatus::Changed,
+            },
+        );
 
-    #[test]
-    fn convert_execution_output_with_receipts_and_gas() {
-        let output = BlockExecutionOutput {
-            result: BlockExecutionResult {
+        let mut state_b = HashMap::default();
+        state_b.insert(
+            addr_b,
+            BundleAccount {
+                info: Some(AccountInfo {
+                    nonce: 3,
+                    balance: U256::from(900),
+                    code_hash: B256::ZERO,
+                    ..Default::default()
+                }),
+                original_info: None,
+                storage: Default::default(),
+                status: AccountStatus::Changed,
+            },
+        );
+
+        let mut bundle = BundleState {
+            state: state_a,
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+        bundle.extend(BundleState {
+            state: state_b,
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        });
+
+        let results = vec![
+            BlockExecutionResult {
                 receipts: vec![test_receipt()],
                 requests: Default::default(),
                 gas_used: 21000,
+                blob_gas_used: 0,
+            },
+            BlockExecutionResult {
+                receipts: vec![test_receipt(), test_receipt()],
+                requests: Default::default(),
+                gas_used: 42000,
                 blob_gas_used: 131072,
             },
-            state: BundleState::default(),
-        };
-        let response = RethApi::<(), ()>::convert_execution_output(output).unwrap();
+        ];
 
-        assert_eq!(response.gas_used, 21000);
-        assert_eq!(response.blob_gas_used, 131072);
-        assert_eq!(response.receipts.len(), 1);
-        let receipt_json = &response.receipts[0];
-        assert!(receipt_json.is_object(), "receipt should serialize: {receipt_json}");
+        let outcome = ExecutionOutcome::from_blocks(5, bundle, results);
+
+        assert_eq!(outcome.first_block, 5);
+        assert_eq!(outcome.receipts.len(), 2);
+        assert_eq!(outcome.receipts[0].len(), 1);
+        assert_eq!(outcome.receipts[1].len(), 2);
+        assert_eq!(outcome.requests.len(), 2);
+        assert!(outcome.bundle.account(&addr_a).is_some());
+        assert!(outcome.bundle.account(&addr_b).is_some());
+        assert_eq!(outcome.bundle.account(&addr_a).unwrap().info.as_ref().unwrap().nonce, 1);
+        assert_eq!(
+            outcome.bundle.account(&addr_b).unwrap().info.as_ref().unwrap().balance,
+            U256::from(900)
+        );
     }
 
     #[test]
-    fn convert_execution_output_with_state_changes() {
-        let addr = address!("0x0000000000000000000000000000000000000001");
-        let slot = U256::from(42);
-        let value = U256::from(100);
+    fn execution_outcome_serde_roundtrip_with_state() {
+        let addr = address!("0x0000000000000000000000000000000000000042");
+        let slot = U256::from(7);
+        let value = U256::from(999);
 
         let mut storage = HashMap::default();
         storage.insert(slot, StorageSlot::new(value));
 
-        let account = BundleAccount {
-            info: Some(AccountInfo {
-                nonce: 5,
-                balance: U256::from(1_000_000),
-                code_hash: B256::ZERO,
-                ..Default::default()
-            }),
-            original_info: None,
-            storage,
-            status: AccountStatus::Changed,
-        };
-
         let mut state = HashMap::default();
-        state.insert(addr, account);
-
-        let output = BlockExecutionOutput {
-            result: BlockExecutionResult {
-                receipts: Vec::<Receipt>::new(),
-                requests: Default::default(),
-                gas_used: 0,
-                blob_gas_used: 0,
+        state.insert(
+            addr,
+            BundleAccount {
+                info: Some(AccountInfo {
+                    nonce: 10,
+                    balance: U256::from(5_000),
+                    code_hash: B256::ZERO,
+                    ..Default::default()
+                }),
+                original_info: None,
+                storage,
+                status: AccountStatus::Changed,
             },
-            state: BundleState {
-                state,
-                contracts: Default::default(),
-                reverts: Default::default(),
-                state_size: 0,
-                reverts_size: 0,
-            },
-        };
-        let response = RethApi::<(), ()>::convert_execution_output(output).unwrap();
+        );
 
-        assert_eq!(response.state_changes.len(), 1);
-        let changes = response.state_changes.get(&addr).unwrap();
-        assert_eq!(changes.nonce, Some(5));
-        assert_eq!(changes.balance, Some(U256::from(1_000_000)));
-        assert_eq!(changes.code_hash, Some(B256::ZERO));
-
-        let slot_key = B256::from(U256::from(42).to_be_bytes::<32>());
-        assert_eq!(*changes.storage.get(&slot_key).unwrap(), value);
-    }
-
-    #[test]
-    fn convert_execution_output_with_contracts() {
         let raw_bytes: &[u8] = &[0x60, 0x00, 0x60, 0x00, 0xfd];
         let code =
             revm::bytecode::Bytecode::new_raw(alloy_primitives::Bytes::from_static(raw_bytes));
@@ -524,56 +515,31 @@ mod tests {
         let mut contracts = HashMap::default();
         contracts.insert(code_hash, code);
 
-        let output = BlockExecutionOutput {
-            result: BlockExecutionResult {
-                receipts: Vec::<Receipt>::new(),
-                requests: Default::default(),
-                gas_used: 0,
-                blob_gas_used: 0,
-            },
-            state: BundleState {
-                state: Default::default(),
+        let outcome = ExecutionOutcome::new(
+            BundleState {
+                state,
                 contracts,
                 reverts: Default::default(),
                 state_size: 0,
                 reverts_size: 0,
             },
-        };
-        let response = RethApi::<(), ()>::convert_execution_output(output).unwrap();
-
-        assert_eq!(response.contracts.len(), 1);
-        let bytecode = response.contracts.get(&code_hash).unwrap();
-        assert_eq!(bytecode.as_ref(), raw_bytes);
-    }
-
-    #[test]
-    fn response_serde_roundtrip() {
-        let addr = address!("0x0000000000000000000000000000000000000042");
-        let mut state_changes = HashMap::default();
-        state_changes.insert(
-            addr,
-            AccountStateChanges {
-                nonce: Some(1),
-                balance: Some(U256::from(500)),
-                code_hash: None,
-                storage: HashMap::default(),
-            },
+            vec![vec![test_receipt()]],
+            1,
+            vec![Default::default()],
         );
 
-        let response = BlockExecutionOutcomeResponse {
-            gas_used: 21000,
-            blob_gas_used: 0,
-            receipts: vec![serde_json::json!({"success": true})],
-            requests: Default::default(),
-            state_changes,
-            contracts: HashMap::default(),
-        };
+        let json = serde_json::to_value(&outcome).unwrap();
+        let deserialized: ExecutionOutcome = serde_json::from_value(json).unwrap();
 
-        let json = serde_json::to_value(&response).unwrap();
-        let deserialized: BlockExecutionOutcomeResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.first_block, 1);
+        assert_eq!(deserialized.receipts.len(), 1);
+        assert_eq!(deserialized.receipts[0][0], test_receipt());
 
-        assert_eq!(deserialized.gas_used, 21000);
-        assert_eq!(deserialized.state_changes.len(), 1);
-        assert_eq!(deserialized.state_changes.get(&addr).unwrap().nonce, Some(1));
+        let account = deserialized.bundle.account(&addr).unwrap();
+        assert_eq!(account.info.as_ref().unwrap().nonce, 10);
+        assert_eq!(account.info.as_ref().unwrap().balance, U256::from(5_000));
+        assert_eq!(account.storage.get(&slot).unwrap().present_value, value,);
+
+        assert!(deserialized.bundle.contracts.contains_key(&code_hash));
     }
 }

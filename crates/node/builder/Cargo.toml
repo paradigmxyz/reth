@@ -26,6 +26,7 @@ reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
