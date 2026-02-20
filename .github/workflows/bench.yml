@@ -516,14 +516,14 @@ jobs:
             rm -rf /tmp/tpt
           fi
 
-          # schelk (snapshot rollback tool, needs sudo so must be in /usr/local/bin)
-          if [ ! -x /usr/local/bin/schelk ]; then
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
             cargo install --git https://github.com/tempoxyz/schelk --locked
             sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
-          # samply (optional CPU profiler, needs sudo so must be in /usr/local/bin)
-          if [ "${BENCH_SAMPLY:-false}" = "true" ] && [ ! -x /usr/local/bin/samply ]; then
+          # samply (optional CPU profiler, invoked via sudo)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
             cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
