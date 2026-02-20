@@ -10,8 +10,8 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::ParallelIterator;
-use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
@@ -35,6 +35,17 @@ use tracing::{debug, debug_span, error, instrument};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
+
+/// Minimum number of active storage tries before leaf updates are fanned out to rayon workers.
+///
+/// For very small blocks, scheduling overhead can dominate the actual trie work.
+const MIN_ACTIVE_STORAGE_TRIES_FOR_PARALLEL_LEAF_UPDATES: usize = 16;
+
+/// Minimum number of storage tries with uncached roots before roots are computed in parallel.
+const MIN_ACTIVE_STORAGE_TRIES_FOR_PARALLEL_ROOTS: usize = 16;
+
+/// Minimum Rayon split size for storage trie fanout work.
+const STORAGE_TRIE_PARALLEL_MIN_LEN: usize = 8;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
@@ -489,44 +500,77 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = tracing::Span::current();
-        let storage_results = storage_updates
+        // Collect all storage updates, skipping tries with no pending updates.
+        // We branch to a serial path for tiny workloads to avoid rayon scheduling overhead.
+        let storage_work = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
             .map(|(address, updates)| {
                 let trie = self.trie.take_or_create_storage_trie(address);
                 let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
 
-                (address, updates, fetched, trie)
+                (*address, updates, fetched, trie)
             })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
-                let mut targets = Vec::new();
+            .collect::<Vec<_>>();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
-                    }
-                })?;
+        let span = tracing::Span::current();
 
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let storage_results = if storage_work.len() <
+            MIN_ACTIVE_STORAGE_TRIES_FOR_PARALLEL_LEAF_UPDATES
+        {
+            storage_work
+                    .into_iter()
+                    .map(|(address, updates, mut fetched, mut trie)| {
+                        let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+                        let mut targets = Vec::new();
+
+                        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                            Entry::Occupied(mut entry) => {
+                                if min_len < *entry.get() {
+                                    entry.insert(min_len);
+                                    targets.push(Target::new(path).with_min_len(min_len));
+                                }
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        })?;
+
+                        SparseTrieResult::Ok((address, targets, fetched, trie))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+        } else {
+            storage_work
+                    .into_par_iter()
+                    .with_min_len(STORAGE_TRIE_PARALLEL_MIN_LEN)
+                    .map(|(address, updates, mut fetched, mut trie)| {
+                        let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+                        let mut targets = Vec::new();
+
+                        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                            Entry::Occupied(mut entry) => {
+                                if min_len < *entry.get() {
+                                    entry.insert(min_len);
+                                    targets.push(Target::new(path).with_min_len(min_len));
+                                }
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        })?;
+
+                        SparseTrieResult::Ok((address, targets, fetched, trie))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+        };
 
         drop(span);
 
         for (address, targets, fetched, trie) in storage_results {
-            self.fetched_storage_targets.insert(*address, fetched);
-            self.trie.insert_storage_trie(*address, trie);
+            self.fetched_storage_targets.insert(address, fetched);
+            self.trie.insert_storage_trie(address, trie);
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
@@ -589,7 +633,7 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        self
+        let storage_roots_work = self
             .trie
             .storage_tries_mut()
             .iter_mut()
@@ -597,11 +641,22 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
                     !trie.is_root_cached()
             })
-            .par_bridge_buffered()
-            .for_each(|(address, trie)| {
+            .collect::<Vec<_>>();
+
+        if storage_roots_work.len() < MIN_ACTIVE_STORAGE_TRIES_FOR_PARALLEL_ROOTS {
+            storage_roots_work.into_iter().for_each(|(address, trie)| {
                 let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_root", ?address).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
+        } else {
+            storage_roots_work
+                .into_par_iter()
+                .with_min_len(STORAGE_TRIE_PARALLEL_MIN_LEN)
+                .for_each(|(address, trie)| {
+                    let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_root", ?address).entered();
+                    trie.root().expect("updates are drained, trie should be revealed by now");
+                });
+        }
         drop(span);
 
         loop {
