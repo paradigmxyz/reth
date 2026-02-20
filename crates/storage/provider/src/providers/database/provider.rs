@@ -629,7 +629,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Batch MDBX-only block writes to reduce per-block cursor open/close overhead.
             let start = Instant::now();
-            self.insert_blocks_mdbx_batch(&blocks, &tx_nums)?;
+            timings.batch = self.insert_blocks_mdbx_batch(&blocks, &tx_nums)?;
             timings.insert_block = start.elapsed();
 
             if save_mode.with_state() {
@@ -743,22 +743,24 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         blocks: &[ExecutedBlock<N::Primitives>],
         tx_nums: &[TxNumber],
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<metrics::InsertBlocksBatchTimings> {
         debug_assert_eq!(blocks.len(), tx_nums.len());
+
+        let mut batch_timings = metrics::InsertBlocksBatchTimings::default();
 
         let write_senders = self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
             EitherWriterDestination::senders(self).is_database();
 
-        // MDBX: Open senders cursor once for all blocks.
+        // MDBX: Open all cursors once for the entire batch.
+        let cursor_open_start = Instant::now();
         let mut senders_cursor = if write_senders {
             Some(self.tx.cursor_write::<tables::TransactionSenders>()?)
         } else {
             None
         };
-
-        // MDBX: Open index cursors once for all blocks.
         let mut body_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_blocks_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+        batch_timings.cursor_open = cursor_open_start.elapsed();
 
         // Collect bodies for a single write_block_bodies call (opens ommers/withdrawals cursors
         // once instead of per-block).
@@ -793,23 +795,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // MDBX: TransactionSenders
             if let Some(cursor) = senders_cursor.as_mut() {
+                let start = Instant::now();
                 let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
                 for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
                     cursor.append(tx_num, &sender)?;
                 }
+                batch_timings.write_senders += start.elapsed();
             }
 
-            // MDBX: HeaderNumbers
+            // MDBX: HeaderNumbers, BlockBodyIndices, TransactionBlocks
+            let start = Instant::now();
             self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 
-            // MDBX: BlockBodyIndices
             body_indices_cursor
                 .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
 
-            // MDBX: TransactionBlocks (last tx -> block mapping)
             if tx_count > 0 {
                 tx_blocks_cursor.append(first_tx_num + tx_count - 1, &block_number)?;
             }
+            batch_timings.write_indices += start.elapsed();
 
             bodies.push((block_number, Some(block.body())));
         }
@@ -820,9 +824,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         drop(tx_blocks_cursor);
 
         // Ommers/Withdrawals — single call opens cursors once for all blocks.
+        let start = Instant::now();
         self.storage.writer().write_block_bodies(self, bodies)?;
+        batch_timings.write_bodies = start.elapsed();
 
-        Ok(())
+        Ok(batch_timings)
     }
 
     /// Unwinds trie state starting at and including the given block.

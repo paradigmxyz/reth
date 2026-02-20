@@ -119,6 +119,22 @@ pub(crate) struct DatabaseProviderMetrics {
     save_blocks_commit_sf_last: Gauge,
     /// Last duration of `RocksDB` commit in `save_blocks`
     save_blocks_commit_rocksdb_last: Gauge,
+    /// Duration of cursor opens in `insert_blocks_mdbx_batch`
+    save_blocks_batch_cursor_open: Histogram,
+    /// Duration of senders writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_senders: Histogram,
+    /// Duration of index writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_indices: Histogram,
+    /// Duration of body writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_bodies: Histogram,
+    /// Last duration of cursor opens in `insert_blocks_mdbx_batch`
+    save_blocks_batch_cursor_open_last: Gauge,
+    /// Last duration of senders writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_senders_last: Gauge,
+    /// Last duration of index writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_indices_last: Gauge,
+    /// Last duration of body writes in `insert_blocks_mdbx_batch`
+    save_blocks_batch_write_bodies_last: Gauge,
 }
 
 /// Timings collected during a `save_blocks` call.
@@ -135,6 +151,21 @@ pub(crate) struct SaveBlocksTimings {
     pub update_history_indices: Duration,
     pub update_pipeline_stages: Duration,
     pub block_count: u64,
+    /// Sub-timings from `insert_blocks_mdbx_batch`.
+    pub batch: InsertBlocksBatchTimings,
+}
+
+/// Sub-timings collected inside `insert_blocks_mdbx_batch`.
+#[derive(Debug, Default)]
+pub(crate) struct InsertBlocksBatchTimings {
+    /// Time to open all cursors (senders, body_indices, tx_blocks).
+    pub cursor_open: Duration,
+    /// Time writing to `TransactionSenders` cursor.
+    pub write_senders: Duration,
+    /// Time writing to `BlockBodyIndices` + `TransactionBlocks` + `HeaderNumbers` cursors.
+    pub write_indices: Duration,
+    /// Time writing ommers/withdrawals via `write_block_bodies`.
+    pub write_bodies: Duration,
 }
 
 /// Timings collected during a `commit` call.
@@ -189,6 +220,16 @@ impl DatabaseProviderMetrics {
         self.save_blocks_update_pipeline_stages_last
             .set(timings.update_pipeline_stages.as_secs_f64());
         self.save_blocks_block_count_last.set(timings.block_count as f64);
+
+        self.save_blocks_batch_cursor_open.record(timings.batch.cursor_open);
+        self.save_blocks_batch_write_senders.record(timings.batch.write_senders);
+        self.save_blocks_batch_write_indices.record(timings.batch.write_indices);
+        self.save_blocks_batch_write_bodies.record(timings.batch.write_bodies);
+
+        self.save_blocks_batch_cursor_open_last.set(timings.batch.cursor_open.as_secs_f64());
+        self.save_blocks_batch_write_senders_last.set(timings.batch.write_senders.as_secs_f64());
+        self.save_blocks_batch_write_indices_last.set(timings.batch.write_indices.as_secs_f64());
+        self.save_blocks_batch_write_bodies_last.set(timings.batch.write_bodies.as_secs_f64());
     }
 
     /// Records all commit timings.
