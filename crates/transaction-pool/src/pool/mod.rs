@@ -290,7 +290,9 @@ where
     pub fn add_blob_sidecar_listener(&self) -> mpsc::Receiver<NewBlobSidecar> {
         let (sender, rx) = mpsc::channel(BLOB_SIDECAR_LISTENER_BUFFER_SIZE);
         let listener = BlobTransactionSidecarListener { sender };
-        self.blob_transaction_sidecar_listener.lock().push(listener);
+        let mut listeners = self.blob_transaction_sidecar_listener.lock();
+        listeners.retain(|l| !l.sender.is_closed());
+        listeners.push(listener);
         rx
     }
 
