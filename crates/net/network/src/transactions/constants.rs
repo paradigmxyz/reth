@@ -14,6 +14,11 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: 
 /// Default is 128 KiB.
 pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 128 * 1024;
 
+/// Maximum size of a single transaction that will be broadcast in full.
+/// Transactions larger than this are only announced as hashes and must be
+/// fetched by interested peers.
+pub const DEFAULT_MAX_FULL_BROADCAST_TX_SIZE: usize = 4096;
+
 /* ================ REQUEST-RESPONSE ================ */
 
 /// Recommended soft limit for the number of hashes in a
