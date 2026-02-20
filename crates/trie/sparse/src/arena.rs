@@ -111,8 +111,23 @@ struct ArenaSparseNodeBranch {
     /// path of the parent extension node with this short key.
     short_key: Nibbles,
     /// Tree mask and hash mask for database persistence (`TrieUpdates`).
-    #[expect(dead_code)]
     branch_masks: BranchNodeMasks,
+}
+
+impl ArenaSparseNodeBranch {
+    /// Updates this branch's `branch_masks` for `nibble` based on a child's mask bits.
+    const fn set_child_mask_bits(&mut self, nibble: u8, hash_mask_bit: bool, tree_mask_bit: bool) {
+        if hash_mask_bit {
+            self.branch_masks.hash_mask.set_bit(nibble);
+        } else {
+            self.branch_masks.hash_mask.unset_bit(nibble);
+        }
+        if tree_mask_bit {
+            self.branch_masks.tree_mask.set_bit(nibble);
+        } else {
+            self.branch_masks.tree_mask.unset_bit(nibble);
+        }
+    }
 }
 
 /// A node in the arena-based sparse trie.
@@ -184,6 +199,29 @@ impl ArenaSparseNode {
             Self::Branch(b) => b,
             _ => panic!("branch_mut called on non-Branch node {self:?}"),
         }
+    }
+
+    /// Returns the branch data if this node (or its subtrie root) is a branch, or `None`.
+    fn as_branch(&self) -> Option<&ArenaSparseNodeBranch> {
+        match self {
+            Self::Branch(b) => Some(b),
+            Self::Subtrie(s) => s.arena[s.root].as_branch(),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if this node should contribute a set bit in its parent's `hash_mask`.
+    /// That is, if the node is a branch with no short key (no extension).
+    fn hash_mask_bit(&self) -> bool {
+        self.as_branch().is_some_and(|b| b.short_key.is_empty())
+    }
+
+    /// Returns `true` if this node should contribute a set bit in its parent's `tree_mask`.
+    /// That is, if the node is a branch with any non-empty `branch_masks`.
+    fn tree_mask_bit(&self) -> bool {
+        self.as_branch().is_some_and(|b| {
+            !b.branch_masks.hash_mask.is_empty() || !b.branch_masks.tree_mask.is_empty()
+        })
     }
 }
 
@@ -435,9 +473,9 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
     );
 }
 
-/// Pops the top entry from the stack and propagates its `num_leaves` and dirty state/count
-/// deltas to the new top (its parent). Returns the popped entry's path, or `None` if the
-/// stack was empty.
+/// Pops the top entry from the stack and propagates `num_leaves` and dirty state/count
+/// deltas to the new top (its parent). Returns the popped entry's path, or `None` if
+/// the stack was empty.
 fn pop_and_propagate(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
@@ -448,9 +486,8 @@ fn pop_and_propagate(
     debug_assert_branch_consistency(arena, entry.index);
 
     if let Some(parent) = stack.last() {
-        let child = &arena[entry.index];
-        let cur_num_leaves = child.num_leaves();
-        let cur_dirty_leaves = child.num_dirty_leaves();
+        let cur_num_leaves = arena[entry.index].num_leaves();
+        let cur_dirty_leaves = arena[entry.index].num_dirty_leaves();
 
         let parent_state = arena[parent.index].state_mut();
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
@@ -786,14 +823,23 @@ fn update_cached_rlp(
             ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
         rlp_node_buf.push(rlp_node);
 
-        // Step 2c: Pop this branch from the stack, propagating leaf-count deltas to
-        // the parent. If the stack is now empty, the root is done. Otherwise resume
-        // the parent branch from the nibble after the child that was just completed.
+        // Step 2c: Pop this branch from the stack, propagating leaf-count deltas and
+        // branch_masks to the parent. If the stack is now empty, the root is done.
+        // Otherwise resume the parent branch from the nibble after the child that was
+        // just completed.
         let popped_path = pop_and_propagate(arena, stack).unwrap();
         if stack.is_empty() {
             break;
         }
-        start_nibble = popped_path.last().unwrap() + 1;
+        // This branch was dirty (that's why it was on the stack). Update the parent's
+        // branch_masks for the nibble that points to this child.
+        let child_nibble = popped_path.last().unwrap();
+        let hash_bit = arena[head_idx].hash_mask_bit();
+        let tree_bit = arena[head_idx].tree_mask_bit();
+        let parent_idx = stack.last().unwrap().index;
+        arena[parent_idx].branch_mut().set_child_mask_bits(child_nibble, hash_bit, tree_bit);
+
+        start_nibble = child_nibble + 1;
     }
 
     rlp_node_buf.pop().expect("root RlpNode must be on rlp_node_buf after update_cached_rlp")
