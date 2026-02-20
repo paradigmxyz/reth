@@ -1,0 +1,55 @@
+# Runs mutation testing on changed code in pull requests.
+#
+# Mutation testing injects small faults (operator swaps, deleted lines, etc.)
+# into the code touched by a PR and checks whether existing tests catch them.
+# Surviving mutants indicate gaps in test coverage.
+
+name: mutants
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  mutants:
+    name: mutation testing
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate diff
+        run: |
+          git diff origin/${{ github.base_ref }}.. | tee git.diff
+
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: Run mutation tests on diff
+        run: |
+          cargo mutants --no-shuffle -vV --in-diff git.diff \
+            --timeout=300 \
+            --build-timeout=300 \
+            -- --all-targets
+
+      - name: Archive results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants.out
+          path: mutants.out
