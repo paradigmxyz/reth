@@ -6,6 +6,7 @@
 # Usage: bench-reth-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
+# Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
 set -euo pipefail
 
 LABEL="$1"
@@ -67,6 +68,8 @@ RETH_BENCH="$(which reth-bench)"
 ONLINE=$(nproc --all)
 RETH_CPUS="1-$(( ONLINE - 1 ))"
 
+BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
+
 RETH_ARGS=(
   node
   --datadir "$DATADIR"
@@ -79,6 +82,11 @@ RETH_ARGS=(
   --disable-discovery
   --no-persist-peers
 )
+
+# Big blocks mode requires the testing API and skip-invalid-transactions
+if [ "$BIG_BLOCKS" = "true" ]; then
+  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions)
+fi
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   SAMPLY="$(which samply)"
@@ -116,21 +124,35 @@ done
 # files are not root-owned (avoids EACCES on next checkout).
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 
-# Warmup
-$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
-  --rpc-url "$BENCH_RPC_URL" \
-  --engine-rpc-url http://127.0.0.1:8551 \
-  --jwt-secret "$DATADIR/jwt.hex" \
-  --advance "${BENCH_WARMUP_BLOCKS:-50}" \
-  --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
+if [ "$BIG_BLOCKS" = "true" ]; then
+  # Big blocks mode: replay pre-generated payloads with gas ramp
+  BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
+  echo "Running big blocks benchmark (replay-payloads)..."
+  $BENCH_NICE "$RETH_BENCH" replay-payloads \
+    --reth-new-payload \
+    --gas-ramp-dir "$BIG_BLOCKS_DIR/gas-ramp-dir" \
+    --payload-dir "$BIG_BLOCKS_DIR/payloads" \
+    --engine-rpc-url http://127.0.0.1:8551 \
+    --jwt-secret "$DATADIR/jwt.hex" \
+    --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+else
+  # Standard mode: warmup + new-payload-fcu
+  # Warmup
+  $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
+    --rpc-url "$BENCH_RPC_URL" \
+    --engine-rpc-url http://127.0.0.1:8551 \
+    --jwt-secret "$DATADIR/jwt.hex" \
+    --advance "${BENCH_WARMUP_BLOCKS:-50}" \
+    --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
-# Benchmark
-$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
-  --rpc-url "$BENCH_RPC_URL" \
-  --engine-rpc-url http://127.0.0.1:8551 \
-  --jwt-secret "$DATADIR/jwt.hex" \
-  --advance "$BENCH_BLOCKS" \
-  --reth-new-payload \
-  --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+  # Benchmark
+  $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
+    --rpc-url "$BENCH_RPC_URL" \
+    --engine-rpc-url http://127.0.0.1:8551 \
+    --jwt-secret "$DATADIR/jwt.hex" \
+    --advance "$BENCH_BLOCKS" \
+    --reth-new-payload \
+    --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
+fi
 
 # cleanup runs via trap

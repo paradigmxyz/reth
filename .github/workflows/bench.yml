@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark"
+        description: "Number of blocks to benchmark (or 'big' for big blocks mode)"
         required: false
         default: "500"
         type: string
@@ -111,6 +111,7 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
+      big-blocks: ${{ steps.args.outputs.big-blocks }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -138,7 +139,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature, samply;
+            let pr, actor, blocks, warmup, baseline, feature, samply, bigBlocks;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -147,6 +148,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+              bigBlocks = blocks === 'big' ? 'true' : 'false';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -166,7 +168,8 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['blocks', 'warmup']);
+              const intArgs = new Set(['warmup']);
+              const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply']);
               const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
@@ -191,6 +194,15 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
+                } else if (intOrKeywordArgs.has(key)) {
+                  const keywords = intOrKeywordArgs.get(key);
+                  if (keywords.has(value)) {
+                    defaults[key] = value;
+                  } else if (/^\d+$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer or one of: ${[...keywords].join(', ')})`);
+                  }
                 } else if (refArgs.has(key)) {
                   if (!value) {
                     invalid.push(`\`${key}=\` (must be a git ref)`);
@@ -205,7 +217,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -220,6 +232,7 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
+              bigBlocks = blocks === 'big' ? 'true' : 'false';
             }
 
             // Resolve display names for baseline/feature
@@ -247,6 +260,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
+            core.setOutput('big-blocks', bigBlocks);
 
       - name: Acknowledge request
         id: ack
@@ -305,8 +319,11 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+            const bigBlocksNote = bigBlocks ? ', blocks: `big`' : '';
+            const blocksDesc = bigBlocks ? 'big blocks' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${bigBlocksNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -331,8 +348,11 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+            const bigBlocksNote = bigBlocks ? ', blocks: `big`' : '';
+            const blocksDesc = bigBlocks ? 'big blocks' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${bigBlocksNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -395,6 +415,7 @@ jobs:
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
+      BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
       - name: Resolve checkout ref
@@ -445,8 +466,11 @@ jobs:
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
+            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
+            const bigBlocksNote = bigBlocks ? ', blocks: `big`' : '';
+            const blocksDesc = bigBlocks ? 'big blocks' : `${blocks} blocks, ${warmup} warmup blocks`;
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${bigBlocksNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -705,6 +729,25 @@ jobs:
           fi
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"
+
+      - name: Download big blocks
+        if: env.BENCH_BIG_BLOCKS == 'true'
+        run: |
+          set -euo pipefail
+          MC="mc --config-dir /home/ubuntu/.mc"
+          BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous-big-blocks.tar.zst"
+          BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
+          mkdir -p "$BIG_BLOCKS_DIR"
+          echo "Downloading big blocks from $BUCKET..."
+          $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
+          echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
+          # Verify expected directory structure
+          if [ ! -d "$BIG_BLOCKS_DIR/gas-ramp-dir" ] || [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
+            echo "::error::Big blocks archive missing expected gas-ramp-dir/ or payloads/ directories"
+            ls -laR "$BIG_BLOCKS_DIR"
+            exit 1
+          fi
+          echo "Payload files: $(find "$BIG_BLOCKS_DIR/payloads" -name '*.json' | wc -l)"
 
       - name: Update status (running benchmarks)
         if: success() && env.BENCH_COMMENT_ID
