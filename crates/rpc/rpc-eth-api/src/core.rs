@@ -27,6 +27,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{BlockIdReader, StateProviderFactory};
 use revm::DatabaseCommit;
+use serde_json::Value;
 use std::collections::HashMap;
 use tracing::trace;
 
@@ -413,7 +414,7 @@ pub trait EthApi<
 
     /// Returns the EIP-7928 block access list for a block by hash.
     #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
 
     /// Returns the EIP-7928 block access list for a block by number.
     #[method(name = "getBlockAccessListByBlockNumber")]
@@ -920,10 +921,7 @@ where
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(
-        &self,
-        block_hash: B256,
-    ) -> RpcResult<Option<serde_json::Value>> {
+    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
         trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
         let ((evm_env, _), block) = futures::try_join!(
             self.evm_env_at(block_hash.into()),
@@ -969,8 +967,8 @@ where
 
                 Ok(Some(json))
             })
-            .await;
-        json
+            .await?;
+        Ok(json)
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
