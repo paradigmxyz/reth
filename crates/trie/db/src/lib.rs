@@ -14,11 +14,7 @@ mod witness;
 
 mod storage_filter;
 pub use reth_trie_common::StorageAccountFilter;
-pub use storage_filter::{
-    build_storage_filter, build_storage_filter_parallel,
-    build_storage_filter_parallel_from_factory, StorageFilterBuilder, StorageFilterFactoryBuilder,
-    StorageFilterParallelBuilder,
-};
+pub use storage_filter::{build_storage_filter_parallel_from_factory, StorageFilterFactoryBuilder};
 
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
