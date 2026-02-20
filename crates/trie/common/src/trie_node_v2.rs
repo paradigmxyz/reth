@@ -1,8 +1,8 @@
 //! Version 2 types related to representing nodes in an MPT.
 
 use crate::BranchNodeMasks;
-use alloc::vec::Vec;
-use alloy_primitives::hex;
+use alloc::{boxed::Box, vec::Vec};
+use alloy_primitives::{hex, B256};
 use alloy_rlp::{bytes, Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
@@ -45,12 +45,12 @@ impl ProofTrieNodeV2 {
                 TrieNode::Branch(branch) => {
                     result.push(Self {
                         path,
-                        node: TrieNodeV2::Branch(BranchNodeV2 {
-                            key: Nibbles::new(),
-                            branch_rlp_node: None,
-                            stack: branch.stack,
-                            state_mask: branch.state_mask,
-                        }),
+                        node: TrieNodeV2::Branch(BranchNodeV2::new(
+                            Nibbles::new(),
+                            branch.stack,
+                            branch.state_mask,
+                            None,
+                        )),
                         masks,
                     });
                 }
@@ -164,7 +164,7 @@ impl Decodable for TrieNodeV2 {
 /// a fixed size.
 ///
 /// This node also encompasses the possible parent extension node of a branch via the `key` field.
-#[derive(PartialEq, Eq, Clone, Default)]
+#[derive(PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BranchNodeV2 {
     /// The key for the branch's parent extension. if key is empty then the branch does not have a
@@ -177,6 +177,22 @@ pub struct BranchNodeV2 {
     /// [`RlpNode`] encoding of the branch node. Always provided when `key` is not empty (i.e this
     /// is an extension node).
     pub branch_rlp_node: Option<RlpNode>,
+    /// Pre-computed child hashes extracted from the stack. Each slot corresponds to a nibble
+    /// (0..16). Slots for non-hash children or absent children are set to `B256::ZERO`.
+    /// Wrapped in `Option` so it can be moved out via `.take()` without cloning.
+    pub child_hashes: Option<Box<[B256; 16]>>,
+}
+
+impl Default for BranchNodeV2 {
+    fn default() -> Self {
+        Self {
+            key: Nibbles::default(),
+            stack: Vec::default(),
+            state_mask: TrieMask::default(),
+            branch_rlp_node: None,
+            child_hashes: None,
+        }
+    }
 }
 
 impl fmt::Debug for BranchNodeV2 {
@@ -186,19 +202,32 @@ impl fmt::Debug for BranchNodeV2 {
             .field("stack", &self.stack.iter().map(hex::encode).collect::<Vec<_>>())
             .field("state_mask", &self.state_mask)
             .field("branch_rlp_node", &self.branch_rlp_node)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl BranchNodeV2 {
     /// Creates a new branch node with the given short key, stack, and state mask.
-    pub const fn new(
+    pub fn new(
         key: Nibbles,
         stack: Vec<RlpNode>,
         state_mask: TrieMask,
         branch_rlp_node: Option<RlpNode>,
     ) -> Self {
-        Self { key, stack, state_mask, branch_rlp_node }
+        let child_hashes = Self::compute_child_hashes(&stack, state_mask);
+        Self { key, stack, state_mask, branch_rlp_node, child_hashes }
+    }
+
+    /// Extracts child hashes from the stack, returning a pre-allocated array
+    /// indexed by nibble.
+    fn compute_child_hashes(stack: &[RlpNode], state_mask: TrieMask) -> Option<Box<[B256; 16]>> {
+        let mut hashes = Box::new([B256::ZERO; 16]);
+        for (stack_ptr, nibble) in state_mask.iter().enumerate() {
+            if let Some(hash) = stack[stack_ptr].as_hash() {
+                hashes[nibble as usize] = hash;
+            }
+        }
+        Some(hashes)
     }
 }
 

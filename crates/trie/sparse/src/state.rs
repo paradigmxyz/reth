@@ -1354,12 +1354,12 @@ mod tests {
             account_subtree: ProofNodes::from_iter([
                 (
                     Nibbles::default(),
-                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                        key: Nibbles::default(),
-                        stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
-                        state_mask: TrieMask::new(0b11),
-                        branch_rlp_node: None,
-                    }))
+                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+                        Nibbles::default(),
+                        vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
+                        TrieMask::new(0b11),
+                        None,
+                    )))
                     .into(),
                 ),
                 (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
@@ -1424,12 +1424,12 @@ mod tests {
                     subtree: ProofNodes::from_iter([
                         (
                             Nibbles::default(),
-                            alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                                key: Nibbles::default(),
-                                stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
-                                state_mask: TrieMask::new(0b11),
-                                branch_rlp_node: None,
-                            }))
+                            alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2::new(
+                                Nibbles::default(),
+                                vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
+                                TrieMask::new(0b11),
+                                None,
+                            )))
                             .into(),
                         ),
                         (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
@@ -1491,15 +1491,15 @@ mod tests {
         let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
         let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
 
-        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
-            key: Nibbles::default(),
-            stack: vec![
+        let branch_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
-            state_mask: TrieMask::new(0b11),
-            branch_rlp_node: None,
-        });
+            TrieMask::new(0b11),
+            None,
+        ));
 
         // Create V2 proof nodes with masks already included
         let v2_proof_nodes = vec![
@@ -1549,15 +1549,15 @@ mod tests {
         let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
         let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
 
-        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
-            key: Nibbles::default(),
-            stack: vec![
+        let branch_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::default(),
+            vec![
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
-            state_mask: TrieMask::new(0b11),
-            branch_rlp_node: None,
-        });
+            TrieMask::new(0b11),
+            None,
+        ));
 
         let v2_proof_nodes = vec![
             ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
