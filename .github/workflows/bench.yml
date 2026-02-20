@@ -506,9 +506,6 @@ jobs:
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
-          # Clean up git auth
-          git config --global --unset url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf
-
       # Verify all required tools are available
       - name: Check dependencies
         run: |
