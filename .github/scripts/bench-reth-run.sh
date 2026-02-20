@@ -19,15 +19,6 @@ cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
-      # Debug: show the process tree so we can see what's running
-      echo "=== Process tree before cleanup ==="
-      ps auxf | grep -E "samply|reth|taskset|nice" | grep -v grep || true
-      echo "=== pgrep results ==="
-      echo "pgrep -x reth: $(sudo pgrep -x reth 2>&1 || echo 'no match')"
-      echo "pgrep -x samply: $(sudo pgrep -x samply 2>&1 || echo 'no match')"
-      echo "pgrep -f samply: $(sudo pgrep -f samply 2>&1 || echo 'no match')"
-      echo "RETH_PID=$RETH_PID"
-      echo "==="
       # Send SIGINT to the inner reth process by exact name (not -f which
       # would also match samply's cmdline containing "reth"). Samply will
       # capture reth's exit and save the profile.
@@ -37,7 +28,6 @@ cleanup() {
         sudo pgrep -x samply > /dev/null 2>&1 || break
         if [ $((i % 10)) -eq 0 ]; then
           echo "Waiting for samply to finish writing profile... (${i}s)"
-          ps auxf | grep -E "samply|reth" | grep -v grep || true
         fi
         sleep 1
       done
