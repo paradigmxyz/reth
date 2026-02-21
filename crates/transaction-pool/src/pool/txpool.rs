@@ -710,6 +710,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.blob_pool_transactions.set(stats.blob as f64);
         self.metrics.blob_pool_size_bytes.set(stats.blob_size as f64);
         self.metrics.total_transactions.set(stats.total as f64);
+        self.all_transactions.update_size_metrics();
     }
 
     /// Updates transaction type metrics for the entire pool.
