@@ -49,10 +49,6 @@ engine-auth: [ ]
 #
 # System contract tests (already fixed and deployed):
 #
-# tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout and test_invalid_log_length
-#   System contract is already fixed and deployed; tests cover scenarios where contract is
-#   malformed which can't happen retroactively. No point in adding checks.
-#
 # tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment
 # tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment
 #   Post-fork system contract deployment tests. Should fix for spec compliance but not realistic
@@ -61,44 +57,8 @@ eels/consume-engine:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-nonzero_balance]-reth
   - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-zero_balance]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_amount_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_amount_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_index_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_index_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_pubkey_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_pubkey_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_signature_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_signature_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_withdrawal_credentials_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Prague-blockchain_test_engine-log_argument_withdrawal_credentials_size-value_zero]-reth
   - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-nonzero_balance]-reth
   - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-zero_balance]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_False]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_True]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_amount_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_amount_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_index_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_index_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_pubkey_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_pubkey_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_signature_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_signature_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_withdrawal_credentials_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Osaka-blockchain_test_engine-log_argument_withdrawal_credentials_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Osaka-blockchain_test_engine-slice_bytes_False]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Osaka-blockchain_test_engine-slice_bytes_True]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_index_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_index_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Amsterdam-blockchain_test_engine-slice_bytes_True]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Amsterdam-blockchain_test_engine-slice_bytes_False]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_pubkey_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_pubkey_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_withdrawal_credentials_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_withdrawal_credentials_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_amount_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_amount_offset-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_signature_size-value_zero]-reth
-  - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_layout[fork_Amsterdam-blockchain_test_engine-log_argument_signature_offset-value_zero]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Osaka-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Prague-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
   - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Paris-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth

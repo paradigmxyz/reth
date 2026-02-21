@@ -12,7 +12,8 @@ LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
 DATADIR="$SCHELK_MOUNT/datadir"
-LOG="/tmp/reth-bench-node-${LABEL}.log"
+mkdir -p "$OUTPUT_DIR"
+LOG="${OUTPUT_DIR}/node.log"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -23,8 +24,12 @@ cleanup() {
       sleep 1
     done
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
+    sleep 1
   fi
-  mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+  if mountpoint -q "$SCHELK_MOUNT"; then
+    sudo umount -l "$SCHELK_MOUNT" || true
+    sudo schelk recover -y || true
+  fi
 }
 TAIL_PID=
 trap cleanup EXIT
@@ -74,8 +79,12 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Run reth-bench with high priority but as the current user so output
+# files are not root-owned (avoids EACCES on next checkout).
+BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
+
 # Warmup
-sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
+$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
@@ -83,7 +92,7 @@ sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
 # Benchmark
-sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
+$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \

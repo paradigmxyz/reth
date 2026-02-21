@@ -6,8 +6,14 @@ cd hivetests/
 sim="${1}"
 limit="${2}"
 
+# Use lower parallelism for eels tests to avoid OOM-killing the runner
+parallelism=16
+if [[ "${sim}" == *"eels"* ]]; then
+    parallelism=4
+fi
+
 run_hive() {
-    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 16 --client reth 2>&1 | tee /tmp/log || true
+    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism "${parallelism}" --client reth 2>&1 | tee /tmp/log || true
 }
 
 check_log() {
