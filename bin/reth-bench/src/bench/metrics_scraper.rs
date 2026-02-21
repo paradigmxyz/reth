@@ -139,10 +139,10 @@ fn parse_all_metrics(text: &str) -> BTreeMap<String, f64> {
         };
 
         // The value is the first whitespace-separated token in the rest.
-        if let Some(value_str) = rest.split_whitespace().next() {
-            if let Ok(v) = value_str.parse::<f64>() {
-                result.insert(name_and_labels.to_string(), v);
-            }
+        if let Some(value_str) = rest.split_whitespace().next()
+            && let Ok(v) = value_str.parse::<f64>()
+        {
+            result.insert(name_and_labels.to_string(), v);
         }
     }
     result
