@@ -503,7 +503,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         if !err.is_bad_transaction() || self.network.is_syncing() {
             return
         }
-        // Only penalize the originator.
+        // otherwise we penalize the peer that sent the bad transaction, with the assumption that
+        // the peer should have known that this transaction is bad (e.g. violating consensus rules)
         if let Some(tracking) = peers {
             self.report_peer_bad_transactions(tracking.originator);
         }
@@ -1089,9 +1090,8 @@ where
 
             // Send hash-only announcements
             let mut new_pooled_hashes = hash_builder.build();
-            new_pooled_hashes.truncate(
-                SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-            );
+            new_pooled_hashes
+                .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
             if !new_pooled_hashes.is_empty() {
                 for hash in new_pooled_hashes.iter_hashes() {
                     track(*hash, PropagateKind::Hash(*peer_id));
@@ -1788,11 +1788,10 @@ impl BroadcastChoice {
         tx_sender: &Address,
         mode: &TransactionPropagationMode,
     ) -> HashSet<PeerId> {
-        let count = match mode {
-            TransactionPropagationMode::Sqrt => (peers.len() as f64).sqrt().ceil() as usize,
-            TransactionPropagationMode::All => return peers.iter().copied().collect(),
-            TransactionPropagationMode::Max(max) => peers.len().min(*max),
-        };
+        let count = mode.full_peer_count(peers.len());
+        if count >= peers.len() {
+            return peers.iter().copied().collect()
+        }
         let mut scored: Vec<(PeerId, u64)> =
             peers.iter().map(|pid| (*pid, self.score(pid, tx_sender))).collect();
         scored.sort_unstable_by_key(|&(_, score)| score);

@@ -56,6 +56,17 @@ pub enum TransactionPropagationMode {
     Max(usize),
 }
 
+impl TransactionPropagationMode {
+    /// Returns the number of peers full transactions should be propagated to.
+    pub(crate) fn full_peer_count(&self, peer_count: usize) -> usize {
+        match self {
+            Self::Sqrt => (peer_count as f64).sqrt().ceil() as usize,
+            Self::All => peer_count,
+            Self::Max(max) => peer_count.min(*max),
+        }
+    }
+}
+
 impl FromStr for TransactionPropagationMode {
     type Err = String;
 
