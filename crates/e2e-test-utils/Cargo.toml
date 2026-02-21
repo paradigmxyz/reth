@@ -38,7 +38,6 @@ reth-ethereum-primitives.workspace = true
 reth-cli-commands.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
-reth-primitives.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
 
