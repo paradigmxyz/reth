@@ -41,6 +41,9 @@ const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 
+/// Maximum number of concurrent archive downloads.
+const MAX_CONCURRENT_DOWNLOADS: usize = 4;
+
 /// Global static download defaults
 static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
 
@@ -199,6 +202,14 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Skip reth.toml generation after download.
     #[arg(long)]
     no_config: bool,
+
+    /// Use resumable two-phase downloads (download to disk first, then extract).
+    ///
+    /// Archives are downloaded to a .part file with HTTP Range resume support
+    /// before extraction. Slower but tolerates network interruptions without
+    /// restarting. By default, archives stream directly into the extractor.
+    #[arg(long)]
+    resumable: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -216,7 +227,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 "Starting snapshot download and extraction"
             );
 
-            stream_and_extract(&url, data_dir.data_dir(), None).await?;
+            stream_and_extract(&url, data_dir.data_dir(), None, self.resumable).await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
             return Ok(());
@@ -285,21 +296,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Downloading all archives"
         );
 
-        // Download and extract all archives in parallel (up to 4 concurrent)
         let shared = SharedProgress::new(total_size, total_archives as u64);
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
 
         let target = target_dir.to_path_buf();
+        let resumable = self.resumable;
         let results: Vec<Result<()>> = stream::iter(all_downloads)
             .map(|(url, _component)| {
                 let dir = target.clone();
                 let sp = Arc::clone(&shared);
                 async move {
-                    stream_and_extract(&url, &dir, Some(sp)).await?;
+                    stream_and_extract(&url, &dir, Some(sp), resumable).await?;
                     Ok(())
                 }
             })
-            .buffer_unordered(4)
+            .buffer_unordered(MAX_CONCURRENT_DOWNLOADS)
             .collect()
             .await;
 
@@ -751,6 +762,21 @@ impl<W: Write> Write for SharedProgressWriter<W> {
     }
 }
 
+/// Wrapper that bumps a shared atomic counter while reading data.
+/// Used for streaming downloads where a single display task shows aggregated progress.
+struct SharedProgressReader<R> {
+    inner: R,
+    progress: Arc<SharedProgress>,
+}
+
+impl<R: Read> Read for SharedProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.progress.add(n as u64);
+        Ok(n)
+    }
+}
+
 /// Downloads a file with resume support using HTTP Range requests.
 /// Automatically retries on failure, resuming from where it left off.
 /// Returns the path to the downloaded file and its total size.
@@ -909,6 +935,77 @@ fn resumable_download(
         .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
 }
 
+/// Streams a remote archive directly into the extractor without writing to disk.
+///
+/// On failure, retries from scratch up to [`MAX_DOWNLOAD_RETRIES`] times.
+fn streaming_download_and_extract(
+    url: &str,
+    format: CompressionFormat,
+    target_dir: &Path,
+    shared: Option<&Arc<SharedProgress>>,
+) -> Result<()> {
+    let quiet = shared.is_some();
+    let mut last_error: Option<eyre::Error> = None;
+
+    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+        if attempt > 1 {
+            info!(target: "reth::cli",
+                url = %url,
+                attempt,
+                max = MAX_DOWNLOAD_RETRIES,
+                "Retrying streaming download from scratch"
+            );
+        }
+
+        let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
+
+        let response = match client.get(url).send().and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = Some(e.into());
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                }
+                continue;
+            }
+        };
+
+        if !quiet && let Some(size) = response.content_length() {
+            info!(target: "reth::cli",
+                url = %url,
+                size = %DownloadProgress::format_size(size),
+                "Streaming archive"
+            );
+        }
+
+        let result = if let Some(sp) = shared {
+            let reader = SharedProgressReader { inner: response, progress: Arc::clone(sp) };
+            extract_archive_raw(reader, format, target_dir)
+        } else {
+            extract_archive_raw(response, format, target_dir)
+        };
+
+        match result {
+            Ok(()) => {
+                if let Some(sp) = shared {
+                    sp.archive_done();
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last_error = Some(e);
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        eyre::eyre!("Streaming download failed after {MAX_DOWNLOAD_RETRIES} attempts")
+    }))
+}
+
 /// Fetches the snapshot from a remote URL with resume support, then extracts it.
 fn download_and_extract(
     url: &str,
@@ -953,11 +1050,14 @@ fn download_and_extract(
 
 /// Downloads and extracts a snapshot, blocking until finished.
 ///
-/// Supports both `file://` URLs for local files and HTTP(S) URLs for remote downloads.
+/// Supports `file://` URLs for local files and HTTP(S) URLs for remote downloads.
+/// When `resumable` is true, downloads to a `.part` file first with HTTP Range resume
+/// support. Otherwise streams directly into the extractor.
 fn blocking_download_and_extract(
     url: &str,
     target_dir: &Path,
     shared: Option<Arc<SharedProgress>>,
+    resumable: bool,
 ) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
@@ -968,8 +1068,10 @@ fn blocking_download_and_extract(
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
         extract_from_file(&file_path, format, target_dir)
-    } else {
+    } else if resumable {
         download_and_extract(url, format, target_dir, shared.as_ref())
+    } else {
+        streaming_download_and_extract(url, format, target_dir, shared.as_ref())
     }
 }
 
@@ -977,15 +1079,19 @@ fn blocking_download_and_extract(
 ///
 /// When `shared` is provided, download progress is reported to the shared
 /// counter for aggregated display. Otherwise uses a local progress bar.
+/// When `resumable` is true, uses two-phase download with `.part` files.
 async fn stream_and_extract(
     url: &str,
     target_dir: &Path,
     shared: Option<Arc<SharedProgress>>,
+    resumable: bool,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
-    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir, shared))
-        .await??;
+    task::spawn_blocking(move || {
+        blocking_download_and_extract(&url, &target_dir, shared, resumable)
+    })
+    .await??;
 
     Ok(())
 }
