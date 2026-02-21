@@ -82,8 +82,10 @@ impl DiskFileBlobStore {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
+                    if result[hash_idx].is_none() {
+                        missing_count -= 1;
+                    }
                     result[hash_idx] = Some(match_result);
-                    missing_count -= 1;
                 }
             }
 
