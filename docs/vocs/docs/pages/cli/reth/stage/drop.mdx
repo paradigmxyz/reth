@@ -121,6 +121,18 @@ Storage:
 
           Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
 
+      --storage.bloom-filter
+          Enable in-memory bloom filter for short-circuiting empty storage slot reads.
+
+          When enabled, the node builds a bloom filter over all `(address, slot)` pairs on startup and checks it before every MDBX storage seek. If the filter says a slot was never written, the seek is skipped entirely. This benefits the 30-40% of SLOAD operations that target empty slots.
+
+      --storage.bloom-filter-size-mb <BLOOM_FILTER_SIZE_MB>
+          Bloom filter size in megabytes (default: 1024, minimum: 1).
+
+          Larger filters have fewer false positives but use more RAM. With K=3 hash functions, a 1024 MB filter supports ~700M entries at <1% FP rate, covering mainnet's ~500M non-zero storage slots with room to grow.
+
+          [default: 1024]
+
   <STAGE>
           Possible values:
           - headers:         The headers stage within the pipeline
