@@ -45,6 +45,8 @@ cleanup() {
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
     sleep 1
   fi
+  # Fix ownership of reth-created files (reth runs as root)
+  sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
   if mountpoint -q "$SCHELK_MOUNT"; then
     sudo umount -l "$SCHELK_MOUNT" || true
     sudo schelk recover -y || true
@@ -70,6 +72,7 @@ RETH_CPUS="1-$(( ONLINE - 1 ))"
 RETH_ARGS=(
   node
   --datadir "$DATADIR"
+  --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
   --http.port 8545
