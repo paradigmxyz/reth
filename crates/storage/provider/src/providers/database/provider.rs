@@ -518,6 +518,42 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
     }
 
+    /// Updates pipeline stage checkpoints after `save_blocks`, optionally skipping deferred index
+    /// stages when history indexing is intentionally deferred.
+    fn update_pipeline_stages_for_save_mode(
+        &self,
+        block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
+        let skip_deferred_history_stages =
+            matches!(save_mode, SaveBlocksMode::FullNoHistoryIndexing);
+        let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
+        for stage_id in StageId::ALL {
+            if skip_deferred_history_stages &&
+                matches!(
+                    stage_id,
+                    StageId::TransactionLookup |
+                        StageId::IndexStorageHistory |
+                        StageId::IndexAccountHistory
+                )
+            {
+                continue;
+            }
+
+            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
+            cursor.upsert(
+                stage_id.to_string(),
+                &StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Writes executed blocks and state to storage.
     ///
     /// This method parallelizes static file (SF) writes with MDBX writes.
@@ -703,7 +739,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_block_number, false)?;
+            self.update_pipeline_stages_for_save_mode(last_block_number, false, save_mode)?;
             timings.update_pipeline_stages = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
@@ -5201,6 +5237,100 @@ mod tests {
                 provider.tx_ref().entries::<tables::StoragesHistory>().unwrap();
             assert!(mdbx_storage_history > 0, "v1: StoragesHistory in MDBX should not be empty");
         }
+    }
+
+    #[test]
+    fn save_blocks_full_no_history_indexing_preserves_deferred_stage_checkpoints() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
+            SealedHeader::new(
+                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                B256::ZERO,
+            ),
+            Default::default(),
+        );
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(genesis.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+
+        provider_rw
+            .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(70))
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(80))
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(90))
+            .unwrap();
+
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number: 1, difficulty: U256::from(1), ..Default::default() },
+            Default::default(),
+        );
+        let executed = ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+
+        provider_rw.save_blocks(vec![executed], SaveBlocksMode::FullNoHistoryIndexing).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::TransactionLookup)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            70
+        );
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::IndexStorageHistory)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            80
+        );
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::IndexAccountHistory)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            90
+        );
+
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            1
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Headers).unwrap().unwrap().block_number,
+            1
+        );
     }
 
     #[test]
