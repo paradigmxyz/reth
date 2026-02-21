@@ -1062,12 +1062,11 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let dispatched =
+        let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
-            dispatched.receivers,
-            dispatched.inline_single,
+            storage_proof_receivers,
             self.cached_storage_roots.clone(),
             v2_storage_calculator,
         );
@@ -1211,34 +1210,25 @@ where
     }
 }
 
-/// Result of dispatching V2 storage proofs.
-struct DispatchedStorageProofs {
-    /// Receivers for storage proofs dispatched to worker pool.
-    receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-    /// Storage proofs with single targets, to be computed inline in the account worker
-    /// instead of dispatching to the storage worker pool.
-    inline_single: B256Map<Vec<proof_v2::Target>>,
-}
-
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
 ///
-/// This function queues storage proof tasks to the worker pool but returns immediately
+/// This function queues all storage proof tasks to the worker pool but returns immediately
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
-/// Storage proofs with a single target are returned separately as `inline_single` to be
-/// computed synchronously in the account worker, avoiding dispatch/channel overhead for
-/// trivially small proof requests.
+/// Accounts that appear in `account_targets` but have no storage targets are *not* dispatched
+/// to storage workers. Instead they are left out of the returned map entirely, letting
+/// `AsyncAccountValueEncoder` handle them via its `Sync`/`FromCache` path which computes
+/// `storage_root_node()` directly — avoiding channel allocation and cross-thread dispatch
+/// overhead for root-only requests.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
-) -> Result<DispatchedStorageProofs, ParallelStateRootError> {
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
-    let mut inline_single =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
@@ -1260,14 +1250,8 @@ fn dispatch_v2_storage_proofs(
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
 
-    // Dispatch proofs for targeted storage slots. Single-target proofs are kept inline
-    // to avoid dispatch/channel overhead.
+    // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
-        if targets.len() <= 1 {
-            inline_single.insert(hashed_address, targets);
-            continue;
-        }
-
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
@@ -1283,20 +1267,11 @@ fn dispatch_v2_storage_proofs(
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
 
-    // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root. These are also inlined.
-    for target in account_targets {
-        let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) ||
-            inline_single.contains_key(&hashed_address)
-        {
-            continue
-        }
+    // Accounts with no storage targets are intentionally NOT dispatched here.
+    // They will be handled by AsyncAccountValueEncoder's Sync/FromCache path,
+    // which computes storage_root_node() directly without channel overhead.
 
-        inline_single.insert(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
-    }
-
-    Ok(DispatchedStorageProofs { receivers: storage_proof_receivers, inline_single })
+    Ok(storage_proof_receivers)
 }
 
 /// Input parameters for storage proof computation.
