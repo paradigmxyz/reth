@@ -145,9 +145,9 @@ impl<T: RlpBincode + 'static> SerdeBincodeCompat for T {
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::TxEip4844;
+    use alloy_consensus::{TxEip4844, TxTy};
     use alloy_eips::eip4895::Withdrawals;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`alloy_consensus::Block`] serde implementation.
@@ -346,8 +346,10 @@ mod block_bincode {
         }
     }
 
-    impl super::SerdeBincodeCompat for alloy_consensus::EthereumReceipt {
-        type BincodeRepr<'a> = alloy_consensus::serde_bincode_compat::EthereumReceipt<'a>;
+    impl<T: TxTy + Serialize + DeserializeOwned> super::SerdeBincodeCompat
+        for alloy_consensus::EthereumReceipt<T>
+    {
+        type BincodeRepr<'a> = alloy_consensus::serde_bincode_compat::EthereumReceipt<'a, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
