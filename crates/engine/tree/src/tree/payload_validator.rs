@@ -1,4 +1,126 @@
 //! Types and traits for validating blocks and payloads.
+//!
+//! # Payload validation flow
+//!
+//! The central entry point is [`BasicEngineValidator::validate_block_with_state`], called by the
+//! engine when a new payload arrives via `engine_newPayload`. It orchestrates block execution,
+//! consensus validation, state root computation, and deferred trie data preparation. The flow is
+//! designed to maximise concurrency: multiple background tasks run in parallel with execution and
+//! validation on the main thread.
+//!
+//! ## Spawned background tasks
+//!
+//! | Task name | Spawned when | What it does | Awaited where |
+//! |---|---|---|---|
+//! | `payload-convert` | Payload received (not already a block) | RLP-decodes and hashes the block header | `convert_to_block` closure (after execution) |
+//! | `tx-iterator` | Always | Parallel signature recovery + tx env conversion | Consumed incrementally during `execute_transactions` |
+//! | `prewarm-cache` | Always | Prewarming account/storage state into execution caches | Implicitly via caches during execution |
+//! | `receipt-root` | Before execution | Incremental receipt root + logs bloom computation | `receipt_root_rx.blocking_recv()` (after execution) |
+//! | `hashed-post-state` | After execution | Keccak256-hashes all changed addresses and storage slots from `BundleState` | Lazily via `LazyHashedPostState::get()` (in `validate_post_execution` or state root computation) |
+//! | Multiproof workers | `StateRootTask` strategy only | Fetch and compute trie multiproofs for incremental state updates | Sparse trie task consumes proof results |
+//! | Sparse trie task | `StateRootTask` strategy only | Maintains sparse trie, applies state updates, computes state root | `handle.state_root()` or `await_state_root_with_timeout` |
+//! | `serial-root` | `StateRootTask` timeout fallback | Serial state root computation racing against the sparse trie task | Polled in `await_state_root_with_timeout` loop |
+//! | `trie-input` | After state root is verified | Sorts hashed state + trie updates, merges ancestor overlays, computes changesets | Not awaited on hot path; consumers call `DeferredTrieData::wait_cloned()` |
+//!
+//! ## Step-by-step timeline
+//!
+//! The flow below describes the `StateRootTask` strategy, which is the primary production path.
+//! The `Parallel` and `Synchronous` strategies skip the sparse trie / multiproof tasks and compute
+//! the state root after execution completes.
+//!
+//! ### Phase 1 — Setup (main thread)
+//!
+//! 1. **Spawn `payload-convert`** — background RLP decoding + header hashing (for payloads)
+//! 2. Build state provider from parent block
+//! 3. Plan state root strategy (`StateRootTask` / `Parallel` / `Synchronous`)
+//! 4. **Spawn payload processor** — this spawns:
+//!    - **`tx-iterator`** — parallel signature recovery via rayon
+//!    - **`prewarm-cache`** — prewarming caches from the state provider
+//!    - **Multiproof workers** — proof fetching threads (StateRootTask only)
+//!    - **Sparse trie task** — incremental state root computation (StateRootTask only)
+//!
+//! ### Phase 2 — Execution (main thread)
+//!
+//! 5. **Spawn `receipt-root`** — background incremental receipt root computation
+//! 6. **Execute transactions** — iterates over transactions from the `tx-iterator`, streaming each
+//!    receipt to `receipt-root` as it completes. State changes are also sent to the multiproof task
+//!    (StateRootTask) for incremental trie updates.
+//! 7. Stop prewarming, terminate caching
+//!
+//! ### Phase 3 — Post-execution (main thread, tasks settling)
+//!
+//! 8. **Spawn `hashed-post-state`** — background keccak256 hashing of all changed state
+//! 9. **Await `payload-convert`** — block conversion completes
+//! 10. **Await `receipt-root`** — receipt root + logs bloom ready
+//! 11. **Consensus validation** — header rules, parent validation, post-execution checks
+//! 12. **Await `hashed-post-state`** — lazily resolved on first `.get()` call (may already be ready
+//!     by the time it is needed)
+//! 13. **Hashed-state validation** — `validate_block_post_execution_with_hashed_state`
+//!
+//! ### Phase 4 — State root (main thread waiting on background)
+//!
+//! 14. **Await state root** — depends on strategy:
+//!     - `StateRootTask`: await sparse trie result (with optional timeout + serial fallback)
+//!     - `Parallel`: compute on rayon thread pool using `ParallelStateRoot`
+//!     - `Synchronous`: serial computation via `StateRoot`
+//! 15. **Verify state root** matches block header
+//!
+//! ### Phase 5 — Finalization (main thread + background)
+//!
+//! 16. **Spawn `trie-input`** — background task to sort + merge trie data and compute changesets.
+//!     The hot path returns the `ExecutedBlock` immediately without waiting.
+//!
+//! ```text
+//!                          validate_block_with_state
+//!  ┌──────────────────────────────────────────────────────────────────────────────────┐
+//!  │                                                                                  │
+//!  │  ── Phase 1: Setup ─────────────────────────────────────────────────────────────  │
+//!  │                                                                                  │
+//!  │  ┌──────────────────┐                                                            │
+//!  │  │ payload-convert  │──────────────────────────────────────┐                      │
+//!  │  └──────────────────┘                                     │                      │
+//!  │  state provider + strategy planning                       │                      │
+//!  │  ┌──────────────────┐  ┌──────────────────┐               │                      │
+//!  │  │   tx-iterator    │  │  prewarm-cache   │               │                      │
+//!  │  └───────┬──────────┘  └──────────────────┘               │                      │
+//!  │          │             ┌──────────────────┐               │                      │
+//!  │          │             │ multiproof workers│               │                      │
+//!  │          │             └────────┬─────────┘               │                      │
+//!  │          │             ┌────────┴─────────┐               │                      │
+//!  │          │             │ sparse trie task  │               │                      │
+//!  │          │             └────────┬─────────┘               │                      │
+//!  │          │                      │                         │                      │
+//!  │  ── Phase 2: Execution ─────────────────────────────────────────────────────────  │
+//!  │          │                      │                         │                      │
+//!  │  ┌───────┴──────────┐           │                         │                      │
+//!  │  │  receipt-root    │           │                         │                      │
+//!  │  └───────┬──────────┘           │                         │                      │
+//!  │  execute_transactions ──receipts│──state updates──────────┤                      │
+//!  │          │                      │                         │                      │
+//!  │  ── Phase 3: Post-execution ────────────────────────────────────────────────────  │
+//!  │          │                      │                         │                      │
+//!  │  ┌───────┴──────────────┐       │                         │                      │
+//!  │  │ hashed-post-state    │       │                         │                      │
+//!  │  └───────┬──────────────┘       │                         │                      │
+//!  │          │                      │                         │                      │
+//!  │  await payload-convert ◄────────┼─────────────────────────┘                      │
+//!  │  await receipt-root ◄───────────┤                                                │
+//!  │  consensus validation           │                                                │
+//!  │  await hashed-post-state (lazy) │                                                │
+//!  │                                 │                                                │
+//!  │  ── Phase 4: State root ────────────────────────────────────────────────────────  │
+//!  │                                 │                                                │
+//!  │  await state root ◄─────────────┘                                                │
+//!  │  verify state root                                                               │
+//!  │                                                                                  │
+//!  │  ── Phase 5: Finalization ──────────────────────────────────────────────────────  │
+//!  │                                                                                  │
+//!  │  ┌──────────────────┐                                                            │
+//!  │  │   trie-input     │  (fire-and-forget)                                         │
+//!  │  └──────────────────┘                                                            │
+//!  │  return ExecutedBlock                                                             │
+//!  └──────────────────────────────────────────────────────────────────────────────────┘
+//! ```
 
 use crate::tree::{
     cached_state::CachedStateProvider,
