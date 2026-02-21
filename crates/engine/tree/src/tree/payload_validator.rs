@@ -51,6 +51,7 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{mpsc::RecvTimeoutError, Arc},
+    time::Duration,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -902,12 +903,17 @@ where
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
+        // Accumulate per-tx metric durations locally to batch-record after the loop,
+        // avoiding per-tx crossbeam_epoch pin/GC overhead in Histogram::record().
+        let mut total_wait = Duration::ZERO;
+        let mut total_exec = Duration::ZERO;
+        let mut tx_count = 0u64;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
+            total_wait += wait_start.elapsed();
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -923,7 +929,8 @@ where
 
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
+            total_exec += tx_start.elapsed();
+            tx_count += 1;
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -936,6 +943,13 @@ where
             }
         }
         drop(exec_span);
+
+        // Flush accumulated per-tx metrics as block-level aggregates (2 histogram records
+        // instead of ~400-800 per block).
+        if tx_count > 0 {
+            self.metrics.record_transaction_wait(total_wait);
+            self.metrics.record_transaction_execution(total_exec);
+        }
 
         Ok((executor, senders))
     }
