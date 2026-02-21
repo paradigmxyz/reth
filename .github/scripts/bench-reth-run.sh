@@ -18,11 +18,30 @@ LOG="${OUTPUT_DIR}/node.log"
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
-    sudo kill "$RETH_PID"
-    for i in $(seq 1 30); do
-      sudo kill -0 "$RETH_PID" 2>/dev/null || break
-      sleep 1
-    done
+    if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+      # Send SIGINT to the inner reth process by exact name (not -f which
+      # would also match samply's cmdline containing "reth"). Samply will
+      # capture reth's exit and save the profile.
+      sudo pkill -INT -x reth 2>/dev/null || true
+      # Wait for samply to finish writing the profile and exit
+      for i in $(seq 1 120); do
+        sudo pgrep -x samply > /dev/null 2>&1 || break
+        if [ $((i % 10)) -eq 0 ]; then
+          echo "Waiting for samply to finish writing profile... (${i}s)"
+        fi
+        sleep 1
+      done
+      if sudo pgrep -x samply > /dev/null 2>&1; then
+        echo "Samply still running after 120s, sending SIGTERM..."
+        sudo pkill -x samply 2>/dev/null || true
+      fi
+    else
+      sudo kill "$RETH_PID"
+      for i in $(seq 1 30); do
+        sudo kill -0 "$RETH_PID" 2>/dev/null || break
+        sleep 1
+      done
+    fi
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
     sleep 1
   fi
@@ -47,17 +66,31 @@ grep Cached /proc/meminfo
 RETH_BENCH="$(which reth-bench)"
 ONLINE=$(nproc --all)
 RETH_CPUS="1-$(( ONLINE - 1 ))"
-sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
-  --datadir "$DATADIR" \
-  --engine.accept-execution-requests-hash \
-  --http \
-  --http.port 8545 \
-  --ws \
-  --ws.api all \
-  --authrpc.port 8551 \
-  --disable-discovery \
-  --no-persist-peers \
-  > "$LOG" 2>&1 &
+
+RETH_ARGS=(
+  node
+  --datadir "$DATADIR"
+  --engine.accept-execution-requests-hash
+  --http
+  --http.port 8545
+  --ws
+  --ws.api all
+  --authrpc.port 8551
+  --disable-discovery
+  --no-persist-peers
+)
+
+if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+  SAMPLY="$(which samply)"
+  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+    "$SAMPLY" record --save-only --presymbolicate \
+    --output "$OUTPUT_DIR/samply-profile.json.gz" \
+    -- "$BINARY" "${RETH_ARGS[@]}" \
+    > "$LOG" 2>&1 &
+else
+  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+    > "$LOG" 2>&1 &
+fi
 
 RETH_PID=$!
 stdbuf -oL tail -f "$LOG" | sed -u "s/^/[reth] /" &

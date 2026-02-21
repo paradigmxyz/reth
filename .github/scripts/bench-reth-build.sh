@@ -14,10 +14,10 @@
 #   baseline: <source-dir>/target/profiling/reth
 #   feature:  <source-dir>/target/profiling/reth, reth-bench installed to cargo bin
 #
-# Required: mc (MinIO client) configured at /home/ubuntu/.mc
+# Required: mc (MinIO client) with a configured alias
 set -euo pipefail
 
-MC="mc --config-dir /home/ubuntu/.mc"
+MC="mc"
 MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"

@@ -885,9 +885,11 @@ where
     }
 
     /// Instantiates `RethApi`
-    pub fn reth_api(&self) -> RethApi<Provider, ExecutionData> {
+    pub fn reth_api(&self) -> RethApi<Provider, EvmConfig, ExecutionData> {
         RethApi::new(
             self.provider.clone(),
+            self.evm_config.clone(),
+            self.blocking_pool_guard.clone(),
             self.executor.clone(),
             self.beacon_engine_handle.clone(),
         )
@@ -1055,6 +1057,8 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
+                            self.evm_config.clone(),
+                            self.blocking_pool_guard.clone(),
                             self.executor.clone(),
                             self.beacon_engine_handle.clone(),
                         )

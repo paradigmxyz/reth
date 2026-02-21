@@ -1,5 +1,5 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{map::AddressMap, U256};
+use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 use crate::reth_engine::RethPayloadStatus;
@@ -17,6 +17,18 @@ pub trait RethApi<ExecutionData> {
         &self,
         block_id: BlockId,
     ) -> RpcResult<AddressMap<U256>>;
+
+    /// Re-executes a block (or a range of blocks) and returns the execution outcome including
+    /// receipts, state changes, and EIP-7685 requests.
+    ///
+    /// If `count` is provided, re-executes `count` consecutive blocks starting from `block_id`
+    /// and returns the merged execution outcome.
+    #[method(name = "getBlockExecutionOutcome")]
+    async fn reth_get_block_execution_outcome(
+        &self,
+        block_id: BlockId,
+        count: Option<U64>,
+    ) -> RpcResult<Option<serde_json::Value>>;
 
     /// Reth-specific newPayload that takes execution data directly.
     ///

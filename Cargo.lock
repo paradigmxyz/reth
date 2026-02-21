@@ -3591,12 +3591,12 @@ dependencies = [
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
  "reth-node-ethereum",
  "reth-payload-primitives",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-tasks",
@@ -7550,6 +7550,7 @@ dependencies = [
  "reth-db",
  "reth-ethereum-cli",
  "reth-ethereum-payload-builder",
+ "reth-ethereum-primitives",
  "reth-network",
  "reth-network-api",
  "reth-node-api",
@@ -7559,7 +7560,7 @@ dependencies = [
  "reth-node-metrics",
  "reth-payload-builder",
  "reth-payload-primitives",
- "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc",
@@ -8229,7 +8230,6 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-api",
@@ -9554,24 +9554,6 @@ dependencies = [
 [[package]]
 name = "reth-primitives"
 version = "1.11.0"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rlp",
- "arbitrary",
- "c-kzg",
- "codspeed-criterion-compat",
- "once_cell",
- "proptest",
- "proptest-arbitrary-interop",
- "reth-codecs",
- "reth-ethereum-forks",
- "reth-ethereum-primitives",
- "reth-primitives-traits",
- "reth-static-file-types",
-]
 
 [[package]]
 name = "reth-primitives-traits"
@@ -10330,7 +10312,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-node-types",
- "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
  "reth-stages-types",

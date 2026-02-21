@@ -22,7 +22,7 @@ reth-errors.workspace = true
 reth-payload-primitives.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
-reth-execution-types.workspace = true
+reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
