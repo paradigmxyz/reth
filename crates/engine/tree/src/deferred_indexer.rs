@@ -219,13 +219,6 @@ impl DeferredHistoryIndexer {
         match result {
             Ok(output) => {
                 provider_rw.save_stage_checkpoint(stage_id, output.checkpoint)?;
-                info!(
-                    target: "engine::persistence::deferred_indexer",
-                    %stage_id,
-                    checkpoint = output.checkpoint.block_number,
-                    %tip,
-                    "Deferred indexing batch complete"
-                );
                 Ok(Some(DeferredStageProgress { stage_id, checkpoint: output.checkpoint }))
             }
             Err(err) => {
@@ -311,5 +304,21 @@ impl DeferredHistoryIndexer {
     /// Marks the indexer as needing catch-up after reorg-related block removal.
     pub fn on_reorg(&mut self, _new_tip_num: u64) {
         self.caught_up = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reorg_marks_indexer_as_not_caught_up() {
+        let mut indexer =
+            DeferredHistoryIndexer::new(&StageConfig::default(), &PruneModes::default());
+        indexer.caught_up = true;
+
+        indexer.on_reorg(123);
+
+        assert!(!indexer.is_caught_up());
     }
 }
