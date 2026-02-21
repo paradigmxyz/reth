@@ -1,18 +1,36 @@
-# op-reth db settings set use_hashed_state
+# reth db prune-checkpoints set
 
-Use hashed state tables (HashedAccounts/HashedStorages) as canonical state
+Set a prune checkpoint for a segment.
 
 ```bash
-$ op-reth db settings set use_hashed_state --help
+$ reth db prune-checkpoints set --help
 ```
 ```txt
-Usage: op-reth db settings set use_hashed_state [OPTIONS] <VALUE>
-
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Usage: reth db prune-checkpoints set [OPTIONS] --segment <SEGMENT> --mode <MODE>
 
 Options:
+      --segment <SEGMENT>
+          The prune segment to update
+
+          [possible values: sender-recovery, transaction-lookup, receipts, contract-logs, account-history, storage-history, bodies]
+
+      --block-number <BLOCK_NUMBER>
+          Highest pruned block number
+
+      --tx-number <TX_NUMBER>
+          Highest pruned transaction number
+
+      --mode <MODE>
+          Prune mode to write: full, distance, or before
+
+          Possible values:
+          - full:     Prune all blocks
+          - distance: Keep the last N blocks (requires --mode-value)
+          - before:   Prune blocks before a specific block number (requires --mode-value)
+
+      --mode-value <MODE_VALUE>
+          Value for distance or before mode (required unless mode is full)
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -22,9 +40,9 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              optimism, optimism_sepolia, optimism-sepolia, base, base_sepolia, base-sepolia, arena-z, arena-z-sepolia, automata, base-devnet-0-sepolia-dev-0, bob, boba-sepolia, boba, camp-sepolia, celo, creator-chain-testnet-sepolia, cyber, cyber-sepolia, ethernity, ethernity-sepolia, fraxtal, funki, funki-sepolia, hashkeychain, ink, ink-sepolia, lisk, lisk-sepolia, lyra, metal, metal-sepolia, mint, mode, mode-sepolia, oplabs-devnet-0-sepolia-dev-0, orderly, ozean-sepolia, pivotal-sepolia, polynomial, race, race-sepolia, radius_testnet-sepolia, redstone, rehearsal-0-bn-0-rehearsal-0-bn, rehearsal-0-bn-1-rehearsal-0-bn, settlus-mainnet, settlus-sepolia-sepolia, shape, shape-sepolia, silent-data-mainnet, snax, soneium, soneium-minato-sepolia, sseed, swan, swell, tbn, tbn-sepolia, unichain, unichain-sepolia, worldchain, worldchain-sepolia, xterio-eth, zora, zora-sepolia, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
-          [default: optimism]
+          [default: mainnet]
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -73,9 +91,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

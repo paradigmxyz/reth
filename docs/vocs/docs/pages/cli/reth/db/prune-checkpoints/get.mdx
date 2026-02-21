@@ -1,18 +1,19 @@
-# reth db settings set transaction_hash_numbers
+# reth db prune-checkpoints get
 
-Store transaction hash to number mapping in rocksdb instead of MDBX
+Get prune checkpoint(s) from database.
 
 ```bash
-$ reth db settings set transaction_hash_numbers --help
+$ reth db prune-checkpoints get --help
 ```
 ```txt
-Usage: reth db settings set transaction_hash_numbers [OPTIONS] <VALUE>
-
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Usage: reth db prune-checkpoints get [OPTIONS]
 
 Options:
+      --segment <SEGMENT>
+          Specific segment to query. If omitted, shows all segments
+
+          [possible values: sender-recovery, transaction-lookup, receipts, contract-logs, account-history, storage-history, bodies]
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -73,9 +74,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

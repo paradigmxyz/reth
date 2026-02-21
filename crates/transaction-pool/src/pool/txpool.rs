@@ -351,15 +351,25 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Sets the current block info for the pool.
     ///
-    /// This will also apply updates to the pool based on the new base fee and blob fee
-    pub fn set_block_info(&mut self, info: BlockInfo) {
-        // first update the subpools based on the new values
-        let basefee_ordering = self.update_basefee(info.pending_basefee, |_| {});
+    /// This will also apply updates to the pool based on the new base fee and blob fee.
+    ///
+    /// Returns the outcome containing any transactions that were promoted due to fee changes.
+    pub fn set_block_info(&mut self, info: BlockInfo) -> UpdateOutcome<T::Transaction> {
+        let mut outcome = UpdateOutcome::default();
+
+        // first update the subpools based on the new values, collecting promoted transactions
+        let basefee_ordering = self.update_basefee(info.pending_basefee, |tx| {
+            outcome.promoted.push(tx.clone());
+        });
         if let Some(blob_fee) = info.pending_blob_fee {
-            self.update_blob_fee(blob_fee, basefee_ordering, |_| {})
+            self.update_blob_fee(blob_fee, basefee_ordering, |tx| {
+                outcome.promoted.push(tx.clone());
+            })
         }
         // then update tracked values
         self.all_transactions.set_block_info(info);
+
+        outcome
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
@@ -762,12 +772,41 @@ impl<T: TransactionOrdering> TxPool<T> {
             .update(on_chain_nonce, on_chain_balance);
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            Ok(InsertOk { transaction, move_to, replaced_tx, updates, state }) => {
-                // replace the new tx and remove the replaced in the subpool(s)
-                self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                // Update inserted transactions metric
+            Ok(InsertOk { transaction, move_to, replaced_tx, mut updates, state }) => {
+                // Interleave update processing and new-tx insertion so that live
+                // `BestTransactions` iterators always receive transactions in nonce order.
+                // Updates are already in nonce-ascending order, so we split them around
+                // the new transaction's nonce:
+                //  1. Promote lower-nonce txs first  (e.g. balance-unlock scenario)
+                //  2. Add the new transaction
+                //  3. Promote higher-nonce txs last   (e.g. gap-fill scenario)
+                let new_nonce = transaction.id().nonce;
+                let split = updates.iter().position(|u| u.id.nonce >= new_nonce);
+                let (promoted, discarded) = match split {
+                    // All updates are lower-nonce — promote them first, then add new tx
+                    None => {
+                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
+                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                        (promoted, discarded)
+                    }
+                    // All updates are higher-nonce — add new tx first, then promote
+                    Some(0) => {
+                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
+                        (promoted, discarded)
+                    }
+                    // Mixed — split and interleave
+                    Some(i) => {
+                        let after = updates.split_off(i);
+                        let mut outcome = self.process_updates(updates);
+                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                        let after_outcome = self.process_updates(after);
+                        outcome.promoted.extend(after_outcome.promoted);
+                        outcome.discarded.extend(after_outcome.discarded);
+                        (outcome.promoted, outcome.discarded)
+                    }
+                };
                 self.metrics.inserted_transactions.increment(1);
-                let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 let replaced = replaced_tx.map(|(tx, _)| tx);
 
@@ -4561,5 +4600,161 @@ mod tests {
             tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
             "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
         );
+    }
+
+    /// Test for <https://github.com/paradigmxyz/reth/issues/17701>
+    ///
+    /// When a new transaction is added and its `updates` contain a same-sender transaction with
+    /// a lower nonce, the lower-nonce tx must be added to the pending subpool *before* the
+    /// higher-nonce tx. Otherwise, live `BestTransactions` iterators receive them out of order.
+    #[test]
+    fn best_transactions_nonce_order_on_balance_unlock() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = Address::random();
+        let on_chain_balance = U256::from(10_000);
+
+        // tx0: nonce 0, cheap — will go straight to pending
+        let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
+        // tx1: nonce 1, very expensive — cumulative cost (tx0 + tx1) will exceed balance
+        let tx1 = tx0.next().inc_limit().with_value(U256::from(on_chain_balance));
+        // tx2: nonce 2
+        let tx2 = tx1.next().inc_limit().with_value(U256::ZERO);
+
+        let v0 = f.validated(tx0);
+        let v1 = f.validated(tx1);
+        let v2 = f.validated(tx2);
+
+        // Add tx0 with limited balance — goes to pending (tx0 cost is small: 1 * 100 = 100)
+        pool.add_transaction(v0, on_chain_balance, 0, None).unwrap();
+
+        // Create a live BestTransactions iterator that will receive new pending txs
+        let mut best = pool.best_transactions();
+
+        // Drain tx0 from the iterator
+        let first = best.next().expect("should yield tx0");
+        assert_eq!(first.id().nonce, 0);
+
+        // Add tx1 with the same limited balance — cumulative cost exceeds balance, goes to
+        // queued
+        pool.add_transaction(v1, on_chain_balance, 0, None).unwrap();
+
+        // tx1 should be queued, nothing new in best
+        assert!(best.next().is_none(), "tx1 should be queued, not pending");
+
+        // Now add tx2 with U256::MAX balance — tx2 goes to pending AND tx1 gets promoted.
+        // The bug: tx2 was added to pending *before* tx1, so BestTransactions yielded tx2
+        // first, violating nonce ordering.
+        pool.add_transaction(v2, U256::MAX, 0, None).unwrap();
+
+        let t1 = best.next().expect("should yield a transaction");
+        let t2 = best.next().expect("should yield a transaction");
+
+        // Correct order: tx1 (nonce 1) before tx2 (nonce 2)
+        assert_eq!(
+            t1.id().nonce,
+            1,
+            "first yielded tx should be nonce 1, got nonce {}",
+            t1.id().nonce
+        );
+        assert_eq!(
+            t2.id().nonce,
+            2,
+            "second yielded tx should be nonce 2, got nonce {}",
+            t2.id().nonce
+        );
+    }
+
+    /// Gap-fill scenario: inserting a low-nonce transaction promotes a queued higher-nonce
+    /// transaction. The new (lower-nonce) tx must appear before the promoted (higher-nonce)
+    /// tx in the `BestTransactions` iterator.
+    #[test]
+    fn best_transactions_nonce_order_on_gap_fill() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = Address::random();
+        let balance = U256::MAX;
+
+        // tx0: nonce 0
+        let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
+        // tx1: nonce 1
+        let tx1 = tx0.next().inc_limit();
+
+        let v0 = f.validated(tx0);
+        let v1 = f.validated(tx1);
+
+        // Add tx1 first — goes to queued because nonce 0 is missing (nonce gap)
+        pool.add_transaction(v1, balance, 0, None).unwrap();
+
+        // Create a live BestTransactions iterator (currently empty — nothing pending)
+        let mut best = pool.best_transactions();
+        assert!(best.next().is_none(), "pool should have no pending txs yet");
+
+        // Add tx0 — fills the gap, tx1 gets promoted
+        pool.add_transaction(v0, balance, 0, None).unwrap();
+
+        let t0 = best.next().expect("should yield a transaction");
+        let t1 = best.next().expect("should yield a transaction");
+
+        assert_eq!(t0.id().nonce, 0, "first yielded tx should be nonce 0, got {}", t0.id().nonce);
+        assert_eq!(t1.id().nonce, 1, "second yielded tx should be nonce 1, got {}", t1.id().nonce);
+    }
+
+    /// Mixed scenario: inserting a mid-nonce transaction promotes both a lower-nonce tx
+    /// (via balance update) and a higher-nonce tx (via gap fill). All three must appear
+    /// in nonce order in `BestTransactions`.
+    #[test]
+    fn best_transactions_nonce_order_mixed_promotions() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = Address::random();
+        let low_balance = U256::from(10_000);
+
+        // tx0: nonce 0, cheap
+        let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
+        // tx1: nonce 1, very expensive — will exceed balance
+        let tx1 = tx0.next().inc_limit().with_value(U256::from(low_balance));
+        // tx2: nonce 2
+        let tx2 = tx1.next().inc_limit().with_value(U256::ZERO);
+        // tx3: nonce 3
+        let tx3 = tx2.next().inc_limit().with_value(U256::ZERO);
+
+        let v0 = f.validated(tx0);
+        let v1 = f.validated(tx1);
+        let v2 = f.validated(tx2);
+        let v3 = f.validated(tx3);
+
+        // Add tx0 — goes to pending
+        pool.add_transaction(v0, low_balance, 0, None).unwrap();
+
+        // Add tx1 — queued (cumulative cost exceeds balance)
+        pool.add_transaction(v1, low_balance, 0, None).unwrap();
+
+        // Add tx3 — queued (nonce gap: tx2 is missing)
+        pool.add_transaction(v3, low_balance, 0, None).unwrap();
+
+        let mut best = pool.best_transactions();
+
+        // Drain tx0
+        let first = best.next().expect("should yield tx0");
+        assert_eq!(first.id().nonce, 0);
+        assert!(best.next().is_none(), "only tx0 should be pending");
+
+        // Add tx2 with U256::MAX balance — this should:
+        //  - promote tx1 (lower-nonce, was queued due to balance)
+        //  - add tx2 itself to pending
+        //  - promote tx3 (higher-nonce, was queued due to nonce gap)
+        pool.add_transaction(v2, U256::MAX, 0, None).unwrap();
+
+        let t1 = best.next().expect("should yield nonce 1");
+        let t2 = best.next().expect("should yield nonce 2");
+        let t3 = best.next().expect("should yield nonce 3");
+
+        assert_eq!(t1.id().nonce, 1, "expected nonce 1, got {}", t1.id().nonce);
+        assert_eq!(t2.id().nonce, 2, "expected nonce 2, got {}", t2.id().nonce);
+        assert_eq!(t3.id().nonce, 3, "expected nonce 3, got {}", t3.id().nonce);
     }
 }

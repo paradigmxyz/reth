@@ -1,16 +1,17 @@
-# reth db settings set storages_history
+# reth db prune-checkpoints
 
-Store storage history in rocksdb instead of MDBX
+View or set prune checkpoints
 
 ```bash
-$ reth db settings set storages_history --help
+$ reth db prune-checkpoints --help
 ```
 ```txt
-Usage: reth db settings set storages_history [OPTIONS] <VALUE>
+Usage: reth db prune-checkpoints [OPTIONS] <COMMAND>
 
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Commands:
+  get   Get prune checkpoint(s) from database
+  set   Set a prune checkpoint for a segment
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -73,9 +74,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

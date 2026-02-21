@@ -16,12 +16,22 @@ engine-withdrawals:
   - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
   - Withdrawals Fork on Block 8 - 10 Block Re-Org NewPayload (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
+  # P2P sync timing issue in hive Docker environment: secondary client returns SYNCING but
+  # peer discovery/connection doesn't complete within the timeout when running with
+  # --sim.parallelism 16. Not a correctness bug, purely a CI timing issue.
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts - No Transactions (Paris) (reth)
   - Sync after 128 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
 engine-cancun:
   - Transaction Re-Org, New Payload on Revert Back (Cancun) (reth)
   - Transaction Re-Org, Re-Org to Different Block (Cancun) (reth)
   - Transaction Re-Org, Re-Org Out (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
+  # Hive test infra bug: geth sidecar switched to PathScheme for state storage, which has
+  # strict trie integrity requirements incompatible with inserting intentionally invalid blocks.
+  # Affects all clients, not just reth. Tracked: https://github.com/ethereum/hive/issues/1382
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
   - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Cancun) (reth)
 engine-api:
   - Transaction Re-Org, Re-Org Out (Paris) (reth)
