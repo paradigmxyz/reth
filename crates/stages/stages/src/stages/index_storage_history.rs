@@ -893,7 +893,7 @@ mod tests {
 
         /// Test stale checkpoint overlap currently panics due non-monotonic shard merge input.
         ///
-        /// This models restart/crash recovery where RocksDB writes can be ahead of stage
+        /// This models restart/crash recovery where `RocksDB` writes can be ahead of stage
         /// checkpoint. Re-executing from stale checkpoint replays overlap and hits the sorted-list
         /// invariant panic in shard encoding.
         #[tokio::test]
