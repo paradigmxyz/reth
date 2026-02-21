@@ -825,7 +825,7 @@ jobs:
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload results
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: bench-reth-results
@@ -990,14 +990,6 @@ jobs:
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: `cc @${process.env.BENCH_ACTOR}\n\n⚠️ Benchmark cancelled. [View logs](${jobUrl})`,
             });
-
-      - name: Upload node log
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: reth-node-log
-          path: |
-            ${{ env.BENCH_WORK_DIR }}/*/node.log
 
       - name: Restore system settings
         if: always()

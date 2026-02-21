@@ -45,6 +45,14 @@ cleanup() {
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
     sleep 1
   fi
+  # Copy reth debug file logs (written to default log dir as root)
+  RETH_LOG_DIR="/root/.cache/reth/logs"
+  if sudo test -d "$RETH_LOG_DIR"; then
+    mkdir -p "$OUTPUT_DIR/debug-logs"
+    sudo cp -a "$RETH_LOG_DIR"/. "$OUTPUT_DIR/debug-logs/" 2>/dev/null || true
+    sudo chown -R "$(id -u):$(id -g)" "$OUTPUT_DIR/debug-logs" 2>/dev/null || true
+    sudo rm -rf "$RETH_LOG_DIR" 2>/dev/null || true
+  fi
   if mountpoint -q "$SCHELK_MOUNT"; then
     sudo umount -l "$SCHELK_MOUNT" || true
     sudo schelk recover -y || true
