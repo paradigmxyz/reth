@@ -170,6 +170,8 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/frontier.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/paris.*
 
           # consume-rlp
           - sim: ethereum/eels/consume-rlp
@@ -190,6 +192,8 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/paris.*
     needs:
       - prepare-reth-stable
       - prepare-reth-edge
