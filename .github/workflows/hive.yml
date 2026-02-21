@@ -26,13 +26,13 @@ jobs:
       cargo_features: "asm-keccak"
       artifact_name: "reth-stable"
 
-  prepare-reth-edge:
-    uses: ./.github/workflows/prepare-reth.yml
-    with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: "asm-keccak edge"
-      artifact_name: "reth-edge"
+  # prepare-reth-edge:
+    # uses: ./.github/workflows/prepare-reth.yml
+    # with:
+      # image_tag: ghcr.io/paradigmxyz/reth:latest
+      # binary_name: reth
+      # cargo_features: "asm-keccak edge"
+      # artifact_name: "reth-edge"
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
@@ -91,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        storage: [stable, edge]
+        storage: [stable]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -192,7 +192,7 @@ jobs:
             limit: .*tests/frontier.*
     needs:
       - prepare-reth-stable
-      - prepare-reth-edge
+      # - prepare-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
