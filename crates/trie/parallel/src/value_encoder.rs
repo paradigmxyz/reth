@@ -8,7 +8,7 @@ use reth_primitives_traits::{dashmap::DashMap, Account};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
-    proof_v2::{DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
+    proof_v2::{self, DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
     trie_cursor::TrieStorageCursor,
     ProofTrieNodeV2,
 };
@@ -34,6 +34,9 @@ pub(crate) struct ValueEncoderStats {
     /// Number of times a dispatched storage proof had no root node and fell back to sync
     /// computation.
     pub(crate) dispatched_missing_root_count: u64,
+    /// Number of times the `InlineSingle` variant was used (single-target storage proof computed
+    /// inline in the account worker instead of dispatching to storage workers).
+    pub(crate) inline_single_count: u64,
 }
 
 impl ValueEncoderStats {
@@ -44,6 +47,7 @@ impl ValueEncoderStats {
         self.from_cache_count += other.from_cache_count;
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
+        self.inline_single_count += other.inline_single_count;
     }
 }
 
@@ -76,6 +80,20 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         hashed_address: B256,
         account: Account,
+        /// Cache to store computed storage roots for future reuse.
+        cached_storage_roots: Arc<DashMap<B256, B256>>,
+    },
+    /// Single-target storage proof computed inline in the account worker to avoid
+    /// dispatch/channel overhead for trivially small proof requests.
+    InlineSingle {
+        /// Shared storage proof calculator for computing the storage proof.
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+        hashed_address: B256,
+        account: Account,
+        /// The single-target proof targets to compute inline.
+        targets: Vec<proof_v2::Target>,
+        /// Shared storage proof results.
+        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Cache to store computed storage roots for future reuse.
         cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
@@ -194,6 +212,37 @@ where
                 cached_storage_roots.insert(hashed_address, storage_root);
                 (account, storage_root)
             }
+            Self::InlineSingle {
+                storage_calculator,
+                hashed_address,
+                account,
+                targets,
+                storage_proof_results,
+                cached_storage_roots,
+            } => {
+                let hashed_address = *hashed_address;
+                let account = *account;
+                let mut calculator = storage_calculator.borrow_mut();
+                let proof = calculator.storage_proof(hashed_address, targets)?;
+                let root = calculator.compute_root_hash(&proof)?;
+
+                storage_proof_results.borrow_mut().insert(hashed_address, proof);
+
+                if let Some(root) = root {
+                    cached_storage_roots.insert(hashed_address, root);
+                }
+
+                let storage_root = root.unwrap_or_else(|| {
+                    let root_node =
+                        calculator.storage_root_node(hashed_address).expect("root node");
+                    calculator
+                        .compute_root_hash(&[root_node])
+                        .expect("root hash")
+                        .expect("storage_root_node returns a node at empty path")
+                });
+
+                (account, storage_root)
+            }
         };
 
         let account = account.into_trie_account(root);
@@ -210,9 +259,14 @@ where
 /// For accounts without pre-dispatched proofs or cached roots, uses a shared
 /// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
 /// multiple accounts.
+///
+/// Single-target storage proofs are computed inline via the `InlineSingle` variant to avoid
+/// dispatch/channel overhead for trivially small proof requests.
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    /// Single-target storage proofs to compute inline in the account worker.
+    inline_single: B256Map<Vec<proof_v2::Target>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -232,15 +286,18 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     ///
     /// # Parameters
     /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
+    /// - `inline_single`: Single-target storage proofs to compute inline in the account worker
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        inline_single: B256Map<Vec<proof_v2::Target>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
             dispatched,
+            inline_single,
             cached_storage_roots,
             storage_proof_results: Default::default(),
             storage_calculator,
@@ -251,7 +308,8 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// Consume [`Self`] and return all collected storage proofs along with accumulated stats.
     ///
     /// This method collects any remaining dispatched proofs that weren't consumed during proof
-    /// calculation and includes their wait time in the returned stats.
+    /// calculation, computes any remaining inline single proofs, and includes their wait time
+    /// in the returned stats.
     ///
     /// # Panics
     ///
@@ -259,12 +317,20 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// been dropped.
     pub(crate) fn finalize(
         self,
-    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
+    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError>
+    where
+        TC: TrieStorageCursor,
+        HC: HashedStorageCursor<Value = alloy_primitives::U256>,
+    {
         let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
         let mut stats = Rc::into_inner(self.stats)
+            .expect("no deferred encoders are still allocated")
+            .into_inner();
+
+        let storage_calculator = Rc::into_inner(self.storage_calculator)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
@@ -283,6 +349,22 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
             stats.storage_wait_time += wait_start.elapsed();
 
             storage_proof_results.insert(*hashed_address, result.proof);
+        }
+
+        // Any remaining inline single proofs need to be computed synchronously.
+        // These are proofs that were not consumed during proof calculation.
+        let mut calculator = storage_calculator;
+        for (hashed_address, mut targets) in self.inline_single {
+            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+            let root = calculator.compute_root_hash(&proof)?;
+
+            storage_proof_results.insert(hashed_address, proof);
+
+            if let Some(root) = root {
+                self.cached_storage_roots.insert(hashed_address, root);
+            }
+
+            stats.inline_single_count += 1;
         }
 
         Ok((storage_proof_results, stats))
@@ -313,6 +395,19 @@ where
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
+                cached_storage_roots: self.cached_storage_roots.clone(),
+            }
+        }
+
+        // Check if this address has a single-target proof to compute inline.
+        if let Some(targets) = self.inline_single.remove(&hashed_address) {
+            self.stats.borrow_mut().inline_single_count += 1;
+            return AsyncAccountDeferredValueEncoder::InlineSingle {
+                storage_calculator: self.storage_calculator.clone(),
+                hashed_address,
+                account,
+                targets,
+                storage_proof_results: self.storage_proof_results.clone(),
                 cached_storage_roots: self.cached_storage_roots.clone(),
             }
         }

@@ -1062,11 +1062,12 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
+        let dispatched =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
-            storage_proof_receivers,
+            dispatched.receivers,
+            dispatched.inline_single,
             self.cached_storage_roots.clone(),
             v2_storage_calculator,
         );
@@ -1210,19 +1211,34 @@ where
     }
 }
 
+/// Result of dispatching V2 storage proofs.
+struct DispatchedStorageProofs {
+    /// Receivers for storage proofs dispatched to worker pool.
+    receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    /// Storage proofs with single targets, to be computed inline in the account worker
+    /// instead of dispatching to the storage worker pool.
+    inline_single: B256Map<Vec<proof_v2::Target>>,
+}
+
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
 ///
-/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// This function queues storage proof tasks to the worker pool but returns immediately
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
+///
+/// Storage proofs with a single target are returned separately as `inline_single` to be
+/// computed synchronously in the account worker, avoiding dispatch/channel overhead for
+/// trivially small proof requests.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<DispatchedStorageProofs, ParallelStateRootError> {
     let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+    let mut inline_single =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
@@ -1244,8 +1260,14 @@ fn dispatch_v2_storage_proofs(
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
 
-    // Dispatch all proofs for targeted storage slots
+    // Dispatch proofs for targeted storage slots. Single-target proofs are kept inline
+    // to avoid dispatch/channel overhead.
     for (hashed_address, targets) in sorted_storage_targets {
+        if targets.len() <= 1 {
+            inline_single.insert(hashed_address, targets);
+            continue;
+        }
+
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
@@ -1262,28 +1284,19 @@ fn dispatch_v2_storage_proofs(
     }
 
     // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root.
+    // single proof target for them so that we get their root. These are also inlined.
     for target in account_targets {
         let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) {
+        if storage_proof_receivers.contains_key(&hashed_address) ||
+            inline_single.contains_key(&hashed_address)
+        {
             continue
         }
 
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
-
-        storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
-
-        storage_proof_receivers.insert(hashed_address, result_rx);
+        inline_single.insert(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
     }
 
-    Ok(storage_proof_receivers)
+    Ok(DispatchedStorageProofs { receivers: storage_proof_receivers, inline_single })
 }
 
 /// Input parameters for storage proof computation.
