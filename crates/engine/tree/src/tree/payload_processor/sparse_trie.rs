@@ -31,6 +31,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
+use std::sync::Arc;
 use tracing::{debug, debug_span, error, instrument};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
@@ -691,7 +692,7 @@ where
                             proof_result_sender: ProofResultContext::new(
                                 self.proof_result_tx.clone(),
                                 0,
-                                HashedPostState::default(),
+                                Arc::new(HashedPostState::default()),
                                 Instant::now(),
                             ),
                         },

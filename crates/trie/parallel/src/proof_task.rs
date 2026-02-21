@@ -542,7 +542,7 @@ pub struct ProofResultMessage {
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
     /// Original state update that triggered this proof
-    pub state: HashedPostState,
+    pub state: Arc<HashedPostState>,
 }
 
 /// Context for sending proof calculation results back to `MultiProofTask`.
@@ -556,17 +556,17 @@ pub struct ProofResultContext {
     /// Sequence number for proof ordering
     pub sequence_number: u64,
     /// Original state update that triggered this proof
-    pub state: HashedPostState,
+    pub state: Arc<HashedPostState>,
     /// Calculation start time for measuring elapsed duration
     pub start_time: Instant,
 }
 
 impl ProofResultContext {
     /// Creates a new proof result context.
-    pub const fn new(
+    pub fn new(
         sender: ProofResultSender,
         sequence_number: u64,
-        state: HashedPostState,
+        state: Arc<HashedPostState>,
         start_time: Instant,
     ) -> Self {
         Self { sender, sequence_number, state, start_time }
