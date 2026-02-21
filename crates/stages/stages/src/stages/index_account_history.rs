@@ -824,5 +824,29 @@ mod tests {
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
+
+        /// Test stale checkpoint overlap currently panics due non-monotonic shard merge input.
+        ///
+        /// This models restart/crash recovery where RocksDB writes can be ahead of stage
+        /// checkpoint. Re-executing from stale checkpoint replays overlap and hits the sorted-list
+        /// invariant panic in shard encoding.
+        #[tokio::test]
+        #[should_panic(expected = "IntegerList must be pre-sorted and non-empty")]
+        async fn execute_incremental_sync_with_stale_checkpoint_overlap_panics() {
+            let db = TestStageDB::default();
+            setup_v2_account_data(&db, 0..=10);
+
+            let input = ExecInput { target: Some(5), ..Default::default() };
+            let mut stage = IndexAccountHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            provider.commit().unwrap();
+
+            // Simulate a stale checkpoint (3) while RocksDB already contains data up to 5.
+            let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(3)) };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let _ = stage.execute(&provider, input).unwrap();
+        }
     }
 }
