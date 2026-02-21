@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        state::latest::LatestStateProvider, NodeTypesForProvider, RocksDBProvider,
-        StaticFileProvider, StaticFileProviderRWRefMut,
+        state::{bloom::BloomStateProvider, latest::LatestStateProvider},
+        NodeTypesForProvider, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     to_range,
     traits::{BlockSource, ReceiptProvider},
@@ -31,6 +31,7 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
 };
+use reth_storage_bloom::StorageBloomFilter;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
@@ -80,6 +81,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
+    /// Optional bloom filter for short-circuiting empty storage slot reads.
+    storage_bloom: Option<Arc<StorageBloomFilter>>,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -133,6 +136,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
             runtime,
+            storage_bloom: None,
         })
     }
 
@@ -165,6 +169,26 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
         self.changeset_cache = changeset_cache;
         self
+    }
+
+    /// Sets the storage bloom filter for short-circuiting empty slot reads.
+    pub fn with_storage_bloom(mut self, bloom: Arc<StorageBloomFilter>) -> Self {
+        self.storage_bloom = Some(bloom);
+        self
+    }
+
+    /// Returns a reference to the storage bloom filter, if configured.
+    pub fn storage_bloom(&self) -> Option<&Arc<StorageBloomFilter>> {
+        self.storage_bloom.as_ref()
+    }
+
+    /// Wraps a boxed state provider with a bloom filter check, if configured.
+    fn maybe_wrap_bloom(&self, provider: StateProviderBox) -> StateProviderBox {
+        if let Some(bloom) = &self.storage_bloom {
+            Box::new(BloomStateProvider::new(provider, Arc::clone(bloom)))
+        } else {
+            provider
+        }
     }
 
     /// Returns reference to the underlying database.
@@ -255,7 +279,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
+        let mut provider = DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
@@ -265,7 +289,11 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
-        )))
+        );
+        if let Some(bloom) = &self.storage_bloom {
+            provider = provider.with_storage_bloom(Arc::clone(bloom));
+        }
+        Ok(DatabaseProviderRW(provider))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
@@ -292,7 +320,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
+        let provider: StateProviderBox =
+            Box::new(LatestStateProvider::new(self.database_provider_ro()?));
+        Ok(self.maybe_wrap_bloom(provider))
     }
 
     /// Storage provider for state at that given block
@@ -302,7 +332,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ) -> ProviderResult<StateProviderBox> {
         let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
-        Ok(state_provider)
+        Ok(self.maybe_wrap_bloom(state_provider))
     }
 
     /// Storage provider for state at that given block hash
@@ -315,7 +345,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
         let state_provider = provider.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
-        Ok(state_provider)
+        Ok(self.maybe_wrap_bloom(state_provider))
     }
 
     /// Asserts that the static files and database are consistent. If not,
@@ -744,6 +774,7 @@ where
             rocksdb_provider,
             changeset_cache,
             runtime,
+            storage_bloom,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -755,6 +786,7 @@ where
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
             .field("runtime", &runtime)
+            .field("storage_bloom", &storage_bloom.as_ref().map(|b| format!("{}MB", b.memory_usage_bytes() / (1024 * 1024))))
             .finish()
     }
 }
@@ -771,6 +803,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             rocksdb_provider: self.rocksdb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
             runtime: self.runtime.clone(),
+            storage_bloom: self.storage_bloom.clone(),
         }
     }
 }
