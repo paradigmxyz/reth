@@ -82,10 +82,11 @@ impl DiskFileBlobStore {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
-                    if result[hash_idx].is_none() {
+                    let slot = &mut result[hash_idx];
+                    if slot.is_none() {
                         missing_count -= 1;
                     }
-                    result[hash_idx] = Some(match_result);
+                    *slot = Some(match_result);
                 }
             }
 
