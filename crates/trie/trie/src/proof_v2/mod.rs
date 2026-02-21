@@ -891,6 +891,13 @@ where
             return Ok(PopCachedBranchOutcome::CalculateLeaves(range));
         }
 
+        // Pre-advance the trie cursor to the next entry after the popped branch.
+        // When next_uncached_key_range processes the branch's first child, the
+        // cursor will likely already be at or past the child's path, avoiding a
+        // redundant seek (O(log N) B-tree traversal) in favor of a single next()
+        // call (O(1) amortized).
+        *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor.next()?);
+
         Ok(PopCachedBranchOutcome::Popped(cached))
     }
 
