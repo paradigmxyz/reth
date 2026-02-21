@@ -203,6 +203,20 @@ eels/consume-engine:
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_selfdestruct_log_at_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test_engine-pre_existing_to_self]-reth
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_selfdestruct_log_at_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test_engine-pre_existing_to_other]-reth
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_transfer_log_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test_engine]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE2-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Amsterdam-blockchain_test_engine_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE2-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-empty-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_engine_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_engine_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_engine_from_state_test-opcode_CREATE-non-empty-balance-revert-initcode]-reth
 
 # Blob limit tests:
 #
@@ -351,4 +365,18 @@ eels/consume-rlp:
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_selfdestruct_log_at_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-pre_existing_to_self]-reth
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_selfdestruct_log_at_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-pre_existing_to_other]-reth
   - tests/amsterdam/eip7708_eth_transfer_logs/test_fork_transition.py::test_transfer_log_fork_transition[fork_BPO2ToAmsterdamAtTime15k-blockchain_test]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-initcode-with-deploy]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-sstore-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_2-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_collision_with_create2_revert_in_initcode[fork_Amsterdam-blockchain_test_from_state_test]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_1-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_from_state_test-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_tx[fork_Amsterdam-tx_type_0-blockchain_test_from_state_test-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE2-non-empty-balance-correct-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_create_opcode[fork_Amsterdam-blockchain_test_from_state_test-opcode_CREATE2-non-empty-balance-revert-initcode]-reth
+  - tests/paris/eip7610_create_collision/test_revert_in_create.py::test_create2_collision_storage[fork_Amsterdam-blockchain_test_from_state_test-empty-initcode]-reth
 
