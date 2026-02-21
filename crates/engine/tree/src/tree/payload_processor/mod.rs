@@ -1079,7 +1079,7 @@ where
     EvmEnvFor<Evm>: Default,
 {
     /// Creates a new [`ExecutionEnv`] with default values for testing.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     fn test_default() -> Self {
         Self {
             evm_env: Default::default(),
