@@ -70,7 +70,9 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   function fmtMgas(v) { return v.toFixed(2); }
   function fmtChange(ch) {
     if (!ch.pct && !ch.ci_pct) return ' ';
-    return `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}% ${sigEmoji[ch.sig]}`;
+    const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
+    const ciStr = ch.ci_pct ? ` (\u00b1${ch.ci_pct.toFixed(2)}%)` : '';
+    return `${pctStr}${ciStr} ${sigEmoji[ch.sig]}`;
   }
 
   // Overall result for header
