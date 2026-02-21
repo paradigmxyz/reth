@@ -33,7 +33,7 @@ pub struct DeferredHistoryIndexerConfig {
 
 impl DeferredHistoryIndexerConfig {
     /// Creates a new deferred history indexer config.
-    pub fn new(stages: StageConfig, prune_modes: PruneModes) -> Self {
+    pub const fn new(stages: StageConfig, prune_modes: PruneModes) -> Self {
         Self { stages, prune_modes }
     }
 }
@@ -62,7 +62,7 @@ pub struct DeferredHistoryIndexer {
     index_storage_batch_size: u64,
     index_account_batch_size: u64,
     caught_up: bool,
-    /// Round-robin index: 0 = tx_lookup, 1 = index_storage, 2 = index_account
+    /// Round-robin index: 0 = `tx_lookup`, 1 = `index_storage`, 2 = `index_account`.
     next_stage: usize,
 }
 
@@ -302,7 +302,7 @@ impl DeferredHistoryIndexer {
     }
 
     /// Marks the indexer as needing catch-up after reorg-related block removal.
-    pub fn on_reorg(&mut self, _new_tip_num: u64) {
+    pub const fn on_reorg(&mut self, _new_tip_num: u64) {
         self.caught_up = false;
     }
 }

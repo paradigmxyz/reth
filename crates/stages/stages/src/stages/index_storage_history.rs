@@ -41,7 +41,12 @@ impl IndexStorageHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode, log_progress: true }
+        Self {
+            commit_threshold: config.commit_threshold,
+            etl_config,
+            prune_mode,
+            log_progress: true,
+        }
     }
 
     /// Enables or disables progress/info logging for this stage execution.
@@ -141,7 +146,12 @@ where
             info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
         }
         let collector = if provider.cached_storage_settings().storage_v2 {
-            collect_storage_history_indices(provider, range.clone(), &self.etl_config, self.log_progress)?
+            collect_storage_history_indices(
+                provider,
+                range.clone(),
+                &self.etl_config,
+                self.log_progress,
+            )?
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
@@ -588,6 +598,7 @@ mod tests {
                 commit_threshold: self.commit_threshold,
                 prune_mode: self.prune_mode,
                 etl_config: EtlConfig::default(),
+                log_progress: true,
             }
         }
     }

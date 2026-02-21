@@ -1,5 +1,7 @@
-use crate::metrics::PersistenceMetrics;
-use crate::deferred_indexer::{DeferredHistoryIndexer, DeferredHistoryIndexerConfig};
+use crate::{
+    deferred_indexer::{DeferredHistoryIndexer, DeferredHistoryIndexerConfig},
+    metrics::PersistenceMetrics,
+};
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -78,9 +80,8 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
-            deferred_indexer: deferred_indexer_config.map(|config| {
-                DeferredHistoryIndexer::new(&config.stages, &config.prune_modes)
-            }),
+            deferred_indexer: deferred_indexer_config
+                .map(|config| DeferredHistoryIndexer::new(&config.stages, &config.prune_modes)),
             deferred_indexing_enabled,
         }
     }

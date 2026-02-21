@@ -38,7 +38,12 @@ impl IndexAccountHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode, log_progress: true }
+        Self {
+            commit_threshold: config.commit_threshold,
+            etl_config,
+            prune_mode,
+            log_progress: true,
+        }
     }
 
     /// Enables or disables progress/info logging for this stage execution.
@@ -139,7 +144,12 @@ where
 
         let collector = if provider.cached_storage_settings().storage_v2 {
             // Use the provider-based collection that can read from static files.
-            collect_account_history_indices(provider, range.clone(), &self.etl_config, self.log_progress)?
+            collect_account_history_indices(
+                provider,
+                range.clone(),
+                &self.etl_config,
+                self.log_progress,
+            )?
         } else {
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
@@ -568,6 +578,7 @@ mod tests {
                 commit_threshold: self.commit_threshold,
                 prune_mode: self.prune_mode,
                 etl_config: EtlConfig::default(),
+                log_progress: true,
             }
         }
     }

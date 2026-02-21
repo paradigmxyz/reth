@@ -102,11 +102,7 @@ impl RocksDBProvider {
             + BlockBodyIndicesProvider
             + TransactionsProvider<Transaction: Encodable2718>,
     {
-        if provider
-            .prune_modes_ref()
-            .transaction_lookup
-            .is_some_and(|mode| mode.is_full())
-        {
+        if provider.prune_modes_ref().transaction_lookup.is_some_and(|mode| mode.is_full()) {
             // Transaction lookup is fully pruned by configuration, so tx hash numbers are not
             // part of the expected persistent state. Avoid startup-time healing scans and just
             // clear stale leftovers if they exist.

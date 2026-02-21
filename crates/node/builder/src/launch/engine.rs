@@ -253,17 +253,13 @@ impl EngineNodeLauncher {
             changeset_cache,
             {
                 // Configure deferred history indexing if enabled in config.
-                let deferred_indexer_config = if ctx.toml_config().stages.deferred_history_indexing
-                {
+                ctx.toml_config().stages.deferred_history_indexing.then(|| {
                     info!(target: "reth::cli", "Deferred history indexing enabled, embedding indexer in persistence service");
-                    Some(DeferredHistoryIndexerConfig::new(
+                    DeferredHistoryIndexerConfig::new(
                         ctx.toml_config().stages.clone(),
-                        ctx.prune_config().segments.clone(),
-                    ))
-                } else {
-                    None
-                };
-                deferred_indexer_config
+                        ctx.prune_config().segments,
+                    )
+                })
             },
             initial_target.is_none(),
         );
