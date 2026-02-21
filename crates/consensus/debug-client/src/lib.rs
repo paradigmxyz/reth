@@ -15,5 +15,8 @@
 mod client;
 mod providers;
 
-pub use client::{BlockProvider, DebugConsensusClient};
+pub use client::{
+    BlockProvider, DebugConsensusClient, FinalizedBlockBuffer, ForkchoiceMode, ForkchoiceProvider,
+    NewBlock, RawBlockProvider,
+};
 pub use providers::{EtherscanBlockProvider, RpcBlockProvider};

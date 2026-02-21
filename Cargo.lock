@@ -7953,6 +7953,7 @@ dependencies = [
  "eyre",
  "futures",
  "reqwest",
+ "reth-ethereum-primitives",
  "reth-node-api",
  "reth-primitives-traits",
  "reth-tracing",
