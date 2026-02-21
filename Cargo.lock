@@ -10219,10 +10219,12 @@ version = "1.11.0"
 dependencies = [
  "alloy-primitives",
  "assert_matches",
+ "metrics",
  "parking_lot",
  "rayon",
  "reth-codecs",
  "reth-db-api",
+ "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
