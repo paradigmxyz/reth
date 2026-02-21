@@ -30,8 +30,11 @@ impl InMemoryBlobStore {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
-                    result[hash_idx] = Some(match_result);
-                    missing_count -= 1;
+                    let slot = &mut result[hash_idx];
+                    if slot.is_none() {
+                        missing_count -= 1;
+                    }
+                    *slot = Some(match_result);
                 }
             }
 
