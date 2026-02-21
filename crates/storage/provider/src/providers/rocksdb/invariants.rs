@@ -677,6 +677,9 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
+            // This test models lost checkpoints after crash recovery, so Finish should also
+            // reflect the lost progress instead of triggering deferred catch-up mode.
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0)).unwrap();
             provider.commit().unwrap();
         }
 
@@ -939,6 +942,8 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
+            // This test models post-unwind state where canonical progress is at block 2.
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
             provider.commit().unwrap();
         }
 
