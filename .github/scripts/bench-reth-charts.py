@@ -73,22 +73,24 @@ def plot_latency_and_throughput(
         for r in baseline:
             lat_s = r["new_payload_latency_us"] / 1_000_000
             base_ggas.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
-        ax1.plot(base_x, base_lat, linewidth=0.8, label=baseline_name, alpha=0.7)
-        ax2.plot(base_x, base_ggas, linewidth=0.8, label=baseline_name, alpha=0.7)
+        l, = ax1.plot(base_x, base_lat, linewidth=0.8, label=baseline_name, alpha=0.7)
+        ax1.axhline(np.median(base_lat), color=l.get_color(), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
+        l, = ax2.plot(base_x, base_ggas, linewidth=0.8, label=baseline_name, alpha=0.7)
+        ax2.axhline(np.median(base_ggas), color=l.get_color(), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
 
-    ax1.plot(feat_x, feat_lat, linewidth=0.8, label=feature_name)
+    l, = ax1.plot(feat_x, feat_lat, linewidth=0.8, label=feature_name)
+    ax1.axhline(np.median(feat_lat), color=l.get_color(), linestyle="--", linewidth=1, label=f"{feature_name} median")
     ax1.set_ylabel("Latency (ms)")
     ax1.set_title("newPayload Latency per Block")
     ax1.grid(True, alpha=0.3)
-    if baseline:
-        ax1.legend()
+    ax1.legend()
 
-    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=feature_name)
+    l, = ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=feature_name)
+    ax2.axhline(np.median(feat_ggas), color=l.get_color(), linestyle="--", linewidth=1, label=f"{feature_name} median")
     ax2.set_ylabel("Ggas/s")
     ax2.set_title("Execution Throughput per Block")
     ax2.grid(True, alpha=0.3)
-    if baseline:
-        ax2.legend()
+    ax2.legend()
 
     if baseline:
         ax3 = axes[2]
@@ -188,30 +190,56 @@ def plot_gas_vs_latency(
     plt.close(fig)
 
 
+def merge_csvs(paths: list[str]) -> list[dict]:
+    """Parse and merge multiple CSVs, averaging values for duplicate blocks."""
+    by_block: dict[int, list[dict]] = {}
+    for path in paths:
+        for row in parse_combined_csv(path):
+            by_block.setdefault(row["block_number"], []).append(row)
+
+    merged = []
+    for bn in sorted(by_block):
+        rows = by_block[bn]
+        if len(rows) == 1:
+            merged.append(rows[0])
+        else:
+            avg = {"block_number": bn}
+            for key in ("gas_used", "new_payload_latency_us"):
+                avg[key] = int(sum(r[key] for r in rows) / len(rows))
+            for key in ("persistence_wait_us", "execution_cache_wait_us", "sparse_trie_wait_us"):
+                vals = [r[key] for r in rows if r[key] is not None]
+                avg[key] = int(sum(vals) / len(vals)) if vals else None
+            merged.append(avg)
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate benchmark charts")
-    parser.add_argument("combined_csv", help="Path to combined_latency.csv (feature)")
+    parser.add_argument(
+        "--feature", nargs="+", required=True,
+        help="Path(s) to feature combined_latency.csv",
+    )
     parser.add_argument(
         "--output-dir", required=True, help="Output directory for PNG charts"
     )
     parser.add_argument(
-        "--baseline", help="Path to baseline combined_latency.csv"
+        "--baseline", nargs="+", help="Path(s) to baseline combined_latency.csv"
     )
     parser.add_argument("--baseline-name", default="baseline", help="Label for baseline")
     parser.add_argument("--feature-name", "--branch-name", default="feature", help="Label for feature")
     args = parser.parse_args()
 
-    feature = parse_combined_csv(args.combined_csv)
+    feature = merge_csvs(args.feature)
     if not feature:
-        print("No results found in combined CSV", file=sys.stderr)
+        print("No results found in feature CSV(s)", file=sys.stderr)
         sys.exit(1)
 
     baseline = None
     if args.baseline:
-        baseline = parse_combined_csv(args.baseline)
+        baseline = merge_csvs(args.baseline)
         if not baseline:
             print(
-                "Warning: no results in baseline CSV, skipping comparison",
+                "Warning: no results in baseline CSV(s), skipping comparison",
                 file=sys.stderr,
             )
             baseline = None

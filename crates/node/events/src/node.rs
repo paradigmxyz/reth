@@ -206,6 +206,10 @@ impl NodeState {
 
                 self.current_stage = Some(current_stage);
             }
+            PipelineEvent::Unwound { stage_id, result } => {
+                info!(stage = %stage_id, checkpoint = %result.checkpoint.block_number, "Unwound stage");
+                self.current_stage = None;
+            }
             _ => (),
         }
     }

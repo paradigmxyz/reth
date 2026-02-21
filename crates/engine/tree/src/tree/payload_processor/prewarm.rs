@@ -139,7 +139,7 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("prewarm-spawn", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let pool_threads = executor.prewarming_pool().current_num_threads();
@@ -624,7 +624,7 @@ where
             let to_multi_proof = to_multi_proof.clone();
             let done_tx = done_tx.clone();
             let rx = tx_receiver.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm worker", idx);
+            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm_worker", idx);
             task_executor.prewarming_pool().spawn(move || {
                 let _enter = span.entered();
                 ctx.transact_batch(rx, to_multi_proof, done_tx);

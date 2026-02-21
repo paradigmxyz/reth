@@ -18,29 +18,49 @@ on:
       blocks:
         description: "Number of blocks to benchmark"
         required: false
-        default: "50"
+        default: "500"
         type: string
+      warmup:
+        description: "Number of warmup blocks"
+        required: false
+        default: "100"
+        type: string
+      baseline:
+        description: "Baseline git ref (default: merge-base)"
+        required: false
+        default: ""
+        type: string
+      feature:
+        description: "Feature git ref (default: branch head)"
+        required: false
+        default: ""
+        type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
   BASELINE: base
   SEED: reth
   RUSTC_WRAPPER: "sccache"
+  BENCH_RUNNERS: 2
 
 name: bench
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-
-concurrency:
-  group: bench-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   codspeed:
-    if: github.event_name != 'issue_comment'
+    if: github.event_name == 'push'
     runs-on: depot-ubuntu-latest
+    concurrency:
+      group: bench-codspeed-${{ github.head_ref || github.run_id }}
+      cancel-in-progress: true
     strategy:
       matrix:
         partition: [1, 2]
@@ -75,17 +95,27 @@ jobs:
           mode: instrumentation
           token: ${{ secrets.CODSPEED_TOKEN }}
 
-  reth-bench:
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')
-    name: reth-bench
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 120
-    env:
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
-      SCHELK_MOUNT: /reth-bench
+  reth-bench-ack:
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
+      github.event_name == 'workflow_dispatch'
+    name: reth-bench-ack
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.args.outputs.pr }}
+      actor: ${{ steps.args.outputs.actor }}
+      blocks: ${{ steps.args.outputs.blocks }}
+      warmup: ${{ steps.args.outputs.warmup }}
+      baseline: ${{ steps.args.outputs.baseline }}
+      feature: ${{ steps.args.outputs.feature }}
+      baseline-name: ${{ steps.args.outputs.baseline-name }}
+      feature-name: ${{ steps.args.outputs.feature-name }}
+      samply: ${{ steps.args.outputs.samply }}
+      comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
-        uses: actions/github-script@v7
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -104,94 +134,377 @@ jobs:
 
       - name: Parse arguments
         id: args
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            const body = context.payload.comment.body.trim();
-            const intArgs = new Set(['blocks', 'warmup']);
-            const refArgs = new Set(['baseline', 'feature']);
-            const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
-            const unknown = [];
-            const invalid = [];
-            const args = body.replace(/^derek bench\s*/, '');
-            for (const part of args.split(/\s+/).filter(Boolean)) {
-              const eq = part.indexOf('=');
-              if (eq === -1) {
-                unknown.push(part);
-                continue;
-              }
-              const key = part.slice(0, eq);
-              const value = part.slice(eq + 1);
-              if (intArgs.has(key)) {
-                if (!/^\d+$/.test(value)) {
-                  invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else if (refArgs.has(key)) {
-                if (!value) {
-                  invalid.push(`\`${key}=\` (must be a git ref)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else {
-                unknown.push(key);
-              }
-            }
-            const errors = [];
-            if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
-            if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
-            if (errors.length) {
-              const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
-              await github.rest.issues.createComment({
+            let pr, actor, blocks, warmup, baseline, feature, samply;
+
+            if (context.eventName === 'workflow_dispatch') {
+              actor = '${{ github.actor }}';
+              blocks = '${{ github.event.inputs.blocks }}' || '500';
+              warmup = '${{ github.event.inputs.warmup }}' || '100';
+              baseline = '${{ github.event.inputs.baseline }}';
+              feature = '${{ github.event.inputs.feature }}';
+              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+
+              // Find PR for the selected branch
+              const branch = '${{ github.ref_name }}';
+              const { data: prs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: msg,
+                head: `${context.repo.owner}:${branch}`,
+                state: 'open',
+                per_page: 1,
               });
-              core.setFailed(msg);
-              return;
+              pr = prs.length ? String(prs[0].number) : '';
+              if (!pr) {
+                core.info(`No open PR found for branch '${branch}', results will be in job summary`);
+              }
+            } else {
+              pr = String(context.issue.number);
+              actor = context.payload.comment.user.login;
+
+              const body = context.payload.comment.body.trim();
+              const intArgs = new Set(['blocks', 'warmup']);
+              const refArgs = new Set(['baseline', 'feature']);
+              const boolArgs = new Set(['samply']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
+              const unknown = [];
+              const invalid = [];
+              const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
+              for (const part of args.split(/\s+/).filter(Boolean)) {
+                const eq = part.indexOf('=');
+                if (eq === -1) {
+                  if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else {
+                    unknown.push(part);
+                  }
+                  continue;
+                }
+                const key = part.slice(0, eq);
+                const value = part.slice(eq + 1);
+                if (intArgs.has(key)) {
+                  if (!/^\d+$/.test(value)) {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                  } else {
+                    defaults[key] = value;
+                  }
+                } else if (refArgs.has(key)) {
+                  if (!value) {
+                    invalid.push(`\`${key}=\` (must be a git ref)`);
+                  } else {
+                    defaults[key] = value;
+                  }
+                } else {
+                  unknown.push(key);
+                }
+              }
+              const errors = [];
+              if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
+              if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
+              if (errors.length) {
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: msg,
+                });
+                core.setFailed(msg);
+                return;
+              }
+              blocks = defaults.blocks;
+              warmup = defaults.warmup;
+              baseline = defaults.baseline;
+              feature = defaults.feature;
+              samply = defaults.samply;
             }
-            core.setOutput('blocks', defaults.blocks);
-            core.setOutput('warmup', defaults.warmup);
-            core.setOutput('baseline', defaults.baseline);
-            core.setOutput('feature', defaults.feature);
-            core.exportVariable('BENCH_BLOCKS', defaults.blocks);
-            core.exportVariable('BENCH_WARMUP_BLOCKS', defaults.warmup);
+
+            // Resolve display names for baseline/feature
+            let baselineName = baseline || 'main';
+            let featureName = feature;
+            if (!featureName) {
+              if (pr) {
+                const { data: prData } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(pr),
+                });
+                featureName = prData.head.ref;
+              } else {
+                featureName = '${{ github.ref_name }}';
+              }
+            }
+
+            core.setOutput('pr', pr || '');
+            core.setOutput('actor', actor);
+            core.setOutput('blocks', blocks);
+            core.setOutput('warmup', warmup);
+            core.setOutput('baseline', baseline);
+            core.setOutput('feature', feature);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-name', featureName);
+            core.setOutput('samply', samply);
 
       - name: Acknowledge request
         id: ack
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'eyes',
-            });
+            if (context.eventName === 'issue_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            }
+
+            const pr = '${{ steps.args.outputs.pr }}';
+            if (!pr) return;
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Count queued/waiting bench runs ahead of this one.
+            // BENCH_RUNNERS is the number of self-hosted runners available.
+            let queueMsg = '';
+            let ahead = 0;
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
+            try {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              // Only count runs that trigger reth-bench (not push-triggered codspeed runs)
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              ahead = Math.max(0, totalAhead - numRunners + 1);
+              if (ahead > 0) {
+                queueMsg = `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`;
+              }
+            } catch (e) {
+              core.info(`Skipping queue tracking: ${e.message}`);
+            }
+
+            const actor = '${{ steps.args.outputs.actor }}';
             const blocks = '${{ steps.args.outputs.blocks }}';
             const warmup = '${{ steps.args.outputs.warmup }}';
-            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ steps.args.outputs.feature }}' || 'PR head';
+            const baseline = '${{ steps.args.outputs.baseline-name }}';
+            const feature = '${{ steps.args.outputs.feature-name }}';
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``,
+              issue_number: parseInt(pr),
+              body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
             });
-            core.setOutput('comment-id', comment.id);
+            core.setOutput('comment-id', String(comment.id));
+            core.setOutput('queue-position', String(ahead || 0));
+
+      - name: Poll queue position
+        if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const pr = '${{ steps.args.outputs.pr }}';
+            const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
+            const actor = '${{ steps.args.outputs.actor }}';
+            const blocks = '${{ steps.args.outputs.blocks }}';
+            const warmup = '${{ steps.args.outputs.warmup }}';
+            const baseline = '${{ steps.args.outputs.baseline-name }}';
+            const feature = '${{ steps.args.outputs.feature-name }}';
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
+            async function getQueuePosition() {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              return { ahead: Math.max(0, totalAhead - numRunners + 1), numRunners };
+            }
+
+            let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            while (true) {
+              await sleep(10_000);
+              try {
+                const { ahead, numRunners } = await getQueuePosition();
+                if (ahead !== lastPosition) {
+                  lastPosition = ahead;
+                  const queueMsg = ahead > 0
+                    ? `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`
+                    : '';
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: commentId,
+                    body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
+                  });
+                }
+                if (ahead === 0) break;
+              } catch (e) {
+                core.info(`Queue poll error: ${e.message}`);
+              }
+            }
+
+  reth-bench:
+    needs: reth-bench-ack
+    name: reth-bench
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 120
+    env:
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      SCHELK_MOUNT: /reth-bench
+      BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
+      BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
+      BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
+      BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
+      BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
+    steps:
+      - name: Resolve checkout ref
+        id: checkout-ref
+        uses: actions/github-script@v8
+        with:
+          script: |
+            if (!process.env.BENCH_PR) {
+              core.setOutput('ref', '${{ github.ref }}');
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: parseInt(process.env.BENCH_PR),
+            });
+            // For closed/merged PRs, the merge ref doesn't exist — use head SHA
+            if (pr.state !== 'open') {
+              core.info(`PR #${process.env.BENCH_PR} is ${pr.state}, using head SHA ${pr.head.sha}`);
+              core.setOutput('ref', pr.head.sha);
+            } else {
+              core.setOutput('ref', `refs/pull/${process.env.BENCH_PR}/merge`);
+            }
+
       - uses: actions/checkout@v6
         with:
           submodules: true
           fetch-depth: 0
-          ref: ${{ format('refs/pull/{0}/merge', github.event.issue.number) }}
+          ref: ${{ steps.checkout-ref.outputs.ref }}
+
+      - name: Resolve job URL and update status
+        if: env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const job = jobs.jobs.find(j => j.name === 'reth-bench');
+            const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            core.exportVariable('BENCH_JOB_URL', jobUrl);
+
+            const blocks = process.env.BENCH_BLOCKS;
+            const warmup = process.env.BENCH_WARMUP_BLOCKS;
+            const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
+            const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
+            const samply = process.env.BENCH_SAMPLY === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
+
+            const { buildBody } = require('./.github/scripts/bench-update-status.js');
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: buildBody('Building binaries...'),
+            });
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
+
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # apt packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          # uv (Python package manager)
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+          fi
+
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # thin-provisioning-tools (era_invalidate, required by schelk)
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+          # samply (optional CPU profiler, invoked via sudo)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+            sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
+          fi
 
       # Verify all required tools are available
       - name: Check dependencies
@@ -200,7 +513,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -212,22 +525,27 @@ jobs:
       # Build binaries
       - name: Resolve PR head branch
         id: pr-info
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            core.setOutput('head-ref', pr.head.ref);
-            core.setOutput('head-sha', pr.head.sha);
+            if (process.env.BENCH_PR) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(process.env.BENCH_PR),
+              });
+              core.setOutput('head-ref', pr.head.ref);
+              core.setOutput('head-sha', pr.head.sha);
+            } else {
+              core.setOutput('head-ref', '${{ github.ref_name }}');
+              core.setOutput('head-sha', '${{ github.sha }}');
+            }
 
       - name: Resolve refs
         id: refs
         run: |
-          BASELINE_ARG="${{ steps.args.outputs.baseline }}"
-          FEATURE_ARG="${{ steps.args.outputs.feature }}"
+          BASELINE_ARG="${{ needs.reth-bench-ack.outputs.baseline }}"
+          FEATURE_ARG="${{ needs.reth-bench-ack.outputs.feature }}"
 
           if [ -n "$BASELINE_ARG" ]; then
             git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
@@ -252,10 +570,71 @@ jobs:
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch or build baseline binaries
-        run: .github/scripts/bench-reth-build.sh baseline "${{ steps.refs.outputs.baseline-ref }}"
-      - name: Fetch or build feature binaries
-        run: .github/scripts/bench-reth-build.sh feature "${{ steps.refs.outputs.feature-ref }}"
+      - name: Check if snapshot needs update
+        id: snapshot-check
+        run: |
+          if .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update status (snapshot needed)
+        if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Building binaries & downloading snapshot...'});
+
+      - name: Prepare source dirs
+        run: |
+          BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
+          if [ -d ../reth-baseline ]; then
+            git -C ../reth-baseline fetch origin "$BASELINE_REF"
+          else
+            git clone . ../reth-baseline
+          fi
+          git -C ../reth-baseline checkout "$BASELINE_REF"
+
+          FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
+          if [ -d ../reth-feature ]; then
+            git -C ../reth-feature fetch origin "$FEATURE_REF"
+          else
+            git clone . ../reth-feature
+          fi
+          git -C ../reth-feature checkout "$FEATURE_REF"
+
+      - name: Build binaries and download snapshot in parallel
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          SNAPSHOT_NEEDED: ${{ steps.snapshot-check.outputs.needed }}
+        run: |
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
+
+          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
+          PID_BASELINE=$!
+          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
+          PID_FEATURE=$!
+
+          PID_SNAPSHOT=
+          if [ "$SNAPSHOT_NEEDED" = "true" ]; then
+            .github/scripts/bench-reth-snapshot.sh &
+            PID_SNAPSHOT=$!
+          fi
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          [ -n "$PID_SNAPSHOT" ] && { wait $PID_SNAPSHOT || FAIL=1; }
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or more parallel tasks failed (builds / snapshot download)"
+            exit 1
+          fi
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -299,27 +678,85 @@ jobs:
       # Clean up any leftover state
       - name: Pre-flight cleanup
         run: |
-          pkill -9 reth || true
-          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          rm -rf "$BENCH_WORK_DIR"
+          mkdir -p "$BENCH_WORK_DIR"
 
       - name: Update status (running benchmarks)
-        if: steps.ack.outputs.comment-id
-        uses: actions/github-script@v7
+        if: success() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: ${{ steps.ack.outputs.comment-id || 0 }},
-              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Running benchmarks (2 runs)...`,
-            });
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Running benchmarks...'});
 
-      - name: "Run benchmark: baseline"
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
+      # Interleaved run order (B-F-F-B) to reduce systematic bias from
+      # thermal drift and cache warming.
+      - name: "Run benchmark: baseline (1/2)"
+        id: run-baseline-1
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
 
-      - name: "Run benchmark: feature"
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature target/profiling/reth /tmp/bench-results-feature
+      - name: "Run benchmark: feature (1/2)"
+        id: run-feature-1
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+
+      - name: "Run benchmark: feature (2/2)"
+        id: run-feature-2
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+
+      - name: "Run benchmark: baseline (2/2)"
+        id: run-baseline-2
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+
+      - name: Upload samply profiles
+        if: success() && env.BENCH_SAMPLY == 'true'
+        run: |
+          PROFILER_API="https://api.profiler.firefox.com"
+          PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
+
+          for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
+            PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
+            if [ ! -f "$PROFILE" ]; then continue; fi
+
+            PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE}) to Firefox Profiler..."
+
+            # Upload compressed profile and get JWT back
+            JWT=$(curl -sf -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "$PROFILER_ACCEPT" \
+              --data-binary "@$PROFILE" \
+              "$PROFILER_API/compressed-store") || {
+              echo "::warning::Failed to upload $run_dir profile to Firefox Profiler"
+              continue
+            }
+
+            # Extract profileToken from JWT payload (header.payload.signature)
+            PAYLOAD=$(echo "$JWT" | cut -d. -f2)
+            # Fix base64 padding
+            case $(( ${#PAYLOAD} % 4 )) in
+              2) PAYLOAD="${PAYLOAD}==" ;;
+              3) PAYLOAD="${PAYLOAD}=" ;;
+            esac
+            PROFILE_TOKEN=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['profileToken'])")
+            PROFILE_URL="https://profiler.firefox.com/public/${PROFILE_TOKEN}"
+            echo "Profile uploaded: $PROFILE_URL"
+
+            # Shorten the URL
+            SHORT_URL=$(curl -sf -X POST \
+              -H "Content-Type: application/json" \
+              -H "$PROFILER_ACCEPT" \
+              -d "{\"longUrl\":\"$PROFILE_URL\"}" \
+              "$PROFILER_API/shorten" | python3 -c "import sys,json; print(json.load(sys.stdin)['shortUrl'])" 2>/dev/null) || SHORT_URL="$PROFILE_URL"
+            echo "$SHORT_URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+            echo "Short profile URL for $run_dir: $SHORT_URL"
+          done
 
       # Results & charts
       - name: Parse results
@@ -338,16 +775,16 @@ jobs:
             BEHIND_BASELINE=$(git rev-list --count "${BASELINE_REF}..${BASELINE_HEAD}" 2>/dev/null || echo "0")
           fi
 
-          SUMMARY_ARGS="--output-summary /tmp/bench-summary.json"
-          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
+          SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
           SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-baseline/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv /tmp/bench-results-feature/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv /tmp/bench-results-feature/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
@@ -360,8 +797,9 @@ jobs:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
-          CHART_ARGS="/tmp/bench-results-feature/combined_latency.csv --output-dir /tmp/bench-charts"
-          CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
+          CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
+          CHART_ARGS="$CHART_ARGS --feature $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --baseline $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
@@ -369,76 +807,92 @@ jobs:
 
       - name: Upload results
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bench-reth-results
-          path: |
-            /tmp/bench-results-baseline/
-            /tmp/bench-results-feature/
-            /tmp/bench-summary.json
-            /tmp/bench-charts/
+          path: ${{ env.BENCH_WORK_DIR }}
 
       - name: Push charts
         id: push-charts
         if: success()
         run: |
-          PR_NUMBER=${{ github.event.issue.number }}
+          PR_NUMBER="${BENCH_PR:-0}"
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
+          CHARTS_REPO="https://x-access-token:${{ secrets.DEREK_TOKEN }}@github.com/decofe/reth-bench-charts.git"
 
-          if git fetch origin bench-charts 2>/dev/null; then
-            git checkout bench-charts
+          TMP_DIR=$(mktemp -d)
+          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            true
           else
-            git checkout --orphan bench-charts
-            git rm -rf . 2>/dev/null || true
+            git init "${TMP_DIR}"
+            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
           fi
 
-          mkdir -p "${CHART_DIR}"
-          cp /tmp/bench-charts/*.png "${CHART_DIR}/"
-          git add "${CHART_DIR}"
-          git -c user.name="github-actions" -c user.email="github-actions@github.com" \
+          mkdir -p "${TMP_DIR}/${CHART_DIR}"
+          cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+          git -C "${TMP_DIR}" add "${CHART_DIR}"
+          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
             commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
-          git push origin bench-charts
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git -C "${TMP_DIR}" push origin HEAD:main
+          echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          rm -rf "${TMP_DIR}"
 
       - name: Compare & comment
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const fs = require('fs');
 
             let comment = '';
             try {
-              comment = fs.readFileSync('/tmp/bench-comment.md', 'utf8');
+              comment = fs.readFileSync(process.env.BENCH_WORK_DIR + '/comment.md', 'utf8');
             } catch (e) {
               comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
             }
 
             const sha = '${{ steps.push-charts.outputs.sha }}';
-            const prNumber = context.issue.number;
+            const prNumber = process.env.BENCH_PR || '0';
             const runId = '${{ github.run_id }}';
-            const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
 
-            const charts = [
-              { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-              { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-              { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-            ];
-
-            let chartMarkdown = '\n\n### Charts\n\n';
-            for (const chart of charts) {
-              chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
-              chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-              chartMarkdown += `</details>\n\n`;
+            if (sha) {
+              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${sha}/pr/${prNumber}/${runId}`;
+              const charts = [
+                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
+                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+              ];
+              let chartMarkdown = '\n\n### Charts\n\n';
+              for (const chart of charts) {
+                chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
+                chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+                chartMarkdown += `</details>\n\n`;
+              }
+              comment += chartMarkdown;
             }
 
-            comment += chartMarkdown;
+            // Samply profile links (URLs point directly to Firefox Profiler)
+            if (process.env.BENCH_SAMPLY === 'true') {
+              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const links = [];
+              for (const run of runs) {
+                try {
+                  const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
+                  if (url) {
+                    links.push(`- **${run}**: [Firefox Profiler](${url})`);
+                  }
+                } catch (e) {}
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
+            }
 
-            const requestedBy = '${{ github.event.comment.user.login }}';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `cc @${requestedBy}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
-            const ackCommentId = '${{ steps.ack.outputs.comment-id }}';
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
+            const ackCommentId = process.env.BENCH_COMMENT_ID;
 
             if (ackCommentId) {
               await github.rest.issues.updateComment({
@@ -448,22 +902,52 @@ jobs:
                 body,
               });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
+              // No PR — write results to job summary
+              await core.summary.addRaw(body).write();
             }
+
+      - name: Update status (failed)
+        if: failure() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const steps_status = [
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
+            });
+
+      - name: Update status (cancelled)
+        if: cancelled() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n⚠️ Benchmark cancelled. [View logs](${jobUrl})`,
+            });
 
       - name: Upload node log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reth-node-log
           path: |
-            /tmp/reth-bench-node-baseline.log
-            /tmp/reth-bench-node-feature.log
+            ${{ env.BENCH_WORK_DIR }}/*/node.log
 
       - name: Restore system settings
         if: always()

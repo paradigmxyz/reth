@@ -162,6 +162,14 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of durations spent revealing multiproof results into the sparse trie.
+    pub sparse_trie_reveal_multiproof_duration_histogram: Histogram,
+    /// Histogram of durations spent coalescing multiple proof results from the channel.
+    pub sparse_trie_proof_coalesce_duration_histogram: Histogram,
+    /// Histogram of durations the event loop spent blocked waiting on channels.
+    pub sparse_trie_channel_wait_duration_histogram: Histogram,
+    /// Histogram of durations spent processing trie updates and promoting pending accounts.
+    pub sparse_trie_process_updates_duration_histogram: Histogram,
     /// Histogram of sparse trie final update durations.
     pub sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
