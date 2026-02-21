@@ -82,6 +82,12 @@ pub(crate) struct RocksDBWriteCtx {
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
     pub prune_tx_lookup: Option<PruneMode>,
+    /// Whether to write transaction lookup indices.
+    pub write_tx_lookup: bool,
+    /// Whether to write account history indices.
+    pub write_account_history: bool,
+    /// Whether to write storage history indices.
+    pub write_storage_history: bool,
     /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
     /// Pending batches to push to after writing.
@@ -93,6 +99,9 @@ impl fmt::Debug for RocksDBWriteCtx {
         f.debug_struct("RocksDBWriteCtx")
             .field("first_block_number", &self.first_block_number)
             .field("prune_tx_lookup", &self.prune_tx_lookup)
+            .field("write_tx_lookup", &self.write_tx_lookup)
+            .field("write_account_history", &self.write_account_history)
+            .field("write_storage_history", &self.write_storage_history)
             .field("storage_settings", &self.storage_settings)
             .field("pending_batches", &"<pending batches>")
             .finish()
@@ -1211,10 +1220,11 @@ impl RocksDBProvider {
         let mut r_account_history = None;
         let mut r_storage_history = None;
 
-        let write_tx_hash =
-            ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.storage_v2;
-        let write_storage_history = ctx.storage_settings.storage_v2;
+        let write_tx_hash = ctx.storage_settings.storage_v2 &&
+            ctx.write_tx_lookup &&
+            ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.storage_v2 && ctx.write_account_history;
+        let write_storage_history = ctx.storage_settings.storage_v2 && ctx.write_storage_history;
 
         runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {

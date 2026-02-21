@@ -21,7 +21,7 @@ use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
-use tracing::{error, info, warn};
+use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
@@ -114,20 +114,6 @@ where
         insert_fn(key, indices)?
     }
     Ok(())
-}
-
-/// Returns the first index `i` where `list[i] >= list[i + 1]`.
-fn first_non_monotonic_pair(list: &[u64]) -> Option<(usize, u64, u64)> {
-    list.windows(2)
-        .enumerate()
-        .find_map(|(idx, window)| (window[0] >= window[1]).then_some((idx, window[0], window[1])))
-}
-
-/// Returns a small sample around a problematic index for logging.
-fn monotonicity_sample(list: &[u64], idx: usize) -> Vec<u64> {
-    let start = idx.saturating_sub(2);
-    let end = (idx + 4).min(list.len());
-    list[start..end].to_vec()
 }
 
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
@@ -309,24 +295,6 @@ where
             }
         }
 
-        if let (Some(existing_last), Some(incoming_first), Some(incoming_last)) =
-            (current_list.last().copied(), new_list.iter().next(), new_list.iter().next_back()) &&
-            incoming_first <= existing_last
-        {
-            warn!(
-                target: "sync::stages::index_history",
-                ?address,
-                append_only,
-                existing_len = current_list.len(),
-                incoming_len = new_list.len(),
-                existing_last,
-                incoming_first,
-                incoming_last,
-                additive_overlap = incoming_last > existing_last,
-                "Detected account-history overlap while merging shards; stage checkpoint may trail persisted data"
-            );
-        }
-
         // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
 
@@ -383,22 +351,6 @@ where
 
     // Write each complete shard with its highest block number as the key.
     for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
-        if let Some((idx, left, right)) = first_non_monotonic_pair(chunk) {
-            error!(
-                target: "sync::stages::index_history",
-                ?address,
-                append_only,
-                chunk_len = chunk.len(),
-                monotonic_violation_index = idx,
-                left,
-                right,
-                first = chunk.first().copied().unwrap_or_default(),
-                last = chunk.last().copied().unwrap_or_default(),
-                sample = ?monotonicity_sample(chunk, idx),
-                "Non-monotonic account-history chunk before shard flush; invariant panic expected"
-            );
-        }
-
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -437,23 +389,6 @@ where
     let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
 
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
-        if let Some((idx, left, right)) = first_non_monotonic_pair(chunk) {
-            error!(
-                target: "sync::stages::index_history",
-                ?address,
-                append_only,
-                chunk_index = i,
-                chunk_len = chunk.len(),
-                monotonic_violation_index = idx,
-                left,
-                right,
-                first = chunk.first().copied().unwrap_or_default(),
-                last = chunk.last().copied().unwrap_or_default(),
-                sample = ?monotonicity_sample(chunk, idx),
-                "Non-monotonic account-history chunk before final shard flush; invariant panic expected"
-            );
-        }
-
         let is_last = i == num_chunks - 1;
 
         // Use u64::MAX for the final shard's key. This invariant allows incremental sync
@@ -576,25 +511,6 @@ where
             }
         }
 
-        if let (Some(existing_last), Some(incoming_first), Some(incoming_last)) =
-            (current_list.last().copied(), new_list.iter().next(), new_list.iter().next_back()) &&
-            incoming_first <= existing_last
-        {
-            warn!(
-                target: "sync::stages::index_history",
-                address = ?partial_key.0,
-                storage_key = ?partial_key.1,
-                append_only,
-                existing_len = current_list.len(),
-                incoming_len = new_list.len(),
-                existing_last,
-                incoming_first,
-                incoming_last,
-                additive_overlap = incoming_last > existing_last,
-                "Detected storage-history overlap while merging shards; stage checkpoint may trail persisted data"
-            );
-        }
-
         // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
 
@@ -658,23 +574,6 @@ where
 
     // Write each complete shard with its highest block number as the key.
     for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
-        if let Some((idx, left, right)) = first_non_monotonic_pair(chunk) {
-            error!(
-                target: "sync::stages::index_history",
-                ?address,
-                ?storage_key,
-                append_only,
-                chunk_len = chunk.len(),
-                monotonic_violation_index = idx,
-                left,
-                right,
-                first = chunk.first().copied().unwrap_or_default(),
-                last = chunk.last().copied().unwrap_or_default(),
-                sample = ?monotonicity_sample(chunk, idx),
-                "Non-monotonic storage-history chunk before shard flush; invariant panic expected"
-            );
-        }
-
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -715,24 +614,6 @@ where
     let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
 
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
-        if let Some((idx, left, right)) = first_non_monotonic_pair(chunk) {
-            error!(
-                target: "sync::stages::index_history",
-                ?address,
-                ?storage_key,
-                append_only,
-                chunk_index = i,
-                chunk_len = chunk.len(),
-                monotonic_violation_index = idx,
-                left,
-                right,
-                first = chunk.first().copied().unwrap_or_default(),
-                last = chunk.last().copied().unwrap_or_default(),
-                sample = ?monotonicity_sample(chunk, idx),
-                "Non-monotonic storage-history chunk before final shard flush; invariant panic expected"
-            );
-        }
-
         let is_last = i == num_chunks - 1;
 
         // Use u64::MAX for the final shard's key. This invariant allows incremental sync

@@ -509,10 +509,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
     /// Creates the context for `RocksDB` writes.
     #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
-    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+    fn rocksdb_write_ctx(
+        &self,
+        first_block: BlockNumber,
+        save_mode: SaveBlocksMode,
+    ) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
+            write_tx_lookup: save_mode.with_tx_lookup(),
+            write_account_history: save_mode.with_history_indexing(),
+            write_storage_history: save_mode.with_history_indexing(),
             storage_settings: self.cached_storage_settings(),
             pending_batches: self.pending_rocksdb_batches.clone(),
         }
@@ -606,7 +613,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number, save_mode);
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
@@ -5242,6 +5249,7 @@ mod tests {
     #[test]
     fn save_blocks_full_no_history_indexing_preserves_deferred_stage_checkpoints() {
         let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
         let provider_rw = factory.provider_rw().unwrap();
 
         let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
@@ -5276,10 +5284,24 @@ mod tests {
             .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(90))
             .unwrap();
 
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+
         let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
             Header { number: 1, difficulty: U256::from(1), ..Default::default() },
             Default::default(),
         );
+        let bundle = BundleState::builder(1..=1)
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(1), ..Default::default() },
+            )
+            .revert_account_info(1, address, Some(None))
+            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(7)))]))
+            .revert_storage(1, address, vec![(slot, U256::ZERO)])
+            .build();
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
         let executed = ExecutedBlock::new(
             Arc::new(block.try_recover().unwrap()),
             Arc::new(BlockExecutionOutput {
@@ -5289,9 +5311,9 @@ mod tests {
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                state: Default::default(),
+                state: bundle,
             }),
-            ComputedTrieData::default(),
+            ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
         );
 
         provider_rw.save_blocks(vec![executed], SaveBlocksMode::FullNoHistoryIndexing).unwrap();
@@ -5331,6 +5353,21 @@ mod tests {
             provider.get_stage_checkpoint(StageId::Headers).unwrap().unwrap().block_number,
             1
         );
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        {
+            let rocksdb = factory.rocksdb_provider();
+            let slot_key = B256::from(slot);
+            let hashed_slot = keccak256(slot_key);
+            assert!(
+                rocksdb.account_history_shards(address).unwrap().is_empty(),
+                "FullNoHistoryIndexing must not write AccountsHistory"
+            );
+            assert!(
+                rocksdb.storage_history_shards(address, hashed_slot).unwrap().is_empty(),
+                "FullNoHistoryIndexing must not write StoragesHistory"
+            );
+        }
     }
 
     #[test]
