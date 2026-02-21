@@ -43,7 +43,7 @@ pub mod tx_manager {
     use super::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
     /// Default limit for number of transactions to keep track of for a single peer.
-    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 32_768;
+    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 8_192;
 
     /// Default maximum pending pool imports to tolerate.
     ///

@@ -1119,7 +1119,7 @@ where
             msg_builder.push_pooled(pooled_tx);
         }
 
-        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.is_empty(), "Broadcasting transaction hashes");
+        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
         let msg = msg_builder.build();
         self.network.send_transactions_hashes(peer_id, msg);
     }
@@ -1239,7 +1239,7 @@ where
 
         // mark the transactions as received
         self.transaction_fetcher.on_transactions_received(
-            transactions.iter().map(|tx| tx.tx_hash()),
+            transactions.iter().map(|tx| *tx.tx_hash()),
             source.is_broadcast(),
         );
 
@@ -1273,7 +1273,7 @@ where
                 entry.get_mut().insert(peer_id);
                 return false
             }
-            if self.transaction_fetcher.is_known_bad_import(tx.tx_hash()) {
+            if self.transaction_fetcher.is_bad_import(tx.tx_hash()) {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     hash=%tx.tx_hash(),
@@ -1805,6 +1805,14 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+        }
+    }
+
+    /// Returns the number of transactions in the builder.
+    fn len(&self) -> usize {
+        match self {
+            Self::Eth66(hashes) => hashes.len(),
+            Self::Eth68(hashes) => hashes.len(),
         }
     }
 
