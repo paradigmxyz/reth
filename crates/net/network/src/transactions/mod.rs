@@ -1018,7 +1018,7 @@ where
 
         // Pre-compute sender → full_peers map using SipHash scoring.
         // Each sender's transactions are deterministically routed to the same sqrt(N) peers.
-        let mut sender_full_peers: HashMap<Address, Vec<PeerId>> = HashMap::default();
+        let mut sender_full_peers: HashMap<Address, HashSet<PeerId>> = HashMap::default();
         if !propagation_mode.is_forced() {
             let peer_ids: Vec<PeerId> = self.peers.keys().copied().collect();
             let mode = &self.config.propagation_mode;
@@ -1088,7 +1088,10 @@ where
             }
 
             // Send hash-only announcements
-            let new_pooled_hashes = hash_builder.build();
+            let mut new_pooled_hashes = hash_builder.build();
+            new_pooled_hashes.truncate(
+                SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+            );
             if !new_pooled_hashes.is_empty() {
                 for hash in new_pooled_hashes.iter_hashes() {
                     track(*hash, PropagateKind::Hash(*peer_id));
@@ -1784,10 +1787,10 @@ impl BroadcastChoice {
         peers: &[PeerId],
         tx_sender: &Address,
         mode: &TransactionPropagationMode,
-    ) -> Vec<PeerId> {
+    ) -> HashSet<PeerId> {
         let count = match mode {
             TransactionPropagationMode::Sqrt => (peers.len() as f64).sqrt().ceil() as usize,
-            TransactionPropagationMode::All => return peers.to_vec(),
+            TransactionPropagationMode::All => return peers.iter().copied().collect(),
             TransactionPropagationMode::Max(max) => peers.len().min(*max),
         };
         let mut scored: Vec<(PeerId, u64)> =
