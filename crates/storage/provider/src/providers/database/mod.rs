@@ -786,7 +786,12 @@ where
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
             .field("runtime", &runtime)
-            .field("storage_bloom", &storage_bloom.as_ref().map(|b| format!("{}MB", b.memory_usage_bytes() / (1024 * 1024))))
+            .field(
+                "storage_bloom",
+                &storage_bloom
+                    .as_ref()
+                    .map(|b| format!("{}MB", b.memory_usage_bytes() / (1024 * 1024))),
+            )
             .finish()
     }
 }

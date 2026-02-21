@@ -7,16 +7,14 @@
 //!
 //! # Design
 //!
-//! - **Lock-free**: Bit array uses [`AtomicU64`] with relaxed ordering — no contention
-//!   between reader threads, no locks on the hot path.
-//! - **Zero false negatives**: If `might_contain` returns `false`, the slot is
-//!   guaranteed absent. A `true` result may be a false positive.
-//! - **Insert-only**: Bits are never cleared. Deleted storage slots become false
-//!   positives, causing a harmless fallback to MDBX. Rebuild on restart resets the
-//!   filter.
-//! - **Double hashing**: We extract two 64-bit values from `keccak256(address || slot)`
-//!   and derive K probe positions via `h1 + i·h2 mod m`. This avoids multiple
-//!   independent hash function calls.
+//! - **Lock-free**: Bit array uses [`AtomicU64`] with relaxed ordering — no contention between
+//!   reader threads, no locks on the hot path.
+//! - **Zero false negatives**: If `might_contain` returns `false`, the slot is guaranteed absent. A
+//!   `true` result may be a false positive.
+//! - **Insert-only**: Bits are never cleared. Deleted storage slots become false positives, causing
+//!   a harmless fallback to MDBX. Rebuild on restart resets the filter.
+//! - **Double hashing**: We extract two 64-bit values from `keccak256(address || slot)` and derive
+//!   K probe positions via `h1 + i·h2 mod m`. This avoids multiple independent hash function calls.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -140,16 +138,13 @@ impl StorageBloomFilter {
 
     /// Saves the bloom filter to a file.
     ///
-    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw bits...]`
+    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw
+    /// bits...]`
     ///
     /// The `block_number` is stored so that on restart we can incrementally catch up
     /// from changesets instead of re-scanning the entire `PlainStorageState` table.
     #[cfg(feature = "std")]
-    pub fn save_to_file(
-        &self,
-        path: &std::path::Path,
-        block_number: u64,
-    ) -> std::io::Result<()> {
+    pub fn save_to_file(&self, path: &std::path::Path, block_number: u64) -> std::io::Result<()> {
         use std::io::Write;
 
         let tmp = path.with_extension("tmp");
@@ -164,7 +159,7 @@ impl StorageBloomFilter {
         file.write_all(&num_words.to_le_bytes())?;
 
         // Bit array — read each atomic word and write as LE bytes
-        for word in self.bits.iter() {
+        for word in &self.bits {
             file.write_all(&word.load(Ordering::Relaxed).to_le_bytes())?;
         }
 
@@ -236,7 +231,7 @@ impl StorageBloomFilter {
             .into_boxed_slice();
 
         let mut word_bytes = [0u8; 8];
-        for word in bits.iter_mut() {
+        for word in &mut bits {
             file.read_exact(&mut word_bytes)?;
             *word = AtomicU64::new(u64::from_le_bytes(word_bytes));
         }
@@ -374,8 +369,7 @@ mod tests {
 
     #[test]
     fn thread_safety() {
-        use std::sync::Arc;
-        use std::thread;
+        use std::{sync::Arc, thread};
 
         let bloom = Arc::new(StorageBloomFilter::new(1024 * 1024, 3));
         let addr = address!("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");

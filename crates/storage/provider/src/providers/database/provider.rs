@@ -258,7 +258,8 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Populates a [`StorageBloomFilter`] by walking the `PlainStorageState` table.
+    /// Populates a [`StorageBloomFilter`](reth_storage_bloom::StorageBloomFilter) by walking the
+    /// `PlainStorageState` table.
     ///
     /// Inserts every non-zero `(address, slot)` pair into the bloom filter.
     /// Returns the number of entries inserted.

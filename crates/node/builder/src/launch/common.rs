@@ -594,8 +594,7 @@ where
             };
 
             let bloom = if let Some((loaded, saved_block)) = persisted {
-                let catchup =
-                    factory.provider()?.catchup_storage_bloom(&loaded, saved_block)?;
+                let catchup = factory.provider()?.catchup_storage_bloom(&loaded, saved_block)?;
                 let elapsed = start.elapsed();
                 info!(
                     target: "reth::cli",
