@@ -16,6 +16,8 @@ use std::{
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
     time::Duration,
 };
+#[cfg(feature = "read-tx-timeouts")]
+use std::cell::Cell;
 
 #[cfg(feature = "read-tx-timeouts")]
 use ffi::mdbx_txn_renew;
@@ -542,6 +544,10 @@ pub(crate) struct TransactionPtr {
     txn: *mut ffi::MDBX_txn,
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
+    /// Counter to amortize timeout checks. Only checks the actual `timed_out` atomic every 256
+    /// operations (when the `u8` wraps around to 0), reducing `AtomicBool::load` overhead.
+    #[cfg(feature = "read-tx-timeouts")]
+    timeout_check_counter: Cell<u8>,
     lock: Arc<Mutex<()>>,
 }
 
@@ -551,6 +557,8 @@ impl TransactionPtr {
             txn,
             #[cfg(feature = "read-tx-timeouts")]
             timed_out: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "read-tx-timeouts")]
+            timeout_check_counter: Cell::new(0),
             lock: Arc::new(Mutex::new(())),
         }
     }
@@ -603,9 +611,17 @@ impl TransactionPtr {
         // No race condition with the `TxnManager` timing out the transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
         // to the `mdbx_txn_reset`.
+        //
+        // Amortize the timeout check: only check every 256 operations (when u8 wraps to 0).
+        // This reduces AtomicBool::load overhead while still detecting timeouts promptly
+        // relative to typical timeout durations (seconds).
         #[cfg(feature = "read-tx-timeouts")]
-        if self.is_timed_out() {
-            return Err(Error::ReadTransactionTimeout)
+        {
+            let count = self.timeout_check_counter.get().wrapping_add(1);
+            self.timeout_check_counter.set(count);
+            if count == 0 && self.is_timed_out() {
+                return Err(Error::ReadTransactionTimeout)
+            }
         }
 
         Ok((f)(self.txn))
@@ -622,10 +638,14 @@ impl TransactionPtr {
     {
         let _lck = self.lock();
 
-        // To be able to do any operations on the transaction, we need to renew it first.
+        // Amortize the timeout check: only check every 256 operations (when u8 wraps to 0).
         #[cfg(feature = "read-tx-timeouts")]
-        if self.is_timed_out() {
-            mdbx_result(unsafe { mdbx_txn_renew(self.txn) })?;
+        {
+            let count = self.timeout_check_counter.get().wrapping_add(1);
+            self.timeout_check_counter.set(count);
+            if count == 0 && self.is_timed_out() {
+                mdbx_result(unsafe { mdbx_txn_renew(self.txn) })?;
+            }
         }
 
         Ok((f)(self.txn))
