@@ -3558,21 +3558,41 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
+        // Prune static-file headers above `block`, if the segment exists.
         //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
-        self.static_file_provider()
-            .get_writer(block, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        // Historically this code assumed headers always exist in static files, but in practice the
+        // index can be stale (e.g. after external file changes) or the segment may be absent on a
+        // fresh node. In those cases we attempt to self-heal by re-initializing the index once.
+        let static_files = self.static_file_provider();
+        let mut highest_static_file_block =
+            static_files.get_highest_static_file_block(StaticFileSegment::Headers);
+        if highest_static_file_block.is_none() {
+            debug!(
+                target: "providers::db",
+                "Static file headers tip missing, re-initializing static file index"
+            );
+            static_files.initialize_index()?;
+            highest_static_file_block =
+                static_files.get_highest_static_file_block(StaticFileSegment::Headers);
+        }
+
+        if let Some(highest_static_file_block) = highest_static_file_block {
+            // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
+            // sure we remove only what is ABOVE the block.
+            //
+            // i.e., if the highest static file block is 8, we want to remove above block 5 only,
+            // we will have three blocks to remove, which will be block 8, 7, and 6.
+            debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
+            static_files
+                .get_writer(block, StaticFileSegment::Headers)?
+                .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        } else {
+            debug!(
+                target: "providers::db",
+                ?block,
+                "No static file headers present, skipping static file header pruning"
+            );
+        }
 
         // First transaction to be removed
         let unwind_tx_from = self
