@@ -325,43 +325,78 @@ impl RocksDBBuilder {
         let options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
 
-        let cf_descriptors: Vec<ColumnFamilyDescriptor> = self
-            .column_families
-            .iter()
-            .map(|name| {
-                let cf_options = if name == tables::TransactionHashNumbers::NAME {
-                    Self::tx_hash_numbers_column_family_options(&self.block_cache)
-                } else {
-                    Self::default_column_family_options(&self.block_cache)
-                };
-                ColumnFamilyDescriptor::new(name.clone(), cf_options)
-            })
-            .collect();
+        let make_cf_descriptors = || -> Vec<ColumnFamilyDescriptor> {
+            self.column_families
+                .iter()
+                .map(|name| {
+                    let cf_options = if name == tables::TransactionHashNumbers::NAME {
+                        Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                    } else {
+                        Self::default_column_family_options(&self.block_cache)
+                    };
+                    ColumnFamilyDescriptor::new(name.clone(), cf_options)
+                })
+                .collect()
+        };
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
         if self.read_only {
-            let db = DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
-                .map_err(|e| {
-                    ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+            let db = match DB::open_cf_descriptors_read_only(
+                &options,
+                &self.path,
+                make_cf_descriptors(),
+                false,
+            ) {
+                Ok(db) => db,
+                Err(_) => {
+                    // RO open failed (e.g. missing column families on a fresh snapshot).
+                    // Briefly open in RW mode to create the DB structure, then retry RO.
+                    {
+                        let _rw_db: OptimisticTransactionDB =
+                            OptimisticTransactionDB::open_cf_descriptors(
+                                &options,
+                                &self.path,
+                                make_cf_descriptors(),
+                            )
+                            .map_err(|e| {
+                                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                                    message: e.to_string().into(),
+                                    code: -1,
+                                }))
+                            })?;
+                    }
+                    DB::open_cf_descriptors_read_only(
+                        &options,
+                        &self.path,
+                        make_cf_descriptors(),
+                        false,
+                    )
+                    .map_err(|e| {
+                        ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                            message: e.to_string().into(),
+                            code: -1,
+                        }))
+                    })?
+                }
+            };
             Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
         } else {
             // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
             // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
             // detection at commit) and is backed by DBCommon, giving us access to
             // cancel_all_background_work for clean shutdown.
-            let db =
-                OptimisticTransactionDB::open_cf_descriptors(&options, &self.path, cf_descriptors)
-                    .map_err(|e| {
-                        ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                            message: e.to_string().into(),
-                            code: -1,
-                        }))
-                    })?;
+            let db = OptimisticTransactionDB::open_cf_descriptors(
+                &options,
+                &self.path,
+                make_cf_descriptors(),
+            )
+            .map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
             Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
         }
     }
@@ -4064,5 +4099,45 @@ mod tests {
 
         let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
+    }
+
+    #[test]
+    fn test_read_only_open_on_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Opening in read-only mode on an empty directory should succeed
+        // via the RW fallback that creates missing column families.
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+
+        // Should be able to read (returns None since DB is empty)
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_read_only_open_after_rw_with_data() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+
+        // First, create the DB with data in RW mode
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            provider.put::<tables::TransactionHashNumbers>(tx_hash, &42).unwrap();
+        }
+
+        // Now open in read-only mode — should succeed and see the data
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(42));
     }
 }
