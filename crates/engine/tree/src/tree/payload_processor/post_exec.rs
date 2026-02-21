@@ -26,6 +26,12 @@ impl<R> core::fmt::Debug for PostExecCoordinator<R> {
     }
 }
 
+impl<R: Receipt + Send + 'static> Default for PostExecCoordinator<R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<R: Receipt + Send + 'static> PostExecCoordinator<R> {
     /// Create a new coordinator and its worker thread.
     pub fn new() -> Self {
