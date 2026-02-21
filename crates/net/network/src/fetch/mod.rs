@@ -210,7 +210,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                                 .queued_requests
                                 .iter()
                                 .position(|req| req.is_normal_priority())
-                                .unwrap_or(0);
+                                .unwrap_or(self.queued_requests.len());
                             self.queued_requests.insert(pos, request);
                         }
                         Priority::Normal => {
