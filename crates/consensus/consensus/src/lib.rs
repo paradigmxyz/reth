@@ -78,6 +78,17 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
+
+    /// Validate a block pre-execution, skipping transaction root validation.
+    ///
+    /// Used when the transaction root check is performed separately (e.g., concurrently).
+    /// The default falls back to the full validation including the tx root.
+    fn validate_block_pre_execution_without_tx_root(
+        &self,
+        block: &SealedBlock<B>,
+    ) -> Result<(), ConsensusError> {
+        self.validate_block_pre_execution(block)
+    }
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.

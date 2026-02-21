@@ -155,6 +155,21 @@ where
     Ok(())
 }
 
+/// Validate a block without regard for state, skipping transaction root validation.
+///
+/// This is the same as [`validate_block_pre_execution`] but omits the
+/// `ensure_transaction_root_valid` check, which can be performed separately (e.g., concurrently).
+pub fn validate_block_pre_execution_without_tx_root<B, ChainSpec>(
+    block: &SealedBlock<B>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
+    post_merge_hardfork_fields(block, chain_spec)
+}
+
 /// Validates the ommers hash and other fork-specific fields.
 ///
 /// These fork-specific validations are:

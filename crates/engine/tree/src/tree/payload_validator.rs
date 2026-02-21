@@ -491,6 +491,22 @@ where
             state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
         }
 
+        // Spawn concurrent transaction root validation before execution so the keccak
+        // work overlaps with block execution on a background thread.
+        // For the Block case the sealed block is already available; for the Payload case
+        // we defer until after block conversion.
+        let tx_root_handle: Option<reth_tasks::LazyHandle<Result<(), GotExpected<B256>>>> =
+            match &input {
+                BlockOrPayload::Block(sealed_block) => {
+                    let block_clone = sealed_block.clone();
+                    Some(self.payload_processor.executor().spawn_blocking_named(
+                        "tx-root-check",
+                        move || block_clone.ensure_transaction_root_valid(),
+                    ))
+                }
+                BlockOrPayload::Payload(_) => None,
+            };
+
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
@@ -529,6 +545,15 @@ where
 
         let block = convert_to_block(input)?.with_senders(senders);
 
+        // For the Payload case, spawn tx root check now that the block is available.
+        let tx_root_handle = tx_root_handle.unwrap_or_else(|| {
+            let sealed = block.clone_sealed_block();
+            self.payload_processor.executor().spawn_blocking_named(
+                "tx-root-check",
+                move || sealed.ensure_transaction_root_valid(),
+            )
+        });
+
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
             .blocking_recv()
@@ -551,6 +576,15 @@ where
             ),
             block
         );
+
+        // Join the concurrent tx root validation
+        if let Err(err) = tx_root_handle.get() {
+            return Err(InsertBlockError::new(
+                block.into_sealed_block(),
+                ConsensusError::BodyTransactionRootDiff(err.clone().into()).into(),
+            )
+            .into())
+        }
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -744,6 +778,26 @@ where
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+            return Err(e)
+        }
+
+        Ok(())
+    }
+
+    /// Validates a block's consensus rules, skipping the transaction root check.
+    ///
+    /// Used when the tx root check is performed concurrently with execution.
+    fn validate_block_inner_without_tx_root(
+        &self,
+        block: &SealedBlock<N::Block>,
+    ) -> Result<(), ConsensusError> {
+        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+            return Err(e)
+        }
+
+        if let Err(e) = self.consensus.validate_block_pre_execution_without_tx_root(block) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -1223,8 +1277,8 @@ where
         let start = Instant::now();
 
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
-        // validate block consensus rules
-        if let Err(e) = self.validate_block_inner(block) {
+        // validate block consensus rules (tx root check is done concurrently)
+        if let Err(e) = self.validate_block_inner_without_tx_root(block) {
             return Err(e.into())
         }
 
