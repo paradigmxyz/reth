@@ -418,6 +418,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let original_size = self.size();
         let mut total_size = 0;
 
+        // Pre-sort senders worst-first to avoid re-sorting each round.
+        let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+        worst_transactions.sort_unstable();
+
+        let mut senders: Vec<SenderId> =
+            worst_transactions.iter().map(|tx| tx.transaction.sender_id()).collect();
+
+        let mut active_senders = senders.len();
+
         loop {
             // check how many unique senders were removed last iteration
             let unique_removed = unique_senders - self.highest_nonces.len();
@@ -429,12 +438,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // we can reuse the temp array
             removed.clear();
 
-            // we prefer removing transactions with lower ordering
-            let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort_unstable();
-
-            // loop through the highest nonces set, removing transactions until we reach the limit
-            for tx in worst_transactions {
+            let mut write = 0;
+            for read in 0..active_senders {
                 // return early if the pool is under limits
                 if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0
@@ -449,8 +454,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     return
                 }
 
+                let sender_id = senders[read];
+                let Some(tx) = self.highest_nonces.get(&sender_id) else {
+                    continue;
+                };
+
                 if !remove_locals && tx.transaction.is_local() {
-                    let sender_id = tx.transaction.sender_id();
                     if local_senders.insert(sender_id) {
                         non_local_senders -= 1;
                     }
@@ -460,7 +469,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 total_size += tx.transaction.size();
                 total_removed += 1;
                 removed.push(*tx.transaction.id());
+
+                senders[write] = sender_id;
+                write += 1;
             }
+
+            active_senders = write;
 
             // remove the transactions from this iteration
             for id in &removed {
@@ -471,7 +485,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
-            if !self.exceeds(limit) || non_local_senders == 0 {
+            if !self.exceeds(limit) || non_local_senders == 0 || active_senders == 0 {
                 return
             }
         }
