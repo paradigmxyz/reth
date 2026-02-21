@@ -35,12 +35,18 @@ on:
         required: false
         default: ""
         type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
   BASELINE: base
   SEED: reth
   RUSTC_WRAPPER: "sccache"
+  BENCH_RUNNERS: 2
 
 name: bench
 
@@ -91,7 +97,7 @@ jobs:
 
   reth-bench-ack:
     if: |
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
       github.event_name == 'workflow_dispatch'
     name: reth-bench-ack
     runs-on: ubuntu-latest
@@ -104,6 +110,7 @@ jobs:
       feature: ${{ steps.args.outputs.feature }}
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
+      samply: ${{ steps.args.outputs.samply }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -129,8 +136,9 @@ jobs:
         id: args
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature;
+            let pr, actor, blocks, warmup, baseline, feature, samply;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -138,6 +146,7 @@ jobs:
               warmup = '${{ github.event.inputs.warmup }}' || '100';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
+              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -159,14 +168,19 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['blocks', 'warmup']);
               const refArgs = new Set(['baseline', 'feature']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
+              const boolArgs = new Set(['samply']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
               const unknown = [];
               const invalid = [];
-              const args = body.replace(/^derek bench\s*/, '');
+              const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
               for (const part of args.split(/\s+/).filter(Boolean)) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
-                  unknown.push(part);
+                  if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else {
+                    unknown.push(part);
+                  }
                   continue;
                 }
                 const key = part.slice(0, eq);
@@ -191,7 +205,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -205,6 +219,7 @@ jobs:
               warmup = defaults.warmup;
               baseline = defaults.baseline;
               feature = defaults.feature;
+              samply = defaults.samply;
             }
 
             // Resolve display names for baseline/feature
@@ -231,11 +246,13 @@ jobs:
             core.setOutput('feature', feature);
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
+            core.setOutput('samply', samply);
 
       - name: Acknowledge request
         id: ack
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             if (context.eventName === 'issue_comment') {
               await github.rest.reactions.createForIssueComment({
@@ -251,9 +268,11 @@ jobs:
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-            // Count queued/waiting bench runs ahead of this one
+            // Count queued/waiting bench runs ahead of this one.
+            // BENCH_RUNNERS is the number of self-hosted runners available.
             let queueMsg = '';
             let ahead = 0;
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
             try {
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
@@ -271,13 +290,13 @@ jobs:
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              ahead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              ahead = Math.max(0, totalAhead - numRunners + 1);
               if (ahead > 0) {
-                queueMsg = `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`;
+                queueMsg = `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`;
               }
             } catch (e) {
-              // Non-fatal — queue info is best-effort
-              core.info(`Could not fetch queue info: ${e.message}`);
+              core.info(`Skipping queue tracking: ${e.message}`);
             }
 
             const actor = '${{ steps.args.outputs.actor }}';
@@ -285,7 +304,9 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -300,6 +321,7 @@ jobs:
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const pr = '${{ steps.args.outputs.pr }}';
             const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
@@ -308,9 +330,12 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
             async function getQueuePosition() {
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
@@ -327,7 +352,8 @@ jobs:
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              return benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              return { ahead: Math.max(0, totalAhead - numRunners + 1), numRunners };
             }
 
             let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
@@ -336,11 +362,11 @@ jobs:
             while (true) {
               await sleep(10_000);
               try {
-                const ahead = await getQueuePosition();
+                const { ahead, numRunners } = await getQueuePosition();
                 if (ahead !== lastPosition) {
                   lastPosition = ahead;
                   const queueMsg = ahead > 0
-                    ? `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`
+                    ? `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`
                     : '';
                   await github.rest.issues.updateComment({
                     owner: context.repo.owner,
@@ -360,9 +386,6 @@ jobs:
     name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
-    concurrency:
-      group: reth-bench-queue
-      cancel-in-progress: false
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
@@ -371,6 +394,7 @@ jobs:
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
       - name: Resolve checkout ref
@@ -405,6 +429,7 @@ jobs:
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
@@ -419,7 +444,9 @@ jobs:
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
+            const samply = process.env.BENCH_SAMPLY === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -432,6 +459,52 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
+
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # apt packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          # uv (Python package manager)
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+          fi
+
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # thin-provisioning-tools (era_invalidate, required by schelk)
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+          # samply (optional CPU profiler, invoked via sudo)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+            sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
+          fi
 
       # Verify all required tools are available
       - name: Check dependencies
@@ -470,32 +543,51 @@ jobs:
 
       - name: Resolve refs
         id: refs
-        run: |
-          BASELINE_ARG="${{ needs.reth-bench-ack.outputs.baseline }}"
-          FEATURE_ARG="${{ needs.reth-bench-ack.outputs.feature }}"
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 
-          if [ -n "$BASELINE_ARG" ]; then
-            git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
-            BASELINE_REF=$(git rev-parse "$BASELINE_ARG" 2>/dev/null || git rev-parse "origin/$BASELINE_ARG" 2>/dev/null)
-            BASELINE_NAME="$BASELINE_ARG"
-          else
-            BASELINE_REF=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
-            BASELINE_NAME="main"
-          fi
+            const baselineArg = '${{ needs.reth-bench-ack.outputs.baseline }}';
+            const featureArg = '${{ needs.reth-bench-ack.outputs.feature }}';
 
-          if [ -n "$FEATURE_ARG" ]; then
-            git fetch origin "$FEATURE_ARG" --quiet 2>/dev/null || true
-            FEATURE_REF=$(git rev-parse "$FEATURE_ARG" 2>/dev/null || git rev-parse "origin/$FEATURE_ARG" 2>/dev/null)
-            FEATURE_NAME="$FEATURE_ARG"
-          else
-            FEATURE_REF="${{ steps.pr-info.outputs.head-sha }}"
-            FEATURE_NAME="${{ steps.pr-info.outputs.head-ref }}"
-          fi
+            let baselineRef, baselineName, featureRef, featureName;
 
-          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
-          echo "baseline-name=$BASELINE_NAME" >> "$GITHUB_OUTPUT"
-          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
-          echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+            if (baselineArg) {
+              try { run(`git fetch origin "${baselineArg}" --quiet`); } catch {}
+              try {
+                baselineRef = run(`git rev-parse "${baselineArg}"`);
+              } catch {
+                baselineRef = run(`git rev-parse "origin/${baselineArg}"`);
+              }
+              baselineName = baselineArg;
+            } else {
+              try {
+                baselineRef = run('git merge-base HEAD origin/main');
+              } catch {
+                baselineRef = '${{ github.sha }}';
+              }
+              baselineName = 'main';
+            }
+
+            if (featureArg) {
+              try { run(`git fetch origin "${featureArg}" --quiet`); } catch {}
+              try {
+                featureRef = run(`git rev-parse "${featureArg}"`);
+              } catch {
+                featureRef = run(`git rev-parse "origin/${featureArg}"`);
+              }
+              featureName = featureArg;
+            } else {
+              featureRef = '${{ steps.pr-info.outputs.head-sha }}';
+              featureName = '${{ steps.pr-info.outputs.head-ref }}';
+            }
+
+            core.setOutput('baseline-ref', baselineRef);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-ref', featureRef);
+            core.setOutput('feature-name', featureName);
 
       - name: Check if snapshot needs update
         id: snapshot-check
@@ -510,6 +602,7 @@ jobs:
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Building binaries & downloading snapshot...'});
@@ -617,6 +710,7 @@ jobs:
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Running benchmarks...'});
@@ -638,6 +732,50 @@ jobs:
       - name: "Run benchmark: baseline (2/2)"
         id: run-baseline-2
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+
+      - name: Upload samply profiles
+        if: success() && env.BENCH_SAMPLY == 'true'
+        run: |
+          PROFILER_API="https://api.profiler.firefox.com"
+          PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
+
+          for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
+            PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
+            if [ ! -f "$PROFILE" ]; then continue; fi
+
+            PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE}) to Firefox Profiler..."
+
+            # Upload compressed profile and get JWT back
+            JWT=$(curl -sf -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "$PROFILER_ACCEPT" \
+              --data-binary "@$PROFILE" \
+              "$PROFILER_API/compressed-store") || {
+              echo "::warning::Failed to upload $run_dir profile to Firefox Profiler"
+              continue
+            }
+
+            # Extract profileToken from JWT payload (header.payload.signature)
+            PAYLOAD=$(echo "$JWT" | cut -d. -f2)
+            # Fix base64 padding
+            case $(( ${#PAYLOAD} % 4 )) in
+              2) PAYLOAD="${PAYLOAD}==" ;;
+              3) PAYLOAD="${PAYLOAD}=" ;;
+            esac
+            PROFILE_TOKEN=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['profileToken'])")
+            PROFILE_URL="https://profiler.firefox.com/public/${PROFILE_TOKEN}"
+            echo "Profile uploaded: $PROFILE_URL"
+
+            # Shorten the URL
+            SHORT_URL=$(curl -sf -X POST \
+              -H "Content-Type: application/json" \
+              -H "$PROFILER_ACCEPT" \
+              -d "{\"longUrl\":\"$PROFILE_URL\"}" \
+              "$PROFILER_API/shorten" | python3 -c "import sys,json; print(json.load(sys.stdin)['shortUrl'])" 2>/dev/null) || SHORT_URL="$PROFILE_URL"
+            echo "$SHORT_URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+            echo "Short profile URL for $run_dir: $SHORT_URL"
+          done
 
       # Results & charts
       - name: Parse results
@@ -700,7 +838,7 @@ jobs:
           PR_NUMBER="${BENCH_PR:-0}"
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
-          CHARTS_REPO="https://x-access-token:${{ secrets.BENCH_BOT_PAT }}@github.com/decofe/reth-bench-charts.git"
+          CHARTS_REPO="https://x-access-token:${{ secrets.DEREK_TOKEN }}@github.com/decofe/reth-bench-charts.git"
 
           TMP_DIR=$(mktemp -d)
           if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
@@ -723,6 +861,7 @@ jobs:
         if: success()
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const fs = require('fs');
 
@@ -753,6 +892,23 @@ jobs:
               comment += chartMarkdown;
             }
 
+            // Samply profile links (URLs point directly to Firefox Profiler)
+            if (process.env.BENCH_SAMPLY === 'true') {
+              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const links = [];
+              for (const run of runs) {
+                try {
+                  const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
+                  if (url) {
+                    links.push(`- **${run}**: [Firefox Profiler](${url})`);
+                  }
+                } catch (e) {}
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
+            }
+
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
             const ackCommentId = process.env.BENCH_COMMENT_ID;
@@ -769,10 +925,22 @@ jobs:
               await core.summary.addRaw(body).write();
             }
 
+      - name: Send Slack notification (success)
+        if: success()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.success({ core, context });
+
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const steps_status = [
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
@@ -788,6 +956,39 @@ jobs:
               owner: context.repo.owner, repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
+            });
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const steps_status = [
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.failure({ core, context, failedStep });
+
+      - name: Update status (cancelled)
+        if: cancelled() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n⚠️ Benchmark cancelled. [View logs](${jobUrl})`,
             });
 
       - name: Upload node log
