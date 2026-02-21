@@ -222,7 +222,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
 
             // New hash
-            if self.is_known_bad_import(&hash) {
+            if self.bad_imports.contains(&hash) || self.underpriced_imports.contains(&hash) {
                 continue;
             }
             let size = metadata.map(|(_, sz)| sz).unwrap_or(0);
@@ -257,10 +257,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.metrics.underpriced_imports.increment(1);
     }
 
-    /// Returns `true` if the hash is in the bad imports or underpriced cache.
+    /// Returns `true` if the hash failed import due to a consensus violation (bad transaction).
+    /// Does **not** include underpriced transactions, which are a local/dynamic condition.
     #[inline]
-    pub fn is_known_bad_import(&self, hash: &TxHash) -> bool {
-        self.bad_imports.contains(hash) || self.underpriced_imports.contains(hash)
+    pub fn is_bad_import(&self, hash: &TxHash) -> bool {
+        self.bad_imports.contains(hash)
     }
 
     /// Inserts a peer announcement into the announces index if not already present.
@@ -404,37 +405,37 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     ///
     /// `is_broadcast` indicates whether these transactions arrived via an unsolicited
     /// `Transactions` broadcast (true) or as a `GetPooledTransactions` response (false).
-    pub fn on_transactions_received<'a>(
+    pub fn on_transactions_received(
         &mut self,
-        hashes: impl Iterator<Item = &'a TxHash>,
+        hashes: impl Iterator<Item = TxHash>,
         is_broadcast: bool,
     ) {
         for hash in hashes {
             // Stage 1 (announced)
-            if let Some(peer_set) = self.announced.remove(hash) {
+            if let Some(peer_set) = self.announced.remove(&hash) {
                 if is_broadcast {
                     self.metrics.late_broadcast_announced.increment(1);
                 }
                 for peer in &peer_set {
-                    self.remove_from_announces(peer, hash);
+                    self.remove_from_announces(peer, &hash);
                 }
                 continue;
             }
 
             // Stage 2 (fetching)
-            if let Some(fetching_peer) = self.fetching.remove(hash) {
+            if let Some(fetching_peer) = self.fetching.remove(&hash) {
                 if is_broadcast {
                     self.metrics.late_broadcast_inflight.increment(1);
                 }
                 if let Some(req) = self.inflight_requests.get_mut(&fetching_peer) {
-                    req.stolen.insert(*hash);
+                    req.stolen.insert(hash);
                 }
-                let mut peers_to_clean = self.alternates.remove(hash).unwrap_or_default();
+                let mut peers_to_clean = self.alternates.remove(&hash).unwrap_or_default();
                 if !peers_to_clean.contains(&fetching_peer) {
                     peers_to_clean.push(fetching_peer);
                 }
                 for peer in &peers_to_clean {
-                    self.remove_from_announces(peer, hash);
+                    self.remove_from_announces(peer, &hash);
                 }
             }
         }
@@ -1555,7 +1556,7 @@ mod test {
         fetcher.schedule_fetches(&peers);
 
         // h1 gets "stolen" (received via broadcast)
-        fetcher.on_transactions_received(once(&h1), true);
+        fetcher.on_transactions_received(once(h1), true);
 
         // Respond with only tx1 (which was stolen)
         let req = mock_rx.recv().await.unwrap();
@@ -2624,6 +2625,172 @@ mod test {
             "hash should be in fetching — peer_b should have been reached"
         );
         assert_eq!(fetcher.fetching[&h], peer_b);
+    }
+
+    #[tokio::test]
+    async fn test_gather_slack_batches_nearby_timeouts() {
+        let mut fetcher = TestFetcher::default();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        let peer_c = peer(3);
+        let h1 = hash(1);
+        let h2 = hash(2);
+        let h3 = hash(3);
+
+        let timeout = fetcher.info.tx_fetch_timeout; // 5s
+        let now = Instant::now();
+
+        // peer_a timed out 200ms ago (earliest)
+        let (_tx1, rx1) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        fetcher.fetching.insert(h1, peer_a);
+        let seq = fetcher.next_seq();
+        fetcher
+            .announces
+            .entry(peer_a)
+            .or_default()
+            .insert(h1, TxAnnounceMetadata { size: 100, seq });
+        fetcher.inflight_requests.insert(
+            peer_a,
+            InflightRequest {
+                hashes: vec![h1],
+                stolen: B256Set::default(),
+                sent_at: now - timeout - Duration::from_millis(200),
+                response: rx1,
+                dangling: false,
+            },
+        );
+
+        // peer_b timed out 150ms ago — within slack (100ms) of peer_a's expiry
+        let (_tx2, rx2) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        fetcher.fetching.insert(h2, peer_b);
+        let seq = fetcher.next_seq();
+        fetcher
+            .announces
+            .entry(peer_b)
+            .or_default()
+            .insert(h2, TxAnnounceMetadata { size: 100, seq });
+        fetcher.inflight_requests.insert(
+            peer_b,
+            InflightRequest {
+                hashes: vec![h2],
+                stolen: B256Set::default(),
+                sent_at: now - timeout - Duration::from_millis(150),
+                response: rx2,
+                dangling: false,
+            },
+        );
+
+        // peer_c sent recently — NOT timed out
+        let (_tx3, rx3) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        fetcher.fetching.insert(h3, peer_c);
+        let seq = fetcher.next_seq();
+        fetcher
+            .announces
+            .entry(peer_c)
+            .or_default()
+            .insert(h3, TxAnnounceMetadata { size: 100, seq });
+        fetcher.inflight_requests.insert(
+            peer_c,
+            InflightRequest {
+                hashes: vec![h3],
+                stolen: B256Set::default(),
+                sent_at: now - Duration::from_secs(1), // only 1s ago, well within timeout
+                response: rx3,
+                dangling: false,
+            },
+        );
+
+        fetcher.drain_timed_out_requests();
+
+        // peer_a and peer_b should both be drained (batched via slack)
+        assert!(
+            fetcher.inflight_requests[&peer_a].dangling,
+            "peer_a should be dangling (earliest timeout)"
+        );
+        assert!(
+            fetcher.inflight_requests[&peer_b].dangling,
+            "peer_b should be dangling (within slack of earliest)"
+        );
+        assert_eq!(fetcher.dangling_count, 2);
+
+        // peer_c should NOT be timed out
+        assert!(
+            !fetcher.inflight_requests[&peer_c].dangling,
+            "peer_c should NOT be dangling (not yet timed out)"
+        );
+        assert!(fetcher.fetching.contains_key(&h3), "h3 should still be in fetching");
+    }
+
+    #[tokio::test]
+    async fn test_gather_slack_does_not_batch_outside_window() {
+        let mut fetcher = TestFetcher::default();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        let h1 = hash(1);
+        let h2 = hash(2);
+
+        let timeout = fetcher.info.tx_fetch_timeout; // 5s
+        let now = Instant::now();
+
+        // peer_a timed out 200ms ago (earliest)
+        let (_tx1, rx1) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        fetcher.fetching.insert(h1, peer_a);
+        let seq = fetcher.next_seq();
+        fetcher
+            .announces
+            .entry(peer_a)
+            .or_default()
+            .insert(h1, TxAnnounceMetadata { size: 100, seq });
+        fetcher.inflight_requests.insert(
+            peer_a,
+            InflightRequest {
+                hashes: vec![h1],
+                stolen: B256Set::default(),
+                sent_at: now - timeout - Duration::from_millis(200),
+                response: rx1,
+                dangling: false,
+            },
+        );
+
+        // peer_b timed out just barely — but 50ms AFTER the slack window closes
+        // earliest expiry = sent_at_a + timeout = now - 200ms
+        // batch_cutoff = earliest + slack = now - 200ms + 100ms = now - 100ms
+        // peer_b expiry = sent_at_b + timeout = now - 50ms (AFTER cutoff)
+        let (_tx2, rx2) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        fetcher.fetching.insert(h2, peer_b);
+        let seq = fetcher.next_seq();
+        fetcher
+            .announces
+            .entry(peer_b)
+            .or_default()
+            .insert(h2, TxAnnounceMetadata { size: 100, seq });
+        fetcher.inflight_requests.insert(
+            peer_b,
+            InflightRequest {
+                hashes: vec![h2],
+                stolen: B256Set::default(),
+                sent_at: now - timeout - Duration::from_millis(50),
+                response: rx2,
+                dangling: false,
+            },
+        );
+
+        fetcher.drain_timed_out_requests();
+
+        // peer_a should be drained
+        assert!(fetcher.inflight_requests[&peer_a].dangling, "peer_a should be dangling");
+
+        // peer_b should NOT be batched — it's outside the slack window
+        assert!(
+            !fetcher.inflight_requests[&peer_b].dangling,
+            "peer_b should NOT be dangling (outside slack window)"
+        );
+        assert_eq!(fetcher.dangling_count, 1);
     }
 
     #[test]
