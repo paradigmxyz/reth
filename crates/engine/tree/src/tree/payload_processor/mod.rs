@@ -1074,12 +1074,31 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
+impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
+where
+    EvmEnvFor<Evm>: Default,
+{
+    /// Creates a new [`ExecutionEnv`] with default values for testing.
+    #[cfg(test)]
+    fn test_default() -> Self {
+        Self {
+            evm_env: Default::default(),
+            hash: Default::default(),
+            parent_hash: Default::default(),
+            parent_state_root: Default::default(),
+            transaction_count: 0,
+            gas_used: 0,
+            withdrawals: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
+        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1354,7 +1373,7 @@ mod tests {
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
         let mut handle = payload_processor.spawn(
-            Default::default(),
+            ExecutionEnv::test_default(),
             (
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,
