@@ -32,19 +32,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 once_cell.workspace = true
 reth-codecs = { workspace = true, optional = true }
 
-[dev-dependencies]
-# eth
-reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
-
-alloy-eips = { workspace = true, features = ["arbitrary"] }
-
-arbitrary = { workspace = true, features = ["derive"] }
-
-proptest-arbitrary-interop.workspace = true
-proptest.workspace = true
-
-criterion.workspace = true
-
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
 # Internal feature to suppress the deprecation warning for reth workspace crates.
@@ -102,12 +89,3 @@ serde-bincode-compat = [
     "reth-ethereum-primitives/serde-bincode-compat",
     "alloy-genesis/serde-bincode-compat",
 ]
-
-[[bench]]
-name = "recover_ecdsa_crit"
-harness = false
-
-[[bench]]
-name = "validate_blob_tx"
-required-features = ["arbitrary", "c-kzg"]
-harness = false

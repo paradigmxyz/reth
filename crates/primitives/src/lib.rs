@@ -1,19 +1,10 @@
 //! Commonly used types in Reth.
 //!
-//! This crate contains Ethereum primitive types and helper functions.
-//!
 //! ## Deprecation Notice
 //!
 //! This crate is deprecated and will be removed in a future release.
 //! Use [`reth-ethereum-primitives`](https://crates.io/crates/reth-ethereum-primitives) and
 //! [`reth-primitives-traits`](https://crates.io/crates/reth-primitives-traits) instead.
-//!
-//! ## Feature Flags
-//!
-//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
-//! - `test-utils`: Export utilities for testing
-//! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
-//!   types.
 
 #![cfg_attr(
     not(feature = "__internal"),
@@ -40,26 +31,104 @@ use alloy_genesis as _;
 use alloy_primitives as _;
 #[cfg(feature = "alloy-rlp")]
 use alloy_rlp as _;
+use once_cell as _;
 #[cfg(feature = "reth-codecs")]
 use reth_codecs as _;
 
-mod block;
-mod receipt;
-pub use reth_static_file_types as static_file;
-pub mod transaction;
-#[cfg(any(test, feature = "arbitrary"))]
-pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{Block, BlockBody, SealedBlock};
-#[expect(deprecated)]
-pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
+// --- block types ---
 
-pub use receipt::{gas_spent_by_transactions, Receipt};
+/// Ethereum full block.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
+pub type Block<T = TransactionSigned, H = Header> = alloy_consensus::Block<T, H>;
+
+/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
+pub type BlockBody<T = TransactionSigned, H = Header> = alloy_consensus::BlockBody<T, H>;
+
+/// Ethereum sealed block type
+pub type SealedBlock<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
+
+/// Helper type for constructing the block
+#[deprecated(note = "Use `SealedBlock` instead")]
+pub type SealedBlockFor<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
+
+/// Ethereum recovered block
+#[deprecated(note = "Use `RecoveredBlock` instead")]
+pub type BlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
+
+/// Ethereum recovered block
+#[deprecated(note = "Use `RecoveredBlock` instead")]
+pub type SealedBlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
+
+#[cfg(any(test, feature = "arbitrary"))]
+pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+
+// --- receipt types ---
+
+pub use reth_ethereum_primitives::Receipt;
+pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
+
+// --- transaction types ---
+
+/// Transaction types re-exported for backward compatibility.
+pub mod transaction {
+    pub use alloy_consensus::{transaction::PooledTransaction, TxType};
+    pub use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    pub use reth_primitives_traits::{
+        crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+        transaction::{
+            error::{
+                InvalidTransactionError, TransactionConversionError,
+                TryFromRecoveredTransactionError,
+            },
+            signed::SignedTransaction,
+        },
+        FillTxEnv, WithEncoded,
+    };
+
+    /// Utility functions for signatures.
+    pub mod util {
+        pub use reth_primitives_traits::crypto::*;
+    }
+
+    /// Signed transaction.
+    pub mod signature {
+        pub use reth_primitives_traits::crypto::secp256k1::{
+            recover_signer, recover_signer_unchecked,
+        };
+    }
+
+    use super::Recovered;
+    use alloy_consensus::transaction::PooledTransaction as PooledTx;
+
+    /// A signed pooled transaction with recovered signer.
+    #[deprecated(note = "use `Recovered` instead")]
+    pub type PooledTransactionsElementEcRecovered<T = PooledTx> = Recovered<T>;
+
+    /// Type alias kept for backward compatibility.
+    #[deprecated(note = "Use `Recovered` instead")]
+    pub type TransactionSignedEcRecovered<T = TransactionSigned> = Recovered<T>;
+}
+
+pub use transaction::{
+    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
+    InvalidTransactionError, Transaction, TransactionSigned, TxType,
+};
+#[expect(deprecated)]
+pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
+
+// --- common re-exports ---
+
+pub use reth_static_file_types as static_file;
+pub use static_file::StaticFileSegment;
+
 pub use reth_primitives_traits::{
     logs_bloom, Account, BlockTy, BodyTy, Bytecode, GotExpected, GotExpectedBoxed, Header,
     HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, StorageEntry,
     TxTy,
 };
-pub use static_file::StaticFileSegment;
 
 pub use alloy_consensus::{
     transaction::{PooledTransaction, Recovered, TransactionMeta},
@@ -70,14 +139,6 @@ pub use alloy_consensus::{
 #[deprecated(note = "use `Recovered` instead")]
 pub type RecoveredTx<T> = Recovered<T>;
 
-pub use transaction::{
-    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    InvalidTransactionError, Transaction, TransactionSigned, TxType,
-};
-#[expect(deprecated)]
-pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
-
-// Re-exports
 pub use reth_ethereum_forks::*;
 
 #[cfg(feature = "c-kzg")]
@@ -95,5 +156,4 @@ pub mod serde_bincode_compat {
     pub use reth_primitives_traits::serde_bincode_compat::*;
 }
 
-// Re-export of `EthPrimitives`
 pub use reth_ethereum_primitives::EthPrimitives;
