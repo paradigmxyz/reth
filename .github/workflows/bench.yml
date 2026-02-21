@@ -543,32 +543,51 @@ jobs:
 
       - name: Resolve refs
         id: refs
-        run: |
-          BASELINE_ARG="${{ needs.reth-bench-ack.outputs.baseline }}"
-          FEATURE_ARG="${{ needs.reth-bench-ack.outputs.feature }}"
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 
-          if [ -n "$BASELINE_ARG" ]; then
-            git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
-            BASELINE_REF=$(git rev-parse "$BASELINE_ARG" 2>/dev/null || git rev-parse "origin/$BASELINE_ARG" 2>/dev/null)
-            BASELINE_NAME="$BASELINE_ARG"
-          else
-            BASELINE_REF=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
-            BASELINE_NAME="main"
-          fi
+            const baselineArg = '${{ needs.reth-bench-ack.outputs.baseline }}';
+            const featureArg = '${{ needs.reth-bench-ack.outputs.feature }}';
 
-          if [ -n "$FEATURE_ARG" ]; then
-            git fetch origin "$FEATURE_ARG" --quiet 2>/dev/null || true
-            FEATURE_REF=$(git rev-parse "$FEATURE_ARG" 2>/dev/null || git rev-parse "origin/$FEATURE_ARG" 2>/dev/null)
-            FEATURE_NAME="$FEATURE_ARG"
-          else
-            FEATURE_REF="${{ steps.pr-info.outputs.head-sha }}"
-            FEATURE_NAME="${{ steps.pr-info.outputs.head-ref }}"
-          fi
+            let baselineRef, baselineName, featureRef, featureName;
 
-          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
-          echo "baseline-name=$BASELINE_NAME" >> "$GITHUB_OUTPUT"
-          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
-          echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+            if (baselineArg) {
+              try { run(`git fetch origin "${baselineArg}" --quiet`); } catch {}
+              try {
+                baselineRef = run(`git rev-parse "${baselineArg}"`);
+              } catch {
+                baselineRef = run(`git rev-parse "origin/${baselineArg}"`);
+              }
+              baselineName = baselineArg;
+            } else {
+              try {
+                baselineRef = run('git merge-base HEAD origin/main');
+              } catch {
+                baselineRef = '${{ github.sha }}';
+              }
+              baselineName = 'main';
+            }
+
+            if (featureArg) {
+              try { run(`git fetch origin "${featureArg}" --quiet`); } catch {}
+              try {
+                featureRef = run(`git rev-parse "${featureArg}"`);
+              } catch {
+                featureRef = run(`git rev-parse "origin/${featureArg}"`);
+              }
+              featureName = featureArg;
+            } else {
+              featureRef = '${{ steps.pr-info.outputs.head-sha }}';
+              featureName = '${{ steps.pr-info.outputs.head-ref }}';
+            }
+
+            core.setOutput('baseline-ref', baselineRef);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-ref', featureRef);
+            core.setOutput('feature-name', featureName);
 
       - name: Check if snapshot needs update
         id: snapshot-check
@@ -906,6 +925,17 @@ jobs:
               await core.summary.addRaw(body).write();
             }
 
+      - name: Send Slack notification (success)
+        if: success()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.success({ core, context });
+
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
@@ -927,6 +957,26 @@ jobs:
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
             });
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const steps_status = [
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.failure({ core, context, failedStep });
 
       - name: Update status (cancelled)
         if: cancelled() && env.BENCH_COMMENT_ID
