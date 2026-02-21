@@ -1074,23 +1074,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
-where
-    EvmEnvFor<Evm>: Default,
-{
-    fn default() -> Self {
-        Self {
-            evm_env: Default::default(),
-            hash: Default::default(),
-            parent_hash: Default::default(),
-            parent_state_root: Default::default(),
-            transaction_count: 0,
-            gas_used: 0,
-            withdrawals: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::PayloadExecutionCache;
