@@ -1,9 +1,12 @@
 //! Metrics for the payload builder impl
 
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Gauge, Histogram},
+    Metrics,
+};
 
 /// Payload builder metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "payloads")]
 pub(crate) struct PayloadBuilderMetrics {
     /// Total number of times an empty payload was returned because a built one was not ready.
@@ -12,6 +15,16 @@ pub(crate) struct PayloadBuilderMetrics {
     pub(crate) initiated_payload_builds: Counter,
     /// Total number of failed payload build attempts.
     pub(crate) failed_payload_builds: Counter,
+    /// Total time it took to build the payload in seconds.
+    pub(crate) payload_build_duration_seconds: Histogram,
+    /// Number of transactions included in the built payload.
+    pub(crate) built_payload_transactions: Histogram,
+    /// Gas used by the built payload.
+    pub(crate) built_payload_gas_used: Gauge,
+    /// RLP-encoded size of the built payload in bytes.
+    pub(crate) built_payload_rlp_size: Histogram,
+    /// Gas throughput measured as `gas_used` / `build_duration`.
+    pub(crate) built_payload_gas_per_second: Gauge,
 }
 
 impl PayloadBuilderMetrics {
