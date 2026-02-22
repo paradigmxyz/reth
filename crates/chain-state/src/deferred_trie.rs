@@ -265,8 +265,54 @@ impl DeferredTrieData {
     /// In normal operation, the parent always has a cached overlay and this
     /// function is never called.
     ///
-    /// Iterates ancestors oldest -> newest, then extends with current block's data,
-    /// so later state takes precedence.
+    /// When the `rayon` feature is enabled:
+    /// 1. Collects ancestor data (states and updates)
+    /// 2. Merges states and trie updates in parallel using k-way merge
+    #[cfg(feature = "rayon")]
+    fn merge_ancestors_into_overlay(
+        ancestors: &[Self],
+        sorted_hashed_state: &HashedPostStateSorted,
+        sorted_trie_updates: &TrieUpdatesSorted,
+    ) -> TrieInputSorted {
+        // Early exit: no ancestors means just wrap current block's data
+        if ancestors.is_empty() {
+            return TrieInputSorted::new(
+                Arc::new(sorted_trie_updates.clone()),
+                Arc::new(sorted_hashed_state.clone()),
+                Default::default(),
+            );
+        }
+
+        // Collect ancestor data in reverse (newest to oldest) for merge_slice
+        let (states, updates): (Vec<_>, Vec<_>) = ancestors
+            .iter()
+            .rev()
+            .map(|a| {
+                // Note: we can assume that this trie data has already been computed
+                let data = a.wait_cloned();
+                (data.hashed_state, data.trie_updates)
+            })
+            .unzip();
+
+        // Merge state and nodes in parallel using k-way merge
+        let (state, nodes) = rayon::join(
+            || {
+                let mut merged = HashedPostStateSorted::merge_slice(&states);
+                merged.extend_ref_and_sort(sorted_hashed_state);
+                merged
+            },
+            || {
+                let mut merged = TrieUpdatesSorted::merge_slice(&updates);
+                merged.extend_ref_and_sort(sorted_trie_updates);
+                merged
+            },
+        );
+
+        TrieInputSorted::new(Arc::new(nodes), Arc::new(state), Default::default())
+    }
+
+    /// Sequential fallback when rayon is not available.
+    #[cfg(not(feature = "rayon"))]
     fn merge_ancestors_into_overlay(
         ancestors: &[Self],
         sorted_hashed_state: &HashedPostStateSorted,
@@ -283,18 +329,8 @@ impl DeferredTrieData {
             nodes_mut.extend_ref_and_sort(ancestor_data.trie_updates.as_ref());
         }
 
-        // Extend with current block's sorted data last (takes precedence)
-        #[cfg(feature = "rayon")]
-        rayon::join(
-            || state_mut.extend_ref_and_sort(sorted_hashed_state),
-            || nodes_mut.extend_ref_and_sort(sorted_trie_updates),
-        );
-
-        #[cfg(not(feature = "rayon"))]
-        {
-            state_mut.extend_ref_and_sort(sorted_hashed_state);
-            nodes_mut.extend_ref_and_sort(sorted_trie_updates);
-        }
+        state_mut.extend_ref_and_sort(sorted_hashed_state);
+        nodes_mut.extend_ref_and_sort(sorted_trie_updates);
 
         overlay
     }
