@@ -3,6 +3,10 @@ mod bodies;
 mod era;
 /// The execution stage that generates state diff.
 mod execution;
+/// Execution cache for prewarming.
+pub mod execution_cache;
+/// Prewarming functionality for the execution stage.
+mod execution_prewarm;
 /// The finish stage
 mod finish;
 /// Account hashing stage.
@@ -26,6 +30,8 @@ mod tx_lookup;
 pub use bodies::*;
 pub use era::*;
 pub use execution::*;
+pub use execution_cache::*;
+pub use execution_prewarm::*;
 pub use finish::*;
 pub use hashing_account::*;
 pub use hashing_storage::*;
