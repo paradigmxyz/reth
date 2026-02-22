@@ -10209,6 +10209,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.2",
  "reth-codecs",
+ "reth-prune-types",
  "reth-trie-common",
  "serde",
 ]

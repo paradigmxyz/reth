@@ -2232,9 +2232,11 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
-        // iterate over all existing stages in the table and update its progress.
+        // iterate over active stages and update their progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
-        for stage_id in StageId::ALL {
+        // TODO: era_enabled should come from node config
+        let era_enabled = true;
+        for stage_id in StageId::active(era_enabled, self.prune_modes_ref()) {
             let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
             cursor.upsert(
                 stage_id.to_string(),
