@@ -12936,6 +12936,146 @@ int mdbx_txn_renew(MDBX_txn *txn) {
   return LOG_IFERR(rc);
 }
 
+int mdbx_txn_clone(const MDBX_txn *source, MDBX_txn **dest) {
+  if (unlikely(!dest))
+    return LOG_IFERR(MDBX_EINVAL);
+
+  int rc = check_txn(source, MDBX_TXN_BLOCKED - MDBX_TXN_PARKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  if (unlikely((source->flags & MDBX_TXN_RDONLY) == 0))
+    return LOG_IFERR(MDBX_EINVAL);
+
+  MDBX_env *const env = source->env;
+  rc = check_env(env, true);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  if (unlikely(!env->lck_mmap.lck))
+    return LOG_IFERR(MDBX_EPERM);
+
+  if (unlikely(!source->to.reader))
+    return LOG_IFERR(MDBX_BAD_TXN);
+
+  const uint32_t snapshot_pages_used = atomic_load32(&source->to.reader->snapshot_pages_used, mo_Relaxed);
+  const uint64_t snapshot_pages_retired = atomic_load64(&source->to.reader->snapshot_pages_retired, mo_Relaxed);
+
+  MDBX_txn *txn = *dest;
+  const bool reuse = txn != nullptr;
+  if (reuse) {
+    rc = check_txn(txn, 0);
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    if (unlikely(txn->env != env))
+      return LOG_IFERR(MDBX_BAD_TXN);
+    if (unlikely((txn->flags & MDBX_TXN_RDONLY) == 0))
+      return LOG_IFERR(MDBX_EINVAL);
+    if (unlikely(txn->owner != 0 || (txn->flags & MDBX_TXN_FINISHED) == 0)) {
+      rc = mdbx_txn_reset(txn);
+      if (unlikely(rc != MDBX_SUCCESS))
+        return LOG_IFERR(rc);
+    }
+  } else {
+    const intptr_t bitmap_bytes =
+#if MDBX_ENABLE_DBI_SPARSE
+        ceil_powerof2(env->max_dbi, CHAR_BIT * sizeof(txn->dbi_sparse[0])) / CHAR_BIT;
+#else
+        0;
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+    STATIC_ASSERT(sizeof(txn->tw) > sizeof(txn->to));
+    const size_t base = sizeof(MDBX_txn) - sizeof(txn->tw) + sizeof(txn->to);
+    const size_t size = base + (size_t)bitmap_bytes + env->max_dbi * sizeof(txn->dbi_seqs[0]) +
+                        env->max_dbi * (sizeof(txn->dbs[0]) + sizeof(txn->cursors[0]) + sizeof(txn->dbi_state[0]));
+    txn = osal_malloc(size);
+    if (unlikely(txn == nullptr))
+      return LOG_IFERR(MDBX_ENOMEM);
+#if MDBX_DEBUG
+    memset(txn, 0xCD, size);
+    VALGRIND_MAKE_MEM_UNDEFINED(txn, size);
+#endif /* MDBX_DEBUG */
+    MDBX_ANALYSIS_ASSUME(size > base);
+    memset(txn, 0, (MDBX_GOOFY_MSVC_STATIC_ANALYZER && base > size) ? size : base);
+    txn->dbs = ptr_disp(txn, base);
+    txn->cursors = ptr_disp(txn->dbs, env->max_dbi * sizeof(txn->dbs[0]));
+    txn->dbi_state = ptr_disp(txn, size - env->max_dbi * sizeof(txn->dbi_state[0]));
+    txn->env = env;
+    txn->dbi_seqs = ptr_disp(txn->cursors, env->max_dbi * sizeof(txn->cursors[0]));
+#if MDBX_ENABLE_DBI_SPARSE
+    txn->dbi_sparse = ptr_disp(txn->dbi_state, -bitmap_bytes);
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+  }
+
+  bsr_t brs = mvcc_bind_slot(env);
+  if (unlikely(brs.err != MDBX_SUCCESS)) {
+    if (!reuse)
+      osal_free(txn);
+    return LOG_IFERR(brs.err);
+  }
+
+  txn->to.reader = brs.rslot;
+  txn->owner = (env->flags & MDBX_NOSTICKYTHREADS) ? 0 : osal_thread_self();
+
+  txn->txnid = source->txnid;
+  txn->front_txnid = source->front_txnid;
+  txn->geo = source->geo;
+  txn->canary = source->canary;
+  txn->parent = nullptr;
+  txn->nested = nullptr;
+
+  const size_t n_dbi = source->n_dbi;
+  txn->n_dbi = n_dbi;
+  memcpy(txn->dbs, source->dbs, n_dbi * sizeof(txn->dbs[0]));
+  memcpy(txn->dbi_state, source->dbi_state, n_dbi * sizeof(txn->dbi_state[0]));
+  memcpy(txn->dbi_seqs, source->dbi_seqs, n_dbi * sizeof(txn->dbi_seqs[0]));
+#if MDBX_ENABLE_DBI_SPARSE
+  const intptr_t bitmap_bytes_copy = ceil_powerof2(env->max_dbi, CHAR_BIT * sizeof(txn->dbi_sparse[0])) / CHAR_BIT;
+  memcpy(txn->dbi_sparse, source->dbi_sparse, bitmap_bytes_copy);
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+
+  memset(txn->cursors, 0, n_dbi * sizeof(txn->cursors[0]));
+  txn->userctx = source->userctx;
+
+  reader_slot_t *const r = txn->to.reader;
+  safe64_reset(&r->txnid, true);
+  atomic_store32(&r->snapshot_pages_used, snapshot_pages_used, mo_Relaxed);
+  atomic_store64(&r->snapshot_pages_retired, snapshot_pages_retired, mo_Relaxed);
+  safe64_write(&r->txnid, source->txnid);
+  atomic_store32(&env->lck->rdt_refresh_flag, true, mo_AcquireRelease);
+
+  const txnid_t snap_oldest = atomic_load64(&env->lck->cached_oldest, mo_AcquireRelease);
+  if (unlikely(source->txnid < snap_oldest)) {
+    safe64_reset(&r->txnid, true);
+    if ((env->flags & ENV_TXKEY) == 0)
+      atomic_store32(&r->pid, 0, mo_Relaxed);
+    txn->to.reader = nullptr;
+    if (!reuse)
+      osal_free(txn);
+    return LOG_IFERR(MDBX_MVCC_RETARDED);
+  }
+
+  txn->flags = MDBX_TXN_RDONLY | (env->flags & MDBX_NOSTICKYTHREADS);
+#if defined(_WIN32) || defined(_WIN64)
+  const size_t used_bytes = pgno2bytes(env, txn->geo.first_unallocated);
+  if (((used_bytes > env->geo_in_bytes.lower && env->geo_in_bytes.shrink) ||
+       (globals.running_under_Wine && used_bytes < env->geo_in_bytes.upper && env->geo_in_bytes.grow)) &&
+      (txn->flags & MDBX_NOSTICKYTHREADS) == 0) {
+    txn->flags |= txn_shrink_allowed;
+    imports.srwl_AcquireShared(&env->remap_guard);
+  }
+#endif /* Windows */
+
+  dxb_sanitize_tail(env, txn);
+  txn->signature = txn_signature;
+
+  if (!reuse)
+    *dest = txn;
+
+  DEBUG("clone txn %" PRIaTXN " from %p to %p on env %p, root page %" PRIaPGNO "/%" PRIaPGNO, txn->txnid,
+        (const void *)source, (void *)txn, (void *)env, txn->dbs[MAIN_DBI].root, txn->dbs[FREE_DBI].root);
+  return MDBX_SUCCESS;
+}
+
 int mdbx_txn_set_userctx(MDBX_txn *txn, void *ctx) {
   int rc = check_txn(txn, MDBX_TXN_FINISHED);
   if (unlikely(rc != MDBX_SUCCESS))

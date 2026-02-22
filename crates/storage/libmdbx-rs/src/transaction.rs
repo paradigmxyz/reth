@@ -280,6 +280,25 @@ where
     }
 }
 
+impl Transaction<RO> {
+    /// Clones the read-only transaction into a new independent transaction.
+    ///
+    /// Creates a new read-only transaction that views the same MVCC snapshot
+    /// as this transaction. The cloned transaction has its own reader slot
+    /// and is completely independent from this transaction.
+    ///
+    /// This is useful for parallelizing read operations across multiple threads
+    /// where all threads need to see the same consistent view of the database.
+    pub fn clone_txn(&self) -> Result<Self> {
+        let env = self.env().clone();
+        let mut txn: *mut ffi::MDBX_txn = std::ptr::null_mut();
+        self.txn_execute(|source| unsafe {
+            mdbx_result(ffi::mdbx_txn_clone(source, &mut txn))
+        })??;
+        Ok(Self::new_from_ptr(env, txn))
+    }
+}
+
 impl<K> fmt::Debug for Transaction<K>
 where
     K: TransactionKind,

@@ -4403,6 +4403,63 @@ LIBMDBX_API int mdbx_txn_unpark(MDBX_txn *txn, bool restart_if_ousted);
  * \retval MDBX_EINVAL           Transaction handle is NULL. */
 LIBMDBX_API int mdbx_txn_renew(MDBX_txn *txn);
 
+/** \brief Clone a read-only transaction.
+ * \ingroup c_transactions
+ *
+ * Creates a new read-only transaction (or renews a previously reset one) that
+ * views the same MVCC snapshot as the source transaction. Both transactions
+ * will see exactly the same database state, regardless of any write
+ * transactions committed after the clone.
+ *
+ * This is useful for parallelizing read operations across multiple threads
+ * where all threads need to see the same consistent view of the database.
+ * Each thread can use its own cloned transaction without synchronization.
+ *
+ * \note The source and cloned transactions are fully independent after
+ * cloning. Aborting, resetting, or renewing one does not affect the other.
+ *
+ * \note Only read-only transactions can be cloned.
+ * Write transactions cannot be cloned.
+ *
+ * \note Works with both sticky-thread (default) and \ref MDBX_NOSTICKYTHREADS
+ * modes. In sticky-thread mode, the clone is bound to the thread that called
+ * this function. In \ref MDBX_NOSTICKYTHREADS mode, the clone can be used
+ * from any thread.
+ *
+ * \warning The source transaction must NOT be used concurrently from
+ * different threads during cloning. Each transaction object (including both
+ * source and clone) must be confined to a single thread at a time.
+ *
+ * \param [in] source An active read-only transaction to clone from.
+ *                    Must not be finished, parked, ousted, in error state,
+ *                    or have child transactions.
+ * \param [in,out] dest Address where the cloned \ref MDBX_txn handle will be
+ *                      stored.
+ *                      - If `*dest` is NULL, a new transaction handle will be
+ *                        allocated.
+ *                      - Otherwise the `*dest` handle will be reset (if
+ *                        needed) and reused.
+ *
+ * \returns A non-zero error value on failure and 0 on success,
+ * some possible errors are:
+ * \retval MDBX_EINVAL Invalid parameter (source is NULL, dest is
+ *                     NULL, or source is not a read-only transaction).
+ * \retval MDBX_BAD_TXN Source transaction is finished, in error,
+ *                      parked, or otherwise not in a valid state;
+ *                      or `*dest` refers to an incompatible
+ *                      transaction handle.
+ * \retval MDBX_MVCC_RETARDED MVCC-snapshot used by source transaction is
+ *                            bygone (older than cached_oldest).
+ * \retval MDBX_EBADSIGN Transaction object has invalid signature.
+ * \retval MDBX_THREAD_MISMATCH Given `*dest` transaction is not owned by
+ *                              current thread (in sticky-thread mode).
+ * \retval MDBX_PANIC A fatal error occurred earlier and
+ *                    the environment must be shut down.
+ * \retval MDBX_ENOMEM Out of memory.
+ * \retval MDBX_READERS_FULL Reader lock table is full.
+ *                           See \ref mdbx_env_set_maxreaders(). */
+LIBMDBX_API int mdbx_txn_clone(const MDBX_txn *source, MDBX_txn **dest);
+
 /** \brief The fours integers markers (aka "canary") associated with the
  * environment.
  * \ingroup c_crud
