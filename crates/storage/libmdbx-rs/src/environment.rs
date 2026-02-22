@@ -55,6 +55,7 @@ impl Environment {
             handle_slow_readers: None,
             #[cfg(feature = "read-tx-timeouts")]
             max_read_transaction_duration: None,
+            prefault_write: None,
         }
     }
 
@@ -602,6 +603,9 @@ pub struct EnvironmentBuilder {
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
     /// enabled, the default value of [`DEFAULT_MAX_READ_TRANSACTION_DURATION`] is used.
     max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
+    /// Controls whether prefault write is enabled. If [None], MDBX uses its default.
+    /// When disabled, avoids `mincore()` syscall overhead in WRITEMAP mode.
+    prefault_write: Option<bool>,
 }
 
 impl EnvironmentBuilder {
@@ -721,6 +725,14 @@ impl EnvironmentBuilder {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
                     }
+                }
+
+                if let Some(prefault_write) = self.prefault_write {
+                    mdbx_result(ffi::mdbx_env_set_option(
+                        env,
+                        ffi::MDBX_opt_prefault_write_enable,
+                        prefault_write as u64,
+                    ))?;
                 }
 
                 Ok(())
@@ -871,6 +883,19 @@ impl EnvironmentBuilder {
     /// information.
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
+        self
+    }
+
+    /// Set whether to enable prefault writes.
+    ///
+    /// In WRITEMAP mode, MDBX by default uses `mincore()` to check if pages are resident before
+    /// touching them. This avoids page faults but adds syscall overhead. Disabling prefault
+    /// writes skips the `mincore()` check and lets the kernel handle page faults directly.
+    ///
+    /// This is beneficial when pages are likely already in memory (e.g., recently read by
+    /// other transactions), as it eliminates unnecessary syscall overhead.
+    pub const fn set_prefault_write(&mut self, prefault_write: bool) -> &mut Self {
+        self.prefault_write = Some(prefault_write);
         self
     }
 }
