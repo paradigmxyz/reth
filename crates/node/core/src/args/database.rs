@@ -55,6 +55,12 @@ pub struct DatabaseArgs {
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
     /// Controls how aggressively the database synchronizes data to disk.
+    ///
+    /// Defaults to `safe-no-sync` which skips per-commit fsync for significantly faster
+    /// persistence. Database integrity is preserved on any crash; only the most recent
+    /// transactions may be lost on power failure (reth recovers these from peers on restart).
+    ///
+    /// Use `durable` for per-commit fsync if strict durability is required.
     #[arg(
         long = "db.sync-mode",
         value_parser = value_parser!(SyncMode),

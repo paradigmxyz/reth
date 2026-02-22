@@ -6,10 +6,9 @@ use ffi::*;
 /// MDBX sync mode
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
 pub enum SyncMode {
-    /// Default robust and durable sync mode.
+    /// Robust and durable sync mode.
     /// Metadata is written and flushed to disk after a data is written and flushed, which
     /// guarantees the integrity of the database in the event of a crash at any time.
-    #[default]
     Durable,
 
     /// Don't sync the meta-page after commit.
@@ -63,6 +62,7 @@ pub enum SyncMode {
     /// as without any no-sync flags. However, you should expect a larger process's work set
     /// and significantly worse a locality of reference, due to the more intensive allocation
     /// of previously unused pages and increase the size of the database.
+    #[default]
     SafeNoSync,
 
     /// Don't sync anything and wipe previous steady commits.
