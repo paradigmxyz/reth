@@ -76,6 +76,7 @@ humantime.workspace = true
 csv.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]

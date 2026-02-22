@@ -73,6 +73,7 @@ RETH_ARGS=(
   node
   --datadir "$DATADIR"
   --log.file.directory "$OUTPUT_DIR/reth-logs"
+  --metrics 127.0.0.1:9001
   --engine.accept-execution-requests-hash
   --http
   --http.port 8545
@@ -134,6 +135,7 @@ $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --jwt-secret "$DATADIR/jwt.hex" \
   --advance "$BENCH_BLOCKS" \
   --reth-new-payload \
+  --metrics-url http://127.0.0.1:9001/metrics \
   --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
 
 # cleanup runs via trap
