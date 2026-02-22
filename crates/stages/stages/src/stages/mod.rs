@@ -1,3 +1,5 @@
+/// Unified block processing stage (bodies + sender recovery + tx lookup).
+mod block_processing;
 /// The bodies stage.
 mod bodies;
 mod era;
@@ -23,6 +25,7 @@ mod sender_recovery;
 /// The transaction lookup stage
 mod tx_lookup;
 
+pub use block_processing::*;
 pub use bodies::*;
 pub use era::*;
 pub use execution::*;
