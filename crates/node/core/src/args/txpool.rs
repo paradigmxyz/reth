@@ -55,6 +55,7 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
+    monitor_orderflow: bool,
 }
 
 impl DefaultTxPoolValues {
@@ -247,6 +248,12 @@ impl DefaultTxPoolValues {
         self.max_batch_size = v;
         self
     }
+
+    /// Set whether pool orderflow monitoring is enabled by default
+    pub const fn with_monitor_orderflow(mut self, v: bool) -> Self {
+        self.monitor_orderflow = v;
+        self
+    }
 }
 
 impl Default for DefaultTxPoolValues {
@@ -282,6 +289,7 @@ impl Default for DefaultTxPoolValues {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
+            monitor_orderflow: false,
         }
     }
 }
@@ -411,6 +419,11 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Enable orderflow monitoring to track how many mined transactions were available in the
+    /// local pool.
+    #[arg(long = "txpool.monitor-orderflow", default_value_t = DefaultTxPoolValues::get_global().monitor_orderflow)]
+    pub monitor_orderflow: bool,
 }
 
 impl TxPoolArgs {
@@ -464,6 +477,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            monitor_orderflow,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -496,6 +510,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            monitor_orderflow,
         }
     }
 }
@@ -625,6 +640,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            monitor_orderflow: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([

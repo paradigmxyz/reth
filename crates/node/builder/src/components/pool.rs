@@ -2,8 +2,9 @@
 
 use crate::{BuilderContext, FullNodeTypes};
 use alloy_primitives::map::AddressSet;
+use futures::FutureExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
@@ -308,7 +309,34 @@ where
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     spawn_local_backup_task(ctx, pool.clone())?;
-    spawn_pool_maintenance_task(ctx, pool, pool_config)?;
+    spawn_pool_maintenance_task(ctx, pool.clone(), pool_config)?;
+
+    // Auto-enable on Ethereum mainnet for convenience, or when explicitly enabled via CLI.
+    let is_mainnet = ctx.chain_spec().chain().is_ethereum();
+    if ctx.config().txpool.monitor_orderflow || is_mainnet {
+        spawn_pool_orderflow_monitor_task(ctx, pool)?;
+    }
+
+    Ok(())
+}
+
+/// Spawn the pool orderflow monitoring task that tracks how many mined transactions were locally
+/// available.
+fn spawn_pool_orderflow_monitor_task<Node, Pool>(
+    ctx: &BuilderContext<Node>,
+    pool: Pool,
+) -> eyre::Result<()>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + Clone + 'static,
+{
+    let chain_events = ctx.provider().canonical_state_stream();
+
+    ctx.task_executor().spawn_task(
+        reth_transaction_pool::orderflow::monitor_orderflow(pool, chain_events, Default::default())
+            .boxed(),
+    );
+
     Ok(())
 }
 
