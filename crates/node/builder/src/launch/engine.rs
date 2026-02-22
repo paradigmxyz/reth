@@ -9,7 +9,7 @@ use crate::{
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use futures::{stream_select, FutureExt, StreamExt};
+use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
@@ -356,7 +356,7 @@ impl EngineNodeLauncher {
                             }
                         }
                     }
-                    payload = built_payloads.select_next_some() => {
+                    payload = built_payloads.select_next_some(), if !built_payloads.is_terminated() => {
                         if let Some(executed_block) = payload.executed_block() {
                             debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
                             orchestrator.handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
