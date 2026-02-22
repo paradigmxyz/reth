@@ -1071,6 +1071,7 @@ where
         let mut dispatched_storage_targets =
             B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
+        let inline_start = Instant::now();
         for (hashed_address, mut targets) in storage_targets {
             if targets.len() == 1 && account_target_addresses.contains(&hashed_address) {
                 // Apply min_len(0) so the root node is included for storage root computation.
@@ -1090,6 +1091,7 @@ where
                 dispatched_storage_targets.insert(hashed_address, targets);
             }
         }
+        let inlined_duration = inline_start.elapsed();
 
         let inlined_count = inlined_accounts.len() as u64;
 
@@ -1114,6 +1116,7 @@ where
         // Merge inlined proof results into the final output.
         storage_proofs.extend(inlined_storage_proofs);
         value_encoder_stats.inlined_count += inlined_count;
+        value_encoder_stats.inlined_duration += inlined_duration;
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 

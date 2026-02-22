@@ -30,6 +30,8 @@ pub struct ProofTaskTrieMetrics {
     deferred_encoder_dispatched_missing_root: Histogram,
     /// Histogram for storage proofs inlined on the account worker (len=1 targets).
     deferred_encoder_inlined: Histogram,
+    /// Histogram for time spent computing inlined storage proofs on the account worker (seconds).
+    deferred_encoder_inlined_seconds: Histogram,
     /// Histogram for time account workers spent blocked waiting for storage proof results
     /// (seconds). This is the portion of account worker idle time attributable to storage
     /// worker latency rather than queue wait.
@@ -65,6 +67,7 @@ impl ProofTaskTrieMetrics {
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);
         self.deferred_encoder_inlined.record(stats.inlined_count as f64);
+        self.deferred_encoder_inlined_seconds.record(stats.inlined_duration.as_secs_f64());
         self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
     }
 }

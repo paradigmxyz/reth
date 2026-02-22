@@ -36,6 +36,8 @@ pub(crate) struct ValueEncoderStats {
     pub(crate) dispatched_missing_root_count: u64,
     /// Number of storage proofs inlined on the account worker (len=1 targets).
     pub(crate) inlined_count: u64,
+    /// Time spent computing inlined storage proofs on the account worker.
+    pub(crate) inlined_duration: Duration,
 }
 
 impl ValueEncoderStats {
@@ -47,6 +49,7 @@ impl ValueEncoderStats {
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
         self.inlined_count += other.inlined_count;
+        self.inlined_duration += other.inlined_duration;
     }
 }
 
