@@ -1190,12 +1190,19 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        let bytes_written = batch.size_in_bytes();
         self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
             }))
-        })
+        })?;
+
+        if let Some(metrics) = self.0.metrics() {
+            metrics.record_commit_bytes_written(bytes_written);
+        }
+
+        Ok(())
     }
 
     /// Writes all `RocksDB` data for multiple blocks in parallel.
@@ -1458,9 +1465,10 @@ impl<'a> RocksDBBatch<'a> {
         if let Some(threshold) = self.auto_commit_threshold &&
             self.inner.size_in_bytes() >= threshold
         {
+            let bytes_written = self.inner.size_in_bytes();
             tracing::debug!(
                 target: "providers::rocksdb",
-                batch_size = self.inner.size_in_bytes(),
+                batch_size = bytes_written,
                 threshold,
                 "Auto-committing RocksDB batch"
             );
@@ -1473,6 +1481,10 @@ impl<'a> RocksDBBatch<'a> {
                     }))
                 },
             )?;
+
+            if let Some(metrics) = self.provider.0.metrics() {
+                metrics.record_commit_bytes_written(bytes_written);
+            }
         }
         Ok(())
     }
@@ -1485,12 +1497,19 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
+        let bytes_written = self.inner.size_in_bytes();
         self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
             }))
-        })
+        })?;
+
+        if let Some(metrics) = self.provider.0.metrics() {
+            metrics.record_commit_bytes_written(bytes_written);
+        }
+
+        Ok(())
     }
 
     /// Returns the number of write operations (puts + deletes) queued in this batch.
