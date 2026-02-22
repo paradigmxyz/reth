@@ -419,7 +419,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) -> bool {
         let mut hashes_to_request = RequestTxHashes::with_capacity(
-            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+            DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES,
         );
         let mut search_durations = TxFetcherSearchDurations::default();
 
@@ -682,7 +682,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
+        budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.iter().next() else { return };
 
@@ -699,29 +699,77 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             return
         }
 
-        // try to fill request by checking if any other hashes pending fetch (in lru order) are
-        // also seen by peer
-        for hash in self.hashes_pending_fetch.iter() {
-            // 1. Check if a hash pending fetch is seen by peer.
-            if !seen_hashes.contains(hash) {
-                continue
-            };
+        // Iterate the smaller collection for better performance. When `seen_hashes` (peer's
+        // announced transactions, typically ~300-500) is smaller than `hashes_pending_fetch`
+        // (can be up to ~12,800), iterating `seen_hashes` and checking membership in
+        // `hashes_pending_fetch` is significantly faster.
+        let use_seen_hashes_iter = seen_hashes.len() < self.hashes_pending_fetch.len();
 
-            // 2. Optimistically include the hash in the request.
-            hashes_to_request.insert(*hash);
+        // Collect hashes that match into a temporary buffer to avoid borrow conflicts
+        let mut matched_hashes =
+            Vec::with_capacity(budget_fill_request.unwrap_or(DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES));
 
-            // 3. Accumulate expected total response size.
+        let mut budget_remaining = budget_fill_request;
+
+        if use_seen_hashes_iter {
+            // Iterate seen_hashes (smaller), check if each is pending fetch
+            for hash in seen_hashes.iter() {
+                if !self.hashes_pending_fetch.contains(hash) {
+                    continue
+                }
+
+                // Skip if already in request
+                if hashes_to_request.contains(hash) {
+                    continue
+                }
+
+                matched_hashes.push(*hash);
+
+                // Check budget
+                if let Some(ref mut bud) = budget_remaining {
+                    *bud -= 1;
+                    if *bud == 0 {
+                        break
+                    }
+                }
+            }
+        } else {
+            // Original path: iterate hashes_pending_fetch, check if seen by peer
+            for hash in self.hashes_pending_fetch.iter() {
+                if !seen_hashes.contains(hash) {
+                    continue
+                }
+
+                matched_hashes.push(*hash);
+
+                // Check budget
+                if let Some(ref mut bud) = budget_remaining {
+                    *bud -= 1;
+                    if *bud == 0 {
+                        break
+                    }
+                }
+            }
+        }
+
+        // Now process matched hashes
+        for hash in matched_hashes {
+            // Accumulate expected total response size
             let size = self
                 .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
+                .get(&hash)
                 .and_then(|entry| entry.tx_encoded_len())
                 .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
             acc_size_response += size;
 
-            // 4. Check if acc size or hashes count is at limit, if so stop looping.
-            // if expected response is full enough or the number of hashes in the request is
-            // enough, we're satisfied
+            // Include the hash in the request
+            hashes_to_request.insert(hash);
+
+            // Remove from pending fetch
+            self.hashes_pending_fetch.remove(&hash);
+
+            // Check if acc size or hashes count is at limit
             if acc_size_response >=
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES ||
                 hashes_to_request.len() >
@@ -729,18 +777,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             {
                 break
             }
-
-            if let Some(ref mut bud) = budget_fill_request {
-                *bud -= 1;
-                if *bud == 0 {
-                    break
-                }
-            }
-        }
-
-        // 5. Remove hashes to request from cache of hashes pending fetch.
-        for hash in hashes_to_request.iter() {
-            self.hashes_pending_fetch.remove(hash);
         }
     }
 
