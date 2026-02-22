@@ -15,6 +15,7 @@ mod clear;
 mod copy;
 mod diff;
 mod get;
+mod hash_storage_changesets;
 mod list;
 mod prune_checkpoints;
 mod repair_trie;
@@ -74,6 +75,8 @@ pub enum Subcommands {
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
     State(state::Command),
+    /// Migrates storage changesets to use hashed storage keys
+    HashStorageChangesets(hash_storage_changesets::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -219,6 +222,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::State(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::HashStorageChangesets(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
