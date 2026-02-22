@@ -18,58 +18,8 @@ use tracing::{debug, info};
 
 /// Parses a user-specified path with support for environment variables and common shorthands (e.g.
 /// ~ for the user's home directory).
-pub fn parse_path(value: &str) -> Result<PathBuf, VarError> {
-    let expanded = expand_path(value)?;
-    Ok(PathBuf::from(expanded))
-}
-
-/// Expands `~` to the user's home directory and `$VAR`/`${VAR}` to environment variables.
-fn expand_path(input: &str) -> Result<String, VarError> {
-    // Expand tilde
-    let input = if input == "~" {
-        dirs_next::home_dir().map_or_else(|| input.to_string(), |h| h.display().to_string())
-    } else if let Some(rest) = input.strip_prefix("~/") {
-        dirs_next::home_dir()
-            .map_or_else(|| input.to_string(), |h| format!("{}/{rest}", h.display()))
-    } else {
-        input.to_string()
-    };
-
-    // Expand environment variables ($VAR or ${VAR})
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '$' {
-            let braced = chars.peek() == Some(&'{');
-            if braced {
-                chars.next(); // consume '{'
-            }
-            let mut var_name = String::new();
-            while let Some(&ch) = chars.peek() {
-                if braced {
-                    if ch == '}' {
-                        chars.next();
-                        break;
-                    }
-                } else if !ch.is_alphanumeric() && ch != '_' {
-                    break;
-                }
-                var_name.push(ch);
-                chars.next();
-            }
-            if var_name.is_empty() {
-                result.push('$');
-                if braced {
-                    result.push('{');
-                }
-            } else {
-                result.push_str(&std::env::var(&var_name)?);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    Ok(result)
+pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
+    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
 }
 
 /// Attempts to retrieve or create a JWT secret from the specified path.

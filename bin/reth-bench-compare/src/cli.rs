@@ -291,8 +291,8 @@ impl Args {
         match &self.jwt_secret {
             Some(path) => {
                 let jwt_secret_str = path.to_string_lossy();
-                let expanded = expand_tilde(&jwt_secret_str);
-                PathBuf::from(expanded)
+                let expanded = shellexpand::tilde(&jwt_secret_str);
+                PathBuf::from(expanded.as_ref())
             }
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
@@ -310,8 +310,8 @@ impl Args {
 
     /// Get the expanded output directory path
     pub(crate) fn output_dir_path(&self) -> PathBuf {
-        let expanded = expand_tilde(&self.output_dir);
-        PathBuf::from(expanded)
+        let expanded = shellexpand::tilde(&self.output_dir);
+        PathBuf::from(expanded.as_ref())
     }
 
     /// Get the effective warmup blocks value - either specified or defaults to blocks
@@ -1030,16 +1030,4 @@ async fn get_samply_path() -> Result<String> {
     }
 
     Ok(samply_path)
-}
-
-/// Expands `~` prefix to the user's home directory.
-fn expand_tilde(input: &str) -> String {
-    if input == "~" {
-        dirs_next::home_dir().map_or_else(|| input.to_string(), |h| h.display().to_string())
-    } else if let Some(rest) = input.strip_prefix("~/") {
-        dirs_next::home_dir()
-            .map_or_else(|| input.to_string(), |h| format!("{}/{rest}", h.display()))
-    } else {
-        input.to_string()
-    }
 }
