@@ -2076,6 +2076,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(id) = self.transaction_id(hash)? {
+            // Check if the receipt's block has been pruned
+            if let Some(block_number) = self.block_by_transaction_id(id)? {
+                let earliest_available = self.static_file_provider.earliest_history_height();
+                if block_number < earliest_available {
+                    return Err(ProviderError::BlockExpired {
+                        requested: block_number,
+                        earliest_available,
+                    })
+                }
+            }
             self.receipt(id)
         } else {
             Ok(None)
@@ -2086,14 +2096,20 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        if let Some(number) = self.convert_hash_or_number(block)? &&
-            let Some(body) = self.block_body_indices(number)?
-        {
-            let tx_range = body.tx_num_range();
-            return if tx_range.is_empty() {
-                Ok(Some(Vec::new()))
-            } else {
-                self.receipts_by_tx_range(tx_range).map(Some)
+        if let Some(number) = self.convert_hash_or_number(block)? {
+            // Check if the block has been pruned
+            let earliest_available = self.static_file_provider.earliest_history_height();
+            if number < earliest_available {
+                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
+            }
+
+            if let Some(body) = self.block_body_indices(number)? {
+                let tx_range = body.tx_num_range();
+                return if tx_range.is_empty() {
+                    Ok(Some(Vec::new()))
+                } else {
+                    self.receipts_by_tx_range(tx_range).map(Some)
+                }
             }
         }
         Ok(None)
@@ -2118,6 +2134,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         if block_range.is_empty() {
             return Ok(Vec::new());
+        }
+
+        // Check if the start of the range has been pruned
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if *block_range.start() < earliest_available {
+            return Err(ProviderError::BlockExpired {
+                requested: *block_range.start(),
+                earliest_available,
+            })
         }
 
         // collect block body indices for each block in the range
