@@ -1,37 +1,40 @@
-# reth
+# reth snapshot-manifest
 
-Reth
+Generate a snapshot manifest from local archive files
 
 ```bash
-$ reth --help
+$ reth snapshot-manifest --help
 ```
 ```txt
-Usage: reth [OPTIONS] <COMMAND>
-
-Commands:
-  node               Start the node
-  init               Initialize the database from a genesis file
-  init-state         Initialize the database from a state dump file
-  import             This syncs RLP encoded blocks from a file or files
-  import-era         This syncs ERA encoded blocks from a directory
-  export-era         Exports block to era1 files in a specified directory
-  dump-genesis       Dumps genesis block JSON configuration to stdout
-  db                 Database debugging utilities
-  download           Download public node snapshots
-  snapshot-manifest  Generate a snapshot manifest from local archive files
-  stage              Manipulate individual stages
-  p2p                P2P Debugging utilities
-  config             Write config to stdout
-  prune              Prune according to the configuration without any limits
-  re-execute         Re-execute blocks in parallel to verify historical sync correctness
-  help               Print this message or the help of the given subcommand(s)
+Usage: reth snapshot-manifest [OPTIONS] --archive-dir <ARCHIVE_DIR> --base-url <BASE_URL> --block <BLOCK>
 
 Options:
+  -d, --archive-dir <ARCHIVE_DIR>
+          Directory containing the archive files
+
+      --base-url <BASE_URL>
+          Base URL where archives will be hosted. Used as the `base_url` field in the manifest
+
+      --block <BLOCK>
+          Block number this snapshot was taken at
+
+      --chain-id <CHAIN_ID>
+          Chain ID
+
+          [default: 1]
+
+      --blocks-per-file <BLOCKS_PER_FILE>
+          Blocks per archive file for chunked components
+
+          [default: 500000]
+
+  -o, --output <OUTPUT>
+          Output path for the manifest file
+
+          [default: manifest.json]
+
   -h, --help
           Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
 
 Logging:
       --log.stdout.format <FORMAT>

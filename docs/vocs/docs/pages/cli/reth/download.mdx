@@ -133,6 +133,34 @@ Storage:
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
+      --manifest-url <URL>
+          URL to a snapshot manifest.json for modular component downloads.
+
+          When provided, fetches this manifest instead of discovering it from the default base URL. Useful for testing with custom or local manifests.
+
+      --with-txs
+          Include transaction static files
+
+      --with-receipts
+          Include receipt static files
+
+      --with-state-history
+          Include account and storage history static files
+
+      --all
+          Download all available components (full archive node, no pruning)
+
+  -y, --non-interactive
+          Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
+
+      --no-config
+          Skip reth.toml generation after download
+
+      --resumable
+          Use resumable two-phase downloads (download to disk first, then extract).
+
+          Archives are downloaded to a .part file with HTTP Range resume support before extraction. Slower but tolerates network interruptions without restarting. By default, archives stream directly into the extractor.
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
