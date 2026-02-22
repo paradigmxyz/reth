@@ -222,56 +222,30 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
-        let (transaction, block) = match self.eth_api().transaction_and_block(tx_hash).await? {
-            None => return Err(EthApiError::TransactionNotFound.into()),
-            Some(res) => res,
-        };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
-
-        // we need to get the state of the parent block because we're essentially replaying the
-        // block the transaction is included in
-        let state_at: BlockId = block.parent_hash().into();
-        let block_hash = block.hash();
-
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                let block_txs = block.transactions_recovered();
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                move || DebugInspector::new(opts).map_err(Eth::Error::from_eth_err),
+                move |tx_info, mut inspector, res, mut db, evm_env, tx_env| {
+                    let trace = inspector
+                        .get_result(
+                            Some(TransactionContext {
+                                block_hash: tx_info.block_hash,
+                                tx_index: tx_info.index.map(|i| i as usize),
+                                tx_hash: tx_info.hash,
+                            }),
+                            &tx_env,
+                            &evm_env.block_env,
+                            &res,
+                            &mut db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
 
-                // configure env for the target transaction
-                let tx = transaction.into_recovered();
-
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
-
-                let tx_env = eth_api.evm_config().tx_env(&tx);
-
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace = inspector
-                    .get_result(
-                        Some(TransactionContext {
-                            block_hash: Some(block_hash),
-                            tx_index: Some(index),
-                            tx_hash: Some(*tx.tx_hash()),
-                        }),
-                        &tx_env,
-                        &evm_env.block_env,
-                        &res,
-                        &mut db,
-                    )
-                    .map_err(Eth::Error::from_eth_err)?;
-
-                Ok(trace)
-            })
-            .await
+                    Ok(trace)
+                },
+            )
+            .await?
+            .ok_or(EthApiError::TransactionNotFound.into())
     }
 
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
