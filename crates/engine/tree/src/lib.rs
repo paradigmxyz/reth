@@ -96,6 +96,8 @@
 pub mod backfill;
 /// The type that drives the chain forward.
 pub mod chain;
+/// Deferred history indexer implementation.
+pub mod deferred_indexer;
 /// Support for downloading blocks on demand for live sync.
 pub mod download;
 /// Engine Api chain handler support.

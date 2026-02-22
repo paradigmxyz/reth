@@ -813,6 +813,56 @@ async fn test_tree_state_on_new_head_reorg() {
 }
 
 #[test]
+fn test_advance_persistence_dispatches_remove_blocks_on_disk_reorg() {
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let canonical: Vec<_> = test_block_builder.get_executed_blocks(0..7).collect();
+    for block in &canonical {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+    test_harness
+        .tree
+        .state
+        .tree_state
+        .set_canonical_head(canonical[6].recovered_block().num_hash());
+
+    let fork_3 =
+        test_block_builder.get_executed_block_with_number(3, canonical[2].recovered_block().hash());
+    let fork_4 =
+        test_block_builder.get_executed_block_with_number(4, fork_3.recovered_block().hash());
+    let fork_5 =
+        test_block_builder.get_executed_block_with_number(5, fork_4.recovered_block().hash());
+    let fork_6 =
+        test_block_builder.get_executed_block_with_number(6, fork_5.recovered_block().hash());
+    let fork_7 =
+        test_block_builder.get_executed_block_with_number(7, fork_6.recovered_block().hash());
+    let fork = vec![fork_3, fork_4, fork_5, fork_6, fork_7];
+    for block in &fork {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+    test_harness.tree.state.tree_state.set_canonical_head(fork[4].recovered_block().num_hash());
+
+    test_harness.tree.persistence_state.last_persisted_block =
+        canonical[6].recovered_block().num_hash();
+
+    test_harness.tree.advance_persistence().unwrap();
+    assert_eq!(
+        test_harness.tree.persistence_state.current_action().cloned(),
+        Some(CurrentPersistenceAction::RemovingBlocks { new_tip_num: 2 })
+    );
+
+    let action = test_harness.action_rx.recv().unwrap();
+    let PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) = action else {
+        panic!("expected RemoveBlocksAbove action");
+    };
+    assert_eq!(new_tip_num, 2);
+    sender.send(None).unwrap();
+}
+
+#[test]
 fn test_tree_state_on_new_head_deep_fork() {
     reth_tracing::init_test_tracing();
 

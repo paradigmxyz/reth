@@ -1,4 +1,7 @@
-use crate::metrics::PersistenceMetrics;
+use crate::{
+    deferred_indexer::{DeferredHistoryIndexer, DeferredHistoryIndexerConfig},
+    metrics::PersistenceMetrics,
+};
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -7,20 +10,20 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
-        mpsc::{Receiver, SendError, Sender},
+        mpsc::{Receiver, SendError, Sender, TryRecvError},
         Arc,
     },
     thread::JoinHandle,
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, warn};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -50,6 +53,10 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Optional deferred history indexer that runs inside this service's thread.
+    deferred_indexer: Option<DeferredHistoryIndexer>,
+    /// Whether deferred indexing ticks are enabled.
+    deferred_indexing_enabled: bool,
 }
 
 impl<N> PersistenceService<N>
@@ -62,6 +69,8 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
+        deferred_indexing_enabled: bool,
     ) -> Self {
         Self {
             provider,
@@ -71,6 +80,9 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            deferred_indexer: deferred_indexer_config
+                .map(|config| DeferredHistoryIndexer::new(&config.stages, &config.prune_modes)),
+            deferred_indexing_enabled,
         }
     }
 }
@@ -82,37 +94,115 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
+        loop {
+            let indexing_pending = self.deferred_indexing_enabled &&
+                self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
+
+            // When indexing work is pending, use try_recv so we can do indexing ticks between
+            // persistence actions. Otherwise block on recv.
+            if indexing_pending {
+                match self.incoming.try_recv() {
+                    Ok(action) => self.handle_action(action)?,
+                    Err(TryRecvError::Empty) => self.run_deferred_indexing_tick(),
+                    Err(TryRecvError::Disconnected) => break,
+                }
+            } else {
+                let action = match self.incoming.recv() {
+                    Ok(action) => action,
+                    Err(_) => break,
+                };
+                self.handle_action(action)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// No persistence work pending, opportunistically run one deferred indexing tick.
+    fn run_deferred_indexing_tick(&mut self) {
+        let Some(indexer) = &mut self.deferred_indexer else {
+            return;
+        };
+
+        let provider_rw = match self.provider.database_provider_rw() {
+            Ok(provider_rw) => provider_rw,
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Failed to open RW provider for deferred indexing tick");
+                return;
+            }
+        };
+
+        let tip = match provider_rw.get_stage_checkpoint(StageId::Finish) {
+            Ok(checkpoint) => checkpoint.map(|c| c.block_number).unwrap_or(0),
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Failed to read Finish checkpoint for deferred indexing tick");
+                return;
+            }
+        };
+
+        let tick_started = Instant::now();
+        let progress = match indexer.tick_with_provider(&provider_rw, tip) {
+            Ok(progress) => progress,
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
+                return;
+            }
+        };
+
+        if let Err(err) = provider_rw.commit() {
+            warn!(target: "engine::persistence", %err, "Failed to commit deferred indexing tick");
+            return;
+        }
+
+        if let Some(progress) = progress {
+            let _ = self.sync_metrics_tx.send(MetricEvent::StageCheckpoint {
+                stage_id: progress.stage_id,
+                checkpoint: progress.checkpoint,
+                max_block_number: Some(tip),
+                elapsed: tick_started.elapsed(),
+            });
+        }
+    }
+
+    /// Handle a single persistence action.
+    fn handle_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                let result = self.on_remove_blocks_above(new_tip_num)?;
+                // send new sync metrics based on removed blocks
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                // we ignore the error because the caller may or may not care about the result
+                let _ = sender.send(result);
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let result = self.on_save_blocks(blocks)?;
+                let result_number = result.map(|r| r.number);
+
+                // we ignore the error because the caller may or may not care about the result
+                let _ = sender.send(result);
+
+                if let Some(block_number) = result_number {
+                    // send new sync metrics based on saved blocks
                     let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: block_number });
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
-
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
-
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                    }
-                }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
-                }
+            }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
+            PersistenceAction::SetDeferredIndexingEnabled(enabled) => {
+                self.deferred_indexing_enabled = enabled;
+                debug!(
+                    target: "engine::persistence",
+                    enabled,
+                    "Updated deferred history indexing state"
+                );
             }
         }
         Ok(())
@@ -120,7 +210,7 @@ where
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
-        &self,
+        &mut self,
         new_tip_num: u64,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
@@ -130,6 +220,11 @@ where
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
+
+        // Notify deferred indexer about the reorg so it re-checks catch-up state
+        if let Some(indexer) = &mut self.deferred_indexer {
+            indexer.on_reorg(new_tip_num);
+        }
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -154,7 +249,12 @@ where
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+            let save_mode = if self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up()) {
+                SaveBlocksMode::FullNoHistoryIndexing
+            } else {
+                SaveBlocksMode::Full
+            };
+            provider_rw.save_blocks(blocks, save_mode)?;
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized)?;
@@ -215,6 +315,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+
+    /// Enables or disables deferred indexing ticks.
+    SetDeferredIndexingEnabled(bool),
 }
 
 /// A handle to the persistence service
@@ -245,6 +348,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        deferred_indexer_config: Option<DeferredHistoryIndexerConfig>,
+        deferred_indexing_enabled: bool,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -253,8 +358,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new(
+            provider_factory,
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+            deferred_indexer_config,
+            deferred_indexing_enabled,
+        );
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -314,6 +425,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
+    /// Enables or disables deferred indexing ticks in the persistence thread.
+    pub fn set_deferred_indexing_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        self.send_action(PersistenceAction::SetDeferredIndexingEnabled(enabled))
+    }
+
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
@@ -369,7 +488,13 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            None,
+            true,
+        )
     }
 
     #[test]

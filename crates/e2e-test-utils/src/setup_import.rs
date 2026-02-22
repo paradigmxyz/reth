@@ -134,7 +134,10 @@ pub async fn setup_engine_with_chain_import(
         // Import the chain data
         // Use no_state to skip state validation for test chains
         let import_config = ImportConfig::default();
-        let config = Config::default();
+        let mut config = Config::default();
+        // Pre-import in e2e setup is expected to be complete/synchronous. Disable deferred
+        // indexing for import so tx/history indexing is materialized before node launch.
+        config.stages.deferred_history_indexing = false;
 
         // Create EVM and consensus for Ethereum
         let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());

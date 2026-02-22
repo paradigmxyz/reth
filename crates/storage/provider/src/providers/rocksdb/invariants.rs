@@ -102,6 +102,20 @@ impl RocksDBProvider {
             + BlockBodyIndicesProvider
             + TransactionsProvider<Transaction: Encodable2718>,
     {
+        if provider.prune_modes_ref().transaction_lookup.is_some_and(|mode| mode.is_full()) {
+            // Transaction lookup is fully pruned by configuration, so tx hash numbers are not
+            // part of the expected persistent state. Avoid startup-time healing scans and just
+            // clear stale leftovers if they exist.
+            if self.first::<tables::TransactionHashNumbers>()?.is_some() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "Transaction lookup prune mode is full, clearing TransactionHashNumbers"
+                );
+                self.clear::<tables::TransactionHashNumbers>()?;
+            }
+            return Ok(None);
+        }
+
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|cp| cp.block_number)
@@ -111,6 +125,22 @@ impl RocksDBProvider {
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Transactions)
             .unwrap_or(0);
+
+        // When the chain is fully synced (`Finish` at or beyond static-file tip) but this stage
+        // trails, deferred indexing is expected to catch up incrementally in the background.
+        // Avoid startup-time scans/healing in that mode.
+        let finish_checkpoint =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|cp| cp.block_number).unwrap_or(0);
+        if checkpoint < sf_tip && finish_checkpoint >= sf_tip {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                checkpoint,
+                sf_tip,
+                finish_checkpoint,
+                "TransactionHashNumbers: deferred indexing catch-up detected, skipping startup healing"
+            );
+            return Ok(None);
+        }
 
         // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
         if checkpoint == 0 && self.first::<tables::TransactionHashNumbers>()?.is_some() {
@@ -264,6 +294,26 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap_or(0);
+
+        // During deferred indexing, `Finish` is already at tip while history stages trail.
+        // In that mode, startup-time healing scans are unnecessary and expensive.
+        let finish_checkpoint =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|cp| cp.block_number).unwrap_or(0);
+        if checkpoint < sf_tip && finish_checkpoint >= sf_tip {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                checkpoint,
+                sf_tip,
+                finish_checkpoint,
+                "StoragesHistory: deferred indexing catch-up detected, skipping startup healing"
+            );
+            return Ok(None);
+        }
+
         // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
         if checkpoint == 0 && self.first::<tables::StoragesHistory>()?.is_some() {
             tracing::info!(
@@ -273,11 +323,6 @@ impl RocksDBProvider {
             self.clear::<tables::StoragesHistory>()?;
             return Ok(None);
         }
-
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
 
         if sf_tip < checkpoint {
             // This should never happen in normal operation - static files are always
@@ -361,6 +406,26 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap_or(0);
+
+        // During deferred indexing, `Finish` is already at tip while history stages trail.
+        // In that mode, startup-time healing scans are unnecessary and expensive.
+        let finish_checkpoint =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|cp| cp.block_number).unwrap_or(0);
+        if checkpoint < sf_tip && finish_checkpoint >= sf_tip {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                checkpoint,
+                sf_tip,
+                finish_checkpoint,
+                "AccountsHistory: deferred indexing catch-up detected, skipping startup healing"
+            );
+            return Ok(None);
+        }
+
         // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
         if checkpoint == 0 && self.first::<tables::AccountsHistory>()?.is_some() {
             tracing::info!(
@@ -370,11 +435,6 @@ impl RocksDBProvider {
             self.clear::<tables::AccountsHistory>()?;
             return Ok(None);
         }
-
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
-            .unwrap_or(0);
 
         if sf_tip < checkpoint {
             // This should never happen in normal operation - static files are always
@@ -454,6 +514,7 @@ mod tests {
         tables::{self, BlockNumberList},
         transaction::DbTxMut,
     };
+    use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_types::StageCheckpoint;
     use reth_testing_utils::generators::{self, BlockRangeParams};
     use tempfile::TempDir;
@@ -535,6 +596,39 @@ mod tests {
         assert_eq!(result, Some(0), "Static file tip (0) behind checkpoint (100) triggers unwind");
     }
 
+    #[test]
+    fn test_check_consistency_tx_lookup_full_prune_skips_healing_and_unwind() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory().with_prune_modes(PruneModes {
+            transaction_lookup: Some(PruneMode::Full),
+            ..Default::default()
+        });
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Insert stale tx hash mapping that should be cleared when tx lookup is fully pruned.
+        let stale_hash = B256::from([0xabu8; 32]);
+        rocksdb.put::<tables::TransactionHashNumbers>(stale_hash, &42).unwrap();
+
+        // A checkpoint ahead of static files would normally trigger unwind in tx-lookup healing.
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "tx-lookup full prune should bypass tx-hash consistency unwind");
+        assert!(
+            rocksdb.get::<tables::TransactionHashNumbers>(stale_hash).unwrap().is_none(),
+            "stale tx-hash rows should be cleared when tx lookup is fully pruned"
+        );
+    }
+
     /// Tests that when checkpoint=0 and `RocksDB` has data, all entries are pruned.
     /// This simulates a crash recovery scenario where the checkpoint was lost.
     #[test]
@@ -583,6 +677,9 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
+            // This test models lost checkpoints after crash recovery, so Finish should also
+            // reflect the lost progress instead of triggering deferred catch-up mode.
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0)).unwrap();
             provider.commit().unwrap();
         }
 
@@ -660,6 +757,60 @@ mod tests {
         assert!(
             rocksdb.last::<tables::StoragesHistory>().unwrap().is_none(),
             "RocksDB should be empty after pruning"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_storages_history_deferred_catchup_skips_startup_healing() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        rocksdb.put::<tables::StoragesHistory>(key.clone(), &block_list).unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block_num in 0..=100u64 {
+                writer
+                    .append_storage_changeset(
+                        vec![StorageBeforeTx {
+                            address: Address::repeat_byte(0x11),
+                            key: B256::repeat_byte(0x22),
+                            value: U256::from(block_num),
+                        }],
+                        block_num,
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(0))
+                .unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "deferred catch-up should skip history startup healing");
+        assert_eq!(
+            rocksdb.get::<tables::StoragesHistory>(key).unwrap(),
+            Some(block_list),
+            "existing partial history should be preserved"
         );
     }
     #[test]
@@ -791,6 +942,8 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
+            // This test models post-unwind state where canonical progress is at block 2.
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
             provider.commit().unwrap();
         }
 
@@ -1070,6 +1223,56 @@ mod tests {
         assert!(
             rocksdb.last::<tables::AccountsHistory>().unwrap().is_none(),
             "RocksDB should be empty after pruning"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_accounts_history_deferred_catchup_skips_startup_healing() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let key = ShardedKey::new(Address::ZERO, 50);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        rocksdb.put::<tables::AccountsHistory>(key.clone(), &block_list).unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block_num in 0..=100u64 {
+                writer
+                    .append_account_changeset(
+                        vec![AccountBeforeTx { address: Address::repeat_byte(0x33), info: None }],
+                        block_num,
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
+                .unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "deferred catch-up should skip history startup healing");
+        assert_eq!(
+            rocksdb.get::<tables::AccountsHistory>(key).unwrap(),
+            Some(block_list),
+            "existing partial history should be preserved"
         );
     }
 

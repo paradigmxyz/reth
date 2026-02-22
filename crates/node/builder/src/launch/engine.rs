@@ -13,6 +13,7 @@ use futures::{stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
+    deferred_indexer::DeferredHistoryIndexerConfig,
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
     tree::TreeConfig,
@@ -138,15 +139,24 @@ impl EngineNodeLauncher {
         network_handle.update_sync_state(SyncState::Syncing);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
+        let initial_target = ctx.initial_backfill_target()?;
+        let startup_consistency_backfill =
+            ctx.node_config().debug.tip.is_none() && initial_target.is_some();
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         let consensus = Arc::new(ctx.components().consensus().clone());
+        let mut startup_pipeline_stages = ctx.toml_config().stages.clone();
+        if startup_consistency_backfill {
+            // If startup consistency detects an actual inconsistency, run full staged sync
+            // (including history indexing stages) during that backfill.
+            startup_pipeline_stages.deferred_history_indexing = false;
+        }
 
         let pipeline = build_networked_pipeline(
-            &ctx.toml_config().stages,
+            &startup_pipeline_stages,
             network_client.clone(),
             consensus.clone(),
             ctx.provider_factory().clone(),
@@ -241,6 +251,17 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            {
+                // Configure deferred history indexing if enabled in config.
+                ctx.toml_config().stages.deferred_history_indexing.then(|| {
+                    info!(target: "reth::cli", "Deferred history indexing enabled, embedding indexer in persistence service");
+                    DeferredHistoryIndexerConfig::new(
+                        ctx.toml_config().stages.clone(),
+                        ctx.prune_config().segments,
+                    )
+                })
+            },
+            initial_target.is_none(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -275,7 +296,6 @@ impl EngineNodeLauncher {
         let (engine_shutdown, shutdown_rx) = EngineShutdown::new();
 
         // Run consensus engine to completion
-        let initial_target = ctx.initial_backfill_target()?;
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()

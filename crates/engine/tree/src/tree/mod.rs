@@ -1433,9 +1433,11 @@ where
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "engine::tree", "received backfill sync started event");
                     self.backfill_sync_state = BackfillSyncState::Active;
+                    let _ = self.persistence.set_deferred_indexing_enabled(false);
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
+                    let _ = self.persistence.set_deferred_indexing_enabled(true);
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");

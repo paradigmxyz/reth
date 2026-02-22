@@ -164,18 +164,32 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 /// Mode for [`DatabaseProvider::save_blocks`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveBlocksMode {
-    /// Full mode: write block structure + receipts + state + trie.
+    /// Full mode: write block structure + receipts + state + trie + history indices.
     /// Used by engine/production code.
     Full,
     /// Blocks only: write block structure (headers, txs, senders, indices).
     /// Receipts/state/trie are skipped - they may come later via separate calls.
     /// Used by `insert_block`.
     BlocksOnly,
+    /// Like `Full`, but skips tx-hash lookup and history index writes.
+    /// Used when deferred history indexing is active and the background indexer
+    /// hasn't caught up yet.
+    FullNoHistoryIndexing,
 }
 
 impl SaveBlocksMode {
-    /// Returns `true` if this is [`SaveBlocksMode::Full`].
+    /// Returns `true` if this mode writes state (receipts, changesets, trie).
     pub const fn with_state(self) -> bool {
+        matches!(self, Self::Full | Self::FullNoHistoryIndexing)
+    }
+
+    /// Returns `true` if this mode writes tx hash lookups.
+    pub const fn with_tx_lookup(self) -> bool {
+        matches!(self, Self::Full | Self::BlocksOnly)
+    }
+
+    /// Returns `true` if this mode writes history indices (account/storage history).
+    pub const fn with_history_indexing(self) -> bool {
         matches!(self, Self::Full)
     }
 }
@@ -495,13 +509,56 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
     /// Creates the context for `RocksDB` writes.
     #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
-    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+    fn rocksdb_write_ctx(
+        &self,
+        first_block: BlockNumber,
+        save_mode: SaveBlocksMode,
+    ) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
+            write_tx_lookup: save_mode.with_tx_lookup(),
+            write_account_history: save_mode.with_history_indexing(),
+            write_storage_history: save_mode.with_history_indexing(),
             storage_settings: self.cached_storage_settings(),
             pending_batches: self.pending_rocksdb_batches.clone(),
         }
+    }
+
+    /// Updates pipeline stage checkpoints after `save_blocks`, optionally skipping deferred index
+    /// stages when history indexing is intentionally deferred.
+    fn update_pipeline_stages_for_save_mode(
+        &self,
+        block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
+        let skip_deferred_history_stages =
+            matches!(save_mode, SaveBlocksMode::FullNoHistoryIndexing);
+        let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
+        for stage_id in StageId::ALL {
+            if skip_deferred_history_stages &&
+                matches!(
+                    stage_id,
+                    StageId::TransactionLookup |
+                        StageId::IndexStorageHistory |
+                        StageId::IndexAccountHistory
+                )
+            {
+                continue;
+            }
+
+            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
+            cursor.upsert(
+                stage_id.to_string(),
+                &StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Writes executed blocks and state to storage.
@@ -556,7 +613,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number, save_mode);
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
@@ -594,7 +651,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if save_mode.with_tx_lookup() &&
+                !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -679,8 +737,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_trie_updates += start.elapsed();
             }
 
-            // Full mode: update history indices
-            if save_mode.with_state() {
+            // Full mode: update history indices (skipped when deferred indexing is catching up)
+            if save_mode.with_history_indexing() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
@@ -688,7 +746,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_block_number, false)?;
+            self.update_pipeline_stages_for_save_mode(last_block_number, false, save_mode)?;
             timings.update_pipeline_stages = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
@@ -5215,6 +5273,130 @@ mod tests {
             let mdbx_storage_history =
                 provider.tx_ref().entries::<tables::StoragesHistory>().unwrap();
             assert!(mdbx_storage_history > 0, "v1: StoragesHistory in MDBX should not be empty");
+        }
+    }
+
+    #[test]
+    fn save_blocks_full_no_history_indexing_preserves_deferred_stage_checkpoints() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
+            SealedHeader::new(
+                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                B256::ZERO,
+            ),
+            Default::default(),
+        );
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(genesis.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+
+        provider_rw
+            .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(70))
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(80))
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(90))
+            .unwrap();
+
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number: 1, difficulty: U256::from(1), ..Default::default() },
+            Default::default(),
+        );
+        let bundle = BundleState::builder(1..=1)
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(1), ..Default::default() },
+            )
+            .revert_account_info(1, address, Some(None))
+            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(7)))]))
+            .revert_storage(1, address, vec![(slot, U256::ZERO)])
+            .build();
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let executed = ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: bundle,
+            }),
+            ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+        );
+
+        provider_rw.save_blocks(vec![executed], SaveBlocksMode::FullNoHistoryIndexing).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::TransactionLookup)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            70
+        );
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::IndexStorageHistory)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            80
+        );
+        assert_eq!(
+            provider
+                .get_stage_checkpoint(StageId::IndexAccountHistory)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            90
+        );
+
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            1
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Headers).unwrap().unwrap().block_number,
+            1
+        );
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        {
+            let rocksdb = factory.rocksdb_provider();
+            let slot_key = B256::from(slot);
+            let hashed_slot = keccak256(slot_key);
+            assert!(
+                rocksdb.account_history_shards(address).unwrap().is_empty(),
+                "FullNoHistoryIndexing must not write AccountsHistory"
+            );
+            assert!(
+                rocksdb.storage_history_shards(address, hashed_slot).unwrap().is_empty(),
+                "FullNoHistoryIndexing must not write StoragesHistory"
+            );
         }
     }
 

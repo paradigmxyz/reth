@@ -27,6 +27,8 @@ pub struct IndexAccountHistoryStage {
     pub prune_mode: Option<PruneMode>,
     /// ETL configuration
     pub etl_config: EtlConfig,
+    /// Whether to emit progress/info logs while collecting/writing indices.
+    pub log_progress: bool,
 }
 
 impl IndexAccountHistoryStage {
@@ -36,13 +38,29 @@ impl IndexAccountHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode }
+        Self {
+            commit_threshold: config.commit_threshold,
+            etl_config,
+            prune_mode,
+            log_progress: true,
+        }
+    }
+
+    /// Enables or disables progress/info logging for this stage execution.
+    pub const fn with_progress_logging(mut self, log_progress: bool) -> Self {
+        self.log_progress = log_progress;
+        self
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
+        Self {
+            commit_threshold: 100_000,
+            prune_mode: None,
+            etl_config: EtlConfig::default(),
+            log_progress: true,
+        }
     }
 }
 
@@ -120,11 +138,18 @@ where
             range = 0..=*input.next_block_range().end();
         }
 
-        info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+        if self.log_progress {
+            info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+        }
 
         let collector = if provider.cached_storage_settings().storage_v2 {
             // Use the provider-based collection that can read from static files.
-            collect_account_history_indices(provider, range.clone(), &self.etl_config)?
+            collect_account_history_indices(
+                provider,
+                range.clone(),
+                &self.etl_config,
+                self.log_progress,
+            )?
         } else {
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
@@ -132,14 +157,17 @@ where
                 ShardedKey::new,
                 |(index, value)| (index, value.address),
                 &self.etl_config,
+                self.log_progress,
             )?
         };
 
-        info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
+        if self.log_progress {
+            info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
+        }
 
         provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-            load_account_history(collector, first_sync, &mut writer)
+            load_account_history(collector, first_sync, &mut writer, self.log_progress)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
@@ -550,6 +578,7 @@ mod tests {
                 commit_threshold: self.commit_threshold,
                 prune_mode: self.prune_mode,
                 etl_config: EtlConfig::default(),
+                log_progress: true,
             }
         }
     }
@@ -794,6 +823,30 @@ mod tests {
             assert!(result.is_some(), "RocksDB should have merged data");
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+
+        /// Test stale checkpoint overlap currently panics due non-monotonic shard merge input.
+        ///
+        /// This models restart/crash recovery where `RocksDB` writes can be ahead of stage
+        /// checkpoint. Re-executing from stale checkpoint replays overlap and hits the sorted-list
+        /// invariant panic in shard encoding.
+        #[tokio::test]
+        #[should_panic(expected = "IntegerList must be pre-sorted and non-empty")]
+        async fn execute_incremental_sync_with_stale_checkpoint_overlap_panics() {
+            let db = TestStageDB::default();
+            setup_v2_account_data(&db, 0..=10);
+
+            let input = ExecInput { target: Some(5), ..Default::default() };
+            let mut stage = IndexAccountHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            provider.commit().unwrap();
+
+            // Simulate a stale checkpoint (3) while RocksDB already contains data up to 5.
+            let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(3)) };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let _ = stage.execute(&provider, input).unwrap();
         }
     }
 }

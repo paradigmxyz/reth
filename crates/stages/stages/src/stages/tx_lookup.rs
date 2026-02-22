@@ -39,11 +39,17 @@ pub struct TransactionLookupStage {
     chunk_size: u64,
     etl_config: EtlConfig,
     prune_mode: Option<PruneMode>,
+    log_progress: bool,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000, etl_config: EtlConfig::default(), prune_mode: None }
+        Self {
+            chunk_size: 5_000_000,
+            etl_config: EtlConfig::default(),
+            prune_mode: None,
+            log_progress: true,
+        }
     }
 }
 
@@ -54,7 +60,13 @@ impl TransactionLookupStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { chunk_size: config.chunk_size, etl_config, prune_mode }
+        Self { chunk_size: config.chunk_size, etl_config, prune_mode, log_progress: true }
+    }
+
+    /// Enables or disables progress/info logging for this stage execution.
+    pub const fn with_progress_logging(mut self, log_progress: bool) -> Self {
+        self.log_progress = log_progress;
+        self
     }
 }
 
@@ -122,11 +134,13 @@ where
         let mut hash_collector: Collector<TxHash, TxNumber> =
             Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
-        info!(
-            target: "sync::stages::transaction_lookup",
-            tx_range = ?input.checkpoint().block_number..=input.target(),
-            "Updating transaction lookup"
-        );
+        if self.log_progress {
+            info!(
+                target: "sync::stages::transaction_lookup",
+                tx_range = ?input.checkpoint().block_number..=input.target(),
+                "Updating transaction lookup"
+            );
+        }
 
         loop {
             let Some(range_output) =
@@ -141,7 +155,9 @@ where
 
             let end_block = *range_output.block_range.end();
 
-            info!(target: "sync::stages::transaction_lookup", tx_range = ?range_output.tx_range, "Calculating transaction hashes");
+            if self.log_progress {
+                info!(target: "sync::stages::transaction_lookup", tx_range = ?range_output.tx_range, "Calculating transaction hashes");
+            }
 
             for (key, value) in provider.transaction_hashes_by_range(range_output.tx_range)? {
                 hash_collector.insert(key, value)?;
@@ -172,7 +188,7 @@ where
                     for (index, hash_to_number) in iter.enumerate() {
                         let (hash_bytes, number_bytes) =
                             hash_to_number.map_err(|e| ProviderError::other(Box::new(e)))?;
-                        if index > 0 && index.is_multiple_of(interval) {
+                        if self.log_progress && index > 0 && index.is_multiple_of(interval) {
                             info!(
                                 target: "sync::stages::transaction_lookup",
                                 ?append_only,
@@ -521,6 +537,7 @@ mod tests {
                 chunk_size: self.chunk_size,
                 etl_config: self.etl_config.clone(),
                 prune_mode: self.prune_mode,
+                log_progress: true,
             }
         }
     }

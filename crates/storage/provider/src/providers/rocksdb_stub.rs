@@ -49,6 +49,12 @@ pub(crate) struct RocksDBWriteCtx {
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
     pub prune_tx_lookup: Option<PruneMode>,
+    /// Whether to write transaction lookup indices.
+    pub write_tx_lookup: bool,
+    /// Whether to write account history indices.
+    pub write_account_history: bool,
+    /// Whether to write storage history indices.
+    pub write_storage_history: bool,
     /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
     /// Pending batches (stub - unused).

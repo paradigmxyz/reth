@@ -100,7 +100,7 @@ impl Config {
 }
 
 /// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct StageConfig {
@@ -128,8 +128,36 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// When true, history indexing stages (`IndexAccountHistory`, `IndexStorageHistory`,
+    /// `TransactionLookup`) are excluded from the pipeline, allowing the node to start syncing
+    /// without waiting for index generation. A deferred indexer runs inside the persistence
+    /// service to build these indices incrementally while the node is live syncing.
+    ///
+    /// Default: true.
+    pub deferred_history_indexing: bool,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
+}
+
+impl Default for StageConfig {
+    fn default() -> Self {
+        Self {
+            era: Default::default(),
+            headers: Default::default(),
+            bodies: Default::default(),
+            sender_recovery: Default::default(),
+            execution: Default::default(),
+            prune: Default::default(),
+            account_hashing: Default::default(),
+            storage_hashing: Default::default(),
+            merkle: Default::default(),
+            transaction_lookup: Default::default(),
+            index_account_history: Default::default(),
+            index_storage_history: Default::default(),
+            deferred_history_indexing: true,
+            etl: Default::default(),
+        }
+    }
 }
 
 impl StageConfig {
@@ -648,7 +676,13 @@ mod tests {
         with_config_path(|path| {
             let config = Config::from_path(path).expect("load_path failed");
             assert_eq!(config, Config::default());
+            assert!(config.stages.deferred_history_indexing);
         })
+    }
+
+    #[test]
+    fn stage_config_defaults_to_deferred_history_indexing() {
+        assert!(Config::default().stages.deferred_history_indexing);
     }
 
     #[test]
@@ -867,7 +901,8 @@ storage_history = { distance = 16384 }
 '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
 '0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
 #";
-        let _conf: Config = toml::from_str(alpha_0_0_8).unwrap();
+        let conf: Config = toml::from_str(alpha_0_0_8).unwrap();
+        assert!(conf.stages.deferred_history_indexing);
 
         let alpha_0_0_11 = r"#
 [prune.segments]
@@ -880,7 +915,8 @@ storage_history = { distance = 16384 }
 '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
 '0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
 #";
-        let _conf: Config = toml::from_str(alpha_0_0_11).unwrap();
+        let conf: Config = toml::from_str(alpha_0_0_11).unwrap();
+        assert!(conf.stages.deferred_history_indexing);
 
         let alpha_0_0_18 = r"#
 [stages.headers]
@@ -976,6 +1012,7 @@ nanos = 0
 #";
         let conf: Config = toml::from_str(alpha_0_0_18).unwrap();
         assert_eq!(conf.stages.execution.max_duration, Some(Duration::from_secs(10 * 60)));
+        assert!(conf.stages.deferred_history_indexing);
 
         let alpha_0_0_19 = r"#
 [stages.headers]
@@ -1067,7 +1104,8 @@ nanos = 0
 secs = 120
 nanos = 0
 #";
-        let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
+        let conf: Config = toml::from_str(alpha_0_0_19).unwrap();
+        assert!(conf.stages.deferred_history_indexing);
     }
 
     // ensures prune config deserialization is backwards compatible
@@ -1082,7 +1120,8 @@ sender_recovery = { distance = 16384 }
 transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
-        let _conf: Config = toml::from_str(s).unwrap();
+        let conf: Config = toml::from_str(s).unwrap();
+        assert!(conf.stages.deferred_history_indexing);
     }
 
     #[test]
