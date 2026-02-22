@@ -85,6 +85,7 @@ impl LowerSparseSubtrie {
     /// `LowerSparseSubtrie` will be put into the blinded state.
     ///
     /// Otherwise returns None.
+    #[allow(dead_code)]
     pub(crate) fn take_revealed(&mut self) -> Option<Box<SparseSubtrie>> {
         self.take_revealed_if(|_| true)
     }

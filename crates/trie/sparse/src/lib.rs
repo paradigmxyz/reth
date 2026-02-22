@@ -14,6 +14,9 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
+mod arena;
+pub use arena::*;
+
 mod parallel;
 pub use parallel::*;
 
