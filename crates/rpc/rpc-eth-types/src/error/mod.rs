@@ -207,6 +207,18 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Wrapper for errors that occurred at a specific transaction index during multi-tx execution.
+    ///
+    /// This preserves the original error's RPC code and data while adding transaction index
+    /// context to the message.
+    #[error("transaction index {tx_index}: {source}")]
+    TxIndexed {
+        /// Transaction index where the error occurred
+        tx_index: usize,
+        /// The underlying error
+        #[source]
+        source: Box<Self>,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -225,6 +237,14 @@ impl EthApiError {
         error: jsonrpsee_types::ErrorObject<'static>,
     ) -> Self {
         Self::CallManyError { bundle_index, tx_index, error }
+    }
+
+    /// Wraps this error with transaction index context.
+    ///
+    /// This preserves the original error's RPC code and data while adding
+    /// transaction index information to the error message.
+    pub fn with_tx_index(self, tx_index: usize) -> Self {
+        Self::TxIndexed { tx_index, source: Box::new(self) }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -343,6 +363,14 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         error.message()
                     ),
                     error.data(),
+                )
+            }
+            EthApiError::TxIndexed { tx_index, source } => {
+                let inner: jsonrpsee_types::error::ErrorObject<'static> = (*source).into();
+                jsonrpsee_types::error::ErrorObject::owned(
+                    inner.code(),
+                    format!("transaction index {tx_index}: {}", inner.message()),
+                    inner.data().map(|d| d.to_owned()),
                 )
             }
         }
@@ -1213,5 +1241,55 @@ mod tests {
         let err = RevertError::new(revert.abi_encode().into());
         let msg = err.to_string();
         assert_eq!(msg, "execution reverted: test_revert_reason");
+    }
+
+    #[test]
+    fn tx_indexed_preserves_error_code() {
+        let original_code: i32 = {
+            let obj: jsonrpsee_types::error::ErrorObject<'static> =
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
+                    tx: 5,
+                    state: 10,
+                })
+                .into();
+            obj.code()
+        };
+
+        let inner_err = EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
+            tx: 5,
+            state: 10,
+        });
+        let indexed_err = inner_err.with_tx_index(3);
+        let indexed_obj: jsonrpsee_types::error::ErrorObject<'static> = indexed_err.into();
+
+        assert_eq!(indexed_obj.code(), original_code);
+        assert!(indexed_obj.message().starts_with("transaction index 3:"));
+        assert!(indexed_obj.message().contains("nonce too low"));
+    }
+
+    #[test]
+    fn tx_indexed_preserves_revert_data() {
+        let revert = Revert::from("test_reason");
+        let revert_bytes: Bytes = revert.abi_encode().into();
+
+        let (original_code, original_data) = {
+            let revert_err =
+                RpcInvalidTransactionError::Revert(RevertError::new(revert_bytes.clone()));
+            let obj: jsonrpsee_types::error::ErrorObject<'static> =
+                EthApiError::InvalidTransaction(revert_err).into();
+            (obj.code(), obj.data().map(|d: &serde_json::value::RawValue| d.to_string()))
+        };
+
+        let revert_err = RpcInvalidTransactionError::Revert(RevertError::new(revert_bytes));
+        let inner_err = EthApiError::InvalidTransaction(revert_err);
+        let indexed_err = inner_err.with_tx_index(7);
+        let indexed_obj: jsonrpsee_types::error::ErrorObject<'static> = indexed_err.into();
+
+        assert_eq!(indexed_obj.code(), original_code);
+        assert_eq!(
+            indexed_obj.data().map(|d: &serde_json::value::RawValue| d.to_string()),
+            original_data
+        );
+        assert!(indexed_obj.message().starts_with("transaction index 7:"));
     }
 }
