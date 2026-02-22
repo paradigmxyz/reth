@@ -2,13 +2,15 @@ use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
+use crate::reth_engine::RethPayloadStatus;
+
 // Required for the subscription attributes below
 use reth_chain_state as _;
 
 /// Reth API namespace for reth-specific methods
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
-pub trait RethApi {
+pub trait RethApi<ExecutionData> {
     /// Returns all ETH balance changes in a block
     #[method(name = "getBalanceChangesInBlock")]
     async fn reth_get_balance_changes_in_block(
@@ -27,6 +29,12 @@ pub trait RethApi {
         block_id: BlockId,
         count: Option<U64>,
     ) -> RpcResult<Option<serde_json::Value>>;
+
+    /// Reth-specific newPayload that takes execution data directly.
+    ///
+    /// Waits for persistence, execution cache, and sparse trie locks before processing.
+    #[method(name = "newPayload")]
+    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(
