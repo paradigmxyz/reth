@@ -2,7 +2,6 @@ use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
-    keccak256,
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
@@ -1345,9 +1344,8 @@ impl RocksDBProvider {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
-                        let key = keccak256(plain_key);
                         storage_history
-                            .entry((revert.address, key))
+                            .entry((revert.address, plain_key))
                             .or_default()
                             .push(block_number);
                     }

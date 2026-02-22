@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode, StorageSlotKey};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
@@ -147,10 +147,12 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    ///
+    /// `lookup_key` is always a plain (unhashed) storage key.
     pub fn storage_history_lookup(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<HistoryInfo>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
@@ -158,16 +160,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
-
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
 
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
@@ -183,27 +175,16 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     /// Resolves a storage value by looking up the given key in history, changesets, or
     /// plain state.
     ///
-    /// Accepts a [`StorageSlotKey`]; the correct lookup key is derived internally
-    /// based on the storage mode.
+    /// `lookup_key` is always a plain (unhashed) storage key.
     fn storage_by_lookup_key(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<Option<StorageValue>>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
-
-        match self.storage_history_lookup(address, storage_key)? {
+        match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
@@ -218,11 +199,12 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state() {
                     let hashed_address = alloy_primitives::keccak256(address);
+                    let hashed_slot = alloy_primitives::keccak256(lookup_key);
                     Ok(self
                         .tx()
                         .cursor_dup_read::<tables::HashedStorages>()?
-                        .seek_by_key_subkey(hashed_address, lookup_key)?
-                        .filter(|entry| entry.key == lookup_key)
+                        .seek_by_key_subkey(hashed_address, hashed_slot)?
+                        .filter(|entry| entry.key == hashed_slot)
                         .map(|entry| entry.value)
                         .or(Some(StorageValue::ZERO)))
                 } else {
@@ -512,18 +494,7 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        self.storage_by_lookup_key(address, StorageSlotKey::plain(storage_key))
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        if !self.provider.cached_storage_settings().use_hashed_state() {
-            return Err(ProviderError::UnsupportedProvider)
-        }
-        self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
+        self.storage_by_lookup_key(address, storage_key)
     }
 }
 
@@ -716,7 +687,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_primitives_traits::{Account, StorageEntry, StorageSlotKey};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
         NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
@@ -971,7 +942,7 @@ mod tests {
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
 
@@ -990,7 +961,7 @@ mod tests {
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
 
@@ -1009,7 +980,7 @@ mod tests {
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
     }
@@ -1272,106 +1243,5 @@ mod tests {
         assert!(needs_prev_shard_check(0, None, 5));
         assert!(!needs_prev_shard_check(0, Some(5), 5)); // found_block == block_number
         assert!(!needs_prev_shard_check(1, Some(10), 5)); // rank > 0
-    }
-
-    #[test]
-    fn test_historical_storage_by_hashed_key_unsupported_in_v1() {
-        let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
-
-        let db = factory.provider().unwrap();
-        let provider = HistoricalStateProviderRef::new(&db, 1);
-
-        assert!(matches!(
-            provider.storage_by_hashed_key(ADDRESS, STORAGE),
-            Err(ProviderError::UnsupportedProvider)
-        ));
-    }
-
-    #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
-    fn test_historical_storage_by_hashed_key_v2() {
-        use crate::BlockWriter;
-        use alloy_primitives::keccak256;
-        use reth_db_api::models::StorageSettings;
-        use reth_execution_types::ExecutionOutcome;
-        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm_database::BundleState;
-        use std::collections::HashMap;
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let slot = U256::from_be_bytes(*STORAGE);
-        let hashed_storage = keccak256(STORAGE);
-        let account: revm_state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-
-        let mut rng = generators::rng();
-        let blocks = random_block_range(
-            &mut rng,
-            0..=5,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
-        );
-
-        let mut addr_storage = HashMap::default();
-        addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
-
-        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
-        let mut reverts: Vec<Revert> = vec![Vec::new(); 6];
-        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[5] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(50))])];
-
-        let bundle = BundleState::new([(ADDRESS, None, Some(account), addr_storage)], reverts, []);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .append_blocks_with_state(
-                blocks
-                    .into_iter()
-                    .map(|b| b.try_recover().expect("failed to seal block with senders"))
-                    .collect(),
-                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
-                Default::default(),
-            )
-            .unwrap();
-
-        let hashed_address = keccak256(ADDRESS);
-
-        provider_rw
-            .tx_ref()
-            .put::<tables::HashedStorages>(
-                hashed_address,
-                StorageEntry { key: hashed_storage, value: U256::from(100) },
-            )
-            .unwrap();
-        provider_rw
-            .tx_ref()
-            .put::<tables::HashedAccounts>(
-                hashed_address,
-                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let db = factory.provider().unwrap();
-
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 0).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(None)
-        ));
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 3).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(Some(U256::ZERO))
-        ));
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, hashed_storage),
-            Ok(Some(v)) if v == U256::from(50)
-        ));
-
-        assert!(matches!(
-            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, STORAGE),
-            Ok(None | Some(U256::ZERO))
-        ));
     }
 }

@@ -135,7 +135,7 @@ impl StorageHistory {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key.as_b256()), block_number);
+            highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
             limiter.increment_deleted_entries_count();
@@ -273,7 +273,7 @@ impl StorageHistory {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key.as_b256()), block_number);
+            highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
             limiter.increment_deleted_entries_count();

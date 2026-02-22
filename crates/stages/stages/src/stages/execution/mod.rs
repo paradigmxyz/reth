@@ -2,6 +2,7 @@ use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
@@ -13,7 +14,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -34,6 +35,8 @@ use std::{
 use tracing::*;
 
 use super::missing_static_data_error;
+
+mod slot_preimages;
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -268,7 +271,9 @@ where
         > + StatsReader
         + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + StoragePath
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -462,6 +467,26 @@ where
             }
         }
 
+        // When using hashed state (storage.v2), inject plain storage-slot keys into wipe
+        // reverts for self-destructed accounts. Without this, the changeset writer would only
+        // see hashed slot keys (from `HashedStorages`) which pollutes the entire codebase.
+        //
+        // SELFDESTRUCT no longer destroys storage post-Cancun, so this is only needed for
+        // pre-Cancun blocks. Post-Cancun we can remove the preimage db entirely.
+        if provider.cached_storage_settings().use_hashed_state() {
+            let start_header = provider
+                .header_by_number(start_block)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
+
+            let path = provider.storage_path().join("preimage");
+            if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
+                slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
+            } else if path.exists() {
+                // Post-Cancun: no more self-destructs, preimage db is no longer needed.
+                let _ = std::fs::remove_dir_all(&path);
+            }
+        }
+
         // Write output. When `use_hashed_state` is enabled, `write_state` skips writing to
         // plain account/storage tables and only writes bytecodes and changesets. The hashed
         // state is then written separately below.
@@ -516,6 +541,8 @@ where
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
             })
         }
+
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, unwind_to)?;
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
 
@@ -574,6 +601,40 @@ where
 
         Ok(())
     }
+}
+
+fn reject_cancun_boundary_unwind<Provider>(
+    provider: &Provider,
+    checkpoint_block: u64,
+    unwind_to: u64,
+) -> Result<(), StageError>
+where
+    Provider: HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+{
+    let checkpoint_header = provider
+        .header_by_number(checkpoint_block)?
+        .ok_or_else(|| ProviderError::HeaderNotFound(checkpoint_block.into()))?;
+    let unwind_to_header = provider
+        .header_by_number(unwind_to)?
+        .ok_or_else(|| ProviderError::HeaderNotFound(unwind_to.into()))?;
+    let checkpoint_is_cancun =
+        provider.chain_spec().is_cancun_active_at_timestamp(checkpoint_header.timestamp());
+    let unwind_to_is_cancun =
+        provider.chain_spec().is_cancun_active_at_timestamp(unwind_to_header.timestamp());
+    if checkpoint_is_cancun && !unwind_to_is_cancun {
+        return Err(StageError::Fatal(
+            std::io::Error::other(format!(
+                "execution unwind across Cancun activation boundary is not allowed: checkpoint \
+                 block #{checkpoint_block} (ts={}) is Cancun-active but unwind target \
+                 #{unwind_to} (ts={}) is pre-Cancun",
+                checkpoint_header.timestamp(),
+                unwind_to_header.timestamp()
+            ))
+            .into(),
+        ))
+    }
+
+    Ok(())
 }
 
 fn execution_checkpoint<N>(
@@ -687,7 +748,7 @@ mod tests {
     use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_chainspec::ChainSpecBuilder;
+    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition};
     use reth_db_api::{
         models::{metadata::StorageSettings, AccountBeforeTx},
         transaction::{DbTx, DbTxMut},
@@ -695,10 +756,11 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account, Bytecode, SealedBlock, StorageEntry};
+    use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, AccountReader, BlockWriter,
-        DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
+        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
+        AccountReader, BlockWriter, DatabaseProviderFactory, ReceiptProvider,
+        StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
@@ -1116,6 +1178,75 @@ mod tests {
 
             assert!(matches!(provider.receipt(0), Ok(None)));
         }
+    }
+
+    #[test]
+    fn unwind_from_cancun_to_pre_cancun_is_rejected() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet()
+                .berlin_activated()
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(15))
+                .build(),
+        );
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let provider = factory.database_provider_rw().unwrap();
+
+        let mut rng = generators::rng();
+        let mut genesis = generators::random_block(
+            &mut rng,
+            0,
+            generators::BlockParams { tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        genesis.header.timestamp = 0;
+        let genesis = genesis.seal_slow();
+
+        let mut block_1 = generators::random_block(
+            &mut rng,
+            1,
+            generators::BlockParams {
+                parent: Some(genesis.hash()),
+                tx_count: Some(0),
+                ..Default::default()
+            },
+        )
+        .unseal();
+        block_1.header.timestamp = 10;
+        let block_1 = block_1.seal_slow();
+
+        let mut block_2 = generators::random_block(
+            &mut rng,
+            2,
+            generators::BlockParams {
+                parent: Some(block_1.hash()),
+                tx_count: Some(0),
+                ..Default::default()
+            },
+        )
+        .unseal();
+        block_2.header.timestamp = 20;
+        let block_2 = block_2.seal_slow();
+
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block_1.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block_2.try_recover().unwrap()).unwrap();
+        provider
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
+
+        let mut execution_stage = stage();
+        let err = execution_stage
+            .unwind(
+                &provider,
+                UnwindInput { checkpoint: StageCheckpoint::new(2), unwind_to: 1, bad_block: None },
+            )
+            .unwrap_err();
+
+        assert_matches!(err, StageError::Fatal(_));
+        assert!(err.to_string().contains("across Cancun activation boundary"));
     }
 
     #[tokio::test]

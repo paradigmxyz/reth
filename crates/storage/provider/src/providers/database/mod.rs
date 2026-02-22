@@ -119,6 +119,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             rocksdb_provider.clone(),
             ChangesetCache::new(),
             runtime.clone(),
+            db.path(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -246,6 +247,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
+            self.db.path(),
         ))
     }
 
@@ -265,6 +267,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
+            self.db.path(),
         )))
     }
 
@@ -285,6 +288,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
+            self.db.path(),
         ))
     }
 
