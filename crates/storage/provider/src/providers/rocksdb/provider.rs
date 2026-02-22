@@ -204,7 +204,7 @@ impl RocksDBBuilder {
 
         options.set_bottommost_compression_type(DBCompressionType::Zstd);
         options.set_bottommost_zstd_max_train_bytes(0, true);
-        options.set_compression_type(DBCompressionType::Lz4);
+        options.set_compression_type(DBCompressionType::Zstd);
         options.set_compaction_pri(CompactionPri::MinOverlappingRatio);
 
         options.set_log_level(log_level);
@@ -232,10 +232,11 @@ impl RocksDBBuilder {
         let mut cf_options = Options::default();
         cf_options.set_block_based_table_factory(&table_options);
         cf_options.set_level_compaction_dynamic_level_bytes(true);
-        // Recommend to use Zstd for bottommost compression and Lz4 for other levels, see https://github.com/facebook/rocksdb/wiki/Compression#configuration
-        cf_options.set_compression_type(DBCompressionType::Lz4);
+        // Use Zstd compression for all levels - benchmarks show 9% size reduction with no
+        // performance penalty
+        cf_options.set_compression_type(DBCompressionType::Zstd);
         cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
-        // Only use Zstd compression, disable dictionary training
+        // Disable dictionary training
         cf_options.set_bottommost_zstd_max_train_bytes(0, true);
         cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
 
