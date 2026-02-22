@@ -1,4 +1,4 @@
-use crate::{formatter::LogFormat, LayerInfo};
+use crate::{formatter::LogFormat, LayerInfo, LogFilterReloadHandle};
 #[cfg(feature = "otlp-logs")]
 use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+use tracing_subscriber::{filter::Directive, reload, EnvFilter, Layer, Registry};
 
 /// A worker guard returned by the file layer.
 ///
@@ -86,28 +86,43 @@ impl Layers {
 
     /// Adds a stdout layer with specified formatting and filtering.
     ///
-    /// # Type Parameters
-    /// * `S` - The type of subscriber that will use these layers.
-    ///
     /// # Arguments
     /// * `format` - The log message format.
-    /// * `directive` - Directive for the default logging level.
-    /// * `filter` - Additional filter directives as a string.
+    /// * `default_directive` - Directive for the default logging level.
+    /// * `filters` - Additional filter directives as a string.
     /// * `color` - Optional color configuration for the log messages.
+    /// * `reloadable` - If true, wraps the filter in a reload layer so it can be changed at
+    ///   runtime, and returns the reload handle.
     ///
     /// # Returns
-    /// An `eyre::Result<()>` indicating the success or failure of the operation.
+    /// An `eyre::Result` with an optional [`LogFilterReloadHandle`] (present when `reloadable` is
+    /// true).
     pub(crate) fn stdout(
         &mut self,
         format: LogFormat,
         default_directive: Directive,
         filters: &str,
         color: Option<String>,
-    ) -> eyre::Result<()> {
+        reloadable: bool,
+    ) -> eyre::Result<Option<LogFilterReloadHandle>> {
         let filter = build_env_filter(Some(default_directive), filters)?;
-        let layer = format.apply(filter, color, None);
-        self.add_layer(layer);
-        Ok(())
+
+        // When reloadable, always show target since the user may switch to DEBUG/TRACE
+        // at runtime via RPC — freezing target=false at init would hide module paths.
+        // Otherwise, only show target when initial level is higher than INFO.
+        let show_target = reloadable ||
+            filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO);
+
+        if reloadable {
+            let (reloadable_filter, handle) = reload::Layer::new(filter);
+            let layer = format.apply(reloadable_filter, color, show_target, None);
+            self.add_layer(layer);
+            Ok(Some(handle))
+        } else {
+            let layer = format.apply(filter, color, show_target, None);
+            self.add_layer(layer);
+            Ok(None)
+        }
     }
 
     /// Adds a file logging layer to the layers collection.
@@ -127,8 +142,11 @@ impl Layers {
     ) -> eyre::Result<FileWorkerGuard> {
         let (writer, guard) = file_info.create_log_writer()?;
         let file_filter = build_env_filter(None, filter)?;
-        let layer = format.apply(file_filter, None, Some(writer));
-        self.add_layer(layer);
+
+        // File layers use their own independent filter — runtime changes via
+        // debug_verbosity/debug_vmodule only affect stdout, not log files.
+        // This prevents RPC-triggered level changes from flooding disk.
+        self.add_layer(format.apply(file_filter, None, true, Some(writer)));
         Ok(guard)
     }
 

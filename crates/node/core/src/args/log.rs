@@ -154,20 +154,25 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Uses default layers for tracing. If you need to include custom layers,
-    /// use `init_tracing_with_layers` instead.
-    ///
     /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        self.init_tracing_with_layers(Layers::new())
+        self.init_tracing_with_layers(Layers::new(), false)
     }
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
+    /// When `enable_reload` is true, a global log handle is installed that allows changing
+    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    ///
+    /// # Arguments
+    /// * `layers` - Pre-configured layers to include
+    /// * `enable_reload` - If true, enables runtime log level changes
+    ///
+    /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
+        enable_reload: bool,
     ) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
@@ -201,8 +206,7 @@ impl LogArgs {
             }
         }
 
-        let guard = tracer.init_with_layers(layers)?;
-        Ok(guard)
+        tracer.with_reload(enable_reload).init_with_layers(layers)
     }
 }
 

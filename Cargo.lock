@@ -9780,6 +9780,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
+ "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",
