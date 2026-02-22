@@ -18,7 +18,7 @@ use alloy_primitives::B256;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crate::tree::payload_processor::post_exec::PostExecBlockHandle;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -755,7 +755,7 @@ where
     ///
     /// This method orchestrates block execution:
     /// 1. Sets up the EVM with state database and precompile caching
-    /// 2. Spawns a background task for incremental receipt root computation
+    /// 2. Streams receipts into a shared background worker for incremental root computation
     /// 3. Executes transactions with metrics collection via state hooks
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
@@ -819,15 +819,8 @@ where
             });
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let receipt_root_handle = self.payload_processor.begin_post_exec_block(receipts_len);
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
@@ -839,9 +832,9 @@ where
             executor,
             transaction_count,
             handle.iter_transactions(),
-            &receipt_tx,
+            &receipt_root_handle,
         )?;
-        drop(receipt_tx);
+        let result_rx = receipt_root_handle.finalize();
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -864,7 +857,7 @@ where
         Ok((output, senders, result_rx))
     }
 
-    /// Executes transactions and collects senders, streaming receipts to a background task.
+    /// Executes transactions and collects senders, streaming receipts to the post-exec worker.
     ///
     /// This method handles:
     /// - Applying pre-execution changes (e.g., beacon root updates)
@@ -878,7 +871,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_root_handle: &PostExecBlockHandle<N::Receipt>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
@@ -928,10 +921,11 @@ where
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
-                // Send the latest receipt to the background task for incremental root computation.
+                // Stream the latest receipt to the background worker for incremental root
+                // computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    receipt_root_handle.push_receipt(tx_index, receipt.clone());
                 }
             }
         }
