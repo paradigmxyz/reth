@@ -594,6 +594,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             self.swarm.state_mut().announce_new_block(block);
                         }
                         BlockValidation::ValidBlock { block } => {
+                            self.swarm.state_mut().update_peer_block(
+                                &peer,
+                                block.hash,
+                                block.number(),
+                            );
                             self.swarm.state_mut().announce_new_block_hash(block);
                         }
                     },
