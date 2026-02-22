@@ -365,6 +365,14 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
+        #[cfg(target_os = "linux")]
+        {
+            use memmap2::Advice;
+            // Enable THP to reduce TLB misses on large static file scans.
+            let _ = data_mmap.advise(Advice::HugePage);
+            let _ = offset_mmap.advise(Advice::HugePage);
+        }
+
         // First byte is the size of one offset in bytes
         let offset_size = offset_mmap[0];
 
