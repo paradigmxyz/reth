@@ -78,6 +78,7 @@ use reth_stages::{
     StageId,
 };
 use reth_static_file::StaticFileProducer;
+use reth_storage_bloom::StorageBloomFilter;
 use reth_tasks::TaskExecutor;
 use reth_tracing::{
     throttle,
@@ -496,7 +497,7 @@ where
             .with_statistics()
             .build()?;
 
-        let factory = ProviderFactory::new(
+        let mut factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
@@ -567,6 +568,65 @@ where
             rx.await?.inspect_err(|err| {
                 error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
+        }
+
+        // Optionally initialize the storage bloom filter for short-circuiting empty slot reads.
+        if self.node_config().storage.bloom_filter {
+            let size_mb = self.node_config().storage.bloom_filter_size_mb;
+            let size_bytes = (size_mb as usize) * 1024 * 1024;
+            let bloom_path = self.data_dir().data_dir().join("storage_bloom.bin");
+
+            // Snapshot the tip before bloom init so the saved block number
+            // matches what the bloom actually contains.
+            let tip = factory.provider()?.best_block_number()?;
+            let start = std::time::Instant::now();
+
+            // Try loading a persisted bloom filter first; fall back to full scan.
+            // IO errors (permission denied, corruption) are non-fatal — log and rebuild.
+            let persisted = match StorageBloomFilter::load_from_file(&bloom_path, size_bytes) {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!(
+                        target: "reth::cli",
+                        %err,
+                        "Failed to load bloom filter file, rebuilding from scratch"
+                    );
+                    None
+                }
+            };
+
+            let bloom = if let Some((loaded, saved_block)) = persisted {
+                let catchup = factory.provider()?.catchup_storage_bloom(&loaded, saved_block)?;
+                let elapsed = start.elapsed();
+                info!(
+                    target: "reth::cli",
+                    size_mb,
+                    saved_block,
+                    catchup_entries = catchup,
+                    elapsed_secs = elapsed.as_secs_f64(),
+                    "Loaded storage bloom filter from disk"
+                );
+                Arc::new(loaded)
+            } else {
+                let fresh = Arc::new(StorageBloomFilter::with_size_mb(size_mb));
+                let entries = factory.provider()?.populate_storage_bloom(&fresh)?;
+                let elapsed = start.elapsed();
+                info!(
+                    target: "reth::cli",
+                    entries,
+                    size_mb,
+                    elapsed_secs = elapsed.as_secs_f64(),
+                    "Populated storage bloom filter from scratch"
+                );
+                fresh
+            };
+
+            // Persist the bloom so the next restart can do an incremental catchup.
+            if let Err(err) = bloom.save_to_file(&bloom_path, tip) {
+                warn!(target: "reth::cli", %err, "Failed to persist storage bloom filter");
+            }
+
+            factory = factory.with_storage_bloom(bloom);
         }
 
         Ok(factory)

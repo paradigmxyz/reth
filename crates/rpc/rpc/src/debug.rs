@@ -40,9 +40,61 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
+
+/// Default timeout for debug trace methods, matching Geth's default of 5 seconds.
+const DEFAULT_TRACE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Parses a Go-style duration string from [`GethDebugTracingOptions::timeout`].
+///
+/// Supports: `"5s"`, `"300ms"`, `"1.5s"`, `"2m"`, `"1h"`, or bare number (seconds).
+/// Fractional values are supported for all units (e.g. `"1.5s"` = 1500ms).
+/// Returns [`DEFAULT_TRACE_TIMEOUT`] when `None` or on parse failure.
+fn parse_timeout(timeout: &Option<String>) -> Duration {
+    match timeout.as_deref() {
+        Some(s) if s.ends_with("ms") => s
+            .trim_end_matches("ms")
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .map(|ms| Duration::from_secs_f64(ms / 1000.0))
+            .unwrap_or(DEFAULT_TRACE_TIMEOUT),
+        Some(s) if s.ends_with('h') => s
+            .trim_end_matches('h')
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .map(|h| Duration::from_secs_f64(h * 3600.0))
+            .unwrap_or(DEFAULT_TRACE_TIMEOUT),
+        Some(s) if s.ends_with('m') => s
+            .trim_end_matches('m')
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .map(|m| Duration::from_secs_f64(m * 60.0))
+            .unwrap_or(DEFAULT_TRACE_TIMEOUT),
+        Some(s) if s.ends_with('s') => s
+            .trim_end_matches('s')
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .map(Duration::from_secs_f64)
+            .unwrap_or(DEFAULT_TRACE_TIMEOUT),
+        Some(s) => s
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .map(Duration::from_secs_f64)
+            .unwrap_or(DEFAULT_TRACE_TIMEOUT),
+        None => DEFAULT_TRACE_TIMEOUT,
+    }
+}
 
 /// `debug` API implementation.
 ///
@@ -113,15 +165,21 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let timeout = parse_timeout(&opts.timeout);
+
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
+                let deadline = Instant::now() + timeout;
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
+                    if Instant::now() > deadline {
+                        return Err(EthApiError::ExecutionTimedOut(timeout).into());
+                    }
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
@@ -228,6 +286,8 @@ where
         };
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
+        let timeout = parse_timeout(&opts.timeout);
+
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash().into();
@@ -252,9 +312,15 @@ where
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
+                let deadline = Instant::now() + timeout;
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+
+                if Instant::now() > deadline {
+                    return Err(EthApiError::ExecutionTimedOut(timeout).into());
+                }
+
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
@@ -305,9 +371,11 @@ where
                 .await;
         }
 
+        let timeout = parse_timeout(&tracing_options.timeout);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                let deadline = Instant::now() + timeout;
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res = this.eth_api().inspect(
@@ -316,6 +384,11 @@ where
                     tx_env.clone(),
                     &mut inspector,
                 )?;
+
+                if Instant::now() > deadline {
+                    return Err(EthApiError::ExecutionTimedOut(timeout).into());
+                }
+
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -353,6 +426,7 @@ where
         }
 
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let timeout = parse_timeout(&tracing_options.timeout);
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
@@ -373,10 +447,16 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
+                let deadline = Instant::now() + timeout;
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+
+                if Instant::now() > deadline {
+                    return Err(EthApiError::ExecutionTimedOut(timeout).into());
+                }
+
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -411,6 +491,7 @@ where
         let opts = opts.unwrap_or_default();
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
+        let timeout = parse_timeout(&tracing_options.timeout);
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -448,6 +529,7 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
+                let deadline = Instant::now() + timeout;
                 let mut inspector = DebugInspector::new(tracing_options.clone())
                     .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
@@ -458,6 +540,9 @@ where
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        if Instant::now() > deadline {
+                            return Err(EthApiError::ExecutionTimedOut(timeout).into());
+                        }
                         // apply state overrides only once, before the first transaction
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
@@ -1155,5 +1240,90 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_timeout() {
+        // milliseconds
+        assert_eq!(parse_timeout(&Some("300ms".to_string())), Duration::from_millis(300));
+        assert_eq!(parse_timeout(&Some("0ms".to_string())), Duration::from_millis(0));
+        assert_eq!(parse_timeout(&Some("1500ms".to_string())), Duration::from_millis(1500));
+
+        // seconds
+        assert_eq!(parse_timeout(&Some("5s".to_string())), Duration::from_secs(5));
+        assert_eq!(parse_timeout(&Some("30s".to_string())), Duration::from_secs(30));
+
+        // fractional seconds
+        assert_eq!(parse_timeout(&Some("1.5s".to_string())), Duration::from_millis(1500));
+        assert_eq!(parse_timeout(&Some("0.5s".to_string())), Duration::from_millis(500));
+
+        // minutes
+        assert_eq!(parse_timeout(&Some("1m".to_string())), Duration::from_secs(60));
+        assert_eq!(parse_timeout(&Some("2m".to_string())), Duration::from_secs(120));
+        assert_eq!(parse_timeout(&Some("1.5m".to_string())), Duration::from_secs(90));
+
+        // hours
+        assert_eq!(parse_timeout(&Some("1h".to_string())), Duration::from_secs(3600));
+        assert_eq!(parse_timeout(&Some("0.5h".to_string())), Duration::from_secs(1800));
+
+        // bare number (seconds)
+        assert_eq!(parse_timeout(&Some("10".to_string())), Duration::from_secs(10));
+        assert_eq!(parse_timeout(&Some("1.5".to_string())), Duration::from_millis(1500));
+
+        // zero
+        assert_eq!(parse_timeout(&Some("0".to_string())), Duration::from_secs(0));
+        assert_eq!(parse_timeout(&Some("0s".to_string())), Duration::from_secs(0));
+
+        // None => default 5s
+        assert_eq!(parse_timeout(&None), Duration::from_secs(5));
+
+        // invalid => default 5s
+        assert_eq!(parse_timeout(&Some("abc".to_string())), Duration::from_secs(5));
+        assert_eq!(parse_timeout(&Some(String::new())), Duration::from_secs(5));
+        assert_eq!(parse_timeout(&Some("-1s".to_string())), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_parse_timeout_alloy_format() {
+        // alloy's `GethDebugTracingOptions::with_timeout()` formats as "{n}ms"
+        let alloy_timeout = format!("{}ms", Duration::from_secs(10).as_millis());
+        assert_eq!(parse_timeout(&Some(alloy_timeout)), Duration::from_secs(10));
+
+        let alloy_timeout = format!("{}ms", Duration::from_millis(500).as_millis());
+        assert_eq!(parse_timeout(&Some(alloy_timeout)), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_zero_timeout_triggers_deadline() {
+        // Verify that a zero timeout creates an immediately-expired deadline.
+        // This is the same pattern used in trace_block() and debug_trace_call_many().
+        let timeout = parse_timeout(&Some("0s".to_string()));
+        assert_eq!(timeout, Duration::ZERO);
+
+        let deadline = Instant::now() + timeout;
+        // Even a zero-duration deadline should expire after any processing
+        std::thread::sleep(Duration::from_millis(1));
+        assert!(Instant::now() > deadline, "zero timeout should create an expired deadline");
+    }
+
+    #[test]
+    fn test_default_timeout_creates_valid_deadline() {
+        // Verify that the default timeout (None) creates a deadline ~5s in the future
+        let timeout = parse_timeout(&None);
+        assert_eq!(timeout, DEFAULT_TRACE_TIMEOUT);
+
+        let before = Instant::now();
+        let deadline = before + timeout;
+        // Deadline should be in the future
+        assert!(deadline > before);
+        // Deadline should be approximately 5s from now (within 100ms tolerance)
+        let diff = deadline.duration_since(before);
+        assert!(diff >= Duration::from_secs(5));
+        assert!(diff < Duration::from_millis(5100));
     }
 }

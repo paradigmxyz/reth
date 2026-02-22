@@ -210,6 +210,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+    /// Optional bloom filter for inserting new storage entries on write.
+    storage_bloom: Option<Arc<reth_storage_bloom::StorageBloomFilter>>,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -227,6 +229,13 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .field(
+                "storage_bloom",
+                &self
+                    .storage_bloom
+                    .as_ref()
+                    .map(|b| format!("{}MB", b.memory_usage_bytes() / (1024 * 1024))),
+            )
             .finish()
     }
 }
@@ -236,9 +245,68 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    /// Sets the storage bloom filter for inserting new entries on write.
+    pub fn with_storage_bloom(
+        mut self,
+        bloom: Arc<reth_storage_bloom::StorageBloomFilter>,
+    ) -> Self {
+        self.storage_bloom = Some(bloom);
+        self
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Populates a [`StorageBloomFilter`](reth_storage_bloom::StorageBloomFilter) by walking the
+    /// `PlainStorageState` table.
+    ///
+    /// Inserts every non-zero `(address, slot)` pair into the bloom filter.
+    /// Returns the number of entries inserted.
+    pub fn populate_storage_bloom(
+        &self,
+        bloom: &reth_storage_bloom::StorageBloomFilter,
+    ) -> ProviderResult<u64> {
+        let mut cursor = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut count = 0u64;
+        let walker = cursor.walk(None)?;
+        for result in walker {
+            let (address, entry) = result?;
+            if !entry.value.is_zero() {
+                bloom.insert(&address, &entry.key);
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    /// Catches up the bloom filter by walking `StorageChangeSets` from
+    /// `from_block + 1` to the current tip.
+    ///
+    /// This is used after loading a persisted bloom to insert any storage slots
+    /// that were written since the bloom was last saved. Since the bloom is
+    /// insert-only (bits are never cleared), inserting every changed slot key is
+    /// sufficient: non-zero slots need to be present, and zeroed slots become
+    /// harmless false positives.
+    ///
+    /// Returns the number of changeset entries processed.
+    pub fn catchup_storage_bloom(
+        &self,
+        bloom: &reth_storage_bloom::StorageBloomFilter,
+        from_block: u64,
+    ) -> ProviderResult<u64> {
+        let start = BlockNumberAddress((from_block + 1, alloy_primitives::Address::ZERO));
+        let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+        let walker = cursor.walk(Some(start))?;
+        let mut count = 0u64;
+        for result in walker {
+            let (block_address, entry) = result?;
+            let BlockNumberAddress((_, address)) = block_address;
+            bloom.insert(&address, &entry.key);
+            count += 1;
+        }
+        Ok(count)
+    }
+
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -374,6 +442,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            storage_bloom: None,
         }
     }
 
@@ -999,6 +1068,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            storage_bloom: None,
         }
     }
 
@@ -2643,6 +2713,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                     if !entry.value.is_zero() {
                         storages_cursor.upsert(address, &entry)?;
+                        // Keep bloom filter in sync so subsequent reads don't
+                        // false-negative on newly written slots.
+                        if let Some(bloom) = &self.storage_bloom {
+                            bloom.insert(&address, &entry.key);
+                        }
                     }
                 }
             }

@@ -1,0 +1,29 @@
+[package]
+name = "reth-storage-bloom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "In-memory bloom filter for short-circuiting empty storage slot reads"
+
+[lints]
+workspace = true
+
+[dependencies]
+# ethereum
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "bloom_filter"
+harness = false
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+]

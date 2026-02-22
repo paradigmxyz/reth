@@ -9263,6 +9263,7 @@ dependencies = [
  "reth-rpc-layer",
  "reth-stages",
  "reth-static-file",
+ "reth-storage-bloom",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -9628,6 +9629,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",
+ "reth-storage-bloom",
  "reth-storage-errors",
  "reth-tasks",
  "reth-testing-utils",
@@ -10275,6 +10277,14 @@ dependencies = [
  "reth-trie-common",
  "revm-database",
  "serde_json",
+]
+
+[[package]]
+name = "reth-storage-bloom"
+version = "1.11.0"
+dependencies = [
+ "alloy-primitives",
+ "codspeed-criterion-compat",
 ]
 
 [[package]]
