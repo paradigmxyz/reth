@@ -7689,6 +7689,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]

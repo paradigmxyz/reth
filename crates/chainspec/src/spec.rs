@@ -88,6 +88,8 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .active_at_timestamp(genesis.timestamp)
         .then_some(0);
 
+    tracing::info!("base fee per gas genesis value: {base_fee_per_gas:?},timestamp:{timestamp:?}");
+
     Header {
         number: genesis.number.unwrap_or_default(),
         parent_hash: genesis.parent_hash.unwrap_or_default(),

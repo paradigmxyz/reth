@@ -649,6 +649,7 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        tracing::info!("payload error tracking:{:?}", payload);
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
