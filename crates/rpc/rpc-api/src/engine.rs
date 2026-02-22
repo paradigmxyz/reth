@@ -11,10 +11,14 @@ use alloy_eips::{
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus,
 };
+
+// TODO: Replace with alloy_rpc_types_engine::ExecutionPayloadBodiesV2 once available in alloy
+// bal-devnet2 branch. V2 adds block_access_list field for EIP-7928.
+type ExecutionPayloadBodiesV2 = ExecutionPayloadBodiesV1;
 use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
@@ -121,6 +125,20 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Post Amsterdam forkchoice update handler
+    ///
+    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
+    /// `slotNumber` field in the `payloadAttributes`, if payload attributes
+    /// are provided.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    #[method(name = "forkchoiceUpdatedV4")]
+    async fn fork_choice_updated_v4(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,

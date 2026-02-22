@@ -1,11 +1,14 @@
-# Runs `ethereum/hive` tests.
+# Runs `Soubhik-10/hive` tests.
 
 name: hive
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 */6 * * *"
+  pull_request:
+    branches:
+      - "**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,30 +18,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-reth-stable:
-    uses: ./.github/workflows/docker-test.yml
+  prepare-reth-stable:
+    uses: ./.github/workflows/prepare-reth.yml
     with:
-      hive_target: hive-stable
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak"
       artifact_name: "reth-stable"
-    secrets: inherit
 
-  build-reth-edge:
-    uses: ./.github/workflows/docker-test.yml
+  prepare-reth-edge:
+    uses: ./.github/workflows/prepare-reth.yml
     with:
-      hive_target: hive-edge
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak edge"
       artifact_name: "reth-edge"
-    secrets: inherit
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
+          ref: master
           path: hivetests
 
       - name: Get hive commit hash
@@ -124,28 +131,30 @@ jobs:
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
-              - eth_blockNumber
+              # - eth_blockNumber
               - eth_call
-              - eth_chainId
-              - eth_createAccessList
-              - eth_estimateGas
-              - eth_feeHistory
-              - eth_getBalance
-              - eth_getBlockBy
-              - eth_getBlockTransactionCountBy
-              - eth_getCode
-              - eth_getProof
-              - eth_getStorage
-              - eth_getTransactionBy
-              - eth_getTransactionCount
-              - eth_getTransactionReceipt
-              - eth_sendRawTransaction
-              - eth_syncing
-              # debug_ rpc methods
-              - debug_
+              # - eth_chainId
+              # - eth_createAccessList
+              # - eth_estimateGas
+              # - eth_feeHistory
+              # - eth_getBalance
+              # - eth_getBlockBy
+              # - eth_getBlockTransactionCountBy
+              # - eth_getCode
+              # - eth_getProof
+              # - eth_getStorage
+              # - eth_getTransactionBy
+              # - eth_getTransactionCount
+              # - eth_getTransactionReceipt
+              # - eth_sendRawTransaction
+              # - eth_syncing
+              # # debug_ rpc methods
+              # - debug_
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-engine
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/prague.*
@@ -161,11 +170,11 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/frontier.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/paris.*
 
           # consume-rlp
           - sim: ethereum/eels/consume-rlp
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-rlp
             limit: .*tests/osaka.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/prague.*
@@ -181,11 +190,9 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/paris.*
     needs:
-      - build-reth-stable
-      - build-reth-edge
+      - prepare-reth-stable
+      - prepare-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes

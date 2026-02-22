@@ -175,6 +175,7 @@ where
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
                 prev_randao: attributes.prev_randao,
                 gas_limit: attributes.gas_limit,
+                slot_number: attributes.slot_number,
             },
             self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
             self.chain_spec(),
@@ -194,6 +195,7 @@ where
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
             extra_data: block.header().extra_data.clone(),
+            slot_number: block.header().slot_number,
         })
     }
 
@@ -209,6 +211,7 @@ where
             ommers: &[],
             withdrawals: attributes.withdrawals.map(Cow::Owned),
             extra_data: attributes.extra_data,
+            slot_number: attributes.slot_number,
         })
     }
 }
@@ -273,6 +276,11 @@ where
             gas_limit: payload.payload.gas_limit(),
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
+            slot_num: if spec >= SpecId::AMSTERDAM {
+                payload.payload.as_v4().unwrap().slot_number
+            } else {
+                Default::default()
+            },
         };
 
         Ok(EvmEnv { cfg_env, block_env })
@@ -289,6 +297,7 @@ where
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
+            slot_number: payload.payload.as_v4().map(|v4| v4.slot_number),
         })
     }
 

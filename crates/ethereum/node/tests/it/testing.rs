@@ -56,6 +56,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
                 suggested_fee_recipient: Address::ZERO,
                 withdrawals: None,
                 parent_beacon_block_root: None,
+                slot_number: None,
             };
 
             let request = TestingBuildBlockRequestV1 {

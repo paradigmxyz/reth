@@ -9,10 +9,13 @@ go build .
 
 ./hive -client reth # first builds and caches the client
 
-# Run each hive command in the background for each simulator and wait
+# Run each hive command in the background for each simulator and wait 
 echo "Building images"
 # TODO: test code has been moved from https://github.com/ethereum/execution-spec-tests to https://github.com/ethereum/execution-specs  we need to pin eels branch with `--sim.buildarg branch=<release-branch-name>` once we have the fusaka release tagged on the new repo
-./hive -client reth --sim "ethereum/eels" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels" \
+    --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.1.0/fixtures_bal.tar.gz \
+    --sim.buildarg branch=devnets/bal/2 \
+    --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &

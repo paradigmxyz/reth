@@ -6,13 +6,15 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
+    eip7928::BlockAccessList,
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::EthPrimitives;
@@ -41,6 +43,8 @@ pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     pub(crate) sidecars: BlobSidecars,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
+    /// The block access list of the payload
+    pub(crate) block_access_list: Option<BlockAccessList>,
 }
 
 // === impl BuiltPayload ===
@@ -54,8 +58,9 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         block: Arc<SealedBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
+        block_access_list: Option<BlockAccessList>,
     ) -> Self {
-        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty }
+        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty, block_access_list }
     }
 
     /// Returns the identifier of the payload.
@@ -162,10 +167,35 @@ impl EthBuiltPayload {
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
-    ///
-    /// Note: Amsterdam fork is not yet implemented, so this conversion is not yet supported.
     pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
-        unimplemented!("ExecutionPayloadEnvelopeV6 not yet supported")
+        let Self { block, fees, sidecars, requests, block_access_list, .. } = self;
+
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
+        Ok(ExecutionPayloadEnvelopeV6 {
+            execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+                alloy_rlp::encode(block_access_list.unwrap_or_default()).into(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
     }
 }
 
@@ -348,6 +378,8 @@ pub struct EthPayloadBuilderAttributes {
     pub withdrawals: Withdrawals,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
+    /// Slot number (EIP-7928, Amsterdam).
+    pub slot_number: Option<u64>,
 }
 
 // === impl EthPayloadBuilderAttributes ===
@@ -372,6 +404,7 @@ impl EthPayloadBuilderAttributes {
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            slot_number: attributes.slot_number,
         }
     }
 }
@@ -418,6 +451,10 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.slot_number
+    }
 }
 
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
@@ -438,6 +475,10 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
 
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
         hasher.update(parent_beacon_block);
+    }
+
+    if let Some(slot_number) = attributes.slot_number {
+        hasher.update(&slot_number.to_be_bytes()[..]);
     }
 
     let out = hasher.finalize();
@@ -477,6 +518,7 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -514,6 +556,7 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -546,6 +589,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            slot_number: None,
         };
 
         // Verify that the generated payload ID matches the expected value

@@ -76,7 +76,7 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, RootProvider};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
-    PayloadAttributes, PayloadId,
+    PayloadAttributes, PayloadId, PraguePayloadFields,
 };
 use eyre::OptionExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -138,6 +138,7 @@ pub(crate) fn prepare_payload_request(
             suggested_fee_recipient: Address::ZERO,
             withdrawals: shanghai_active.then(Vec::new),
             parent_beacon_block_root: cancun_active.then_some(B256::ZERO),
+            slot_number: None,
         },
         forkchoice_state: ForkchoiceState {
             head_block_hash: parent_hash,
@@ -230,14 +231,33 @@ pub(crate) async fn get_payload_with_sidecar(
         }
         4 => {
             let envelope = provider.get_payload_v4(payload_id).await?;
-            Ok(envelope.into_payload_and_sidecar(
-                parent_beacon_block_root.ok_or_eyre("parent_beacon_block_root required for V4")?,
+            let versioned_hashes = versioned_hashes_from_commitments(
+                &envelope.envelope_inner.blobs_bundle.commitments,
+            );
+            let cancun_fields = CancunPayloadFields {
+                parent_beacon_block_root: parent_beacon_block_root
+                    .ok_or_eyre("parent_beacon_block_root required for V4")?,
+                versioned_hashes,
+            };
+            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
+            Ok((
+                ExecutionPayload::V3(envelope.envelope_inner.execution_payload),
+                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
             ))
         }
         5 => {
             let envelope = provider.get_payload_v5(payload_id).await?;
-            Ok(envelope.into_payload_and_sidecar(
-                parent_beacon_block_root.ok_or_eyre("parent_beacon_block_root required for V5")?,
+            let versioned_hashes =
+                versioned_hashes_from_commitments(&envelope.blobs_bundle.commitments);
+            let cancun_fields = CancunPayloadFields {
+                parent_beacon_block_root: parent_beacon_block_root
+                    .ok_or_eyre("parent_beacon_block_root required for V5")?,
+                versioned_hashes,
+            };
+            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
+            Ok((
+                ExecutionPayload::V3(envelope.execution_payload),
+                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
             ))
         }
         _ => panic!("This tool does not support getPayload versions past v5"),

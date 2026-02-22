@@ -15,6 +15,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use alloy_rlp::Decodable;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
@@ -778,16 +779,21 @@ where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<
+            BuiltPayload: BuiltPayload<Primitives = N>,
+            ExecutionData: ExecutionPayload,
+        >,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
+        let has_bal = input.block_access_list().is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
                 .without_state_clear()
+                .with_bal_builder_if(has_bal)
                 .build()
         });
 
@@ -854,6 +860,32 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
+        // Validate BAL hash if we executed with BAL tracking
+        if has_bal {
+            // Get the expected BAL from input and the built BAL from execution
+            let expected_bal =
+                input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
+
+            let built_bal = &result.block_access_list;
+
+            // Compute hashes and compare
+            let expected_hash = expected_bal
+                .as_ref()
+                .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+
+            let built_hash = built_bal
+                .as_ref()
+                .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+
+            if let (Some(expected), Some(got)) = (expected_hash, built_hash) &&
+                expected != got
+            {
+                return Err(InsertBlockErrorKind::Consensus(
+                    ConsensusError::BlockAccessListHashMismatch((got, expected).into()),
+                ));
+            }
+        }
+
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -871,9 +903,10 @@ where
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
+    /// - Bumping BAL index after each transaction when BAL tracking is enabled
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<E, Tx, InnerTx, Err>(
+    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
@@ -881,7 +914,8 @@ where
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt>,
+        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
+        DB: revm::Database + 'a,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
         Err: core::error::Error + Send + Sync + 'static,
@@ -1794,9 +1828,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the block access list if available.
-    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        // TODO decode and return `BlockAccessList`
-        None
+    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload
+                .block_access_list()
+                .map(|bytes| BlockAccessList::decode(&mut bytes.as_ref())),
+            Self::Block(_) => None,
+        }
     }
 
     /// Returns the number of transactions in the payload or block.

@@ -252,8 +252,16 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests, None)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        validate_block_post_execution(
+            block,
+            &chain_spec,
+            &output.receipts,
+            &output.requests,
+            None,
+            &output.block_access_list,
+            Some(output.gas_used),
+        )
+        .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
         let hashed_state =

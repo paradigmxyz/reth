@@ -160,12 +160,11 @@ impl PersistenceSubscription {
 /// to pings.
 pub(crate) async fn setup_persistence_subscription(
     ws_url: Url,
-    persistence_timeout: Duration,
+    _persistence_timeout: Duration,
 ) -> eyre::Result<PersistenceSubscription> {
     info!(target: "reth-bench", "Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-    let ws_connect =
-        WsConnect::new(ws_url.to_string()).with_keepalive_interval(persistence_timeout);
+    let ws_connect = WsConnect::new(ws_url.to_string());
     let client = RpcClient::connect_pubsub(ws_connect)
         .await
         .wrap_err("Failed to connect to WebSocket RPC endpoint")?;

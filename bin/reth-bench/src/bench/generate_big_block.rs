@@ -773,6 +773,7 @@ impl Command {
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
+                slot_number: None,
             },
             transactions: transactions.to_vec(),
             extra_data: None,

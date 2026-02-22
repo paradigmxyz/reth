@@ -87,6 +87,7 @@ unknown-git = "deny"
 allow-git = [
     # TODO: Please avoid adding new entries to this list.
     "https://github.com/alloy-rs/alloy",
+    "https://github.com/alloy-rs/op-alloy",
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",

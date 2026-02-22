@@ -86,6 +86,27 @@ pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), Conse
     Ok(())
 }
 
+/// Validate that Amsterdam header fields are present in the block.
+///
+/// This checks that the `block_access_list_hash` and `slot_number` are set in the header,
+/// as required post-Amsterdam.
+///
+/// See [EIP-7928]: Block-level Access Lists
+/// See [EIP-7778]: Slot Number in Block Header
+///
+/// [EIP-7928]: https://eips.ethereum.org/EIPS/eip-7928
+/// [EIP-7778]: https://eips.ethereum.org/EIPS/eip-7778
+#[inline]
+pub fn validate_amsterdam_header_fields<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+    if header.block_access_list_hash().is_none() {
+        return Err(ConsensusError::BlockAccessListHashMissing);
+    }
+    if header.slot_number().is_none() {
+        return Err(ConsensusError::SlotNumberMissing);
+    }
+    Ok(())
+}
+
 /// Ensures the block response data matches the header.
 ///
 /// This ensures the body response items match the header's hashes:

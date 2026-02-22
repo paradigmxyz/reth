@@ -17,11 +17,12 @@ pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAt
 mod error;
 pub use error::*;
 
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
+use alloy_rpc_types_engine::{
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
-    PayloadAttributes as EthPayloadAttributes,
+    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};

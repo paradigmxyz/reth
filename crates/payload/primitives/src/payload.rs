@@ -45,6 +45,11 @@ pub trait ExecutionPayload:
     /// Returns `None` for pre-Amsterdam blocks.
     fn block_access_list(&self) -> Option<&Bytes>;
 
+    /// Returns the slot number included in this payload.
+    ///
+    /// Returns `None` for pre-Amsterdam blocks.
+    fn slot_number(&self) -> Option<u64>;
+
     /// Returns the beacon block root associated with this payload.
     ///
     /// Returns `None` for pre-merge payloads.
@@ -78,7 +83,11 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        None
+        self.payload.block_access_list()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload.slot_number()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -132,6 +141,22 @@ where
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
+        }
+    }
+
+    /// Returns `block_access_list` from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
+        }
+    }
+
+    /// Returns `slot_number` from  payload.
+    pub fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.slot_number(),
+            Self::PayloadAttributes(attributes) => attributes.slot_number(),
         }
     }
 
@@ -189,6 +214,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
+
+    fn slot_number(&self) -> Option<u64> {
         None
     }
 
