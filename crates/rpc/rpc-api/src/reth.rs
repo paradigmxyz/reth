@@ -8,8 +8,8 @@ use crate::reth_engine::RethPayloadStatus;
 use reth_chain_state as _;
 
 /// Reth API namespace for reth-specific methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"), server_bounds(ExecutionData: jsonrpsee::core::DeserializeOwned))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth", client_bounds(ExecutionData: jsonrpsee::core::Serialize + Clone), server_bounds(ExecutionData: jsonrpsee::core::DeserializeOwned)))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
 pub trait RethApi<ExecutionData> {
     /// Returns all ETH balance changes in a block
     #[method(name = "getBalanceChangesInBlock")]

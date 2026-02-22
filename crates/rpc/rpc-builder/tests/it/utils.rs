@@ -64,8 +64,12 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_http(modules), eth_api, EventSender::new(1));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_http(modules),
+        eth_api,
+        EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
         .start(&server)
@@ -77,8 +81,12 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules), eth_api, EventSender::new(1));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules),
+        eth_api,
+        EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .start(&server)
@@ -95,6 +103,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
@@ -115,6 +124,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
     let addr = test_address();
     RpcServerConfig::ws(Default::default())

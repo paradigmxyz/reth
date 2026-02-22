@@ -211,7 +211,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
+        <Node::Types as NodeTypes>::Payload,
     >,
 }
 
@@ -227,7 +227,7 @@ where
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
+        <Node::Types as NodeTypes>::Payload,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -1027,7 +1027,7 @@ where
                 engine_api,
                 eth_api,
                 engine_events.clone(),
-                Some(Arc::new(beacon_engine_handle.clone())),
+                beacon_engine_handle.clone(),
             );
 
         // in dev mode we generate 20 random dev-signer accounts
