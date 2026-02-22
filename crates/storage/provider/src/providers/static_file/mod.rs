@@ -7,6 +7,9 @@ pub use manager::{
 mod jar;
 pub use jar::StaticFileJarProvider;
 
+#[cfg(test)]
+mod safe_no_sync_test;
+
 mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
