@@ -73,6 +73,10 @@ pub mod added_removed_keys;
 /// Utilities used by other modules in this crate.
 mod utils;
 
+/// Cuckoo filter for tracking accounts with storage.
+mod storage_filter;
+pub use storage_filter::{StorageAccountFilter, StorageFilterUpdateStats};
+
 /// Bincode-compatible serde implementations for trie types.
 ///
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows

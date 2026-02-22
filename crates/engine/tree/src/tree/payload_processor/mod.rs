@@ -34,7 +34,9 @@ use reth_provider::{
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_tasks::{ForEachOrdered, Runtime};
-use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, StorageAccountFilter,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -269,6 +271,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -299,7 +302,8 @@ where
         // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, storage_filter);
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
@@ -1382,6 +1386,7 @@ mod tests {
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
+            None,
         );
 
         let mut state_hook = handle.state_hook();

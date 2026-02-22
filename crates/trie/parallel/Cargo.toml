@@ -17,6 +17,7 @@ reth-primitives-traits = { workspace = true, features = ["dashmap", "std"] }
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
@@ -34,6 +35,7 @@ derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
 crossbeam-channel.workspace = true
+parking_lot.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

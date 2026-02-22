@@ -15,6 +15,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use parking_lot::RwLock;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
@@ -43,7 +44,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, StorageAccountFilter};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -139,6 +140,8 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Optional storage filter for skipping storage proofs of accounts without storage
+    storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -173,6 +176,7 @@ where
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -194,7 +198,67 @@ where
             validator,
             changeset_cache,
             runtime,
+            storage_filter,
         }
+    }
+
+    /// Sets the storage filter for skipping storage proofs of accounts without storage.
+    pub fn set_storage_filter(
+        &mut self,
+        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+        self.storage_filter = Some(filter);
+    }
+
+    /// Updates the storage filter with accounts from the hashed post state in background.
+    ///
+    /// This spawns a background thread that inserts accounts with non-zero storage and removes
+    /// destroyed accounts. Called immediately after state root computation completes successfully.
+    fn update_storage_filter(&self, hashed_state: Arc<HashedPostState>) {
+        let Some(filter) = self.storage_filter.clone() else { return };
+
+        self.payload_processor.executor().spawn_blocking_named(
+            "update-storage-filter",
+            move || {
+                let mut filter_guard = filter.write();
+                let mut inserted = 0usize;
+                let mut removed = 0usize;
+                let mut failures = 0usize;
+
+                // Process destroyed accounts (accounts with None value)
+                for (addr, account) in &hashed_state.accounts {
+                    if account.is_none() && filter_guard.remove(*addr) {
+                        removed += 1;
+                    }
+                }
+
+                // Process accounts with non-zero storage
+                for (addr, storage) in &hashed_state.storages {
+                    let has_non_zero = storage
+                        .storage
+                        .iter()
+                        .any(|(_, value)| *value != alloy_primitives::U256::ZERO);
+
+                    if has_non_zero {
+                        if filter_guard.insert(*addr).is_err() {
+                            failures += 1;
+                        } else {
+                            inserted += 1;
+                        }
+                    }
+                }
+
+                if inserted > 0 || removed > 0 || failures > 0 {
+                    tracing::trace!(
+                        target: "engine::tree::payload_validator",
+                        inserted,
+                        removed,
+                        failures,
+                        "Updated storage filter after state root"
+                    );
+                }
+            },
+        );
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -1320,6 +1384,7 @@ where
                     overlay_factory,
                     &self.config,
                     block_access_list,
+                    self.storage_filter.clone(),
                 );
 
                 // record prewarming initialization duration
@@ -1494,13 +1559,16 @@ where
         let ancestors: Vec<DeferredTrieData> =
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
-        // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
-        // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
             Ok(state) => Arc::new(state),
             Err(handle) => Arc::new(handle.get().clone()),
         };
+
+        // Update storage filter now that state root is computed and validated.
+        // This uses the already-hashed state to avoid re-hashing addresses.
+        self.update_storage_filter(hashed_state.clone());
+
+        // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data =
             DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
@@ -1669,6 +1737,16 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Sets the storage filter for skipping storage proofs of accounts without storage.
+    ///
+    /// This is called after the filter is built from the database.
+    /// Default implementation does nothing.
+    fn set_storage_filter(
+        &mut self,
+        _filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1731,6 +1809,13 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn set_storage_filter(
+        &mut self,
+        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+        self.storage_filter = Some(filter);
     }
 }
 
