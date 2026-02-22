@@ -132,6 +132,11 @@ Storage:
       --num-tasks <NUM_TASKS>
           Number of tasks to run in parallel. Defaults to the number of available CPUs
 
+      --blocks-per-chunk <BLOCKS_PER_CHUNK>
+          Number of blocks each worker processes before grabbing the next chunk
+
+          [default: 5000]
+
       --skip-invalid-blocks
           Continues with execution when an invalid block is encountered and collects these blocks
 
