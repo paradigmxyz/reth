@@ -2,6 +2,7 @@
 
 use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
+use reth_bal_store::BalStore;
 use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::FullConsensus;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
@@ -15,7 +16,7 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{fmt::Debug, future::Future, marker::PhantomData};
+use std::{fmt, fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
@@ -103,7 +104,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 }
 
 /// Context passed to [`NodeAddOns::launch_add_ons`],
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node with all configured components.
     pub node: N,
@@ -115,6 +116,14 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
+    /// Shared BAL store used by both Engine API and network request handling.
+    pub bal_store: Arc<dyn BalStore>,
+}
+
+impl<N: FullNodeComponents> fmt::Debug for AddOnsContext<'_, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AddOnsContext").finish_non_exhaustive()
+    }
 }
 
 /// Customizable node add-on types.

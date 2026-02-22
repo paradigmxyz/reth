@@ -981,7 +981,8 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events, .. } =
+            ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1408,6 +1409,7 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
+            ctx.bal_store.clone(),
         ))
     }
 }

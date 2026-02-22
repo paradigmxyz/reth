@@ -7579,6 +7579,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bal-store"
+version = "1.11.0"
+dependencies = [
+ "alloy-primitives",
+ "parking_lot",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "reth-basic-payload-builder"
 version = "1.11.0"
 dependencies = [
@@ -9049,6 +9060,7 @@ dependencies = [
  "rand 0.8.5",
  "rand 0.9.2",
  "rayon",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-consensus",
  "reth-discv4",
@@ -9188,6 +9200,7 @@ version = "1.11.0"
 dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
+ "reth-bal-store",
  "reth-basic-payload-builder",
  "reth-consensus",
  "reth-db-api",
@@ -9222,6 +9235,7 @@ dependencies = [
  "jsonrpsee",
  "parking_lot",
  "rayon",
+ "reth-bal-store",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -9956,6 +9970,8 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "parking_lot",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
@@ -9974,6 +9990,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-transaction-pool",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
