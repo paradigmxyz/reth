@@ -63,9 +63,10 @@ impl StorageBloomFilter {
     /// - `num_hashes`: Number of probe positions per key (K). Typical: 3.
     ///
     /// # Panics
-    /// Panics if `size_bytes < 8`.
+    /// Panics if `size_bytes < 8` or `num_hashes == 0`.
     pub fn new(size_bytes: usize, num_hashes: u8) -> Self {
         assert!(size_bytes >= 8, "bloom filter must be at least 8 bytes");
+        assert!(num_hashes > 0, "bloom filter needs at least 1 hash function");
         let num_words = size_bytes / 8;
         let bits: Box<[AtomicU64]> = (0..num_words)
             .map(|_| AtomicU64::new(0))
@@ -138,8 +139,7 @@ impl StorageBloomFilter {
 
     /// Saves the bloom filter to a file.
     ///
-    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw
-    /// bits...]`
+    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw bits...]`
     ///
     /// The `block_number` is stored so that on restart we can incrementally catch up
     /// from changesets instead of re-scanning the entire `PlainStorageState` table.
@@ -209,6 +209,9 @@ impl StorageBloomFilter {
         let mut num_hashes_buf = [0u8; 1];
         file.read_exact(&mut num_hashes_buf)?;
         let num_hashes = num_hashes_buf[0];
+        if num_hashes == 0 {
+            return Ok(None);
+        }
 
         let mut block_buf = [0u8; 8];
         file.read_exact(&mut block_buf)?;
@@ -457,5 +460,40 @@ mod tests {
         assert!(result.is_none(), "should reject mismatched size");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn false_positive_rate_vs_num_hashes() {
+        // Sweep K=1..8 to show how FP rate changes with num_hashes.
+        // Run with: cargo test -p reth-storage-bloom false_positive_rate_vs_num_hashes -- --nocapture
+        let size_bytes = 1024 * 1024; // 1MB filter
+        let n_insert = 100_000u64;
+        let n_query = 100_000u64;
+
+        let addr = address!("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let other = address!("1111111111111111111111111111111111111111");
+
+        println!("\n{:<12} {:<15} {:<10}", "num_hashes", "false_positives", "fp_rate");
+        println!("{}", "-".repeat(40));
+
+        for k in 1u8..=8 {
+            let bloom = StorageBloomFilter::new(size_bytes, k);
+
+            for i in 0..n_insert {
+                let slot = B256::from(alloy_primitives::U256::from(i));
+                bloom.insert(&addr, &slot);
+            }
+
+            let mut fp = 0u64;
+            for i in 0..n_query {
+                let slot = B256::from(alloy_primitives::U256::from(i));
+                if bloom.might_contain(&other, &slot) {
+                    fp += 1;
+                }
+            }
+
+            let rate = fp as f64 / n_query as f64;
+            println!("{:<12} {:<15} {:.6}", k, fp, rate);
+        }
     }
 }
