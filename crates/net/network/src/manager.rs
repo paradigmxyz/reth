@@ -567,6 +567,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 });
             }
+            PeerRequest::GetAccountRange { .. } |
+            PeerRequest::GetStorageRanges { .. } |
+            PeerRequest::GetByteCodes { .. } |
+            PeerRequest::GetTrieNodes { .. } => {
+                // Snap protocol requests from peers are not handled here.
+                // They are handled in the session layer directly.
+            }
         }
     }
 

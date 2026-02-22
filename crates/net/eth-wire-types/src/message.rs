@@ -170,15 +170,29 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetBlockAccessLists => {
                 if version < EthVersion::Eth71 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetBlockAccessLists))
+                    // Beyond the max ID for this version — treat as raw capability message
+                    // (e.g. a snap protocol message in the multiplexed ID space).
+                    let raw_payload = Bytes::copy_from_slice(buf);
+                    buf.advance(raw_payload.len());
+                    EthMessage::Other(RawCapabilityMessage::new(
+                        message_type.to_u8() as usize,
+                        raw_payload.into(),
+                    ))
+                } else {
+                    EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
                 }
-                EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::BlockAccessLists => {
                 if version < EthVersion::Eth71 {
-                    return Err(MessageError::Invalid(version, EthMessageID::BlockAccessLists))
+                    let raw_payload = Bytes::copy_from_slice(buf);
+                    buf.advance(raw_payload.len());
+                    EthMessage::Other(RawCapabilityMessage::new(
+                        message_type.to_u8() as usize,
+                        raw_payload.into(),
+                    ))
+                } else {
+                    EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
                 }
-                EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -829,6 +843,9 @@ mod tests {
 
     #[test]
     fn test_bal_message_version_gating() {
+        // On versions < Eth71, GetBlockAccessLists and BlockAccessLists IDs are treated as
+        // raw capability messages (Other) since they fall beyond the eth range and may
+        // belong to another sub-protocol (e.g. snap).
         let get_block_access_lists =
             EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
                 request_id: 1337,
@@ -842,10 +859,7 @@ mod tests {
             EthVersion::Eth70,
             &mut &buf[..],
         );
-        assert!(matches!(
-            msg,
-            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::GetBlockAccessLists))
-        ));
+        assert!(matches!(msg, Ok(ProtocolMessage { message: EthMessage::Other(_), .. })));
 
         let block_access_lists =
             EthMessage::<EthNetworkPrimitives>::BlockAccessLists(RequestPair {
@@ -860,10 +874,7 @@ mod tests {
             EthVersion::Eth70,
             &mut &buf[..],
         );
-        assert!(matches!(
-            msg,
-            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists))
-        ));
+        assert!(matches!(msg, Ok(ProtocolMessage { message: EthMessage::Other(_), .. })));
     }
 
     #[test]
