@@ -263,7 +263,8 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
         };
 
         let end_key = match range.end_bound() {
-            Bound::Included(key) | Bound::Excluded(key) => Bound::Included((*key).clone()),
+            Bound::Included(key) => Bound::Included((*key).clone()),
+            Bound::Excluded(key) => Bound::Excluded((*key).clone()),
             Bound::Unbounded => Bound::Unbounded,
         };
 
