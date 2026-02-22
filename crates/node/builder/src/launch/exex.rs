@@ -48,8 +48,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// For L2 chains with faster block times, this value should be increased proportionally
     /// to avoid excessive warnings. For example, a chain with 2-second block times might use
     /// a value 6x higher than the default (768 instead of 128).
-    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
-        self.wal_blocks_warning = threshold;
+    ///
+    /// If `None` is provided, the default threshold is used.
+    pub const fn with_wal_blocks_warning(mut self, threshold: Option<usize>) -> Self {
+        if let Some(threshold) = threshold {
+            self.wal_blocks_warning = threshold;
+        }
         self
     }
 
