@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Benchmarks for `StorageBloomFilter`.
 //!
 //! Measures insert and lookup throughput to validate that the bloom filter
