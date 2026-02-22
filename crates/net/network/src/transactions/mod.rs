@@ -2918,8 +2918,7 @@ mod tests {
 
         let peer = tx_manager.peers.get(&peer_id).unwrap();
         assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
-        assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
-        peer.seen_transactions.contains(eip4844_tx.transaction.hash());
+        assert!(peer.seen_transactions.contains(eip4844_tx.transaction.hash()));
 
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
