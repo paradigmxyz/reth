@@ -997,17 +997,31 @@ mod tests {
         )
     }
 
+    /// Guard that clears the post-transaction hook when dropped.
+    ///
+    /// This prevents circular references between the hook closure and the provider.
+    struct PostTxHookGuard(Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>);
+
+    impl Drop for PostTxHookGuard {
+        fn drop(&mut self) {
+            self.0.set_post_transaction_hook(Box::new(|| ()));
+        }
+    }
+
     /// This will persist the last block in-memory and delete it from
     /// `canonical_in_memory_state` right after a database read transaction is created.
     ///
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
+    ///
+    /// Returns a guard that clears the hook when dropped to prevent circular references.
     fn persist_block_after_db_tx_creation(
         provider: BlockchainProvider<MockNodeTypesWithDB>,
         block_number: BlockNumber,
-    ) {
+    ) -> PostTxHookGuard {
         let hook_provider = provider.clone();
-        provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
+        let db = Arc::clone(provider.database.db_ref());
+        db.set_post_transaction_hook(Box::new(move || {
             if let Some(state) = hook_provider.canonical_in_memory_state.head_state() &&
                 state.anchor().number + 1 == block_number
             {
@@ -1027,6 +1041,7 @@ mod tests {
                 hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
             }
         }));
+        PostTxHookGuard(db)
     }
 
     #[test]
@@ -2061,7 +2076,7 @@ mod tests {
                 // Test range that spans database and in-memory
                 {
                     // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
-                    persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+                    let _hook_guard = persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                     assert_eq!(
                         provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
@@ -2153,7 +2168,7 @@ mod tests {
                 {
 
                     // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
-                    persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+                    let _hook_guard = persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                     assert_eq!(
                         provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
@@ -2270,7 +2285,7 @@ mod tests {
             // Ensure that the first generated in-memory block exists
             {
                 // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
-                persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+                let _hook_guard = persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                 call_method!($arg_count, provider, $method, $item_extractor, tx_num, tx_hash, &in_memory_blocks[0], &receipts);
 
@@ -2582,7 +2597,8 @@ mod tests {
         {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
-            persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+            let _hook_guard =
+                persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
             let to_be_persisted_tx = in_memory_blocks[0].body().transactions[0].clone();
 
             // Even though the block exists, given the order of provider queries done in the method
@@ -2601,7 +2617,8 @@ mod tests {
         {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
-            persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
+            let _hook_guard =
+                persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
             assert_eq!(
