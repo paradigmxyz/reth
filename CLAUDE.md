@@ -172,7 +172,22 @@ Before submitting changes, ensure:
 2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
-5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+5. **CLI Docs** (if CLI changed): Run `make update-book-cli` (see below)
+6. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+### CLI Reference Docs (`book` CI Job)
+
+The CLI reference pages under `docs/vocs/docs/pages/cli/` are **auto-generated** from the `reth` binary's `--help` output. **Do not edit these files manually** — any hand edits will be overwritten and CI will fail regardless.
+
+When you add, remove, or modify CLI commands, subcommands, or flags, regenerate the CLI docs by running:
+
+```bash
+make update-book-cli
+```
+
+This builds `reth` in debug mode and runs `docs/cli/update.sh` to regenerate all CLI pages. Commit the resulting changes.
+
+The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating the docs and running `git diff --exit-code`. If the committed docs don't match the generated output, CI fails. Manually editing these pages is never productive — always use `make update-book-cli`.
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
@@ -313,6 +328,74 @@ GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
 Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
 
 
+#### Rust Style Guides
+
+##### Type Ordering in Files
+
+When defining structs, traits, and functions in a file, follow this ordering convention. The file's primary type (matching the file name) comes first, followed by supporting public types, then private types and helpers.
+
+```rust
+use ...;
+
+/// The primary type of this file (matches filename).
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// Followed by public auxiliary types that support the primary type
+
+/// Configuration for the processor.
+pub struct PayloadProcessorConfig { ... }
+
+/// Result type returned by processor operations.
+pub struct ProcessorResult { ... }
+
+// Followed by public traits related to the primary type
+
+pub trait ProcessorExt { ... }
+
+// Followed by private helper types
+
+struct InternalState { ... }
+
+// Followed by private helper functions
+
+fn validate_input() { ... }
+```
+
+❌ **Bad**: Adding new traits and auxiliary types **above** the file's primary type (see [#22133](https://github.com/paradigmxyz/reth/pull/22133)):
+
+```rust
+use ...;
+
+// ❌ BAD - new auxiliary struct added before the file's main type
+pub struct CacheWaitDurations { ... }
+
+// ❌ BAD - new trait added before the file's main type  
+pub trait WaitForCaches { ... }
+
+// The file's primary type is buried below unrelated additions
+pub struct PayloadProcessor { ... }
+```
+
+✅ **Good**: New types go **after** the primary type:
+
+```rust
+use ...;
+
+// ✅ The file's primary type stays at the top
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// ✅ Auxiliary types follow the primary type
+pub struct CacheWaitDurations { ... }
+
+pub trait WaitForCaches { ... }
+
+impl WaitForCaches for PayloadProcessor { ... }
+```
+
 ### Example Contribution Workflow
 
 Let's say you want to fix a bug where external IP resolution fails on startup:
@@ -387,5 +470,8 @@ cargo build --release
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo docs --document-private-items
+
+# Regenerate CLI reference docs (after CLI changes)
+make update-book-cli
 ```

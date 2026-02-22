@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProviderFactory};
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
     time::{Duration, Instant},
@@ -134,12 +134,12 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
 
     let start_time = Instant::now();
-    let mut hasher = checksum_hasher();
-    let mut total = 0usize;
     let limit = limit.unwrap_or(usize::MAX);
+    let mut checksummer = Checksummer::new(checksum_hasher(), limit);
 
     let start_block = start_block.unwrap_or(0);
     let end_block = end_block.unwrap_or(u64::MAX);
+    let is_change_based = segment.is_change_based();
 
     info!(
         "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
@@ -149,7 +149,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    'outer: for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    let mut reached_limit = false;
+    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }
@@ -167,28 +168,42 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 
         let mut cursor = jar_provider.cursor()?;
 
-        while let Ok(Some(row)) = cursor.next_row() {
-            for col_data in row.iter() {
-                hasher.write(col_data);
-            }
+        if is_change_based {
+            let offsets = jar_provider.read_changeset_offsets()?.ok_or_else(|| {
+                eyre::eyre!(
+                    "Missing changeset offsets sidecar for segment {} at range {}",
+                    segment,
+                    block_range
+                )
+            })?;
+            let input = ChangeBasedChecksumInput {
+                segment,
+                block_range_start: block_range.start(),
+                start_block,
+                end_block,
+                offsets: &offsets,
+            };
 
-            total += 1;
-
-            if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-                info!("Hashed {total} entries.");
-            }
-
-            if total >= limit {
-                break 'outer;
+            reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
+        } else {
+            while let Some(row) = cursor.next_row()? {
+                if checksummer.write_row(&row) {
+                    reached_limit = true;
+                    break;
+                }
             }
         }
 
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+
+        if reached_limit {
+            break;
+        }
     }
 
-    let checksum = hasher.finish();
+    let (checksum, total) = checksummer.finish();
     let elapsed = start_time.elapsed();
 
     info!(
@@ -267,7 +282,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
 
             total = index + 1;
             if total >= limit {
-                break
+                break;
             }
         }
 
@@ -284,4 +299,140 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
 
         Ok((checksum, elapsed))
     }
+}
+
+/// Accumulates a checksum over key-value entries, tracking count and limit.
+struct Checksummer<H> {
+    hasher: H,
+    total: usize,
+    limit: usize,
+}
+
+impl<H: Hasher> Checksummer<H> {
+    fn new(hasher: H, limit: usize) -> Self {
+        Self { hasher, total: 0, limit }
+    }
+
+    /// Hash a row's columns (non-changeset segments). Returns `true` if the limit is reached.
+    fn write_row(&mut self, row: &[&[u8]]) -> bool {
+        for col in row {
+            self.hasher.write(col);
+        }
+        self.advance()
+    }
+
+    /// Hash a key + value as two separate writes, matching MDBX raw entry semantics.
+    /// Write boundaries matter: foldhash rotates its accumulator by `len` on each `write`.
+    fn write_entry(&mut self, key: &[u8], value: &[u8]) -> bool {
+        self.hasher.write(key);
+        self.hasher.write(value);
+        self.advance()
+    }
+
+    fn advance(&mut self) -> bool {
+        self.total += 1;
+        if self.total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+            info!("Hashed {} entries.", self.total);
+        }
+        self.total >= self.limit
+    }
+
+    fn finish(self) -> (u64, usize) {
+        (self.hasher.finish(), self.total)
+    }
+}
+
+/// Reconstruct MDBX `StorageChangeSets` key/value boundaries from a static-file row.
+///
+/// MDBX layout:
+/// - key: `BlockNumberAddress` => `[8B block_number][20B address]`
+/// - value: `StorageEntry` => `[32B storage_key][compact U256 value]`
+///
+/// Static-file row layout for `StorageBeforeTx`:
+/// - `[20B address][32B storage_key][compact U256 value]`
+fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([u8; 28], &[u8])> {
+    if row.len() < 20 {
+        return Err(eyre::eyre!(
+            "Storage changeset row too short: expected at least 20 bytes, got {}",
+            row.len()
+        ));
+    }
+
+    let mut key_buf = [0u8; 28];
+    key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
+    key_buf[8..].copy_from_slice(&row[..20]);
+    Ok((key_buf, &row[20..]))
+}
+
+struct ChangeBasedChecksumInput<'a> {
+    segment: StaticFileSegment,
+    block_range_start: u64,
+    start_block: u64,
+    end_block: u64,
+    offsets: &'a [ChangesetOffset],
+}
+
+fn checksum_change_based_segment<H: Hasher>(
+    checksummer: &mut Checksummer<H>,
+    input: ChangeBasedChecksumInput<'_>,
+    cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
+) -> eyre::Result<bool> {
+    let ChangeBasedChecksumInput { segment, block_range_start, start_block, end_block, offsets } =
+        input;
+    let is_storage = segment.is_storage_change_sets();
+    let mut reached_limit = false;
+
+    for (offset_index, offset) in offsets.iter().enumerate() {
+        let block_number = block_range_start + offset_index as u64;
+        let include = block_number >= start_block && block_number <= end_block;
+
+        for _ in 0..offset.num_changes() {
+            let row = cursor.next_row()?.ok_or_else(|| {
+                eyre::eyre!(
+                    "Unexpected EOF while checksumming {} static file at range starting {}",
+                    segment,
+                    block_range_start
+                )
+            })?;
+
+            if !include {
+                continue;
+            }
+
+            // Reconstruct MDBX key/value write boundaries. foldhash rotates
+            // its accumulator by `len` on each write(), so boundaries must
+            // match exactly.
+            let done = if is_storage {
+                // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
+                // value = compact StorageEntry. Column 0 is compact
+                // StorageBeforeTx = [20B address][32B key][compact U256].
+                let col = row[0];
+                let (key, value) = split_storage_changeset_row(block_number, col)?;
+                checksummer.write_entry(&key, value)
+            } else {
+                // AccountChangeSets: MDBX key = BlockNumber (8B),
+                // value = compact AccountBeforeTx (= column 0).
+                checksummer.write_entry(&block_number.to_be_bytes(), row[0])
+            };
+
+            if done {
+                reached_limit = true;
+                break;
+            }
+        }
+
+        if reached_limit {
+            break;
+        }
+    }
+
+    if !reached_limit && cursor.next_row()?.is_some() {
+        return Err(eyre::eyre!(
+            "Changeset offsets do not cover all rows for {} at range starting {}",
+            segment,
+            block_range_start
+        ));
+    }
+
+    Ok(reached_limit)
 }

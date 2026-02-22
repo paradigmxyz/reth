@@ -87,6 +87,7 @@ pub async fn import_blocks_from_file<N>(
     config: &Config,
     executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
     consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<ImportResult>
 where
     N: ProviderNodeTypes,
@@ -147,6 +148,7 @@ where
             static_file_producer.clone(),
             import_config.no_state,
             executor.clone(),
+            runtime.clone(),
         )?;
 
         // override the tip
@@ -257,6 +259,7 @@ where
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
+#[expect(clippy::too_many_arguments)]
 pub fn build_import_pipeline_impl<N, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
@@ -265,6 +268,7 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
@@ -283,7 +287,7 @@ where
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     header_downloader.update_local_head(local_head);
@@ -291,7 +295,7 @@ where
 
     let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
         .build(file_client.clone(), consensus.clone(), provider_factory.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     body_downloader

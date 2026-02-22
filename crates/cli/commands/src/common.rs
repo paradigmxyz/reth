@@ -89,13 +89,15 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     ///
-    /// Internally builds a [`reth_tasks::Runtime`] attached to the current tokio handle for
-    /// parallel storage I/O.
-    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    /// The provided `runtime` is used for parallel storage I/O.
+    pub fn init<N: CliNodeTypes>(
+        &self,
+        access: AccessRights,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -144,11 +146,24 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
-            .with_default_tables()
-            .with_database_log_level(self.db.log_level)
-            .with_read_only(!access.is_read_write())
-            .build()?;
+        let rocksdb_provider = if !access.is_read_write() && !RocksDBProvider::exists(&rocksdb_path)
+        {
+            // RocksDB database doesn't exist yet (e.g. datadir restored from a snapshot
+            // or created before RocksDB storage). Create an empty one so read-only
+            // commands can proceed.
+            debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?
+        } else {
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .with_read_only(!access.is_read_write())
+                .build()?
+        };
 
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
