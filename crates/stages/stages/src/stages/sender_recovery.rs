@@ -423,6 +423,7 @@ where
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
+        .map(|tx_number| tx_number + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
         // If `TransactionSenders` table was pruned, we will have a number of entries in it not
@@ -695,7 +696,8 @@ mod tests {
                         blocks[..=max_pruned_block as usize]
                             .iter()
                             .map(|block| block.transaction_count() as u64)
-                            .sum(),
+                            .sum::<u64>()
+                            .saturating_sub(1),
                     ),
                     prune_mode: PruneMode::Full,
                 },
