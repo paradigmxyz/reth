@@ -103,8 +103,8 @@ where
             .eth
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
-                TransferInspector::new(false),
-                |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
+                || Ok(TransferInspector::new(false)),
+                |_tx_info, inspector, _, _, _, _| Ok(inspector.into_transfers()),
             )
             .await
             .map_err(Into::into)?
