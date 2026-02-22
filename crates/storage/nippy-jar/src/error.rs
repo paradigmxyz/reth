@@ -85,9 +85,23 @@ pub enum NippyJarError {
     #[error("jar has been frozen and cannot be modified.")]
     FrozenJar,
 
-    /// The file is in an inconsistent state.
-    #[error("File is in an inconsistent state.")]
-    InconsistentState,
+    /// The offset file size does not match the expected size based on row/column configuration.
+    #[error("Offset file size mismatch: expected {expected} bytes, actual {actual} bytes")]
+    OffsetFileSizeMismatch {
+        /// Expected file size in bytes.
+        expected: u64,
+        /// Actual file size in bytes.
+        actual: u64,
+    },
+
+    /// The data file size does not match the last offset value.
+    #[error("Data file size mismatch: expected {expected} bytes (from last offset), actual {actual} bytes")]
+    DataFileSizeMismatch {
+        /// Expected file size in bytes (from last offset).
+        expected: u64,
+        /// Actual file size in bytes.
+        actual: u64,
+    },
 
     /// A specified file is missing.
     #[error("Missing file: {}", .0.display())]
