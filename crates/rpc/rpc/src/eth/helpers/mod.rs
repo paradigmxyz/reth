@@ -12,6 +12,7 @@ mod pending_block;
 mod receipt;
 mod spec;
 mod state;
+mod subscriptions;
 mod trace;
 mod transaction;
 
