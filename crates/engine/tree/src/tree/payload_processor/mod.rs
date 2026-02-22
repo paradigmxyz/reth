@@ -1019,16 +1019,10 @@ impl PayloadExecutionCache {
     /// Updates the cache with a closure that has exclusive access to the guard.
     /// This ensures that all cache operations happen atomically.
     ///
-    /// ## CRITICAL SAFETY REQUIREMENT
-    ///
-    /// **Before calling this method, you MUST ensure there are no other active cache users.**
-    /// This includes:
-    /// - No running [`PrewarmCacheTask`] instances that could write to the cache
-    /// - No concurrent transactions that might access the cached state
-    /// - All prewarming operations must be completed or cancelled
-    ///
-    /// Violating this requirement can result in cache corruption, incorrect state data,
-    /// and potential consensus failures.
+    /// Callers must not mutate the *underlying* [`ExecutionCache`] data (e.g. via
+    /// `SavedCache::clear`) while other tasks may hold clones of the same
+    /// `SavedCache`. Swapping the slot value (`*cached = Some(..)` / `*cached = None`)
+    /// is always safe because existing clones retain their own `Arc` references.
     pub fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),
