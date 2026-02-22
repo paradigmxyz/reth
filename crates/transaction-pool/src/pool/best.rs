@@ -5,7 +5,6 @@ use crate::{
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
-use alloy_eips::Typed2718;
 use alloy_primitives::map::AddressSet;
 use core::fmt;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -216,7 +215,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 self.independent.insert(unlocked.clone());
             }
 
-            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+            if self.skip_blobs && best.transaction.is_eip4844() {
                 // blobs should be skipped, marking them as invalid will ensure that no dependent
                 // transactions are returned
                 self.mark_invalid(
