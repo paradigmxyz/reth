@@ -30,7 +30,7 @@ pub(crate) struct BloomStateProvider<S> {
 
 impl<S> BloomStateProvider<S> {
     /// Creates a new [`BloomStateProvider`] wrapping the given provider with a bloom filter.
-    pub(crate) fn new(inner: S, bloom: Arc<StorageBloomFilter>) -> Self {
+    pub(crate) const fn new(inner: S, bloom: Arc<StorageBloomFilter>) -> Self {
         Self { inner, bloom }
     }
 }
