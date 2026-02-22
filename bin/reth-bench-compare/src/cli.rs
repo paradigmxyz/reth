@@ -291,8 +291,8 @@ impl Args {
         match &self.jwt_secret {
             Some(path) => {
                 let jwt_secret_str = path.to_string_lossy();
-                let expanded = shellexpand::tilde(&jwt_secret_str);
-                PathBuf::from(expanded.as_ref())
+                let expanded = reth_node_core::utils::expand_tilde(&jwt_secret_str);
+                PathBuf::from(expanded)
             }
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
@@ -310,8 +310,8 @@ impl Args {
 
     /// Get the expanded output directory path
     pub(crate) fn output_dir_path(&self) -> PathBuf {
-        let expanded = shellexpand::tilde(&self.output_dir);
-        PathBuf::from(expanded.as_ref())
+        let expanded = reth_node_core::utils::expand_tilde(&self.output_dir);
+        PathBuf::from(expanded)
     }
 
     /// Get the effective warmup blocks value - either specified or defaults to blocks
