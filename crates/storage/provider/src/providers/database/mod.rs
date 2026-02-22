@@ -178,7 +178,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns a reference to the storage bloom filter, if configured.
-    pub fn storage_bloom(&self) -> Option<&Arc<StorageBloomFilter>> {
+    pub const fn storage_bloom(&self) -> Option<&Arc<StorageBloomFilter>> {
         self.storage_bloom.as_ref()
     }
 

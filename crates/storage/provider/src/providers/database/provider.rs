@@ -269,8 +269,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<u64> {
         let mut cursor = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
         let mut count = 0u64;
-        let mut walker = cursor.walk(None)?;
-        while let Some(result) = walker.next() {
+        let walker = cursor.walk(None)?;
+        for result in walker {
             let (address, entry) = result?;
             if !entry.value.is_zero() {
                 bloom.insert(&address, &entry.key);
@@ -297,9 +297,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<u64> {
         let start = BlockNumberAddress((from_block + 1, alloy_primitives::Address::ZERO));
         let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
-        let mut walker = cursor.walk(Some(start))?;
+        let walker = cursor.walk(Some(start))?;
         let mut count = 0u64;
-        while let Some(result) = walker.next() {
+        for result in walker {
             let (block_address, entry) = result?;
             let BlockNumberAddress((_, address)) = block_address;
             bloom.insert(&address, &entry.key);
