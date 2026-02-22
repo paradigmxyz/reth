@@ -303,6 +303,8 @@ pub(crate) struct TransactionOutcomeMetrics {
     commit_whole_duration_seconds: Histogram,
     /// User-mode CPU time spent on GC update during transaction commit
     commit_gc_cputime_duration_seconds: Histogram,
+    /// Size in bytes of dirty pages written during transaction commit
+    commit_space_dirty_bytes: Histogram,
 }
 
 impl TransactionOutcomeMetrics {
@@ -330,6 +332,7 @@ impl TransactionOutcomeMetrics {
             self.commit_ending_duration_seconds.record(commit_latency.ending());
             self.commit_whole_duration_seconds.record(commit_latency.whole());
             self.commit_gc_cputime_duration_seconds.record(commit_latency.gc_cputime());
+            self.commit_space_dirty_bytes.record(commit_latency.space_dirty() as f64);
         }
     }
 }
