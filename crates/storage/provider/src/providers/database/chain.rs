@@ -2,7 +2,7 @@ use crate::{providers::NodeTypesForProvider, DatabaseProvider};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::NodePrimitives;
 
-use reth_primitives_traits::{FullBlockHeader, FullSignedTx};
+use reth_primitives_traits::{BlockHeader, FullBlockHeader, FullSignedTx, SignedTransaction};
 use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EmptyBodyStorage, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]
@@ -50,8 +50,8 @@ where
 
 impl<N, T, H> ChainStorage<N> for EmptyBodyStorage<T, H>
 where
-    T: FullSignedTx,
-    H: FullBlockHeader,
+    T: SignedTransaction,
+    H: BlockHeader,
     N: NodePrimitives<
         Block = alloy_consensus::Block<T, H>,
         BlockHeader = H,
