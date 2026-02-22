@@ -14,6 +14,8 @@ pub struct ExecutorMetrics {
     pub gas_per_second: Gauge,
     /// The Histogram for amount of gas used.
     pub gas_used_histogram: Histogram,
+    /// The total amount of gas used in the latest block.
+    pub gas_used_last: Gauge,
 
     /// The Histogram for amount of time taken to execute the pre-execution changes.
     pub pre_execution_histogram: Histogram,
@@ -51,6 +53,7 @@ impl ExecutorMetrics {
         self.gas_processed_total.increment(gas_used);
         self.gas_per_second.set(gas_used as f64 / execution_duration);
         self.gas_used_histogram.record(gas_used as f64);
+        self.gas_used_last.set(gas_used as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
