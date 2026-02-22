@@ -2006,6 +2006,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         if let Some(block_number) = self.convert_hash_or_number(id)? &&
             let Some(body) = self.block_body_indices(block_number)?
         {
+            // If the block's transactions have been pruned, return None
+            if let Some(checkpoint) = self.get_prune_checkpoint(PruneSegment::Bodies)? &&
+                let Some(pruned_block) = checkpoint.block_number &&
+                block_number <= pruned_block
+            {
+                return Ok(None);
+            }
+
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
@@ -2089,6 +2097,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         if let Some(number) = self.convert_hash_or_number(block)? &&
             let Some(body) = self.block_body_indices(number)?
         {
+            // If the block's receipts have been pruned, return None
+            if let Some(checkpoint) = self.get_prune_checkpoint(PruneSegment::Receipts)? &&
+                let Some(pruned_block) = checkpoint.block_number &&
+                number <= pruned_block
+            {
+                return Ok(None);
+            }
+
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
