@@ -19,6 +19,7 @@ use alloy_primitives::B256;
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crossbeam_channel::RecvTimeoutError;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -50,7 +51,7 @@ use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::Arc,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -1036,7 +1037,7 @@ where
                 self.metrics.block_validation.state_root_task_timeout_total.increment(1);
 
                 let (seq_tx, seq_rx) =
-                    std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
+                    crossbeam_channel::bounded::<ProviderResult<(B256, TrieUpdates)>>(1);
 
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
@@ -1045,52 +1046,55 @@ where
                     let _ = seq_tx.send(result);
                 });
 
-                const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
-
-                loop {
-                    match task_rx.recv_timeout(POLL_INTERVAL) {
-                        Ok(result) => {
-                            debug!(
-                                target: "engine::tree::payload_validator",
-                                source = "task",
-                                "State root timeout race won"
-                            );
-                            return Ok(result);
+                crossbeam_channel::select! {
+                    recv(task_rx) -> result => {
+                        match result {
+                            Ok(result) => {
+                                debug!(
+                                    target: "engine::tree::payload_validator",
+                                    source = "task",
+                                    "State root timeout race won"
+                                );
+                                Ok(result)
+                            }
+                            Err(_) => {
+                                debug!(
+                                    target: "engine::tree::payload_validator",
+                                    "State root task dropped, waiting for sequential fallback"
+                                );
+                                let result = seq_rx.recv().map_err(|_| {
+                                    ProviderError::other(std::io::Error::other(
+                                        "both state root computations failed",
+                                    ))
+                                })?;
+                                let (state_root, trie_updates) = result?;
+                                Ok(Ok(StateRootComputeOutcome {
+                                    state_root,
+                                    trie_updates,
+                                    #[cfg(feature = "trie-debug")]
+                                    debug_recorders: Vec::new(),
+                                }))
+                            }
                         }
-                        Err(RecvTimeoutError::Disconnected) => {
-                            debug!(
-                                target: "engine::tree::payload_validator",
-                                "State root task dropped, waiting for sequential fallback"
-                            );
-                            let result = seq_rx.recv().map_err(|_| {
-                                ProviderError::other(std::io::Error::other(
-                                    "both state root computations failed",
-                                ))
-                            })?;
-                            let (state_root, trie_updates) = result?;
-                            return Ok(Ok(StateRootComputeOutcome {
-                                state_root,
-                                trie_updates,
-                                #[cfg(feature = "trie-debug")]
-                                debug_recorders: Vec::new(),
-                            }));
-                        }
-                        Err(RecvTimeoutError::Timeout) => {}
                     }
-
-                    if let Ok(result) = seq_rx.try_recv() {
+                    recv(seq_rx) -> result => {
+                        let result = result.map_err(|_| {
+                            ProviderError::other(std::io::Error::other(
+                                "both state root computations failed",
+                            ))
+                        })?;
                         debug!(
                             target: "engine::tree::payload_validator",
                             source = "sequential",
                             "State root timeout race won"
                         );
                         let (state_root, trie_updates) = result?;
-                        return Ok(Ok(StateRootComputeOutcome {
+                        Ok(Ok(StateRootComputeOutcome {
                             state_root,
                             trie_updates,
                             #[cfg(feature = "trie-debug")]
                             debug_recorders: Vec::new(),
-                        }));
+                        }))
                     }
                 }
             }
