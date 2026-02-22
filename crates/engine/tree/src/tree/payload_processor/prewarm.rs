@@ -42,6 +42,20 @@ use std::sync::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
+/// Transaction count threshold below which prewarm workers are capped to
+/// [`SMALL_BLOCK_MAX_PREWARM_WORKERS`].
+///
+/// For small blocks, each prewarm worker pays ~400µs for EVM context setup (`evm_for_ctx`),
+/// but actual per-transaction execution is only ~30µs. Spawning N workers for N transactions
+/// wastes CPU on context setup and creates contention with the sparse trie's critical path.
+/// Capping to fewer workers still emits `PrefetchProofs` targets (keeping the sparse trie fed)
+/// while avoiding the overhead.
+const SMALL_BLOCK_PREWARM_WORKER_THRESHOLD: usize = 50;
+
+/// Maximum number of prewarm workers for blocks at or below
+/// [`SMALL_BLOCK_PREWARM_WORKER_THRESHOLD`] transactions.
+const SMALL_BLOCK_MAX_PREWARM_WORKERS: usize = 1;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -145,11 +159,19 @@ where
             let pool_threads = executor.prewarming_pool().current_num_threads();
             // Don't spawn more workers than transactions. When transaction_count is 0
             // (unknown), use all pool threads.
-            let workers_needed = if ctx.env.transaction_count > 0 {
+            let mut workers_needed = if ctx.env.transaction_count > 0 {
                 ctx.env.transaction_count.min(pool_threads)
             } else {
                 pool_threads
             };
+
+            // For small blocks, cap workers to reduce EVM context setup overhead while
+            // still emitting PrefetchProofs targets to keep the sparse trie fed.
+            if ctx.env.transaction_count > 0
+                && ctx.env.transaction_count <= SMALL_BLOCK_PREWARM_WORKER_THRESHOLD
+            {
+                workers_needed = workers_needed.min(SMALL_BLOCK_MAX_PREWARM_WORKERS);
+            }
 
             let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
 
