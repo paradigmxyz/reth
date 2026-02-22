@@ -928,4 +928,127 @@ mod tests {
             }
         }
     }
+
+    /// Tests that when rocksdb feature is enabled but `storages_history_in_rocksdb = false`,
+    /// the pruner uses MDBX path instead of `RocksDB` path.
+    ///
+    /// This ensures storage settings are respected even when rocksdb feature is available.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn prune_respects_storage_settings_mdbx_path() {
+        use alloy_primitives::Address;
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+        use reth_provider::RocksDBProviderFactory;
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=100,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            1..2,
+            1..2,
+        );
+
+        // Insert changesets and history into MDBX (not static files, not RocksDB)
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        // Build storage indices for RocksDB insertion
+        let mut storage_indices: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        for (block, changeset) in changesets.iter().enumerate() {
+            for (address, _, storage_entries) in changeset {
+                for entry in storage_entries {
+                    storage_indices.entry((*address, entry.key)).or_default().push(block as u64);
+                }
+            }
+        }
+
+        // Insert some data into RocksDB to verify it's NOT touched
+        let rocksdb = db.factory.rocksdb_provider();
+        let mut batch = rocksdb.batch();
+        for ((address, storage_key), block_numbers) in &storage_indices {
+            let shard = BlockNumberList::new_pre_sorted(block_numbers.clone());
+            batch
+                .put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(*address, *storage_key),
+                    &shard,
+                )
+                .expect("insert storage history shard");
+        }
+        batch.commit().expect("commit rocksdb batch");
+
+        // Record RocksDB state before pruning
+        let rocksdb_shards_before: Vec<_> = storage_indices
+            .keys()
+            .map(|(addr, key)| {
+                ((*addr, *key), rocksdb.storage_history_shards(*addr, *key).unwrap())
+            })
+            .collect();
+
+        // Record MDBX state before pruning
+        let mdbx_history_before = db.table::<tables::StoragesHistory>().unwrap();
+        assert!(!mdbx_history_before.is_empty(), "MDBX should have storage history data");
+
+        let to_block: BlockNumber = 50;
+        let prune_mode = PruneMode::Before(to_block);
+        let input =
+            PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
+        let segment = StorageHistory::new(prune_mode);
+
+        // Key: Set storages_history_in_rocksdb = false (use MDBX path)
+        db.factory.set_storage_settings_cache(
+            StorageSettings::default()
+                .with_storage_changesets_in_static_files(false)
+                .with_storages_history_in_rocksdb(false),
+        );
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        assert_matches!(
+            result,
+            SegmentOutput { progress: PruneProgress::Finished, pruned, checkpoint: Some(_) }
+                if pruned > 0
+        );
+
+        // Verify MDBX history was pruned (shards should be reduced or modified)
+        let mdbx_history_after = db.table::<tables::StoragesHistory>().unwrap();
+        assert!(
+            mdbx_history_after.len() <= mdbx_history_before.len(),
+            "MDBX storage history should be pruned or reduced"
+        );
+
+        // Verify RocksDB data was NOT touched
+        let rocksdb = db.factory.rocksdb_provider();
+        for ((addr, key), shards_before) in &rocksdb_shards_before {
+            let shards_after = rocksdb.storage_history_shards(*addr, *key).unwrap();
+            assert_eq!(
+                shards_before.len(),
+                shards_after.len(),
+                "RocksDB shards for {addr:?}/{key:?} should NOT be modified when storages_history_in_rocksdb=false"
+            );
+            for ((key_before, blocks_before), (key_after, blocks_after)) in
+                shards_before.iter().zip(shards_after.iter())
+            {
+                assert_eq!(key_before, key_after, "RocksDB shard key should be unchanged");
+                assert_eq!(
+                    blocks_before.iter().collect::<Vec<_>>(),
+                    blocks_after.iter().collect::<Vec<_>>(),
+                    "RocksDB shard blocks should be unchanged"
+                );
+            }
+        }
+    }
 }
