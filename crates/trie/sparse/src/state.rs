@@ -880,6 +880,21 @@ where
                 self.storage.prune(max_depth, max_storage_tries);
             },
         );
+
+        // Snapshot initial state for all surviving tries for the next debug recording cycle.
+        // This must happen after pruning so the snapshot reflects the post-prune state,
+        // and must cover all surviving tries (not just those that were actually pruned).
+        #[cfg(feature = "trie-debug")]
+        {
+            if let Some(trie) = self.state.as_revealed_mut() {
+                trie.debug_snapshot_initial_state();
+            }
+            for trie in self.storage.tries.values_mut() {
+                if let Some(trie) = trie.as_revealed_mut() {
+                    trie.debug_snapshot_initial_state();
+                }
+            }
+        }
     }
 }
 

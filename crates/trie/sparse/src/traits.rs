@@ -317,6 +317,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         TrieDebugRecorder::default()
     }
 
+    /// Resets the debug recorder and snapshots the current revealed nodes as the initial state
+    /// for the next recording cycle.
+    ///
+    /// The default implementation is a no-op.
+    #[cfg(feature = "trie-debug")]
+    fn debug_snapshot_initial_state(&mut self) {}
+
     /// Applies leaf updates to the sparse trie.
     ///
     /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
