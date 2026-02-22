@@ -78,6 +78,12 @@ impl InMemorySize for alloy_consensus::Receipt {
     }
 }
 
+impl<T: InMemorySize> InMemorySize for alloy_consensus::EthereumReceipt<T> {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + self.logs.iter().map(|log| log.size()).sum::<usize>()
+    }
+}
+
 impl InMemorySize for LogData {
     fn size(&self) -> usize {
         self.data.len() + core::mem::size_of_val(self.topics())

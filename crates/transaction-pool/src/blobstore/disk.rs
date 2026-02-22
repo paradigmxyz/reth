@@ -7,10 +7,10 @@ use alloy_eips::{
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{map::B256Set, TxHash, B256};
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
+use std::{fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
 /// How many [`BlobTransactionSidecarVariant`] to cache in memory.
@@ -82,8 +82,11 @@ impl DiskFileBlobStore {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
-                    result[hash_idx] = Some(match_result);
-                    missing_count -= 1;
+                    let slot = &mut result[hash_idx];
+                    if slot.is_none() {
+                        missing_count -= 1;
+                    }
+                    *slot = Some(match_result);
                 }
             }
 
@@ -310,7 +313,7 @@ struct DiskFileBlobStoreInner {
     blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, ByLength>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
-    txs_to_delete: RwLock<HashSet<B256>>,
+    txs_to_delete: RwLock<B256Set>,
     /// Tracks of known versioned hashes and a transaction they exist in
     ///
     /// Note: It is possible that one blob can appear in multiple transactions but this only tracks

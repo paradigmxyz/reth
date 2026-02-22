@@ -88,7 +88,10 @@ use crate::{
     TransactionValidator,
 };
 
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    Address, TxHash, B256,
+};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -97,7 +100,6 @@ use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
-    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -202,9 +204,15 @@ where
     pub fn block_info(&self) -> BlockInfo {
         self.get_pool_data().block_info()
     }
-    /// Sets the currently tracked block
+    /// Sets the currently tracked block.
+    ///
+    /// This will also notify subscribers about any transactions that were promoted to the pending
+    /// pool due to fee changes.
     pub fn set_block_info(&self, info: BlockInfo) {
-        self.pool.write().set_block_info(info)
+        let outcome = self.pool.write().set_block_info(info);
+
+        // Notify subscribers about promoted transactions due to fee changes
+        self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
     }
 
     /// Returns the internal [`SenderId`] for this address
@@ -218,7 +226,7 @@ where
     }
 
     /// Returns all senders in the pool
-    pub fn unique_senders(&self) -> HashSet<Address> {
+    pub fn unique_senders(&self) -> AddressSet {
         self.get_pool_data().unique_senders()
     }
 
@@ -628,10 +636,24 @@ where
     }
 
     /// Adds all transactions in the iterator to the pool, returning a list of results.
+    ///
+    /// Convenience method that assigns the same origin to all transactions. Delegates to
+    /// [`Self::add_transactions_with_origins`].
     pub fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
+    }
+
+    /// Adds all transactions in the iterator to the pool, each with its own
+    /// [`TransactionOrigin`], returning a list of results.
+    pub fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<
+            Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
+        >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
@@ -640,7 +662,7 @@ where
 
             let results = transactions
                 .into_iter()
-                .map(|tx| {
+                .map(|(origin, tx)| {
                     let (result, meta) = self.add_transaction(&mut pool, origin, tx);
 
                     // Only collect metadata for successful insertions
@@ -1064,6 +1086,21 @@ where
         removed
     }
 
+    /// Prunes and returns all matching transactions from the pool.
+    ///
+    /// This removes the transactions as if they were mined: descendant transactions are **not**
+    /// parked and remain eligible for inclusion.
+    pub fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+
+        self.pool.write().prune_transactions(hashes)
+    }
+
     /// Removes and returns all transactions that are present in the pool.
     pub fn retain_unknown<A>(&self, announcement: &mut A)
     where
@@ -1088,6 +1125,16 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns a pending transaction sent by the given sender with the given nonce.
+    pub fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_pending_transaction_by_sender_and_nonce(sender_id, nonce)
     }
 
     /// Returns all queued transactions of the address by sender
@@ -1192,11 +1239,11 @@ where
 
     /// Notify about propagated transactions.
     pub fn on_propagated(&self, txs: PropagatedTransactions) {
-        if txs.0.is_empty() {
+        if txs.is_empty() {
             return
         }
         self.with_event_listener(|listener| {
-            txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
+            txs.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
         });
     }
 

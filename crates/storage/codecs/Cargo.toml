@@ -22,7 +22,7 @@ alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
 
-# optimism
+# op
 op-alloy-consensus = { workspace = true, optional = true }
 
 # misc

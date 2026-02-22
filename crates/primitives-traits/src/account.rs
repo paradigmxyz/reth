@@ -89,6 +89,16 @@ impl From<revm_state::Account> for Account {
     }
 }
 
+impl From<TrieAccount> for Account {
+    fn from(value: TrieAccount) -> Self {
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            bytecode_hash: (value.code_hash != KECCAK_EMPTY).then_some(value.code_hash),
+        }
+    }
+}
+
 impl InMemorySize for Account {
     fn size(&self) -> usize {
         size_of::<Self>()

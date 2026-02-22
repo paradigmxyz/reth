@@ -1,6 +1,6 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::MINIMUM_PRUNING_DISTANCE;
+use crate::{MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE};
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
@@ -24,9 +24,9 @@ pub enum PruneSegment {
     Receipts,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
-    /// Prune segment responsible for the `AccountChangeSets` and `AccountsHistory` tables.
+    /// Prunes account changesets (static files/MDBX) and `AccountsHistory`.
     AccountHistory,
-    /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
+    /// Prunes storage changesets (static files/MDBX) and `StoragesHistory`.
     StorageHistory,
     #[deprecated = "Variant indexes cannot be changed"]
     #[strum(disabled)]
@@ -65,9 +65,10 @@ impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
+            Self::SenderRecovery | Self::TransactionLookup => 0,
+            Self::Receipts | Self::Bodies => MINIMUM_DISTANCE,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
-                MINIMUM_PRUNING_DISTANCE
+                MINIMUM_UNWIND_SAFE_DISTANCE
             }
             #[expect(deprecated)]
             #[expect(clippy::match_same_arms)]

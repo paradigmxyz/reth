@@ -26,6 +26,14 @@ pub struct ImportCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
+    /// Fail immediately when an invalid block is encountered.
+    ///
+    /// By default, the import will stop at the last valid block if an invalid block is
+    /// encountered during execution or validation, leaving the database at the last valid
+    /// block state. When this flag is set, the import will instead fail with an error.
+    #[arg(long, verbatim_doc_comment)]
+    fail_on_invalid_block: bool,
+
     /// The path(s) to block file(s) for import.
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
@@ -39,6 +47,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     pub async fn execute<N, Comp>(
         self,
         components: impl FnOnce(Arc<N::ChainSpec>) -> Comp,
+        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
@@ -46,13 +55,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } =
+            self.env.init::<N>(AccessRights::RW, runtime.clone())?;
 
         let components = components(provider_factory.chain_spec());
 
         info!(target: "reth::cli", "Starting import of {} file(s)", self.paths.len());
 
-        let import_config = ImportConfig { no_state: self.no_state, chunk_len: self.chunk_len };
+        let import_config = ImportConfig {
+            no_state: self.no_state,
+            chunk_len: self.chunk_len,
+            fail_on_invalid_block: self.fail_on_invalid_block,
+        };
 
         let executor = components.evm_config().clone();
         let consensus = Arc::new(components.consensus().clone());
@@ -73,6 +87,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
                 &config,
                 executor.clone(),
                 consensus.clone(),
+                runtime.clone(),
             )
             .await?;
 
@@ -81,7 +96,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
             total_decoded_blocks += result.total_decoded_blocks;
             total_decoded_txns += result.total_decoded_txns;
 
-            if !result.is_complete() {
+            // Check if we stopped due to an invalid block
+            if result.stopped_on_invalid_block {
+                info!(target: "reth::cli",
+                      "Stopped at last valid block {} due to invalid block {} in file: {}. Imported {} blocks, {} transactions",
+                      result.last_valid_block.unwrap_or(0),
+                      result.bad_block.unwrap_or(0),
+                      path.display(),
+                      result.total_imported_blocks,
+                      result.total_imported_txns);
+                // Stop importing further files and exit successfully
+                break;
+            }
+
+            if !result.is_successful() {
                 return Err(eyre::eyre!(
                     "Chain was partially imported from file: {}. Imported {}/{} blocks, {}/{} transactions",
                     path.display(),
@@ -98,7 +126,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         }
 
         info!(target: "reth::cli",
-              "All files imported successfully. Total: {}/{} blocks, {}/{} transactions",
+              "Import complete. Total: {}/{} blocks, {}/{} transactions",
               total_imported_blocks, total_decoded_blocks, total_imported_txns, total_decoded_txns);
 
         Ok(())
@@ -138,5 +166,21 @@ mod tests {
         assert_eq!(args.paths[0], PathBuf::from("file1.rlp"));
         assert_eq!(args.paths[1], PathBuf::from("file2.rlp"));
         assert_eq!(args.paths[2], PathBuf::from("file3.rlp"));
+    }
+
+    #[test]
+    fn parse_import_command_with_fail_on_invalid_block() {
+        let args: ImportCommand<EthereumChainSpecParser> =
+            ImportCommand::parse_from(["reth", "--fail-on-invalid-block", "chain.rlp"]);
+        assert!(args.fail_on_invalid_block);
+        assert_eq!(args.paths.len(), 1);
+        assert_eq!(args.paths[0], PathBuf::from("chain.rlp"));
+    }
+
+    #[test]
+    fn parse_import_command_default_stops_on_invalid_block() {
+        let args: ImportCommand<EthereumChainSpecParser> =
+            ImportCommand::parse_from(["reth", "chain.rlp"]);
+        assert!(!args.fail_on_invalid_block);
     }
 }

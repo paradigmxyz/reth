@@ -25,7 +25,7 @@ mod test {
     use reth_cli_commands::NodeCommand;
 
     #[test]
-    #[ignore = "reth cmd will print op-reth output if optimism feature enabled"]
+    #[ignore = "reth cmd output differs when optimism feature enabled"]
     fn parse_dev() {
         let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();

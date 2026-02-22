@@ -104,6 +104,14 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// State is not available because the block has not been executed yet.
+    #[error("state at block #{requested} is not available, block has not been executed yet (latest executed: #{executed})")]
+    BlockNotExecuted {
+        /// The block number that was requested.
+        requested: BlockNumber,
+        /// The latest executed block number.
+        executed: BlockNumber,
+    },
     /// Block data is not available because history has expired.
     ///
     /// The requested block number is below the earliest available block.
@@ -168,6 +176,16 @@ pub enum ProviderError {
         requested: BlockNumber,
         /// The available range of blocks with changesets
         available: core::ops::RangeInclusive<BlockNumber>,
+    },
+    /// Inconsistency detected between static files/rocksdb and the DB during
+    /// `ProviderFactory::check_consistency`. The database must be unwound to
+    /// the specified block number to restore consistency.
+    #[error("consistency check failed for {data_source}. Db must be unwound to {unwind_to}")]
+    MustUnwind {
+        /// The inconsistent data source(s).
+        data_source: &'static str,
+        /// The block number to which the database must be unwound.
+        unwind_to: BlockNumber,
     },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]

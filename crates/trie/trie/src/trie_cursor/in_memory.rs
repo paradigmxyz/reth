@@ -215,8 +215,8 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.seeked = true;
 
         let entry = match (mem_entry, &self.cursor_entry) {
-            (Some((mem_key, entry_inner)), _) if mem_key == key => {
-                entry_inner.map(|node| (key, node))
+            (Some((mem_key, entry_inner)), _) if *mem_key == key => {
+                entry_inner.clone().map(|node| (key, node))
             }
             (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
             _ => None,

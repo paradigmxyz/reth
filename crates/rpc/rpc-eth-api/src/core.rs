@@ -20,6 +20,7 @@ use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::FillTransaction;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use std::collections::HashMap;
 use tracing::trace;
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
@@ -200,6 +201,14 @@ pub trait EthApi<
         index: JsonStorageKey,
         block_number: Option<BlockId>,
     ) -> RpcResult<B256>;
+
+    /// Returns values from multiple storage positions across multiple addresses.
+    #[method(name = "getStorageValues")]
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>>;
 
     /// Returns the number of transactions sent from an address at given block number.
     #[method(name = "getTransactionCount")]
@@ -394,6 +403,17 @@ pub trait EthApi<
         address: Address,
         block: BlockId,
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
+
+    /// Returns the EIP-7928 block access list for a block by hash.
+    #[method(name = "getBlockAccessListByBlockHash")]
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
+    /// Returns the EIP-7928 block access list for a block by number.
+    #[method(name = "getBlockAccessListByBlockNumber")]
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Bytes>>;
 }
 
 #[async_trait::async_trait]
@@ -640,6 +660,16 @@ where
         Ok(EthState::storage_at(self, address, index, block_number).await?)
     }
 
+    /// Handler for: `eth_getStorageValues`
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getStorageValues");
+        Ok(EthState::storage_values(self, requests, block_number).await?)
+    }
+
     /// Handler for: `eth_getTransactionCount`
     async fn transaction_count(
         &self,
@@ -880,5 +910,20 @@ where
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
+    }
+
+    /// Handler for: `eth_getBlockAccessListByBlockHash`
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockAccessListByBlockHash");
+        Err(internal_rpc_err("unimplemented"))
+    }
+
+    /// Handler for: `eth_getBlockAccessListByBlockNumber`
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
+        Err(internal_rpc_err("unimplemented"))
     }
 }

@@ -1,5 +1,6 @@
+use crate::ChangesetEntry;
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
+use alloy_primitives::{map::B256Map, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::RangeBounds;
 use reth_db_api::models::BlockNumberAddress;
@@ -8,7 +9,7 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Hashing Writer
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HashingWriter: Send {
     /// Unwind and clear account hashing.
     ///
@@ -47,8 +48,8 @@ pub trait HashingWriter: Send {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
+        changesets: impl Iterator<Item = (BlockNumberAddress, ChangesetEntry)>,
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 
     /// Unwind and clear storage hashing in a given block range.
     ///
@@ -57,8 +58,8 @@ pub trait HashingWriter: Send {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing_range(
         &self,
-        range: impl RangeBounds<BlockNumberAddress>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.
     ///
@@ -68,5 +69,5 @@ pub trait HashingWriter: Send {
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 }

@@ -92,7 +92,7 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     ///
     ///
     /// # Example
@@ -131,7 +131,7 @@ impl<
     /// ````
     pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
@@ -143,12 +143,12 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     pub fn run_with_components<N>(
         self,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
@@ -180,7 +180,7 @@ impl<
     /// ```
     pub fn with_runner<L, Fut>(self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
@@ -196,7 +196,7 @@ impl<
         runner: CliRunner,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
@@ -209,6 +209,12 @@ impl<
             self.logs.log_file_directory =
                 self.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
+
+        // Apply node-specific log defaults before initializing tracing
+        if matches!(self.command, Commands::Node(_)) {
+            self.logs.apply_node_defaults();
+        }
+
         let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
@@ -443,6 +449,42 @@ mod tests {
         let end = "reth/logs".to_string();
         println!("{log_dir:?}");
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    }
+
+    #[test]
+    fn log_file_max_files_defaults() {
+        use reth_node_core::args::LogArgs;
+
+        // Node command without explicit --log.file.max-files should get Some(5) after
+        // apply_node_defaults
+        let mut cli = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+        assert!(cli.logs.log_file_max_files.is_none());
+        cli.logs.apply_node_defaults();
+        assert_eq!(cli.logs.log_file_max_files, Some(LogArgs::DEFAULT_MAX_LOG_FILES_NODE));
+
+        // Non-node command without explicit --log.file.max-files should be None and
+        // effective_log_file_max_files returns 0
+        let cli = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+        assert!(cli.logs.log_file_max_files.is_none());
+        assert_eq!(cli.logs.effective_log_file_max_files(), 0);
+
+        // Explicitly set value should be preserved for node command
+        let mut cli =
+            Cli::try_parse_args_from(["reth", "node", "--log.file.max-files", "10"]).unwrap();
+        assert_eq!(cli.logs.log_file_max_files, Some(10));
+        cli.logs.apply_node_defaults();
+        assert_eq!(cli.logs.log_file_max_files, Some(10));
+
+        // Explicitly set value should be preserved for non-node command
+        let cli =
+            Cli::try_parse_args_from(["reth", "config", "--log.file.max-files", "3"]).unwrap();
+        assert_eq!(cli.logs.log_file_max_files, Some(3));
+        assert_eq!(cli.logs.effective_log_file_max_files(), 3);
+
+        // Setting to 0 explicitly should work
+        let cli = Cli::try_parse_args_from(["reth", "node", "--log.file.max-files", "0"]).unwrap();
+        assert_eq!(cli.logs.log_file_max_files, Some(0));
+        assert_eq!(cli.logs.effective_log_file_max_files(), 0);
     }
 
     #[test]

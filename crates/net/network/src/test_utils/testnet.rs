@@ -10,7 +10,7 @@ use crate::{
         policy::NetworkPolicies,
         TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager, PeersConfig,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -19,6 +19,7 @@ use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -28,7 +29,7 @@ use reth_network_peers::PeerId;
 use reth_storage_api::{
     noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
-use reth_tasks::TokioTaskExecutor;
+use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
@@ -182,19 +183,22 @@ where
     C: ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + BlockReaderIdExt
-        + HeaderProvider
+        + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
         + 'static,
     Pool: TransactionPool,
 {
     /// Installs an eth pool on each peer
-    pub fn with_eth_pool(self) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+    pub fn with_eth_pool(
+        self,
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
+                EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                TokioTaskExecutor::default(),
+                Runtime::test(),
             );
             peer.map_transactions_manager(EthTransactionPool::eth_pool(
                 pool,
@@ -208,7 +212,7 @@ where
     pub fn with_eth_pool_config(
         self,
         tx_manager_config: TransactionsManagerConfig,
-    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
         self.with_eth_pool_config_and_policy(tx_manager_config, Default::default())
     }
 
@@ -217,13 +221,14 @@ where
         self,
         tx_manager_config: TransactionsManagerConfig,
         policy: TransactionPropagationKind,
-    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
+                EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                TokioTaskExecutor::default(),
+                Runtime::test(),
             );
 
             peer.map_transactions_manager_with(
@@ -708,11 +713,12 @@ where
     }
 
     fn network_config_builder(secret_key: SecretKey) -> NetworkConfigBuilder {
-        NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::new(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_dns_discovery()
             .disable_discv4_discovery()
+            .peer_config(PeersConfig::test())
     }
 }
 

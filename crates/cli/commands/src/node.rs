@@ -10,7 +10,7 @@ use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
-        NetworkArgs, PayloadBuilderArgs, PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, StorageArgs,
         TxPoolArgs,
     },
     node_config::NodeConfig,
@@ -103,10 +103,6 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten)]
     pub pruning: PruningArgs,
 
-    /// All `RocksDB` table routing arguments
-    #[command(flatten)]
-    pub rocksdb: RocksDbArgs,
-
     /// Engine cli arguments
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
@@ -118,6 +114,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// All static files related arguments
     #[command(flatten, next_help_heading = "Static Files")]
     pub static_files: StaticFilesArgs,
+
+    /// All storage related arguments with --storage prefix
+    #[command(flatten, next_help_heading = "Storage")]
+    pub storage: StorageArgs,
 
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
@@ -171,15 +171,12 @@ where
             db,
             dev,
             pruning,
-            rocksdb,
             engine,
             era,
             static_files,
+            storage,
             ext,
         } = self;
-
-        // Validate RocksDB arguments
-        rocksdb.validate()?;
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -196,17 +193,17 @@ where
             db,
             dev,
             pruning,
-            rocksdb,
             engine,
             era,
             static_files,
+            storage,
         };
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = init_db(db_path.clone(), self.db.database_args())?.with_metrics();
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

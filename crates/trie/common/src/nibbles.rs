@@ -1,6 +1,27 @@
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use derive_more::Deref;
 pub use nybbles::Nibbles;
+
+/// Compares two [`Nibbles`] in depth-first order.
+///
+/// In depth-first ordering:
+/// - Descendants come before their ancestors (children before parents)
+/// - Siblings are ordered lexicographically
+pub fn depth_first_cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
+    if a.len() == b.len() {
+        return a.cmp(b)
+    }
+
+    let common_prefix_len = a.common_prefix_length(b);
+    if a.len() == common_prefix_len {
+        return Ordering::Greater
+    } else if b.len() == common_prefix_len {
+        return Ordering::Less
+    }
+
+    a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))
+}
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
@@ -66,6 +87,22 @@ impl From<StoredNibblesSubKey> for Nibbles {
     #[inline]
     fn from(value: StoredNibblesSubKey) -> Self {
         value.0
+    }
+}
+
+impl StoredNibblesSubKey {
+    /// Encodes the nibbles into a fixed-size `[u8; 65]` array.
+    ///
+    /// The first 64 bytes contain the nibble values (right-padded with zeros),
+    /// and the 65th byte stores the actual nibble count.
+    pub fn to_compact_array(&self) -> [u8; 65] {
+        assert!(self.0.len() <= 64);
+        let mut buf = [0u8; 65];
+        for (i, nibble) in self.0.iter().enumerate() {
+            buf[i] = nibble;
+        }
+        buf[64] = self.0.len() as u8;
+        buf
     }
 }
 
@@ -165,5 +202,52 @@ mod tests {
         let serialized = serde_json::to_string(&subkey).unwrap();
         let deserialized: StoredNibblesSubKey = serde_json::from_str(&serialized).unwrap();
         assert_eq!(subkey, deserialized);
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_compact_array_empty() {
+        let subkey = StoredNibblesSubKey::from(vec![]);
+        let arr = subkey.to_compact_array();
+        assert_eq!(arr, [0u8; 65]);
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_compact_array_full() {
+        let nibbles: Vec<u8> = (0..64).map(|i| i % 16).collect();
+        let subkey = StoredNibblesSubKey::from(nibbles.clone());
+        let arr = subkey.to_compact_array();
+        assert_eq!(&arr[..64], &nibbles[..]);
+        assert_eq!(arr[64], 64);
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_compact_array_roundtrip() {
+        let subkey = StoredNibblesSubKey::from(vec![0x0A, 0x0B, 0x0C]);
+        let arr = subkey.to_compact_array();
+        let (recovered, rest) = StoredNibblesSubKey::from_compact(&arr, 65);
+        assert_eq!(recovered, subkey);
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_compact_array_matches_to_compact() {
+        for len in [0, 1, 2, 31, 32, 33, 63, 64] {
+            let nibbles: Vec<u8> = (0..len).map(|i| (i % 16) as u8).collect();
+            let subkey = StoredNibblesSubKey::from(nibbles);
+
+            let arr = subkey.to_compact_array();
+
+            let mut compact_buf = BytesMut::with_capacity(65);
+            subkey.to_compact(&mut compact_buf);
+
+            assert_eq!(&arr[..], &compact_buf[..], "mismatch at nibble length {len}");
+        }
+    }
+
+    #[test]
+    fn test_stored_nibbles_subkey_compact_array_padding_is_zero() {
+        let subkey = StoredNibblesSubKey::from(vec![0x0F; 10]);
+        let arr = subkey.to_compact_array();
+        assert!(arr[10..64].iter().all(|&b| b == 0), "padding bytes must be zero");
     }
 }

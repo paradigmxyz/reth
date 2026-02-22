@@ -51,6 +51,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
+use alloy_primitives as _;
+
 pub mod cli;
 
 /// Re-exported utils.
@@ -121,9 +124,11 @@ pub mod providers {
     pub use reth_provider::*;
 }
 
-/// Re-exported from `reth_primitives`.
+/// Re-exported primitives.
+#[allow(ambiguous_glob_reexports)]
 pub mod primitives {
-    pub use reth_primitives::*;
+    pub use reth_ethereum_primitives::*;
+    pub use reth_primitives_traits::*;
 }
 
 /// Re-exported from `reth_ethereum_consensus`.
@@ -205,12 +210,9 @@ pub mod rpc {
     }
 }
 
-/// Ress subprotocol installation.
-pub mod ress;
-
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
@@ -218,3 +220,4 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+use tracing as _;

@@ -206,6 +206,10 @@ impl NodeState {
 
                 self.current_stage = Some(current_stage);
             }
+            PipelineEvent::Unwound { stage_id, result } => {
+                info!(stage = %stage_id, checkpoint = %result.checkpoint.block_number, "Unwound stage");
+                self.current_stage = None;
+            }
             _ => (),
         }
     }
@@ -265,7 +269,7 @@ impl NodeState {
                 warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
             }
             ConsensusEngineEvent::BlockReceived(num_hash) => {
-                info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
+                info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
             }
         }
     }

@@ -1,25 +1,24 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
-use crate::FromEvmError;
+use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
-use reth_chainspec::ChainSpecProvider;
-use reth_errors::ProviderError;
+use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
-    Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Database, Evm,
+    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{bal::EvmDatabaseError, State},
 };
-use reth_rpc_eth_types::{cache::db::StateCacheDb, EthApiError};
+use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
+use revm::{context::Block, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
@@ -180,7 +179,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
-                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                this.apply_pre_execution_changes(&block, &mut db)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
@@ -291,7 +290,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let block_number = evm_env.block_env.number().saturating_to();
                 let base_fee = evm_env.block_env.basefee();
 
-                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                this.apply_pre_execution_changes(&block, &mut db)?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
@@ -310,12 +309,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
+                        #[allow(clippy::needless_update)]
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
                             index: Some(idx),
                             block_hash: Some(block_hash),
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
+                            ..Default::default()
                         };
                         idx += 1;
 
@@ -410,22 +411,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Applies chain-specific state transitions required before executing a block.
     ///
     /// Note: This should only be called when tracing an entire block vs individual transactions.
-    /// When tracing transaction on top of an already committed block state, those transitions are
+    /// When tracing transactions on top of an already committed block state, those transitions are
     /// already applied.
-    fn apply_pre_execution_changes<DB: Send + Database + DatabaseCommit>(
+    fn apply_pre_execution_changes(
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
-        db: &mut DB,
-        evm_env: &EvmEnvFor<Self::Evm>,
+        db: &mut StateCacheDb,
     ) -> Result<(), Self::Error> {
-        let mut system_caller = SystemCaller::new(self.provider().chain_spec());
-
-        // apply relevant system calls
-        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        system_caller.apply_pre_execution_changes(block.header(), &mut evm).map_err(|err| {
-            EthApiError::EvmCustom(format!("failed to apply 4788 system call {err}"))
-        })?;
-
+        self.evm_config()
+            .executor_for_block(db, block.sealed_block())
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?
+            .apply_pre_execution_changes()
+            .map_err(Self::Error::from_eth_err)?;
         Ok(())
     }
 }

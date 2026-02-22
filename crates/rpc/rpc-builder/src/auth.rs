@@ -337,8 +337,15 @@ impl AuthServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
-        let Some(handle) = self.handle else { return Ok(()) };
-        handle.stop()
+        if let Some(handle) = self.handle {
+            handle.stop()?;
+        }
+
+        if let Some(ipc_handle) = self.ipc_handle {
+            ipc_handle.stop()?;
+        }
+
+        Ok(())
     }
 
     /// Returns the url to the http server

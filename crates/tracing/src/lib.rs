@@ -32,8 +32,7 @@
 //!  }
 //!  ```
 //!
-//!  This example sets up a tracer with JSON format logging for journald and terminal-friendly
-//! format  for file logging.
+//! This example sets up a tracer with JSON format logging to stdout.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -250,11 +249,10 @@ impl Tracer for RethTracer {
             layers.journald(&config)?;
         }
 
-        let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
-        } else {
-            None
-        };
+        let file_guard = self
+            .file
+            .map(|(config, file_info)| layers.file(config.format, &config.filters, file_info))
+            .transpose()?;
 
         if let Some(config) = self.samply {
             layers.samply(config)?;
