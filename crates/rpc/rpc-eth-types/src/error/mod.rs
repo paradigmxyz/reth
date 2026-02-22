@@ -227,22 +227,6 @@ impl EthApiError {
         Self::CallManyError { bundle_index, tx_index, error }
     }
 
-    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
-    pub const fn is_gas_too_high(&self) -> bool {
-        matches!(
-            self,
-            Self::InvalidTransaction(
-                RpcInvalidTransactionError::GasTooHigh |
-                    RpcInvalidTransactionError::GasLimitTooHigh
-            )
-        )
-    }
-
-    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooLow`]
-    pub const fn is_gas_too_low(&self) -> bool {
-        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
-    }
-
     /// Returns the [`RpcInvalidTransactionError`] if this is a [`EthApiError::InvalidTransaction`]
     pub const fn as_invalid_transaction(&self) -> Option<&RpcInvalidTransactionError> {
         match self {
