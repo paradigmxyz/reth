@@ -1062,8 +1062,43 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+        // Inline len=1 storage proofs on the account worker to avoid dispatcher overhead.
+        // Tracy shows ~82% of storage proof calls have a single target.
+        let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+
+        let mut inlined_storage_proofs = B256Map::with_capacity_and_hasher(0, Default::default());
+        let mut inlined_accounts = B256Set::with_capacity_and_hasher(0, Default::default());
+        let mut dispatched_storage_targets =
+            B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
+
+        for (hashed_address, mut targets) in storage_targets {
+            if targets.len() == 1 && account_target_addresses.contains(&hashed_address) {
+                // Apply min_len(0) so the root node is included for storage root computation.
+                targets[0] = targets[0].with_min_len(0);
+
+                let mut calc = v2_storage_calculator.borrow_mut();
+                let proof = calc.storage_proof(hashed_address, &mut targets)?;
+                let root = calc.compute_root_hash(&proof)?;
+
+                if let Some(root) = root {
+                    self.cached_storage_roots.insert(hashed_address, root);
+                }
+
+                inlined_storage_proofs.insert(hashed_address, proof);
+                inlined_accounts.insert(hashed_address);
+            } else {
+                dispatched_storage_targets.insert(hashed_address, targets);
+            }
+        }
+
+        let inlined_count = inlined_accounts.len() as u64;
+
+        let storage_proof_receivers = dispatch_v2_storage_proofs(
+            &self.storage_work_tx,
+            &account_targets,
+            dispatched_storage_targets,
+            &inlined_accounts,
+        )?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1074,7 +1109,11 @@ where
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+        let (mut storage_proofs, mut value_encoder_stats) = value_encoder.finalize()?;
+
+        // Merge inlined proof results into the final output.
+        storage_proofs.extend(inlined_storage_proofs);
+        value_encoder_stats.inlined_count += inlined_count;
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
@@ -1221,6 +1260,7 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
+    inlined_accounts: &B256Set,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1262,10 +1302,13 @@ fn dispatch_v2_storage_proofs(
     }
 
     // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root.
+    // single proof target for them so that we get their root. Skip accounts whose storage
+    // proofs were already inlined on the account worker.
     for target in account_targets {
         let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) {
+        if storage_proof_receivers.contains_key(&hashed_address) ||
+            inlined_accounts.contains(&hashed_address)
+        {
             continue
         }
 
