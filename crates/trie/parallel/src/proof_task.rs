@@ -1216,6 +1216,12 @@ where
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
+/// Accounts that appear in `account_targets` but have no storage targets are *not* dispatched
+/// to storage workers. Instead they are left out of the returned map entirely, letting
+/// `AsyncAccountValueEncoder` handle them via its `Sync`/`FromCache` path which computes
+/// `storage_root_node()` directly — avoiding channel allocation and cross-thread dispatch
+/// overhead for root-only requests.
+///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
@@ -1261,27 +1267,9 @@ fn dispatch_v2_storage_proofs(
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
 
-    // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root.
-    for target in account_targets {
-        let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) {
-            continue
-        }
-
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
-
-        storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
-
-        storage_proof_receivers.insert(hashed_address, result_rx);
-    }
+    // Accounts with no storage targets are intentionally NOT dispatched here.
+    // They will be handled by AsyncAccountValueEncoder's Sync/FromCache path,
+    // which computes storage_root_node() directly without channel overhead.
 
     Ok(storage_proof_receivers)
 }

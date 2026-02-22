@@ -34,6 +34,9 @@ pub(crate) struct ValueEncoderStats {
     /// Number of times a dispatched storage proof had no root node and fell back to sync
     /// computation.
     pub(crate) dispatched_missing_root_count: u64,
+    /// Number of times the `InlineSingle` variant was used (single-target storage proof computed
+    /// inline in the account worker instead of dispatching to storage workers).
+    pub(crate) inline_single_count: u64,
 }
 
 impl ValueEncoderStats {
@@ -44,6 +47,7 @@ impl ValueEncoderStats {
         self.from_cache_count += other.from_cache_count;
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
+        self.inline_single_count += other.inline_single_count;
     }
 }
 
@@ -251,7 +255,8 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// Consume [`Self`] and return all collected storage proofs along with accumulated stats.
     ///
     /// This method collects any remaining dispatched proofs that weren't consumed during proof
-    /// calculation and includes their wait time in the returned stats.
+    /// calculation, computes any remaining inline single proofs, and includes their wait time
+    /// in the returned stats.
     ///
     /// # Panics
     ///
