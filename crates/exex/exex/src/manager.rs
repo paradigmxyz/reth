@@ -132,6 +132,10 @@ impl<N: NodePrimitives> ExExHandle<N> {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification<N>),
     ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
+        let should_reset_finished_height = matches!(
+            notification,
+            ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. }
+        );
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -181,6 +185,15 @@ impl<N: NodePrimitives> ExExHandle<N> {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
                 self.metrics.notifications_sent_total.increment(1);
+                if should_reset_finished_height {
+                    debug!(
+                        target: "exex::manager",
+                        exex_id = %self.id,
+                        %notification_id,
+                        "Resetting finished height after reorg/revert notification"
+                    );
+                    self.finished_height = None;
+                }
                 Poll::Ready(Ok(()))
             }
             Err(err) => Poll::Ready(Err(err)),
@@ -1304,6 +1317,84 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_reorg_resets_finished_height_for_commits() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Finished height is higher than upcoming chain tips.
+        exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
+
+        let mut old_block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        old_block.set_hash(B256::new([0x01; 32]));
+        old_block.set_block_number(9);
+
+        let mut new_block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        new_block.set_hash(B256::new([0x02; 32]));
+        new_block.set_block_number(10);
+
+        let reorg_notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(
+                vec![old_block],
+                Default::default(),
+                Default::default(),
+            )),
+            new: Arc::new(Chain::new(
+                vec![new_block],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        match exex_handle.send(&mut cx, &(1, reorg_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received_notification = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received_notification, reorg_notification);
+            }
+            Poll::Pending => panic!("Reorg notification send is pending"),
+            Poll::Ready(Err(e)) => panic!("Failed to send reorg notification: {e:?}"),
+        }
+
+        assert!(exex_handle.finished_height.is_none());
+
+        let mut commit_block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        commit_block.set_hash(B256::new([0x03; 32]));
+        commit_block.set_block_number(11);
+
+        let commit_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![commit_block],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        match exex_handle.send(&mut cx, &(2, commit_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received_notification = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received_notification, commit_notification);
+            }
+            Poll::Pending => panic!("Commit notification send is pending"),
+            Poll::Ready(Err(e)) => panic!("Failed to send commit notification: {e:?}"),
+        }
+
+        assert_eq!(exex_handle.next_notification_id, 3);
     }
 
     #[tokio::test]
