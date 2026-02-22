@@ -857,7 +857,7 @@ impl SparseTrie for ParallelSparseTrie {
                 SparseNode::Branch {
                     state_mask,
                     blinded_mask,
-                    blinded_hashes: blinded_hashes.clone(),
+                    blinded_hashes: *blinded_hashes,
                     state: SparseNodeState::Dirty,
                 }
             };
@@ -1228,7 +1228,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // For branch nodes at max depth, collapse all children onto them,
                     if depth == max_depth {
                         let mut blinded_mask = *blinded_mask;
-                        let mut blinded_hashes = blinded_hashes.clone();
+                        let mut blinded_hashes = *blinded_hashes;
                         for nibble in state_mask.iter() {
                             if blinded_mask.is_bit_set(nibble) {
                                 continue;
@@ -2712,7 +2712,7 @@ impl SparseSubtrie {
                     };
 
                 let mut blinded_mask = TrieMask::default();
-                let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+                let mut blinded_hashes = [B256::ZERO; 16];
 
                 for (stack_ptr, idx) in state_mask.iter().enumerate() {
                     let mut child_path = path;

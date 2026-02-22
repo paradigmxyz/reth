@@ -358,7 +358,7 @@ pub enum SparseNode {
         /// The mask of the children that are blinded.
         blinded_mask: TrieMask,
         /// The hashes of the children that are blinded.
-        blinded_hashes: Box<[B256; 16]>,
+        blinded_hashes: [B256; 16],
     },
 }
 
@@ -367,7 +367,7 @@ impl SparseNode {
     #[cfg(test)]
     pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
         let mut blinded_mask = TrieMask::default();
-        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+        let mut blinded_hashes = [B256::ZERO; 16];
 
         for (nibble, hash) in blinded_children {
             blinded_mask.set_bit(*nibble);
@@ -386,7 +386,7 @@ impl SparseNode {
             state_mask,
             state: SparseNodeState::Dirty,
             blinded_mask: TrieMask::default(),
-            blinded_hashes: Box::new([B256::ZERO; 16]),
+            blinded_hashes: [B256::ZERO; 16],
         }
     }
 
