@@ -17,7 +17,13 @@ use reth_stages_api::{
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use reth_trie_db::DatabaseStateRoot;
+
 use std::fmt::Debug;
+
+type DbStateRoot<'a, TX, A> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
 use tracing::*;
 
 // TODO: automate the process outlined below so the user can just send in a debugging package
@@ -241,13 +247,15 @@ where
             });
 
             let tx = provider.tx_ref();
-            let progress = StateRoot::from_tx(tx)
-                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
-                .root_with_progress()
-                .map_err(|e| {
-                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                    StageError::Fatal(Box::new(e))
-                })?;
+            let progress = reth_trie_db::with_adapter!(provider, |A| {
+                DbStateRoot::<_, A>::from_tx(tx)
+                    .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                    .root_with_progress()
+            })
+            .map_err(|e| {
+                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                StageError::Fatal(Box::new(e))
+            })?;
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -314,12 +322,13 @@ where
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
-                let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider, chunk_range)
-                    .map_err(|e| {
-                        error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                        StageError::Fatal(Box::new(e))
-                    })?;
+                let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
+                    DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
+                })
+                .map_err(|e| {
+                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    StageError::Fatal(Box::new(e))
+                })?;
                 provider.write_trie_updates(updates)?;
                 final_root = Some(root);
             }
@@ -392,8 +401,10 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = StateRoot::incremental_root_with_updates(provider, range)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = reth_trie_db::with_adapter!(provider, |A| {
+                DbStateRoot::<_, A>::incremental_root_with_updates(provider, range)
+            })
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root
             let target = provider
@@ -591,10 +602,12 @@ mod tests {
         let actual_root = runner
             .db
             .query_with_provider(|provider| {
-                Ok(StateRoot::incremental_root_with_updates(
-                    &provider,
-                    stage_progress + 1..=previous_stage,
-                ))
+                Ok(reth_trie_db::with_adapter!(provider, |A| {
+                    DbStateRoot::<_, A>::incremental_root_with_updates(
+                        &provider,
+                        stage_progress + 1..=previous_stage,
+                    )
+                }))
             })
             .unwrap();
 

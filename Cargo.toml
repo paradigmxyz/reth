@@ -138,6 +138,7 @@ members = [
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",
+    "examples/migrate-trie-to-packed",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",

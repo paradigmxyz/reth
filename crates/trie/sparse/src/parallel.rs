@@ -3624,7 +3624,9 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use reth_execution_errors::SparseTrieErrorKind;
     use reth_primitives_traits::Account;
-    use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StorageSettingsCache, TrieWriter,
+    };
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
         node_iter::{TrieElement, TrieNodeIter},
@@ -5875,14 +5877,17 @@ mod tests {
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
-                        run_hash_builder(
-                            state.clone(),
-                            trie_cursor.account_trie_cursor().unwrap(),
-                            Default::default(),
-                            state.keys().copied(),
-                        );
+                        reth_trie_db::with_adapter!(provider_factory, |A| {
+                            let trie_cursor =
+                                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+                            run_hash_builder(
+                                state.clone(),
+                                trie_cursor.account_trie_cursor().unwrap(),
+                                Default::default(),
+                                state.keys().copied(),
+                            )
+                        });
 
                     // Extract account nodes before moving hash_builder_updates
                     let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
@@ -5920,17 +5925,20 @@ mod tests {
                     let sparse_updates = updated_sparse.take_updates();
 
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
-                        run_hash_builder(
-                            state.clone(),
-                            trie_cursor.account_trie_cursor().unwrap(),
-                            keys_to_delete
-                                .iter()
-                                .map(|nibbles| B256::from_slice(&nibbles.pack()))
-                                .collect(),
-                            state.keys().copied(),
-                        );
+                        reth_trie_db::with_adapter!(provider_factory, |A| {
+                            let trie_cursor =
+                                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+                            run_hash_builder(
+                                state.clone(),
+                                trie_cursor.account_trie_cursor().unwrap(),
+                                keys_to_delete
+                                    .iter()
+                                    .map(|nibbles| B256::from_slice(&nibbles.pack()))
+                                    .collect(),
+                                state.keys().copied(),
+                            )
+                        });
 
                     // Extract account nodes before moving hash_builder_updates
                     let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();

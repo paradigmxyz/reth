@@ -32,6 +32,28 @@ use reth_trie_db::{
 
 use std::fmt::Debug;
 
+type DbStateRoot<'a, TX, A> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbStorageRoot<'a, TX, A> = StorageRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbStorageProof<'a, TX, A> = StorageProof<
+    'static,
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbProof<'a, TX, A> = Proof<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbTrieWitness<'a, TX, A> = TrieWitness<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+
 /// Result of a history lookup for an account or storage slot.
 ///
 /// Indicates where to find the historical value for a given key at a specific block.
@@ -374,36 +396,49 @@ impl<
     > StateRootProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(StateRoot::overlay_root(self.tx(), &revert_state)?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_state = self.revert_state()?;
+            let hashed_state_sorted = hashed_state.into_sorted();
+            revert_state.extend_ref_and_sort(&hashed_state_sorted);
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root(self.tx(), &revert_state)?)
+        })
     }
 
-    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        input.prepend(self.revert_state()?.into());
-        Ok(StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))?)
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
+        })
     }
 
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_state = self.revert_state()?;
+            let hashed_state_sorted = hashed_state.into_sorted();
+            revert_state.extend_ref_and_sort(&hashed_state_sorted);
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_with_updates(self.tx(), &revert_state)?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend(self.revert_state()?.into());
-        Ok(StateRoot::overlay_root_from_nodes_with_updates(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-        )?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
+        })
     }
 }
 
@@ -420,10 +455,12 @@ impl<
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageRoot::overlay_root(self.tx(), address, revert_storage)
-            .map_err(|err| ProviderError::Database(err.into()))
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, revert_storage)
+                .map_err(|err| ProviderError::Database(err.into()))
+        })
     }
 
     fn storage_proof(
@@ -432,10 +469,17 @@ impl<
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                self.tx(),
+                address,
+                slot,
+                revert_storage,
+            )
             .map_err(ProviderError::from)
+        })
     }
 
     fn storage_multiproof(
@@ -444,10 +488,17 @@ impl<
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                self.tx(),
+                address,
+                slots,
+                revert_storage,
+            )
             .map_err(ProviderError::from)
+        })
     }
 }
 
@@ -462,30 +513,39 @@ impl<
     /// Get account and storage proofs.
     fn proof(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        })
     }
 
     fn multiproof(
         &self,
-        mut input: TrieInput,
+        input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        })
     }
 
-    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        input.prepend(self.revert_state()?.into());
-        TrieWitness::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            <DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)
+                .map_err(ProviderError::from)
+                .map(|hm| hm.into_values().collect())
+        })
     }
 }
 

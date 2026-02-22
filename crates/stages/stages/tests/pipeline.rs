@@ -363,10 +363,16 @@ async fn run_pipeline_forward_and_unwind(
         // Convert bundle state to hashed post state and compute state root
         let hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-        let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
-            provider.tx_ref(),
-            &hashed_state.clone().into_sorted(),
-        )?;
+        type TestStateRoot<'a, TX, A> = StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+            reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+        >;
+        let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+            TestStateRoot::<_, A>::overlay_root_with_updates(
+                provider.tx_ref(),
+                &hashed_state.clone().into_sorted(),
+            )
+        })?;
 
         // Create receipts for receipt root calculation (one per transaction)
         let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
