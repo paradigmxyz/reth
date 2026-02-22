@@ -12,7 +12,14 @@ use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
 };
-use tracing::debug;
+use tracing::{debug, warn};
+
+/// Maximum number of fork blocks allowed at a single block height.
+///
+/// Prevents unbounded memory growth when many competing blocks are received for the same height
+/// without finalization (e.g., from a misconfigured benchmark harness or adversarial peers).
+/// When this limit is exceeded, the oldest non-canonical blocks and their subtrees are evicted.
+const MAX_SIDECHAINS_PER_BLOCK: usize = 64;
 
 /// Keeps track of the state of the tree.
 ///
@@ -171,6 +178,73 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
+
+        self.enforce_sidechain_limit(block_number);
+    }
+
+    /// Removes excess non-canonical fork blocks at the given height when the number of blocks
+    /// exceeds [`MAX_SIDECHAINS_PER_BLOCK`].
+    ///
+    /// Evicts the oldest non-canonical blocks first (front of the insertion-ordered vec),
+    /// along with all of their descendant subtrees.
+    fn enforce_sidechain_limit(&mut self, block_number: BlockNumber) {
+        let Some(blocks_at_height) = self.blocks_by_number.get(&block_number) else {
+            return;
+        };
+
+        if blocks_at_height.len() <= MAX_SIDECHAINS_PER_BLOCK {
+            return;
+        }
+
+        // Find the canonical block hash at this height (if any) so we never evict it.
+        let canonical_hash_at_height = {
+            let mut current = self.current_canonical_head.hash;
+            let mut found = None;
+            // If the canonical head is at this height, use it directly.
+            if self.current_canonical_head.number == block_number {
+                found = Some(current);
+            } else if self.current_canonical_head.number > block_number {
+                // Walk back the canonical chain to find the block at this height.
+                while let Some(executed) = self.blocks_by_hash.get(&current) {
+                    if executed.recovered_block().number() == block_number {
+                        found = Some(current);
+                        break;
+                    }
+                    current = executed.recovered_block().parent_hash();
+                }
+            }
+            found
+        };
+
+        // Collect hashes of non-canonical blocks to evict (oldest first from the vec).
+        let blocks_at_height = self.blocks_by_number.get(&block_number).unwrap();
+        let excess = blocks_at_height.len() - MAX_SIDECHAINS_PER_BLOCK;
+        let to_evict: Vec<B256> = blocks_at_height
+            .iter()
+            .filter(|b| Some(b.recovered_block().hash()) != canonical_hash_at_height)
+            .take(excess)
+            .map(|b| b.recovered_block().hash())
+            .collect();
+
+        if to_evict.is_empty() {
+            return;
+        }
+
+        warn!(
+            target: "engine::tree",
+            block_number,
+            evicting = to_evict.len(),
+            total = self.blocks_by_number.get(&block_number).map_or(0, |b| b.len()),
+            "Sidechain fork limit exceeded, evicting non-canonical blocks"
+        );
+
+        // BFS removal: evict each block and all its descendants.
+        let mut queue: VecDeque<B256> = to_evict.into();
+        while let Some(hash) = queue.pop_front() {
+            if let Some((_removed, children)) = self.remove_by_hash(hash) {
+                queue.extend(children);
+            }
+        }
     }
 
     /// Remove single executed block by its hash.
@@ -200,7 +274,7 @@ impl<N: NodePrimitives> TreeState<N> {
             // We have to find the index of the block since it exists in a vec
             if let Some(index) = entry.get().iter().position(|b| b.recovered_block().hash() == hash)
             {
-                entry.get_mut().swap_remove(index);
+                entry.get_mut().remove(index);
 
                 // If there are no blocks left then remove the entry for this block
                 if entry.get().is_empty() {
@@ -692,5 +766,103 @@ mod tests {
             tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
             Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
         );
+    }
+
+    #[tokio::test]
+    async fn test_sidechain_limit_evicts_oldest_non_canonical() {
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
+        let mut test_block_builder = TestBlockBuilder::eth();
+
+        // Insert a canonical chain: block 1 -> block 2
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+        // Set canonical head to block 2
+        tree_state.set_canonical_head(blocks[1].recovered_block().num_hash());
+
+        let parent_hash = blocks[0].recovered_block().hash();
+
+        // Insert MAX_SIDECHAINS_PER_BLOCK + 10 fork blocks at height 2, all parented to block 1
+        let mut fork_blocks = Vec::new();
+        for _ in 0..(MAX_SIDECHAINS_PER_BLOCK + 10) {
+            let fork = test_block_builder.get_executed_block_with_number(2, parent_hash);
+            fork_blocks.push(fork);
+        }
+
+        for fork in &fork_blocks {
+            tree_state.insert_executed(fork.clone());
+        }
+
+        // Should be capped: the canonical block + MAX_SIDECHAINS_PER_BLOCK - 1 forks
+        assert!(
+            tree_state.blocks_by_number[&2].len() <= MAX_SIDECHAINS_PER_BLOCK,
+            "blocks at height 2 should be at most {MAX_SIDECHAINS_PER_BLOCK}, got {}",
+            tree_state.blocks_by_number[&2].len()
+        );
+
+        // Canonical block must survive eviction
+        assert!(
+            tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()),
+            "canonical block must not be evicted"
+        );
+
+        // Oldest non-canonical forks should have been evicted
+        assert!(
+            !tree_state.blocks_by_hash.contains_key(&fork_blocks[0].recovered_block().hash()),
+            "oldest fork block should be evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sidechain_limit_evicts_descendant_subtrees() {
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
+        let mut test_block_builder = TestBlockBuilder::eth();
+
+        // Build canonical chain: 1 -> 2 -> 3
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+        tree_state.set_canonical_head(blocks[2].recovered_block().num_hash());
+
+        let parent_hash = blocks[0].recovered_block().hash();
+
+        // Insert MAX_SIDECHAINS_PER_BLOCK - 1 fork blocks at height 2
+        // (together with the canonical block, this fills the limit exactly)
+        let mut fork_blocks_h2 = Vec::new();
+        for _ in 0..(MAX_SIDECHAINS_PER_BLOCK - 1) {
+            let fork = test_block_builder.get_executed_block_with_number(2, parent_hash);
+            fork_blocks_h2.push(fork);
+        }
+        for fork in &fork_blocks_h2 {
+            tree_state.insert_executed(fork.clone());
+        }
+
+        // Add a child (height 3) to the first fork block at height 2.
+        // Inserted while fork_blocks_h2[0] is still in the tree.
+        let child_of_first_fork = test_block_builder
+            .get_executed_block_with_number(3, fork_blocks_h2[0].recovered_block().hash());
+        tree_state.insert_executed(child_of_first_fork.clone());
+
+        // Now insert one more fork at height 2 to exceed the limit and trigger eviction.
+        let extra_fork = test_block_builder.get_executed_block_with_number(2, parent_hash);
+        tree_state.insert_executed(extra_fork);
+
+        // The first fork block should have been evicted (oldest non-canonical)
+        assert!(
+            !tree_state.blocks_by_hash.contains_key(&fork_blocks_h2[0].recovered_block().hash()),
+            "first fork block should be evicted"
+        );
+
+        // Its child at height 3 should also have been evicted via BFS subtree removal.
+        assert!(
+            !tree_state.blocks_by_hash.contains_key(&child_of_first_fork.recovered_block().hash()),
+            "child of evicted fork block should also be evicted"
+        );
+
+        // Canonical blocks must survive
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
     }
 }
