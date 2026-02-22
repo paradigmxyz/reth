@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, sync::Arc};
 
 use clap::builder::TypedValueParser;
 
@@ -73,7 +73,8 @@ pub trait ChainSpecParser: Clone + Send + Sync + 'static {
 /// A helper to parse a [`Genesis`](alloy_genesis::Genesis) as argument or from disk.
 pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
     // try to read json from path first
-    let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+    let path = expand_tilde(s);
+    let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(io_err) => {
             // valid json may start with "\n", but must contain "{"
@@ -86,4 +87,16 @@ pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
     };
 
     Ok(serde_json::from_str(&raw)?)
+}
+
+/// Expands a leading `~` to the user's home directory.
+fn expand_tilde(input: &str) -> String {
+    if input == "~" {
+        dirs_next::home_dir().map_or_else(|| input.to_string(), |h| h.display().to_string())
+    } else if let Some(rest) = input.strip_prefix("~/") {
+        dirs_next::home_dir()
+            .map_or_else(|| input.to_string(), |h| format!("{}/{rest}", h.display()))
+    } else {
+        input.to_string()
+    }
 }

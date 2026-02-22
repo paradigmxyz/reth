@@ -18,6 +18,6 @@ alloy-genesis.workspace = true
 
 # misc
 clap.workspace = true
-shellexpand.workspace = true
+dirs-next.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
