@@ -139,7 +139,8 @@ impl StorageBloomFilter {
 
     /// Saves the bloom filter to a file.
     ///
-    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw bits...]`
+    /// File format: `[magic: 8B][version: 1B][num_hashes: 1B][block_number: 8B][num_words: 8B][raw
+    /// bits...]`
     ///
     /// The `block_number` is stored so that on restart we can incrementally catch up
     /// from changesets instead of re-scanning the entire `PlainStorageState` table.
@@ -465,7 +466,8 @@ mod tests {
     #[test]
     fn false_positive_rate_vs_num_hashes() {
         // Sweep K=1..8 to show how FP rate changes with num_hashes.
-        // Run with: cargo test -p reth-storage-bloom false_positive_rate_vs_num_hashes -- --nocapture
+        // Run with: cargo test -p reth-storage-bloom false_positive_rate_vs_num_hashes --
+        // --nocapture
         let size_bytes = 1024 * 1024; // 1MB filter
         let n_insert = 100_000u64;
         let n_query = 100_000u64;
