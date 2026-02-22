@@ -2678,17 +2678,38 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
+            // Phase 1: linear merge-scan to delete existing entries
+            let slots = storage.storage_slots_ref();
+            if let Some((first_slot, _)) = slots.first() {
+                let mut db_entry =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, *first_slot)?;
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+                for &(hashed_slot, _) in slots {
+                    loop {
+                        match db_entry {
+                            Some(entry) if entry.key < hashed_slot => {
+                                db_entry = hashed_storage_cursor.next_dup()?.map(|(_, v)| v);
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    // delete if found
+                    if db_entry.as_ref().is_some_and(|e| e.key == *hashed_slot) {
+                        hashed_storage_cursor.delete_current()?;
+
+                        db_entry = hashed_storage_cursor
+                            .current()?
+                            .filter(|(k, _)| *k == *hashed_address)
+                            .map(|(_, entry)| entry);
+                    }
                 }
+            }
 
-                if !entry.value.is_zero() {
+            // phase 2: insert non zero values
+            for (hashed_slot, value) in slots {
+                if !value.is_zero() {
+                    let entry = StorageEntry { key: *hashed_slot, value: *value };
                     hashed_storage_cursor.upsert(*hashed_address, &entry)?;
                 }
             }
@@ -5507,5 +5528,86 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    /// Helper: read all ``HashedStorages`` entries for a given address via a dup cursor.
+    fn read_hashed_storage_slots<TX: DbTx>(tx: &TX, hashed_address: B256) -> Vec<StorageEntry> {
+        let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>().expect("cursor");
+        let mut entries = Vec::new();
+        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, B256::ZERO).expect("seek") {
+            entries.push(entry);
+            while let Some((_, entry)) = cursor.next_dup().expect("next_dup") {
+                entries.push(entry);
+            }
+        }
+        entries
+    }
+
+    #[test]
+    fn test_write_hashed_state_merge_scan() {
+        use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+
+        // Pre-populate: 5 sorted storage slots
+        let slot_a = B256::with_last_byte(0x10);
+        let slot_b = B256::with_last_byte(0x20);
+        let slot_c = B256::with_last_byte(0x30);
+        let slot_d = B256::with_last_byte(0x40);
+        let slot_e = B256::with_last_byte(0x50);
+
+        {
+            let mut cursor =
+                provider.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+            for slot in [slot_a, slot_b, slot_c, slot_d, slot_e] {
+                cursor
+                    .upsert(hashed_address, &StorageEntry { key: slot, value: U256::from(1) })
+                    .unwrap();
+            }
+        }
+
+        // Apply updates:
+        // - slot_a: update value to 100
+        // - slot_b: delete (value = 0)
+        // - slot_c: unchanged (not in updates)
+        // - slot_d: update value to 400
+        // - slot_e: delete (value = 0)
+        // - slot_f: new entry
+        let slot_f = B256::with_last_byte(0x60);
+        let storage = HashedStorageSorted {
+            storage_slots: vec![
+                (slot_a, U256::from(100)),
+                (slot_b, U256::ZERO),
+                (slot_d, U256::from(400)),
+                (slot_e, U256::ZERO),
+                (slot_f, U256::from(600)),
+            ],
+            wiped: false,
+        };
+
+        let hashed_state =
+            HashedPostStateSorted::new(vec![], B256Map::from_iter([(hashed_address, storage)]));
+        provider.write_hashed_state(&hashed_state).unwrap();
+
+        // Verify final state
+        let entries = read_hashed_storage_slots(provider.tx_ref(), hashed_address);
+
+        // Expected: slot_a=100, slot_c=1 (unchanged), slot_d=400, slot_f=600
+        // slot_b and slot_e should be deleted
+        assert_eq!(entries.len(), 4, "expected 4 entries, got: {entries:?}");
+
+        assert_eq!(entries[0].key, slot_a);
+        assert_eq!(entries[0].value, U256::from(100));
+
+        assert_eq!(entries[1].key, slot_c);
+        assert_eq!(entries[1].value, U256::from(1));
+
+        assert_eq!(entries[2].key, slot_d);
+        assert_eq!(entries[2].value, U256::from(400));
+
+        assert_eq!(entries[3].key, slot_f);
+        assert_eq!(entries[3].value, U256::from(600));
     }
 }
