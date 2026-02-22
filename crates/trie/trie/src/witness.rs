@@ -140,9 +140,17 @@ where
                 entry.insert(account_node.clone());
             }
         }
-        for storage_node in multiproof.storages.values().flat_map(|s| s.subtree.values()) {
-            if let Entry::Vacant(entry) = self.witness.entry(keccak256(storage_node.as_ref())) {
-                entry.insert(storage_node.clone());
+        for (hashed_address, storage_mp) in &multiproof.storages {
+            // Skip storage proof nodes for accounts that don't target any storage slots.
+            // These nodes may be produced while deriving account storage roots, but they are
+            // unnecessary for stateless execution witness verification.
+            if proof_targets.get(hashed_address).is_none_or(|slots| slots.is_empty()) {
+                continue;
+            }
+            for storage_node in storage_mp.subtree.values() {
+                if let Entry::Vacant(entry) = self.witness.entry(keccak256(storage_node.as_ref())) {
+                    entry.insert(storage_node.clone());
+                }
             }
         }
 
@@ -167,21 +175,38 @@ where
                     SparseTrieErrorKind::Blind,
                 ),
             )?;
-            for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
-                let storage_nibbles = Nibbles::unpack(hashed_slot);
-                let maybe_leaf_value = storage
-                    .and_then(|s| s.storage.get(&hashed_slot))
-                    .filter(|v| !v.is_zero())
-                    .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
+            let sorted_slots = hashed_slots.into_iter().sorted_unstable().collect_vec();
+            // Match execution-specs ordering to minimize witness nodes:
+            // apply updates/inserts first, then deletions.
+            for is_delete_pass in [false, true] {
+                for hashed_slot in &sorted_slots {
+                    let storage_nibbles = Nibbles::unpack(*hashed_slot);
+                    let maybe_leaf_value = storage
+                        .and_then(|s| s.storage.get(hashed_slot))
+                        .filter(|v| !v.is_zero())
+                        .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
+                    let is_delete = maybe_leaf_value.is_none();
+                    if is_delete != is_delete_pass {
+                        continue;
+                    }
 
-                if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
-                } else {
-                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
+                    if let Some(value) = maybe_leaf_value {
+                        storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(
+                            |err| {
+                                SparseStateTrieErrorKind::SparseStorageTrie(
+                                    hashed_address,
+                                    err.into_kind(),
+                                )
+                            },
+                        )?;
+                    } else {
+                        storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
+                            SparseStateTrieErrorKind::SparseStorageTrie(
+                                hashed_address,
+                                err.into_kind(),
+                            )
+                        })?;
+                    }
                 }
             }
 
@@ -200,6 +225,10 @@ where
                 self.witness.insert(keccak256(&node), node);
             }
         }
+
+        // Filter out empty trie root nodes — they carry no useful witness information
+        // since any verifier can reconstruct an empty trie root trivially.
+        self.witness.retain(|_, v| v.as_ref() != [EMPTY_STRING_CODE]);
 
         Ok(self.witness)
     }
