@@ -331,6 +331,25 @@ where
                 }
                 continue
             }
+            // EIP-7778: the executor tracks gas_before_refund while the payload builder's
+            // pre-check uses gas_after_refund. Near-full blocks can pass the pre-check but
+            // fail the executor's check. Skip the tx and continue building.
+            Err(BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit,
+                    block_available_gas,
+                },
+            )) => {
+                trace!(target: "payload_builder", %transaction_gas_limit, %block_available_gas, ?tx, "skipping transaction exceeding block gas limit");
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    &InvalidPoolTransactionError::ExceedsGasLimit(
+                        transaction_gas_limit,
+                        block_available_gas,
+                    ),
+                );
+                continue
+            }
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
