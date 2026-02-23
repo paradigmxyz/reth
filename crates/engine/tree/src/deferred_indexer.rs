@@ -108,9 +108,6 @@ pub struct DeferredHistoryIndexer {
     tx_lookup: TransactionLookupStage,
     index_storage: IndexStorageHistoryStage,
     index_account: IndexAccountHistoryStage,
-    tx_lookup_prune_mode: Option<PruneMode>,
-    index_storage_prune_mode: Option<PruneMode>,
-    index_account_prune_mode: Option<PruneMode>,
     tx_lookup_batch_size: u64,
     index_storage_batch_size: u64,
     index_account_batch_size: u64,
@@ -153,9 +150,6 @@ impl DeferredHistoryIndexer {
                 prune_modes.account_history,
             )
             .with_progress_logging(false),
-            tx_lookup_prune_mode: prune_modes.transaction_lookup,
-            index_storage_prune_mode: prune_modes.storage_history,
-            index_account_prune_mode: prune_modes.account_history,
             tx_lookup_batch_size: TX_LOOKUP_BATCH_SIZE,
             index_storage_batch_size: INDEX_STORAGE_HISTORY_BATCH_SIZE,
             index_account_batch_size: INDEX_ACCOUNT_HISTORY_BATCH_SIZE,
@@ -180,13 +174,13 @@ impl DeferredHistoryIndexer {
     ) -> (Option<PruneMode>, PruneSegment) {
         match stage_id {
             StageId::TransactionLookup => {
-                (self.tx_lookup_prune_mode, PruneSegment::TransactionLookup)
+                (self.tx_lookup.prune_mode(), PruneSegment::TransactionLookup)
             }
             StageId::IndexStorageHistory => {
-                (self.index_storage_prune_mode, PruneSegment::StorageHistory)
+                (self.index_storage.prune_mode(), PruneSegment::StorageHistory)
             }
             StageId::IndexAccountHistory => {
-                (self.index_account_prune_mode, PruneSegment::AccountHistory)
+                (self.index_account.prune_mode(), PruneSegment::AccountHistory)
             }
             _ => unreachable!(),
         }

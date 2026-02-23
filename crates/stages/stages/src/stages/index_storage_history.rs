@@ -54,6 +54,11 @@ impl IndexStorageHistoryStage {
         self.log_progress = log_progress;
         self
     }
+
+    /// Returns the configured prune mode for this stage.
+    pub const fn prune_mode(&self) -> Option<PruneMode> {
+        self.prune_mode
+    }
 }
 
 impl Default for IndexStorageHistoryStage {
