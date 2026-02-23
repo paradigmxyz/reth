@@ -839,7 +839,6 @@ where
         ext: F,
     ) -> eyre::Result<RpcServerOnlyHandle<N, EthB::EthApi>>
     where
-
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
@@ -892,7 +891,6 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
-
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         // Check CLI config to determine if auth server should be disabled
@@ -912,7 +910,6 @@ where
         disable_auth: bool,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
-
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
@@ -979,7 +976,6 @@ where
         ext: F,
     ) -> eyre::Result<RpcSetupContext<'a, N, EthB::EthApi>>
     where
-
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
