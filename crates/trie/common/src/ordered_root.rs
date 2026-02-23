@@ -405,4 +405,30 @@ mod tests {
             Err(OrderedRootError::DuplicateIndex { index: 1 })
         );
     }
+
+    #[test]
+    fn test_ordered_builder_duplicate_after_flush() {
+        // For len=3, trie order is [1, 2, 0].
+        // Fast-path case: items flushed directly should still reject duplicates.
+        let mut builder = OrderedTrieRootEncodedBuilder::new(3);
+        builder.push(1, b"item_1").unwrap(); // fast path, flushed immediately
+        builder.push(2, b"item_2").unwrap(); // fast path, flushed immediately
+        assert_eq!(
+            builder.push(1, b"item_1_dup"),
+            Err(OrderedRootError::DuplicateIndex { index: 1 })
+        );
+
+        // Slow-path case: item buffered then flushed by a subsequent push.
+        // push(0) buffers in pending[0]. push(1) is fast path (adjust(0,3)=1).
+        // push(2) is fast path (adjust(1,3)=2), flush drains pending[0] (adjust(2,3)=0).
+        // Now pending[0] is None (taken by flush), but pushed[0] must still be set.
+        let mut builder = OrderedTrieRootEncodedBuilder::new(3);
+        builder.push(0, b"item_0").unwrap(); // buffered in pending[0]
+        builder.push(1, b"item_1").unwrap(); // fast path, flush finds pending[2]=None, stops
+        builder.push(2, b"item_2").unwrap(); // fast path, flush finds pending[0]=Some, flushes it
+        assert_eq!(
+            builder.push(0, b"item_0_dup"),
+            Err(OrderedRootError::DuplicateIndex { index: 0 })
+        );
+    }
 }
