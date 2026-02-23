@@ -172,7 +172,22 @@ Before submitting changes, ensure:
 2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
-5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+5. **CLI Docs** (if CLI changed): Run `make update-book-cli` (see below)
+6. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+### CLI Reference Docs (`book` CI Job)
+
+The CLI reference pages under `docs/vocs/docs/pages/cli/` are **auto-generated** from the `reth` binary's `--help` output. **Do not edit these files manually** — any hand edits will be overwritten and CI will fail regardless.
+
+When you add, remove, or modify CLI commands, subcommands, or flags, regenerate the CLI docs by running:
+
+```bash
+make update-book-cli
+```
+
+This builds `reth` in debug mode and runs `docs/cli/update.sh` to regenerate all CLI pages. Commit the resulting changes.
+
+The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating the docs and running `git diff --exit-code`. If the committed docs don't match the generated output, CI fails. Manually editing these pages is never productive — always use `make update-book-cli`.
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
@@ -455,5 +470,8 @@ cargo build --release
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo docs --document-private-items
+
+# Regenerate CLI reference docs (after CLI changes)
+make update-book-cli
 ```
