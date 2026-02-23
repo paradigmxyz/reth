@@ -167,4 +167,126 @@ mod tests {
         assert_eq!(expand_path("~/$RETH_TEST_DIR/data").unwrap(), home.join("mydir/data"));
         unsafe { std::env::remove_var("RETH_TEST_DIR") };
     }
+
+    #[test]
+    fn test_multiple_env_vars() {
+        unsafe { std::env::set_var("RETH_TEST_CHAIN", "mainnet") };
+        unsafe { std::env::set_var("RETH_TEST_NET", "prod") };
+        assert_eq!(
+            expand_path("/data/$RETH_TEST_CHAIN/$RETH_TEST_NET/db").unwrap(),
+            PathBuf::from("/data/mainnet/prod/db")
+        );
+        unsafe { std::env::remove_var("RETH_TEST_CHAIN") };
+        unsafe { std::env::remove_var("RETH_TEST_NET") };
+    }
+
+    #[test]
+    fn test_multiple_braced_env_vars() {
+        unsafe { std::env::set_var("RETH_TEST_A", "alpha") };
+        unsafe { std::env::set_var("RETH_TEST_B", "beta") };
+        assert_eq!(
+            expand_path("${RETH_TEST_A}/${RETH_TEST_B}").unwrap(),
+            PathBuf::from("alpha/beta")
+        );
+        unsafe { std::env::remove_var("RETH_TEST_A") };
+        unsafe { std::env::remove_var("RETH_TEST_B") };
+    }
+
+    #[test]
+    fn test_repeated_same_var() {
+        unsafe { std::env::set_var("RETH_TEST_REP", "val") };
+        assert_eq!(
+            expand_path("$RETH_TEST_REP/$RETH_TEST_REP/db").unwrap(),
+            PathBuf::from("val/val/db")
+        );
+        unsafe { std::env::remove_var("RETH_TEST_REP") };
+    }
+
+    #[test]
+    fn test_env_var_with_suffix() {
+        // bare $VAR stops at non-ident char, so "-db" is literal suffix
+        unsafe { std::env::set_var("RETH_TEST_CHAIN2", "mainnet") };
+        assert_eq!(expand_path("$RETH_TEST_CHAIN2-db").unwrap(), PathBuf::from("mainnet-db"));
+        unsafe { std::env::remove_var("RETH_TEST_CHAIN2") };
+    }
+
+    #[test]
+    fn test_braced_env_var_with_suffix() {
+        // braced ${VAR} allows immediate suffix
+        unsafe { std::env::set_var("RETH_TEST_CHAIN3", "mainnet") };
+        assert_eq!(expand_path("${RETH_TEST_CHAIN3}db").unwrap(), PathBuf::from("mainnetdb"));
+        unsafe { std::env::remove_var("RETH_TEST_CHAIN3") };
+    }
+
+    #[test]
+    fn test_env_var_preceded_by_prefix() {
+        unsafe { std::env::set_var("RETH_TEST_CHAIN4", "mainnet") };
+        assert_eq!(
+            expand_path("prefix_$RETH_TEST_CHAIN4/suffix").unwrap(),
+            PathBuf::from("prefix_mainnet/suffix")
+        );
+        unsafe { std::env::remove_var("RETH_TEST_CHAIN4") };
+    }
+
+    #[test]
+    fn test_env_var_empty_value() {
+        // env var set to empty string should expand to empty, not error
+        unsafe { std::env::set_var("RETH_TEST_EMPTY", "") };
+        assert_eq!(expand_path("/data/$RETH_TEST_EMPTY/db").unwrap(), PathBuf::from("/data//db"));
+        unsafe { std::env::remove_var("RETH_TEST_EMPTY") };
+    }
+
+    #[test]
+    fn test_tilde_user_does_not_expand() {
+        // ~username should NOT expand (we only support bare ~)
+        assert_eq!(expand_path("~user/foo").unwrap(), PathBuf::from("~user/foo"));
+    }
+
+    #[test]
+    fn test_tilde_trailing_slash_only() {
+        let home = dirs_next::home_dir().unwrap();
+        let expected = PathBuf::from(format!("{}/", home.display()));
+        assert_eq!(expand_path("~/").unwrap(), expected);
+    }
+
+    #[test]
+    fn test_tilde_backslash() {
+        // Windows-style ~\ should also trigger tilde expansion
+        let home = dirs_next::home_dir().unwrap();
+        let result = expand_path("~\\foo\\bar").unwrap();
+        let result_str = result.to_string_lossy();
+        let home_str = home.to_string_lossy();
+        assert!(
+            result_str.starts_with(home_str.as_ref()),
+            "expected result '{result_str}' to start with home '{home_str}'"
+        );
+        assert!(result_str.ends_with("\\foo\\bar"));
+    }
+
+    #[test]
+    fn test_env_var_with_underscores_and_digits() {
+        unsafe { std::env::set_var("RETH_V2_TEST_99", "ok") };
+        assert_eq!(expand_path("$RETH_V2_TEST_99").unwrap(), PathBuf::from("ok"));
+        unsafe { std::env::remove_var("RETH_V2_TEST_99") };
+    }
+
+    #[test]
+    fn test_realistic_datadir_path() {
+        // mimics real --datadir usage: ~/.reth/mainnet
+        let home = dirs_next::home_dir().unwrap();
+        assert_eq!(expand_path("~/.reth/mainnet").unwrap(), home.join(".reth/mainnet"));
+    }
+
+    #[test]
+    fn test_realistic_env_datadir_path() {
+        // mimics $HOME/.reth pattern
+        let home = dirs_next::home_dir().unwrap();
+        let home_str = home.to_string_lossy();
+        unsafe { std::env::set_var("RETH_TEST_HOME", home_str.as_ref()) };
+        assert_eq!(
+            expand_path("$RETH_TEST_HOME/.reth/mainnet").unwrap(),
+            home.join(".reth/mainnet")
+        );
+        unsafe { std::env::remove_var("RETH_TEST_HOME") };
+    }
 }
