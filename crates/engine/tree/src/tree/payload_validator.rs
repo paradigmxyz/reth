@@ -52,7 +52,7 @@ use std::{
     panic::{self, AssertUnwindSafe},
     sync::{mpsc::RecvTimeoutError, Arc},
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
@@ -531,9 +531,11 @@ where
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
             let block = block.clone();
+            let parent_span = Span::current();
+            let num_hash = block.num_hash();
             self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
                 let _span =
-                    debug_span!(target: "engine::tree::payload_validator", "payload_tx_root")
+                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
                         .entered();
                 block.body().calculate_tx_root()
             })
@@ -541,8 +543,6 @@ where
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let _receipt_root_wait_span =
-            debug_span!(target: "engine::tree::payload_validator", "wait_receipt_root").entered();
         let receipt_root_bloom = receipt_root_rx
             .blocking_recv()
             .inspect_err(|_| {
@@ -851,11 +851,9 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor.executor().spawn_blocking_named("receipt-root", move || {
-            let _span = debug_span!(target: "engine::tree::payload_validator", "receipt_root_task")
-                .entered();
-            task_handle.run(receipts_len)
-        });
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));

@@ -87,8 +87,11 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
 
     /// Validate a block disregarding world state using an optional pre-computed transaction root.
     ///
-    /// Implementations may use `transaction_root` to avoid recomputing the transaction trie root
-    /// from the block body. By default this falls back to [`Self::validate_block_pre_execution`].
+    /// If `transaction_root` is provided, the implementation should use the pre-computed
+    /// transaction root instead of recomputing it from the block body. The value must have been
+    /// derived from `block.body().calculate_tx_root()`.
+    ///
+    /// By default this falls back to [`Self::validate_block_pre_execution`].
     fn validate_block_pre_execution_with_tx_root(
         &self,
         block: &SealedBlock<B>,
