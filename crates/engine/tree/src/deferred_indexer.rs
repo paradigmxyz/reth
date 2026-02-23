@@ -291,10 +291,6 @@ impl DeferredHistoryIndexer {
     where
         Provider: StageCheckpointReader,
     {
-        if tip == 0 {
-            return Ok(false);
-        }
-
         let tx_lookup = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|c| c.block_number)
@@ -325,10 +321,6 @@ impl DeferredHistoryIndexer {
         IndexStorageHistoryStage: Stage<Provider>,
         IndexAccountHistoryStage: Stage<Provider>,
     {
-        if tip == 0 {
-            return Ok(None);
-        }
-
         if self.state.is_caught_up() {
             if self.check_caught_up(provider_rw, tip)? {
                 return Ok(None);
@@ -367,6 +359,8 @@ impl DeferredHistoryIndexer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_provider::ProviderResult;
+    use std::string::String;
 
     #[test]
     fn reorg_marks_indexer_as_not_caught_up() {
@@ -378,5 +372,39 @@ mod tests {
 
         assert!(!indexer.is_caught_up());
         assert_eq!(indexer.state, DeferredIndexerState::TransactionLookup);
+    }
+
+    #[derive(Default)]
+    struct MockStageCheckpointReader {
+        tx_lookup: Option<StageCheckpoint>,
+        storage_history: Option<StageCheckpoint>,
+        account_history: Option<StageCheckpoint>,
+    }
+
+    impl StageCheckpointReader for MockStageCheckpointReader {
+        fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+            Ok(match id {
+                StageId::TransactionLookup => self.tx_lookup,
+                StageId::IndexStorageHistory => self.storage_history,
+                StageId::IndexAccountHistory => self.account_history,
+                _ => None,
+            })
+        }
+
+        fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn genesis_tip_is_trivially_caught_up() {
+        let indexer = DeferredHistoryIndexer::new(&StageConfig::default(), &PruneModes::default());
+        let provider = MockStageCheckpointReader::default();
+
+        assert!(indexer.check_caught_up(&provider, 0).unwrap());
     }
 }
