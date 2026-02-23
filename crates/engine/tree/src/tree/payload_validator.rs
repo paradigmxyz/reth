@@ -530,15 +530,23 @@ where
         let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = receipt_root_rx
-            .blocking_recv()
-            .inspect_err(|_| {
-                tracing::error!(
-                    target: "engine::tree::payload_validator",
-                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                );
-            })
-            .ok();
+        let receipt_root_bloom = {
+            let _enter = debug_span!(
+                target: "engine::tree::payload_validator",
+                "wait_receipt_root",
+            )
+            .entered();
+
+            receipt_root_rx
+                .blocking_recv()
+                .inspect_err(|_| {
+                    tracing::error!(
+                        target: "engine::tree::payload_validator",
+                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                    );
+                })
+                .ok()
+        };
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -1251,10 +1259,15 @@ where
         }
         drop(_enter);
 
+        // Wait for the background keccak256 hashing task to complete. This blocks until
+        // all changed addresses and storage slots have been hashed.
+        let hashed_state_ref =
+            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                .in_scope(|| hashed_state.get());
+
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) = self
-            .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
+        if let Err(err) =
+            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
