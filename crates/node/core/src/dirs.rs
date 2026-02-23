@@ -3,7 +3,6 @@
 use crate::{args::DatadirArgs, utils::parse_path};
 use reth_chainspec::Chain;
 use std::{
-    env::VarError,
     fmt::{Debug, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
@@ -127,7 +126,7 @@ impl<D: XdgPath> Default for PlatformPath<D> {
 }
 
 impl<D> FromStr for PlatformPath<D> {
-    type Err = shellexpand::LookupError<VarError>;
+    type Err = crate::utils::ExpandPathError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(parse_path(s)?, std::marker::PhantomData))
@@ -235,7 +234,7 @@ impl<D> Default for MaybePlatformPath<D> {
 }
 
 impl<D> FromStr for MaybePlatformPath<D> {
-    type Err = shellexpand::LookupError<VarError>;
+    type Err = crate::utils::ExpandPathError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let p = match s {

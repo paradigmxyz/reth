@@ -73,7 +73,8 @@ pub trait ChainSpecParser: Clone + Send + Sync + 'static {
 /// A helper to parse a [`Genesis`](alloy_genesis::Genesis) as argument or from disk.
 pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
     // try to read json from path first
-    let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+    let expanded = expand_path(s)?;
+    let raw = match fs::read_to_string(&expanded) {
         Ok(raw) => raw,
         Err(io_err) => {
             // valid json may start with "\n", but must contain "{"
@@ -86,4 +87,55 @@ pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
     };
 
     Ok(serde_json::from_str(&raw)?)
+}
+
+fn expand_path(input: &str) -> eyre::Result<PathBuf> {
+    let s = if input == "~" || input.starts_with("~/") || input.starts_with("~\\") {
+        let home = dirs_next::home_dir()
+            .ok_or_else(|| eyre::eyre!("could not determine home directory"))?;
+        let mut out = home.to_string_lossy().into_owned();
+        if input.len() > 1 {
+            out.push_str(&input[1..]);
+        }
+        out
+    } else {
+        input.to_string()
+    };
+
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            result.push(c);
+            continue;
+        }
+        let braced = chars.peek() == Some(&'{');
+        if braced {
+            chars.next();
+        }
+        let mut name = String::new();
+        while let Some(&c) = chars.peek() {
+            if braced {
+                if c == '}' {
+                    chars.next();
+                    break;
+                }
+            } else if !c.is_ascii_alphanumeric() && c != '_' {
+                break;
+            }
+            name.push(c);
+            chars.next();
+        }
+        if name.is_empty() {
+            result.push('$');
+            if braced {
+                result.push('{');
+            }
+        } else {
+            let value =
+                std::env::var(&name).map_err(|e| eyre::eyre!("env var `{name}` not found: {e}"))?;
+            result.push_str(&value);
+        }
+    }
+    Ok(PathBuf::from(result))
 }
