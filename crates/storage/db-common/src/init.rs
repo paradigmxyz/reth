@@ -153,6 +153,8 @@ where
 
     let genesis = chain.genesis();
     let hash = chain.genesis_hash();
+    tracing::info!("from init_genesis_with_settings:{:?}", genesis.config);
+    tracing::info!("from init_genesis_with_settings base fees:{:?}", genesis.base_fee_per_gas);
 
     // Get the genesis block number from the chain spec
     let genesis_block_number = chain.genesis_header().number();
