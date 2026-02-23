@@ -30,7 +30,7 @@ pub struct RethPayloadStatus {
 /// Responses include timing breakdowns with server-measured execution latency.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
-pub trait RethEngineApi<ExecutionData: Send + Sync + 'static> {
+pub trait RethEngineApi<ExecutionData> {
     /// Reth-specific newPayload that takes `ExecutionData` directly.
     ///
     /// Waits for persistence, execution cache, and sparse trie locks before processing.
