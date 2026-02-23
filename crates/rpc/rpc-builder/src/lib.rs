@@ -344,7 +344,6 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
         Payload: PayloadTypes,
-        RethEngineApi<Payload>: RethEngineApiServer<Payload::ExecutionData>,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -891,7 +890,6 @@ where
     ) -> AuthRpcModule
     where
         Payload: PayloadTypes,
-        RethEngineApi<Payload>: RethEngineApiServer<Payload::ExecutionData>,
     {
         let mut module = engine_api.into_rpc_module();
 

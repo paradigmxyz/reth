@@ -1,5 +1,4 @@
 use crate::EngineApiError;
-use alloy_rpc_types_engine::ExecutionData;
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
@@ -30,11 +29,11 @@ impl<Payload: PayloadTypes> RethEngineApi<Payload> {
 }
 
 #[async_trait]
-impl<Payload> RethEngineApiServer<Payload::ExecutionData> for RethEngineApi<Payload>
-where
-    Payload: PayloadTypes<ExecutionData = ExecutionData>,
-{
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
+impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for RethEngineApi<Payload> {
+    async fn reth_new_payload(
+        &self,
+        payload: Payload::ExecutionData,
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayload");
         let (status, timings) = self
             .beacon_engine_handle
