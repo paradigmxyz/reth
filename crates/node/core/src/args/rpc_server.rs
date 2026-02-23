@@ -776,24 +776,19 @@ impl RpcServerArgs {
         self
     }
 
-    /// Returns `true` if the debug RPC namespace is enabled on any transport.
-    ///
-    /// This is used to determine whether to enable runtime log level changes
-    /// via `debug_verbosity` and `debug_vmodule` RPC methods.
-    pub fn debug_namespace_enabled(&self) -> bool {
-        let debug_module = RethRpcModule::Debug;
-
+    /// Returns `true` if the given RPC namespace is enabled on any transport.
+    pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
         // Check HTTP API
-        if self.http_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+        if self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
             return true;
         }
 
         // Check WS API
-        if self.ws_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+        if self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
             return true;
         }
 
-        // IPC exposes all modules (including debug) when enabled
+        // IPC exposes all modules when enabled
         !self.ipcdisable
     }
 

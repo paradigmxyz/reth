@@ -23,7 +23,7 @@ use reth_node_core::{
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::{info, warn};
@@ -363,7 +363,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
     /// This is used to determine whether to enable runtime log level changes.
     pub fn debug_namespace_enabled(&self) -> bool {
         match self {
-            Self::Node(cmd) => cmd.rpc.debug_namespace_enabled(),
+            Self::Node(cmd) => cmd.rpc.is_namespace_enabled(RethRpcModule::Debug),
             _ => false,
         }
     }
