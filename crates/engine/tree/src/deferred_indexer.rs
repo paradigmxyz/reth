@@ -105,13 +105,19 @@ impl DeferredIndexerState {
 /// Processes history indexing in small batches, round-robining between the three deferred
 /// stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`).
 pub struct DeferredHistoryIndexer {
+    /// Deferred transaction-lookup stage instance, executed incrementally by persistence ticks.
     tx_lookup: TransactionLookupStage,
+    /// Deferred storage-history indexing stage instance.
     index_storage: IndexStorageHistoryStage,
+    /// Deferred account-history indexing stage instance.
     index_account: IndexAccountHistoryStage,
+    /// Max blocks to advance `TransactionLookup` in a single tick.
     tx_lookup_batch_size: u64,
+    /// Max blocks to advance `IndexStorageHistory` in a single tick.
     index_storage_batch_size: u64,
+    /// Max blocks to advance `IndexAccountHistory` in a single tick.
     index_account_batch_size: u64,
-    /// Deferred indexing lifecycle and scheduling state.
+    /// Deferred indexing lifecycle state plus round-robin stage selection.
     state: DeferredIndexerState,
 }
 
