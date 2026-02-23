@@ -1,7 +1,6 @@
 //! Reth-specific engine API extensions.
 
-use alloy_rpc_types_engine::{ExecutionData, PayloadStatus};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use alloy_rpc_types_engine::PayloadStatus;
 use serde::{Deserialize, Serialize};
 
 /// Reth-specific payload status that includes server-measured execution latency.
@@ -20,20 +19,4 @@ pub struct RethPayloadStatus {
     pub execution_cache_wait_us: u64,
     /// Time spent waiting for the sparse trie lock, in microseconds.
     pub sparse_trie_wait_us: u64,
-}
-
-/// Reth-specific engine API extensions.
-///
-/// This trait provides a `reth_newPayload` endpoint that takes `ExecutionData` directly
-/// (payload + sidecar), waiting for persistence and cache locks before processing.
-///
-/// Responses include timing breakdowns with server-measured execution latency.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
-pub trait RethEngineApi {
-    /// Reth-specific newPayload that takes `ExecutionData` directly.
-    ///
-    /// Waits for persistence, execution cache, and sparse trie locks before processing.
-    #[method(name = "newPayload")]
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus>;
 }

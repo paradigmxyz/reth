@@ -67,7 +67,14 @@ impl LogFormat {
                     layer.with_filter(filter).boxed()
                 }
             }
-            Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
+            Self::LogFmt => {
+                let layer = tracing_logfmt::builder().layer();
+                if let Some(writer) = file_writer {
+                    layer.with_writer(writer).with_filter(filter).boxed()
+                } else {
+                    layer.with_filter(filter).boxed()
+                }
+            }
             Self::Terminal => {
                 let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
 
