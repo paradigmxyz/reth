@@ -336,8 +336,8 @@ where
     {
         // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
-        // RLP decoding + header hashing and pre-computes the transaction root that is validated
-        // later in post-execution checks.
+        // RLP decoding + header hashing.
+        let is_payload = matches!(&input, BlockOrPayload::Payload(_));
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -348,9 +348,7 @@ where
                         let BlockOrPayload::Payload(payload) = payload_clone else {
                             unreachable!()
                         };
-                        let block = validator.convert_payload_to_block(payload)?;
-                        let transaction_root = block.body().calculate_tx_root();
-                        Ok((block, Some(transaction_root)))
+                        validator.convert_payload_to_block(payload)
                     },
                 );
                 Either::Left(handle)
@@ -360,18 +358,16 @@ where
 
         // Returns the sealed block, either by awaiting the background conversion task (for
         // payloads) or by extracting the already-converted block directly.
-        let convert_to_block = move |input: BlockOrPayload<T>| -> Result<
-            (SealedBlock<N::Block>, Option<B256>),
-            NewPayloadError,
-        > {
-            match convert_to_block {
-                Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
-                Either::Right(()) => {
-                    let BlockOrPayload::Block(block) = input else { unreachable!() };
-                    Ok((block, None))
+        let convert_to_block =
+            move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
+                match convert_to_block {
+                    Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
+                    Either::Right(()) => {
+                        let BlockOrPayload::Block(block) = input else { unreachable!() };
+                        Ok(block)
+                    }
                 }
-            }
-        };
+            };
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -380,7 +376,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let (block, _) = convert_to_block(input)?;
+                        let block = convert_to_block(input)?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -411,7 +407,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                convert_to_block(input)?.0,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -424,7 +420,7 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                convert_to_block(input)?.0,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -532,7 +528,13 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
-        let (block, transaction_root) = convert_to_block(input)?;
+        let block = convert_to_block(input)?;
+        let transaction_root = is_payload.then(|| {
+            let block = block.clone();
+            self.payload_processor
+                .executor()
+                .spawn_blocking_named("payload-tx-root", move || block.body().calculate_tx_root())
+        });
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -545,6 +547,8 @@ where
                 );
             })
             .ok();
+        let transaction_root =
+            transaction_root.map(|handle| handle.try_into_inner().expect("sole handle"));
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
