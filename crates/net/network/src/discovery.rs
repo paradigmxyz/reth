@@ -107,8 +107,18 @@ impl Discovery {
             Ok((Some(discv5), Some(discv5_updates.into())))
         };
 
-        let ((discv4, discv4_updates, _discv4_service), (discv5, discv5_updates)) =
-            tokio::try_join!(discv4_future, discv5_future)?;
+        let (discv4_result, discv5_result) = tokio::join!(discv4_future, discv5_future);
+
+        // If one succeeds but the other fails, we must clean up the successful one's resources
+        // before returning the error — otherwise spawned background tasks and bound sockets leak.
+        if discv5_result.is_err() {
+            if let Ok((Some(discv4), _, _)) = &discv4_result {
+                discv4.terminate();
+            }
+        }
+
+        let (discv4, discv4_updates, _discv4_service) = discv4_result?;
+        let (discv5, discv5_updates) = discv5_result?;
 
         // setup DNS discovery
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
