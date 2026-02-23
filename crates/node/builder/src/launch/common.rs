@@ -959,6 +959,8 @@ where
                         StageId::IndexAccountHistory
                 )
             {
+                // These stages are allowed to lag behind while deferred history indexing is
+                // enabled, so they must not participate in startup pipeline consistency checks.
                 return false
             }
 
