@@ -88,9 +88,9 @@ impl DeferredIndexerState {
     }
 
     /// Transitions to the caught-up state.
-    const fn mark_caught_up(self) -> Self {
-        let _ = self;
-        Self::CaughtUp
+    const fn mark_caught_up(mut self) -> Self {
+        self = Self::CaughtUp;
+        self
     }
 
     /// Transitions to catch-up mode from the first deferred stage.
