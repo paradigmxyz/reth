@@ -1875,6 +1875,7 @@ impl ParallelSparseTrie {
                     }
                     SparseTrieUpdatesAction::InsertUpdated(path, branch_node) => {
                         updates.updated_nodes.insert(path, branch_node);
+                        updates.removed_nodes.remove(&path);
                     }
                 }
             }
