@@ -28,7 +28,6 @@ fn to_rpc_log(
         block_hash: Some(block_num_hash.hash),
         block_number: Some(block_num_hash.number),
         transaction_hash,
-        // The transaction and receipt index is always the same.
         transaction_index: Some(transaction_index),
         log_index: Some(log_index),
         removed,
