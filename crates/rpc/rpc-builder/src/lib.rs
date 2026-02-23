@@ -893,7 +893,7 @@ where
     {
         let mut module = engine_api.into_rpc_module();
 
-        // merge reth_newPayload endpoint
+        // Merge reth_* endpoints
         let reth_engine_api = RethEngineApi::new(beacon_engine_handle);
         module
             .merge(RethEngineApiServer::into_rpc(reth_engine_api).remove_context())

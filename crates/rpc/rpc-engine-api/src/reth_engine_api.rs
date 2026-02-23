@@ -11,14 +11,9 @@ use tracing::trace;
 /// Provides the `reth_newPayload` endpoint that takes `ExecutionData` directly,
 /// waits for persistence, execution cache, and sparse trie locks before processing,
 /// and returns timing breakdowns with server-measured execution latency.
+#[derive(Debug)]
 pub struct RethEngineApi<Payload: PayloadTypes> {
     beacon_engine_handle: ConsensusEngineHandle<Payload>,
-}
-
-impl<Payload: PayloadTypes> std::fmt::Debug for RethEngineApi<Payload> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RethEngineApi").finish_non_exhaustive()
-    }
 }
 
 impl<Payload: PayloadTypes> RethEngineApi<Payload> {
