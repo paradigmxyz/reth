@@ -1224,21 +1224,27 @@ impl RocksDBProvider {
         let write_account_history = ctx.storage_settings.storage_v2;
         let write_storage_history = ctx.storage_settings.storage_v2;
 
+        // Propagate tracing context into rayon-spawned threads so that RocksDB
+        // write spans appear as children of write_blocks_data in traces.
+        let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
                 });
             }
 
             if write_account_history {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_account_history = Some(self.write_account_history(blocks, &ctx));
                 });
             }
 
             if write_storage_history {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_storage_history = Some(self.write_storage_history(blocks, &ctx));
                 });
             }

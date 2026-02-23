@@ -566,9 +566,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Write to all backends in parallel.
         let runtime = &self.runtime;
+        // Propagate tracing context into rayon-spawned threads so that static file
+        // and RocksDB write spans appear as children of save_blocks in traces.
+        let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
+                let _guard = span.enter();
                 let start = Instant::now();
                 sf_result = Some(
                     sf_provider
@@ -581,6 +585,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             #[cfg(all(unix, feature = "rocksdb"))]
             if rocksdb_enabled {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     let start = Instant::now();
                     rocksdb_result = Some(
                         rocksdb_provider

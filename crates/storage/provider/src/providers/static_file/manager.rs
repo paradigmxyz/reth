@@ -658,6 +658,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
     /// `sync_all()` is called to flush writes to disk.
+    #[instrument(level = "debug", target = "providers::static_file", skip_all, fields(?segment))]
     fn write_segment<F>(
         &self,
         segment: StaticFileSegment,
@@ -697,8 +698,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
 
+        // Propagate tracing context into rayon-spawned threads so that per-segment
+        // write spans appear as children of write_blocks_data in traces.
+        let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
             s.spawn(|_| {
+                let _guard = span.enter();
                 r_headers =
                     Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
                         Self::write_headers(w, blocks)
@@ -706,6 +711,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             });
 
             s.spawn(|_| {
+                let _guard = span.enter();
                 r_txs = Some(self.write_segment(
                     StaticFileSegment::Transactions,
                     first_block_number,
@@ -715,6 +721,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             if ctx.write_senders {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_senders = Some(self.write_segment(
                         StaticFileSegment::TransactionSenders,
                         first_block_number,
@@ -725,6 +732,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             if ctx.write_receipts {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_receipts = Some(self.write_segment(
                         StaticFileSegment::Receipts,
                         first_block_number,
@@ -735,6 +743,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             if ctx.write_account_changesets {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_account_changesets = Some(self.write_segment(
                         StaticFileSegment::AccountChangeSets,
                         first_block_number,
@@ -745,6 +754,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             if ctx.write_storage_changesets {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_storage_changesets = Some(self.write_segment(
                         StaticFileSegment::StorageChangeSets,
                         first_block_number,
