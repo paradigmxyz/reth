@@ -19,7 +19,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -36,7 +36,6 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
 };
 use tracing::instrument;
 
@@ -690,6 +689,14 @@ impl RocksDBProvider {
     /// Creates a new `RocksDB` provider builder.
     pub fn builder(path: impl AsRef<Path>) -> RocksDBBuilder {
         RocksDBBuilder::new(path)
+    }
+
+    /// Returns `true` if a `RocksDB` database exists at the given path.
+    ///
+    /// Checks for the presence of the `CURRENT` file, which `RocksDB` creates
+    /// when initializing a database.
+    pub fn exists(path: impl AsRef<Path>) -> bool {
+        path.as_ref().join("CURRENT").exists()
     }
 
     /// Returns `true` if this provider is in read-only mode.

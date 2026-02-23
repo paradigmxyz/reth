@@ -20,7 +20,10 @@ use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     consensus::EthBeaconConsensus,
     network::api::noop::NoopNetwork,
-    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
+    node::{
+        api::{ConsensusEngineHandle, NodeTypesWithDBAdapter},
+        EthEngineTypes, EthEvmConfig, EthereumNode,
+    },
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
@@ -31,10 +34,11 @@ use reth_ethereum::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
     },
-    tasks::{Runtime, TokioTaskExecutor},
+    tasks::Runtime,
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
+use tokio::sync::mpsc::unbounded_channel;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -49,13 +53,13 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?;
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = Runtime::test();
     let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
-        runtime,
+        runtime.clone(),
     )?;
 
     // 2. Set up the blockchain provider using only the database provider and a noop for the tree to
@@ -68,7 +72,7 @@ async fn main() -> eyre::Result<()> {
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(Box::new(TokioTaskExecutor::default()))
+        .with_executor(runtime)
         .with_evm_config(EthEvmConfig::new(spec.clone()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 
@@ -83,7 +87,12 @@ async fn main() -> eyre::Result<()> {
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
 
-    let mut server = rpc_builder.build(config, eth_api, Default::default());
+    let mut server = rpc_builder.build(
+        config,
+        eth_api,
+        Default::default(),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };

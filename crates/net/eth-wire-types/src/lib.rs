@@ -38,6 +38,9 @@ pub use state::*;
 pub mod receipts;
 pub use receipts::*;
 
+pub mod block_access_lists;
+pub use block_access_lists::*;
+
 pub mod disconnect_reason;
 pub use disconnect_reason::*;
 

@@ -19,7 +19,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TokioTaskExecutor;
+use reth_tasks::Runtime;
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
     test_utils::{TestPool, TestPoolBuilder},
@@ -49,7 +49,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         beacon_engine_handle,
         spawn_test_payload_service().into(),
         NoopTransactionPool::default(),
-        Box::<TokioTaskExecutor>::default(),
+        Runtime::test(),
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
@@ -64,8 +64,12 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_http(modules), eth_api, EventSender::new(1));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_http(modules),
+        eth_api,
+        EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
         .start(&server)
@@ -77,8 +81,12 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules), eth_api, EventSender::new(1));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules),
+        eth_api,
+        EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .start(&server)
@@ -95,6 +103,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
@@ -115,6 +124,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
     let addr = test_address();
     RpcServerConfig::ws(Default::default())
@@ -134,7 +144,7 @@ pub fn test_rpc_builder(
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(Box::new(TokioTaskExecutor::default()))
+        .with_executor(Runtime::test())
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default())
 }

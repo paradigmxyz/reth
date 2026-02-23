@@ -26,7 +26,8 @@ pub struct BenchmarkArgs {
     /// This will perform JWT authentication for all requests to the given engine RPC url.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
-    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
+    /// by default.
     #[arg(
         long = "jwt-secret",
         alias = "jwtsecret",
@@ -58,6 +59,25 @@ pub struct BenchmarkArgs {
     /// The path to the output directory for granular benchmark results.
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
+
+    /// Optional Prometheus metrics endpoint to scrape after each block.
+    ///
+    /// When provided, reth-bench will fetch metrics from this URL after each
+    /// `newPayload` / `forkchoiceUpdated` call, recording per-block execution
+    /// and state root durations. Results are written to `metrics.csv` in the
+    /// output directory.
+    ///
+    /// Example: `http://127.0.0.1:9001/metrics`
+    #[arg(long = "metrics-url", value_name = "URL", verbatim_doc_comment)]
+    pub metrics_url: Option<String>,
+
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    pub reth_new_payload: bool,
 }
 
 #[cfg(test)]

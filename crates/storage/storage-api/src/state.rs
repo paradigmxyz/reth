@@ -14,7 +14,7 @@ use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StateReader: Send {
     /// Receipt type in [`ExecutionOutcome`].
     type Receipt: Send + Sync;
@@ -30,7 +30,7 @@ pub trait StateReader: Send {
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
 /// An abstraction for a type that provides state data.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
     BlockHashReader
     + AccountReader
@@ -110,14 +110,14 @@ pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
 /// Trait that provides the hashed state from various sources.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
 }
 
 /// Trait for reading bytecode associated with a given code hash.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;

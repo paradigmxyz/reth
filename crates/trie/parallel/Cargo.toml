@@ -13,11 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["dashmap"] }
+reth-primitives-traits = { workspace = true, features = ["dashmap", "std"] }
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
-reth-trie-common.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
@@ -60,7 +59,6 @@ metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics", "reth-trie-sparse
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
-    "reth-trie-common/test-utils",
     "reth-trie-db/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-trie/test-utils",

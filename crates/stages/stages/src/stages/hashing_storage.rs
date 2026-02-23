@@ -110,10 +110,9 @@ where
 
             for chunk in &storage_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
                 // An _unordered_ channel to receive results from a rayon job
-                let (tx, rx) = mpsc::channel();
-                channels.push(rx);
-
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                let (tx, rx) = mpsc::sync_channel(chunk.len());
+                channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address

@@ -9,7 +9,7 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Hashing Writer
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HashingWriter: Send {
     /// Unwind and clear account hashing.
     ///

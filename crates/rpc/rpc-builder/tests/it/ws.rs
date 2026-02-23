@@ -3,10 +3,13 @@
 
 use crate::utils::{launch_ws, test_rpc_builder};
 use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_node_ethereum::EthEngineTypes;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
 use std::time::Duration;
+use tokio::sync::mpsc::unbounded_channel;
 
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 
@@ -127,8 +130,12 @@ async fn test_eth_subscribe_not_available_over_http() {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
     let modules = RpcModuleSelection::Standard;
-    let server =
-        builder.build(TransportRpcModuleConfig::set_http(modules), eth_api, EventSender::new(1));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_http(modules),
+        eth_api,
+        EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
     let handle = RpcServerConfig::http(Default::default())
         .with_http_address(crate::utils::test_address())
         .start(&server)
@@ -145,7 +152,7 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_builder::RpcModuleBuilder;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::{
         test_utils::{TestPool, TestPoolBuilder},
         PoolTransaction, TransactionOrigin, TransactionPool,
@@ -160,7 +167,7 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
         .with_provider(NoopProvider::default())
         .with_pool(pool)
         .with_network(NoopNetwork::default())
-        .with_executor(Box::new(TokioTaskExecutor::default()))
+        .with_executor(Runtime::test())
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default());
 
@@ -169,6 +176,7 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
         TransportRpcModuleConfig::set_ws(RpcModuleSelection::Standard),
         eth_api,
         EventSender::new(1),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
     let handle = RpcServerConfig::ws(Default::default())
         .with_ws_address(crate::utils::test_address())

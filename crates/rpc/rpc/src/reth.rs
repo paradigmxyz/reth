@@ -2,7 +2,7 @@ use std::{future::Future, sync::Arc};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{map::AddressMap, U256};
+use alloy_primitives::{map::AddressMap, U256, U64};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -10,40 +10,99 @@ use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
 };
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethResult;
+use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_execution_types::ExecutionOutcome;
+use reth_node_api::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_rpc_api::RethApiServer;
+use reth_rpc_api::{RethApiServer, RethPayloadStatus};
 use reth_rpc_eth_types::{EthApiError, EthResult};
-use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
-use serde::Serialize;
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
+};
+use reth_tasks::{pool::BlockingTaskGuard, Runtime};
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
+
+/// Configuration for the `reth` namespace.
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RethModuleConfig {
+    /// Whether the `reth_newPayload` method should be exposed.
+    #[serde(default)]
+    new_payload: bool,
+}
+
+impl RethModuleConfig {
+    /// Returns whether the `reth_newPayload` method is enabled.
+    pub const fn new_payload(&self) -> bool {
+        self.new_payload
+    }
+
+    /// Sets whether the `reth_newPayload` method should be enabled.
+    pub const fn with_new_payload(mut self, new_payload: bool) -> Self {
+        self.new_payload = new_payload;
+        self
+    }
+}
 
 /// `reth` API implementation.
 ///
 /// This type provides the functionality for handling `reth` prototype RPC requests.
-pub struct RethApi<Provider> {
-    inner: Arc<RethApiInner<Provider>>,
+#[derive(Debug)]
+pub struct RethApi<Provider, EvmConfig, Payload: PayloadTypes> {
+    inner: Arc<RethApiInner<Provider, EvmConfig, Payload>>,
 }
 
-// === impl RethApi ===
+impl<Provider, EvmConfig, Payload> Clone for RethApi<Provider, EvmConfig, Payload>
+where
+    Payload: PayloadTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
 
-impl<Provider> RethApi<Provider> {
+impl<Provider, EvmConfig, Payload> RethApi<Provider, EvmConfig, Payload>
+where
+    Payload: PayloadTypes,
+{
     /// The provider that can interact with the chain.
     pub fn provider(&self) -> &Provider {
         &self.inner.provider
     }
 
+    /// The evm config.
+    pub fn evm_config(&self) -> &EvmConfig {
+        &self.inner.evm_config
+    }
+
     /// Create a new instance of the [`RethApi`]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = Arc::new(RethApiInner { provider, task_spawner });
+    pub fn new(
+        provider: Provider,
+        evm_config: EvmConfig,
+        blocking_task_guard: BlockingTaskGuard,
+        task_spawner: Runtime,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
+        config: RethModuleConfig,
+    ) -> Self {
+        let inner = Arc::new(RethApiInner {
+            provider,
+            evm_config,
+            blocking_task_guard,
+            task_spawner,
+            beacon_engine_handle,
+            config,
+        });
         Self { inner }
     }
 }
 
-impl<Provider> RethApi<Provider>
+impl<Provider, EvmConfig, Payload> RethApi<Provider, EvmConfig, Payload>
 where
     Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    EvmConfig: Send + Sync + 'static,
+    Payload: PayloadTypes,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -55,10 +114,10 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         let f = c(this);
-        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             let res = f.await;
             let _ = tx.send(res);
-        }));
+        });
         rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
@@ -90,16 +149,135 @@ where
     }
 }
 
+impl<N, Provider, EvmConfig, Payload> RethApi<Provider, EvmConfig, Payload>
+where
+    N: NodePrimitives,
+    Provider: BlockReaderIdExt
+        + ChangeSetReader
+        + StateProviderFactory
+        + BlockReader<Block = N::Block>
+        + CanonStateSubscriptions<Primitives = N>
+        + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N> + 'static,
+    Payload: PayloadTypes,
+{
+    /// Re-executes one or more consecutive blocks and returns the execution outcome.
+    pub async fn block_execution_outcome(
+        &self,
+        block_id: BlockId,
+        count: Option<U64>,
+    ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
+        const MAX_BLOCK_COUNT: u64 = 128;
+
+        let block_count = count.map(|c| c.to::<u64>()).unwrap_or(1);
+        if block_count == 0 || block_count > MAX_BLOCK_COUNT {
+            return Err(EthApiError::InvalidParams(format!(
+                "block count must be between 1 and {MAX_BLOCK_COUNT}, got {block_count}"
+            )))
+        }
+
+        let permit = self
+            .inner
+            .blocking_task_guard
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| EthApiError::InternalEthError)?;
+        self.on_blocking_task(move |this| async move {
+            let _permit = permit;
+            this.try_block_execution_outcome(block_id, block_count)
+        })
+        .await
+    }
+
+    fn try_block_execution_outcome(
+        &self,
+        block_id: BlockId,
+        block_count: u64,
+    ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
+        let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
+            return Ok(None)
+        };
+
+        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
+        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
+
+        let mut blocks = Vec::with_capacity(block_count as usize);
+        for block_number in start_block..start_block + block_count {
+            let Some(block) = self
+                .provider()
+                .recovered_block(block_number.into(), TransactionVariant::WithHash)?
+            else {
+                if block_number == start_block {
+                    return Ok(None)
+                }
+                break;
+            };
+            blocks.push(block);
+        }
+
+        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
+            |e: reth_evm::execute::BlockExecutionError| {
+                EthApiError::Internal(reth_errors::RethError::Other(e.into()))
+            },
+        )?;
+
+        Ok(Some(outcome))
+    }
+}
+
+impl<Provider, EvmConfig, Payload> RethApi<Provider, EvmConfig, Payload>
+where
+    Provider: 'static,
+    Payload: PayloadTypes,
+{
+    /// Waits for persistence, execution cache, and sparse trie locks before processing.
+    ///
+    /// Used by `reth_newPayload` endpoint.
+    pub async fn reth_new_payload(
+        &self,
+        payload: Payload::ExecutionData,
+    ) -> Result<RethPayloadStatus, jsonrpsee::types::ErrorObject<'static>> {
+        if !self.inner.config.new_payload {
+            return Err(jsonrpsee::types::error::ErrorObject::owned(
+                jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                "reth_newPayload is not enabled",
+                None::<()>,
+            ))
+        }
+
+        let (status, timings) =
+            self.inner.beacon_engine_handle.reth_new_payload(payload).await.map_err(|e| {
+                jsonrpsee::types::error::ErrorObject::owned(
+                    jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                    e.to_string(),
+                    None::<()>,
+                )
+            })?;
+        Ok(RethPayloadStatus {
+            status,
+            latency_us: timings.latency.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
+            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
+            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
+        })
+    }
+}
+
 #[async_trait]
-impl<Provider> RethApiServer for RethApi<Provider>
+impl<Provider, EvmConfig, Payload> RethApiServer<Payload::ExecutionData>
+    for RethApi<Provider, EvmConfig, Payload>
 where
     Provider: BlockReaderIdExt
         + ChangeSetReader
         + StateProviderFactory
+        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
+    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    Payload: PayloadTypes,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -109,6 +287,24 @@ where
         Ok(Self::balance_changes_in_block(self, block_id).await?)
     }
 
+    /// Handler for `reth_getBlockExecutionOutcome`
+    async fn reth_get_block_execution_outcome(
+        &self,
+        block_id: BlockId,
+        count: Option<U64>,
+    ) -> RpcResult<Option<serde_json::Value>> {
+        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
+        match outcome {
+            Some(outcome) => {
+                let value = serde_json::to_value(&outcome).map_err(|e| {
+                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
+                })?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Handler for `reth_subscribeChainNotifications`
     async fn reth_subscribe_chain_notifications(
         &self,
@@ -116,7 +312,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
 
         Ok(())
     }
@@ -128,7 +324,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
 
         Ok(())
     }
@@ -141,13 +337,21 @@ where
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(finalized_chain_notifications(
+        self.inner.task_spawner.spawn_task(finalized_chain_notifications(
             sink,
             canon_stream,
             finalized_stream,
-        )));
+        ));
 
         Ok(())
+    }
+
+    /// Handler for `reth_newPayload`
+    async fn reth_new_payload(
+        &self,
+        payload: Payload::ExecutionData,
+    ) -> RpcResult<RethPayloadStatus> {
+        Ok(Self::reth_new_payload(self, payload).await?)
     }
 }
 
@@ -246,21 +450,18 @@ async fn finalized_chain_notifications<N>(
     }
 }
 
-impl<Provider> std::fmt::Debug for RethApi<Provider> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RethApi").finish_non_exhaustive()
-    }
-}
-
-impl<Provider> Clone for RethApi<Provider> {
-    fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
-    }
-}
-
-struct RethApiInner<Provider> {
+#[derive(Debug)]
+struct RethApiInner<Provider, EvmConfig, Payload: PayloadTypes> {
     /// The provider that can interact with the chain.
     provider: Provider,
+    /// The EVM configuration used to create block executors.
+    evm_config: EvmConfig,
+    /// Guard to restrict the number of concurrent block re-execution requests.
+    blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
+    /// Optional beacon engine handle for `reth_newPayload`.
+    beacon_engine_handle: ConsensusEngineHandle<Payload>,
+    /// Configuration for the `reth` namespace.
+    config: RethModuleConfig,
 }

@@ -7,7 +7,7 @@ use reth_db_models::AccountBeforeTx;
 use reth_storage_errors::provider::ProviderResult;
 
 /// History Writer
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HistoryWriter: Send {
     /// Unwind and clear account history indices.
     ///

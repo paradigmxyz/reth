@@ -343,6 +343,14 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the dev block time for the node.
+    ///
+    /// This sets the interval at which the dev miner produces new blocks.
+    pub const fn with_dev_block_time(mut self, block_time: std::time::Duration) -> Self {
+        self.dev.block_time = Some(block_time);
+        self
+    }
+
     /// Set the pruning args for the node
     pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;

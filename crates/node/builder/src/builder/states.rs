@@ -343,10 +343,7 @@ mod test {
             payload_builder_handle: PayloadBuilderHandle::<EthEngineTypes>::noop(),
         };
 
-        let task_executor = {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            Runtime::with_existing_handle(runtime.handle().clone()).unwrap()
-        };
+        let task_executor = Runtime::test();
 
         let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
 

@@ -39,6 +39,7 @@ bytes.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 once_cell.workspace = true
+quanta = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 
@@ -85,6 +86,7 @@ std = [
     "bytes/std",
     "derive_more/std",
     "once_cell/std",
+    "quanta",
     "secp256k1?/std",
     "thiserror/std",
     "alloy-trie/std",

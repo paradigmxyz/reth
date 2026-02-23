@@ -32,13 +32,14 @@ use jsonrpsee::{
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
-use reth_engine_primitives::ConsensusEngineEvent;
+use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle, PayloadTypes};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    OtterscanApi, RPCApi, RethApi, RethModuleConfig, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -57,7 +58,7 @@ use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
     StateProviderFactory,
 };
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -123,7 +124,7 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
     /// The Network type to when creating all rpc handlers
     network: Network,
     /// How additional tasks are spawned, for example in the eth pubsub namespace
-    executor: Box<dyn TaskSpawner + 'static>,
+    executor: Option<Runtime>,
     /// Defines how the EVM should be configured before execution.
     evm_config: EvmConfig,
     /// The consensus implementation.
@@ -142,11 +143,19 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         provider: Provider,
         pool: Pool,
         network: Network,
-        executor: Box<dyn TaskSpawner + 'static>,
+        executor: Runtime,
         evm_config: EvmConfig,
         consensus: Consensus,
     ) -> Self {
-        Self { provider, pool, network, executor, evm_config, consensus, _primitives: PhantomData }
+        Self {
+            provider,
+            pool,
+            network,
+            executor: Some(executor),
+            evm_config,
+            consensus,
+            _primitives: PhantomData,
+        }
     }
 
     /// Configure the provider instance.
@@ -217,22 +226,13 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     }
 
     /// Configure the task executor to use for additional tasks.
-    pub fn with_executor(self, executor: Box<dyn TaskSpawner + 'static>) -> Self {
-        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
-    }
-
-    /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
-    ///
-    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
-    /// [`TokioTaskExecutor`].
-    pub fn with_tokio_executor(self) -> Self {
+    pub fn with_executor(self, executor: Runtime) -> Self {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
         Self {
             provider,
             network,
             pool,
-            executor: Box::new(TokioTaskExecutor::default()),
+            executor: Some(executor),
             evm_config,
             consensus,
             _primitives,
@@ -328,23 +328,26 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
-    pub fn build_with_auth_server<EthApi>(
+    #[expect(clippy::type_complexity)]
+    pub fn build_with_auth_server<EthApi, Payload>(
         self,
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
-        RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
+        RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>,
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = self.into_registry(config, eth, engine_events);
+        let mut registry = self.into_registry(config, eth, engine_events, beacon_engine_handle);
         let modules = registry.create_transport_rpc_modules(module_config);
         let auth_module = registry.create_auth_module(engine);
 
@@ -355,16 +358,20 @@ where
     /// components.
     ///
     /// This is useful for getting access to API handlers directly
-    pub fn into_registry<EthApi>(
+    pub fn into_registry<EthApi, Payload>(
         self,
         config: RpcModuleConfig,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
-    ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
+    ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        Payload: PayloadTypes,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
+        let executor =
+            executor.expect("RpcModuleBuilder requires a Runtime to be set via `with_executor`");
         RpcRegistryInner::new(
             provider,
             pool,
@@ -375,26 +382,34 @@ where
             evm_config,
             eth,
             engine_events,
+            beacon_engine_handle,
         )
     }
 
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
-    pub fn build<EthApi>(
+    pub fn build<EthApi, Payload>(
         self,
         module_config: TransportRpcModuleConfig,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        Payload: PayloadTypes,
     {
         let mut modules = TransportRpcModules::default();
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
-            let mut registry = self.into_registry(config.unwrap_or_default(), eth, engine_events);
+            let mut registry = self.into_registry(
+                config.unwrap_or_default(),
+                eth,
+                engine_events,
+                beacon_engine_handle,
+            );
 
             modules.config = module_config;
             modules.http = registry.maybe_module(http.as_ref());
@@ -408,7 +423,15 @@ where
 
 impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), Box::new(TokioTaskExecutor::default()), (), ())
+        Self {
+            provider: (),
+            pool: (),
+            network: (),
+            executor: None,
+            evm_config: (),
+            consensus: (),
+            _primitives: PhantomData,
+        }
     }
 }
 
@@ -417,6 +440,9 @@ impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
 pub struct RpcModuleConfig {
     /// `eth` namespace settings
     eth: EthConfig,
+    /// `reth` namespace settings
+    #[serde(default)]
+    reth: RethModuleConfig,
 }
 
 // === impl RpcModuleConfig ===
@@ -428,8 +454,8 @@ impl RpcModuleConfig {
     }
 
     /// Returns a new RPC module config given the eth namespace config
-    pub const fn new(eth: EthConfig) -> Self {
-        Self { eth }
+    pub fn new(eth: EthConfig) -> Self {
+        Self { eth, reth: RethModuleConfig::default() }
     }
 
     /// Get a reference to the eth namespace config
@@ -441,12 +467,18 @@ impl RpcModuleConfig {
     pub const fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
     }
+
+    /// Get a reference to the reth namespace config.
+    pub const fn reth(&self) -> &RethModuleConfig {
+        &self.reth
+    }
 }
 
 /// Configures [`RpcModuleConfig`]
 #[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
+    reth: Option<RethModuleConfig>,
 }
 
 // === impl RpcModuleConfigBuilder ===
@@ -458,10 +490,16 @@ impl RpcModuleConfigBuilder {
         self
     }
 
+    /// Configures custom `reth` namespace settings.
+    pub const fn reth(mut self, reth: RethModuleConfig) -> Self {
+        self.reth = Some(reth);
+        self
+    }
+
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
-        let Self { eth } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default() }
+        let Self { eth, reth } = self;
+        RpcModuleConfig { eth: eth.unwrap_or_default(), reth: reth.unwrap_or_default() }
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -482,11 +520,19 @@ impl RpcModuleConfigBuilder {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug)]
-pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmConfig, Consensus> {
+pub struct RpcRegistryInner<
+    Provider,
+    Pool,
+    Network,
+    EthApi: EthApiTypes,
+    EvmConfig,
+    Consensus,
+    Payload: PayloadTypes,
+> {
     provider: Provider,
     pool: Pool,
     network: Network,
-    executor: Box<dyn TaskSpawner + 'static>,
+    executor: Runtime,
     evm_config: EvmConfig,
     consensus: Consensus,
     /// Holds all `eth_` namespace handlers
@@ -495,17 +541,19 @@ pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmCon
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
-    /// eth config settings
-    eth_config: EthConfig,
+    /// Configuration for the RPC modules.
+    config: RpcModuleConfig,
     /// Notification channel for engine API events
     engine_events:
         EventSender<ConsensusEngineEvent<<EthApi::RpcConvert as RpcConvert>::Primitives>>,
+    /// Optional beacon engine handle for `reth_newPayload`.
+    beacon_engine_handle: ConsensusEngineHandle<Payload>,
 }
 
 // === impl RpcRegistryInner ===
 
-impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     N: NodePrimitives,
     Provider: StateProviderFactory
@@ -518,6 +566,7 @@ where
     Network: Clone + 'static,
     EthApi: FullEthApiTypes + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
+    Payload: PayloadTypes,
 {
     /// Creates a new, empty instance.
     #[expect(clippy::too_many_arguments)]
@@ -525,7 +574,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        executor: Box<dyn TaskSpawner + 'static>,
+        executor: Runtime,
         consensus: Consensus,
         config: RpcModuleConfig,
         evm_config: EvmConfig,
@@ -533,6 +582,7 @@ where
         engine_events: EventSender<
             ConsensusEngineEvent<<EthApi::Provider as NodePrimitivesProvider>::Primitives>,
         >,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
@@ -550,17 +600,19 @@ where
             consensus,
             modules: Default::default(),
             blocking_pool_guard,
-            eth_config: config.eth,
+            config,
             evm_config,
             engine_events,
+            beacon_engine_handle,
         }
     }
 }
 
-impl<Provider, Pool, Network, EthApi, Evm, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, Evm, Consensus>
+impl<Provider, Pool, Network, EthApi, Evm, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, Evm, Consensus, Payload>
 where
     EthApi: EthApiTypes,
+    Payload: PayloadTypes,
 {
     /// Returns a reference to the installed [`EthApi`].
     pub const fn eth_api(&self) -> &EthApi {
@@ -578,8 +630,8 @@ where
     }
 
     /// Returns a reference to the tasks type
-    pub const fn tasks(&self) -> &(dyn TaskSpawner + 'static) {
-        &*self.executor
+    pub const fn tasks(&self) -> &Runtime {
+        &self.executor
     }
 
     /// Returns a reference to the provider
@@ -607,13 +659,14 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
     Provider: BlockReader + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EvmConfig: ConfigureEvm,
+    Payload: PayloadTypes,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec, Pool>
@@ -648,8 +701,8 @@ where
     }
 }
 
-impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     N: NodePrimitives,
     Provider: FullRpcProvider<
@@ -672,6 +725,7 @@ where
             TxTy<N>,
         > + EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
+    Payload: PayloadTypes,
 {
     /// Register Eth Namespace
     ///
@@ -766,8 +820,8 @@ where
     }
 }
 
-impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     N: NodePrimitives,
     Provider: FullRpcProvider<
@@ -780,6 +834,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N>,
+    Payload: PayloadTypes,
 {
     /// Instantiates `TraceApi`
     ///
@@ -790,7 +845,7 @@ where
         TraceApi::new(
             self.eth_api().clone(),
             self.blocking_pool_guard.clone(),
-            self.eth_config.clone(),
+            self.config.eth.clone(),
         )
     }
 
@@ -838,13 +893,20 @@ where
     }
 
     /// Instantiates `RethApi`
-    pub fn reth_api(&self) -> RethApi<Provider> {
-        RethApi::new(self.provider.clone(), self.executor.clone())
+    pub fn reth_api(&self) -> RethApi<Provider, EvmConfig, Payload> {
+        RethApi::new(
+            self.provider.clone(),
+            self.evm_config.clone(),
+            self.blocking_pool_guard.clone(),
+            self.executor.clone(),
+            self.beacon_engine_handle.clone(),
+            self.config.reth.clone(),
+        )
     }
 }
 
-impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block>
@@ -858,6 +920,7 @@ where
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
+    Payload: PayloadTypes,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -944,7 +1007,7 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            &*self.executor,
+                            &self.executor,
                             self.engine_events.new_listener(),
                         )
                         .into_rpc()
@@ -972,7 +1035,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            self.eth_config.clone(),
+                            self.config.eth.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -992,11 +1055,16 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Reth => RethApi::new(
+                            self.provider.clone(),
+                            self.evm_config.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.executor.clone(),
+                            self.beacon_engine_handle.clone(),
+                            self.config.reth.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
@@ -1016,8 +1084,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EthApi, EvmConfig, Consensus> Clone
-    for RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+impl<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload> Clone
+    for RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus, Payload>
 where
     EthApi: EthApiTypes,
     Provider: Clone,
@@ -1025,6 +1093,7 @@ where
     Network: Clone,
     EvmConfig: Clone,
     Consensus: Clone,
+    Payload: PayloadTypes,
 {
     fn clone(&self) -> Self {
         Self {
@@ -1037,8 +1106,9 @@ where
             eth: self.eth.clone(),
             blocking_pool_guard: self.blocking_pool_guard.clone(),
             modules: self.modules.clone(),
-            eth_config: self.eth_config.clone(),
+            config: self.config.clone(),
             engine_events: self.engine_events.clone(),
+            beacon_engine_handle: self.beacon_engine_handle.clone(),
         }
     }
 }
@@ -2382,6 +2452,17 @@ mod tests {
             config,
             RpcModuleSelection::Selection([RethRpcModule::Eth, RethRpcModule::Admin].into())
         );
+    }
+
+    #[test]
+    fn test_rpc_module_config_reth_new_payload_flag() {
+        let config = RpcModuleConfig::builder()
+            .reth(RethModuleConfig::default().with_new_payload(true))
+            .build();
+        assert!(config.reth().new_payload());
+
+        let config = RpcModuleConfig::new(Default::default());
+        assert!(!config.reth().new_payload());
     }
 
     #[test]
