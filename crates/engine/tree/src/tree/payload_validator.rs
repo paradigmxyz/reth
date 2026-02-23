@@ -524,6 +524,8 @@ where
 
         let block = convert_to_block(input)?.with_senders(senders);
 
+        // If the stream is incomplete (e.g. execution abort), this returns `None` and consensus
+        // falls back to computing receipt-root + logs-bloom from `output.receipts`.
         let receipt_root_bloom = post_exec.receipt_root_bloom();
         let withdrawals_root = post_exec.withdrawals_root();
         let Some(hashed_state) = post_exec.hashed_post_state() else {
@@ -752,7 +754,7 @@ where
     ///
     /// This method orchestrates block execution:
     /// 1. Sets up the EVM with state database and precompile caching
-    /// 2. Spawns a background task for incremental receipt root computation
+    /// 2. Spawns a block-scoped post-execution task
     /// 3. Executes transactions with metrics collection via state hooks
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
@@ -760,7 +762,7 @@ where
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
-        env: ExecutionEnv<Evm>,
+        mut env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
@@ -775,6 +777,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
+        let withdrawals = env.withdrawals.take();
 
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
@@ -813,7 +816,6 @@ where
         }
 
         let receipts_len = input.transaction_count();
-        let withdrawals = input.withdrawals().map(|w| w.to_vec());
         let mut post_exec = self.payload_processor.post_exec_handle(receipts_len, withdrawals);
 
         let transaction_count = input.transaction_count();
@@ -1239,11 +1241,17 @@ where
         }
         drop(_enter);
 
-        debug_assert_eq!(
-            withdrawals_root,
-            block.withdrawals_root(),
-            "post-exec withdrawals root does not match block header"
-        );
+        if let (Some(withdrawals_root), Some(header_withdrawals_root)) =
+            (withdrawals_root, block.withdrawals_root())
+        {
+            if withdrawals_root != header_withdrawals_root {
+                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+                return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                )
+                .into())
+            }
+        }
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) = self

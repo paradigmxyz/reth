@@ -4,7 +4,7 @@
 //! [`OnceLock`](reth_primitives_traits::sync::OnceLock). Each artifact can be awaited
 //! independently via `wait`-backed getters.
 
-use super::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use super::receipt_root_task::{compute_receipt_root_bloom, IndexedReceipt};
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::{self, Sender as CrossbeamSender};
@@ -95,9 +95,8 @@ impl<R: Receipt + 'static> PostExecHandle<R> {
                 output_for_task
                     .set_withdrawals_root(withdrawals.as_deref().map(calculate_withdrawals_root));
 
-                let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-                ReceiptRootTaskHandle::new(receipt_rx, result_tx).run(receipts_len);
-                output_for_task.set_receipt_root_bloom(result_rx.blocking_recv().ok());
+                output_for_task
+                    .set_receipt_root_bloom(compute_receipt_root_bloom(receipt_rx, receipts_len));
 
                 let hashed_post_state = hashed_post_state_rx
                     .recv()
@@ -299,6 +298,17 @@ mod tests {
         handle.spawn_hashed_post_state(HashedPostState::default);
 
         assert!(handle.hashed_post_state().is_some());
+    }
+
+    #[test]
+    fn post_exec_handle_returns_none_when_hashed_state_panics() {
+        let rt = test_runtime();
+
+        let mut handle = PostExecHandle::<Receipt>::new(&rt, 0, None);
+        handle.finish_receipts();
+        handle.spawn_hashed_post_state(|| panic!("hashed-state panic"));
+
+        assert!(handle.hashed_post_state().is_none());
     }
 
     #[test]
