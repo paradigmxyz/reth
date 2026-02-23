@@ -13,6 +13,29 @@ use reth_storage_api::{BlockReader, ProviderBlock};
 use std::sync::Arc;
 use thiserror::Error;
 
+#[inline]
+fn to_rpc_log(
+    inner: &alloy_primitives::Log,
+    block_num_hash: &BlockNumHash,
+    block_timestamp: u64,
+    transaction_hash: Option<TxHash>,
+    transaction_index: u64,
+    log_index: u64,
+    removed: bool,
+) -> Log {
+    Log {
+        inner: inner.clone(),
+        block_hash: Some(block_num_hash.hash),
+        block_number: Some(block_num_hash.number),
+        transaction_hash,
+        // The transaction and receipt index is always the same.
+        transaction_index: Some(transaction_index),
+        log_index: Some(log_index),
+        removed,
+        block_timestamp: Some(block_timestamp),
+    }
+}
+
 /// Returns all matching of a block's receipts when the transaction hashes are known.
 pub fn matching_block_logs_with_tx_hashes<'a, I, R>(
     filter: &Filter,
@@ -37,18 +60,15 @@ where
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
         for log in receipt.logs() {
             if filter.matches(log) {
-                let log = Log {
-                    inner: log.clone(),
-                    block_hash: Some(block_num_hash.hash),
-                    block_number: Some(block_num_hash.number),
-                    transaction_hash: Some(tx_hash),
-                    // The transaction and receipt index is always the same.
-                    transaction_index: Some(receipt_idx as u64),
-                    log_index: Some(log_index),
+                all_logs.push(to_rpc_log(
+                    log,
+                    &block_num_hash,
+                    block_timestamp,
+                    Some(tx_hash),
+                    receipt_idx as u64,
+                    log_index,
                     removed,
-                    block_timestamp: Some(block_timestamp),
-                };
-                all_logs.push(log);
+                ));
             }
             log_index += 1;
         }
@@ -131,18 +151,15 @@ where
                     };
                 }
 
-                let log = Log {
-                    inner: log.clone(),
-                    block_hash: Some(block_num_hash.hash),
-                    block_number: Some(block_num_hash.number),
+                all_logs.push(to_rpc_log(
+                    log,
+                    &block_num_hash,
+                    block_timestamp,
                     transaction_hash,
-                    // The transaction and receipt index is always the same.
-                    transaction_index: Some(receipt_idx as u64),
-                    log_index: Some(log_index),
+                    receipt_idx as u64,
+                    log_index,
                     removed,
-                    block_timestamp: Some(block_timestamp),
-                };
-                all_logs.push(log);
+                ));
             }
             log_index += 1;
         }
