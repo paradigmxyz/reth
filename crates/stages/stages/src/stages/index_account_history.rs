@@ -829,6 +829,5 @@ mod tests {
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
-
     }
 }

@@ -348,12 +348,12 @@ impl DeferredHistoryIndexer {
     }
 
     /// Returns whether deferred indexing has caught up to the tip.
-    pub fn is_caught_up(&self) -> bool {
+    pub const fn is_caught_up(&self) -> bool {
         self.state.is_caught_up()
     }
 
     /// Marks the indexer as needing catch-up after reorg-related block removal.
-    pub fn on_reorg(&mut self, _new_tip_num: u64) {
+    pub const fn on_reorg(&mut self, _new_tip_num: u64) {
         self.state = self.state.mark_needs_catch_up();
     }
 }
