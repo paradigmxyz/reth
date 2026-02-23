@@ -14,7 +14,7 @@ use reth_errors::RethResult;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_rpc_api::RethApiServer;
+use reth_rpc_api::{RethApiExtServer, RethApiServer};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
@@ -203,24 +203,6 @@ where
         Ok(Self::balance_changes_in_block(self, block_id).await?)
     }
 
-    /// Handler for `reth_getBlockExecutionOutcome`
-    async fn reth_get_block_execution_outcome(
-        &self,
-        block_id: BlockId,
-        count: Option<U64>,
-    ) -> RpcResult<Option<serde_json::Value>> {
-        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
-        match outcome {
-            Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
-                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
-                })?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
-        }
-    }
-
     /// Handler for `reth_subscribeChainNotifications`
     async fn reth_subscribe_chain_notifications(
         &self,
@@ -260,6 +242,36 @@ where
         ));
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl<Provider, EvmConfig> RethApiExtServer for RethApi<Provider, EvmConfig>
+where
+    Provider: BlockReaderIdExt
+        + ChangeSetReader
+        + StateProviderFactory
+        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
+        + CanonStateSubscriptions
+        + 'static,
+    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+{
+    /// Handler for `reth_getBlockExecutionOutcome`
+    async fn reth_get_block_execution_outcome(
+        &self,
+        block_id: BlockId,
+        count: Option<U64>,
+    ) -> RpcResult<Option<serde_json::Value>> {
+        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
+        match outcome {
+            Some(outcome) => {
+                let value = serde_json::to_value(&outcome).map_err(|e| {
+                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
+                })?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
     }
 }
 

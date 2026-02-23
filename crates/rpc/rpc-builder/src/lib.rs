@@ -760,7 +760,9 @@ where
     /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
-        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
+        let mut module = RethApiServer::into_rpc(rethapi.clone());
+        module.merge(RethApiExtServer::into_rpc(rethapi)).expect("No conflicts");
+        self.modules.insert(RethRpcModule::Reth, module.into());
         self
     }
 
@@ -1006,14 +1008,19 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => RethApi::new(
-                            self.provider.clone(),
-                            self.evm_config.clone(),
-                            self.blocking_pool_guard.clone(),
-                            self.executor.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Reth => {
+                            let reth_api = RethApi::new(
+                                self.provider.clone(),
+                                self.evm_config.clone(),
+                                self.blocking_pool_guard.clone(),
+                                self.executor.clone(),
+                            );
+                            let mut module = RethApiServer::into_rpc(reth_api.clone());
+                            module
+                                .merge(RethApiExtServer::into_rpc(reth_api))
+                                .expect("No conflicts");
+                            module.into()
+                        }
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
