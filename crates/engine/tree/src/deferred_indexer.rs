@@ -94,9 +94,9 @@ impl DeferredIndexerState {
     }
 
     /// Transitions to catch-up mode from the first deferred stage.
-    const fn mark_needs_catch_up(self) -> Self {
-        let _ = self;
-        Self::TransactionLookup
+    const fn mark_needs_catch_up(mut self) -> Self {
+        self = Self::TransactionLookup;
+        self
     }
 }
 
