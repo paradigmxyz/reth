@@ -35,6 +35,8 @@ jobs:
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-02-21
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
