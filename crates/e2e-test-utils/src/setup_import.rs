@@ -275,8 +275,9 @@ mod tests {
     use crate::test_rlp_utils::{create_fcu_json, generate_test_blocks, write_blocks_to_rlp};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::mdbx::DatabaseArguments;
+    use reth_ethereum_primitives::Block;
     use reth_payload_builder::EthPayloadBuilderAttributes;
-    use reth_primitives::SealedBlock;
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, BlockHashReader, BlockNumReader, BlockReaderIdExt,
     };
@@ -448,7 +449,7 @@ mod tests {
         chain_spec: &ChainSpec,
         block_count: u64,
         temp_dir: &Path,
-    ) -> (Vec<SealedBlock>, PathBuf) {
+    ) -> (Vec<SealedBlock<Block>>, PathBuf) {
         let test_blocks = generate_test_blocks(chain_spec, block_count);
         assert_eq!(
             test_blocks.len(),
