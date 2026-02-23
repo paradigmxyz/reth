@@ -527,7 +527,9 @@ struct ArenaSparseSubtrie {
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Reusable buffer for collecting required proofs during leaf updates.
-    required_proofs: Vec<ArenaRequiredProof>,
+    /// Each entry is `(index, proof)` where `index` is the position of the target in the
+    /// `sorted_updates` slice passed to [`Self::update_leaves`].
+    required_proofs: Vec<(usize, ArenaRequiredProof)>,
 }
 
 impl ArenaSparseSubtrie {
@@ -568,7 +570,7 @@ impl ArenaSparseSubtrie {
             prev_dirty_leaves: root_node.num_dirty_leaves(),
         });
 
-        for &(key, ref full_path, ref update) in sorted_updates {
+        for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
             let find_result = find_ancestor(&mut self.arena, &mut self.buffers.stack, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
@@ -576,8 +578,10 @@ impl ArenaSparseSubtrie {
                 let head = self.buffers.stack.last().unwrap();
                 let head_branch = self.arena[head.index].branch_ref();
                 let logical_len = head.path.len() + head_branch.short_key.len();
-                self.required_proofs
-                    .push(ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) });
+                self.required_proofs.push((
+                    idx,
+                    ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+                ));
                 continue;
             }
 
@@ -603,8 +607,9 @@ impl ArenaSparseSubtrie {
                         find_result,
                     );
                     if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
-                        self.required_proofs.push(ArenaRequiredProof { key: proof_key, min_len });
-                        self.required_proofs.push(ArenaRequiredProof { key, min_len });
+                        self.required_proofs
+                            .push((idx, ArenaRequiredProof { key: proof_key, min_len }));
+                        self.required_proofs.push((idx, ArenaRequiredProof { key, min_len }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -775,14 +780,21 @@ fn update_cached_rlp(
                         }
                         ArenaSparseNode::Subtrie(subtrie) => {
                             let subtrie_root = &subtrie.arena[subtrie.root];
-                            let ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                                state: ArenaSparseNodeState::Cached { rlp_node, .. },
-                                ..
-                            }) = subtrie_root
-                            else {
-                                panic!("subtrie root must be a cached Branch")
-                            };
-                            rlp_node_buf.push(rlp_node.clone());
+                            match subtrie_root {
+                                ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                                    state: ArenaSparseNodeState::Cached { rlp_node, .. },
+                                    ..
+                                }) => {
+                                    rlp_node_buf.push(rlp_node.clone());
+                                }
+                                ArenaSparseNode::Leaf {
+                                    state: ArenaSparseNodeState::Cached { rlp_node, .. },
+                                    ..
+                                } => {
+                                    rlp_node_buf.push(rlp_node.clone());
+                                }
+                                _ => panic!("subtrie root must be a cached Branch or Leaf"),
+                            }
                         }
                         ArenaSparseNode::TakenSubtrie => {
                             unreachable!("TakenSubtrie should not appear during update_cached_rlp");
@@ -977,16 +989,16 @@ fn replace_child_in_parent(
     root
 }
 
-/// Result of [`upsert_leaf`] indicating whether a new branch was created that the caller
+/// Result of [`upsert_leaf`] indicating whether a new child was created that the caller
 /// may need to wrap as a subtrie (in the upper trie).
 #[derive(Debug)]
 enum UpsertLeafResult {
-    /// No new branch was created (value update, new leaf only, or same-leaf overwrite).
+    /// No new subtrie-eligible child was created (value update or same-leaf overwrite).
     None,
-    /// A new branch was created. Contains the parent's arena index, the child nibble under
-    /// which the new branch sits, and the parent's path — enough for the caller to call
-    /// `maybe_wrap_in_subtrie`.
-    NewBranch { parent_idx: Index, child_nibble: u8, parent_path: Nibbles },
+    /// A new child (branch or leaf) was created or inserted. Contains the parent's arena
+    /// index, the child nibble under which it sits, and the parent's path — enough for the
+    /// caller to call `maybe_wrap_in_subtrie`.
+    NewChild { parent_idx: Index, child_nibble: u8, parent_path: Nibbles },
 }
 
 /// Performs a leaf upsert using a pre-computed [`FindAncestorResult`] from
@@ -1057,7 +1069,7 @@ fn upsert_leaf(
                 if stack.len() >= 2 {
                     let parent_entry = &stack[stack.len() - 2];
                     let child_nibble = stack.last().unwrap().path.last().unwrap();
-                    return UpsertLeafResult::NewBranch {
+                    return UpsertLeafResult::NewChild {
                         parent_idx: parent_entry.index,
                         child_nibble,
                         parent_path: parent_entry.path,
@@ -1083,7 +1095,7 @@ fn upsert_leaf(
             if stack.len() >= 2 {
                 let parent_entry = &stack[stack.len() - 2];
                 let child_nibble = stack.last().unwrap().path.last().unwrap();
-                return UpsertLeafResult::NewBranch {
+                return UpsertLeafResult::NewChild {
                     parent_idx: parent_entry.index,
                     child_nibble,
                     parent_path: parent_entry.path,
@@ -1117,7 +1129,11 @@ fn upsert_leaf(
                 num_leaves: old_num_leaves + 1,
                 num_dirty_leaves: old_dirty_leaves + 1,
             };
-            UpsertLeafResult::None
+            UpsertLeafResult::NewChild {
+                parent_idx: head_idx,
+                child_nibble,
+                parent_path: head_path,
+            }
         }
         FindAncestorResult::RevealedSubtrie { .. } => {
             unreachable!("RevealedSubtrie must be handled by caller")
@@ -1358,15 +1374,21 @@ fn collapse_branch(
             b.short_key = new_short_key;
             b.state = b.state.to_dirty();
         }
-        ArenaSparseNode::Subtrie(subtrie) => {
-            let ArenaSparseNode::Branch(b) = &mut subtrie.arena[subtrie.root] else {
-                unreachable!("subtrie root must be a Branch during collapse_branch")
-            };
-            let mut new_short_key = prefix;
-            new_short_key.extend(&b.short_key);
-            b.short_key = new_short_key;
-            b.state = b.state.to_dirty();
-        }
+        ArenaSparseNode::Subtrie(subtrie) => match &mut subtrie.arena[subtrie.root] {
+            ArenaSparseNode::Branch(b) => {
+                let mut new_short_key = prefix;
+                new_short_key.extend(&b.short_key);
+                b.short_key = new_short_key;
+                b.state = b.state.to_dirty();
+            }
+            ArenaSparseNode::Leaf { key, state, .. } => {
+                let mut new_key = prefix;
+                new_key.extend(key);
+                *key = new_key;
+                *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+            }
+            _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
+        },
         _ => unreachable!("remaining child must be Leaf, Branch, or Subtrie"),
     }
 
@@ -1548,17 +1570,16 @@ impl ArenaParallelSparseTrie {
         Box::new(subtrie)
     }
 
-    /// Returns `true` if a node at `path` with the given `short_key` should be placed in a
-    /// subtrie rather than the upper arena.
-    const fn should_be_subtrie(path_len: usize, short_key_len: usize) -> bool {
-        path_len >= UPPER_TRIE_MAX_DEPTH || path_len + short_key_len >= UPPER_TRIE_MAX_DEPTH
+    /// Returns `true` if a node at the given path length should be placed in a subtrie rather
+    /// than the upper arena.
+    const fn should_be_subtrie(path_len: usize) -> bool {
+        path_len == UPPER_TRIE_MAX_DEPTH
     }
 
     /// If the child node at `child_idx` (under `parent_idx` at `child_nibble`) should be a
-    /// subtrie based on its depth and short key length, wraps it in
-    /// [`ArenaSparseNode::Subtrie`] and updates the parent's child pointer. Also pops the
-    /// stack entry if the child was pushed by [`reveal_node`] (since subtrie roots are not
-    /// traversed by the upper trie's stack).
+    /// subtrie based on its depth, wraps it in [`ArenaSparseNode::Subtrie`] and updates the
+    /// parent's child pointer. Also pops the stack entry if the child was pushed by
+    /// [`reveal_node`] (since subtrie roots are not traversed by the upper trie's stack).
     fn maybe_wrap_in_subtrie(
         &mut self,
         parent_idx: Index,
@@ -1576,18 +1597,20 @@ impl ArenaParallelSparseTrie {
             return;
         };
 
-        // Only branch nodes can become subtrie roots.
-        let ArenaSparseNode::Branch(child_branch) = &self.upper_arena[child_idx] else {
-            return;
-        };
-        let short_key_len = child_branch.short_key.len();
-
-        if !Self::should_be_subtrie(child_path_len, short_key_len) {
+        // Only branch and leaf nodes can become subtrie roots.
+        if !matches!(
+            self.upper_arena[child_idx],
+            ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. }
+        ) {
             return;
         }
 
-        // If reveal_node pushed this child onto the stack (because it's a branch), pop it —
-        // the upper trie doesn't traverse into subtrie roots.
+        if !Self::should_be_subtrie(child_path_len) {
+            return;
+        }
+
+        // If the child was pushed onto the stack, pop it — the upper trie doesn't traverse
+        // into subtrie roots.
         if stack.last().is_some_and(|e| e.index == child_idx) {
             stack.pop();
         }
@@ -1624,8 +1647,8 @@ impl ArenaParallelSparseTrie {
             parent_path.len() + self.upper_arena[parent_idx].branch_ref().short_key.len() + 1;
 
         let should_remain = match subtrie_root {
-            ArenaSparseNode::Branch(b) => {
-                Self::should_be_subtrie(child_path_len, b.short_key.len())
+            ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
+                Self::should_be_subtrie(child_path_len)
             }
             _ => false,
         };
@@ -2029,9 +2052,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     subtrie.update_leaves(subtrie_updates, subtrie_root_path);
 
-                    for proof in subtrie.required_proofs.drain(..) {
+                    for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                         proof_required_fn(proof.key, proof.min_len);
-                        updates.insert(proof.key, LeafUpdate::Touched);
+                        let (key, _, ref update) = subtrie_updates[target_idx];
+                        updates.insert(key, update.clone());
                     }
 
                     self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
@@ -2064,7 +2088,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             v,
                             find_result,
                         );
-                        if let UpsertLeafResult::NewBranch {
+                        if let UpsertLeafResult::NewChild {
                             parent_idx,
                             child_nibble,
                             parent_path,
