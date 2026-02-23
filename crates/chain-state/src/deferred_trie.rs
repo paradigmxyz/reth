@@ -312,6 +312,11 @@ impl DeferredTrieData {
     /// Given that invariant, circular wait dependencies are impossible.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
+        #[cfg(feature = "rayon")]
+        debug_assert!(
+            rayon::current_thread_index().is_none(),
+            "wait_cloned must not be called from a rayon worker thread"
+        );
         let mut state = self.state.lock();
         match &mut *state {
             // If the deferred trie data is ready, return the cached result.

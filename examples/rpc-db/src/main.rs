@@ -20,7 +20,10 @@ use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     consensus::EthBeaconConsensus,
     network::api::noop::NoopNetwork,
-    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
+    node::{
+        api::{ConsensusEngineHandle, NodeTypesWithDBAdapter},
+        EthEngineTypes, EthEvmConfig, EthereumNode,
+    },
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
@@ -35,6 +38,7 @@ use reth_ethereum::{
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
+use tokio::sync::mpsc::unbounded_channel;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -83,7 +87,12 @@ async fn main() -> eyre::Result<()> {
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
 
-    let mut server = rpc_builder.build(config, eth_api, Default::default());
+    let mut server = rpc_builder.build(
+        config,
+        eth_api,
+        Default::default(),
+        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
+    );
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };

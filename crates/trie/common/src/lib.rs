@@ -37,10 +37,13 @@ mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
-pub use nibbles::{depth_first_cmp, Nibbles, StoredNibbles, StoredNibblesSubKey};
+pub use nibbles::{
+    depth_first_cmp, Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles,
+    StoredNibblesSubKey,
+};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{PackedStorageTrieEntry, StorageTrieEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
