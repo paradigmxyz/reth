@@ -261,6 +261,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
         let mut log_interval_start_block = 0;
 
         let mut parent_header = self.parent_header.clone();
+        tracing::info!("from file client builder:{:?}", parent_header);
 
         async move {
             while let Some(block_res) = stream.next().await {
@@ -279,7 +280,10 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                 };
 
                 let block = SealedBlock::seal_slow(block);
-
+                tracing::info!(
+                    "from file client builder, decoded block:{:?}",
+                    block.sealed_header()
+                );
                 // Validate standalone header
                 self.consensus.validate_header(block.sealed_header())?;
                 if let Some(parent) = &parent_header {

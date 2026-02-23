@@ -284,8 +284,8 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
+    tracing::info!("parent header:{:?},header:{:?} from validation", parent, header);
     if parent.hash() != header.parent_hash() {
-        tracing::info!("parent header:{:?},header:{:?} from validation", parent, header);
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
