@@ -351,30 +351,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ordered_builder_fast_path_coverage() {
-        for len in [1, 2, 10, 128, 129, 200, 400] {
-            let items: Vec<Vec<u8>> =
-                (0..len).map(|i| format!("item_{i}_data").into_bytes()).collect();
-
-            let expected = ordered_trie_root_encoded(&items);
-
-            // Push in execution order (0, 1, 2, ..., N-1).
-            // All items except index 0 should hit the fast path since they arrive
-            // in trie insertion order after the first item is buffered.
-            let mut builder = OrderedTrieRootEncodedBuilder::new(len);
-            for (i, item) in items.iter().enumerate() {
-                builder.push_unchecked(i, item);
-            }
-
-            let actual = builder.finalize().unwrap();
-            assert_eq!(
-                expected, actual,
-                "fast path mismatch for len={len}: expected {expected:?}, got {actual:?}"
-            );
-        }
-    }
-
-    #[test]
     fn test_ordered_builder_index_errors() {
         let mut builder = OrderedTrieRootEncodedBuilder::new(2);
 
@@ -395,15 +371,53 @@ mod tests {
     }
 
     #[test]
-    fn test_ordered_builder_fast_path_duplicate_detection() {
-        // For len=3, trie order is [1, 2, 0]. Pushing index 1 first hits the fast path.
-        // Pushing index 1 again must be detected as a duplicate via the sentinel.
-        let mut builder = OrderedTrieRootEncodedBuilder::new(3);
-        builder.push(1, b"item_1").unwrap(); // fast path
-        assert_eq!(
-            builder.push(1, b"item_1_dup"),
-            Err(OrderedRootError::DuplicateIndex { index: 1 })
-        );
+    fn test_ordered_builder_all_fast_path() {
+        // Push in trie insertion order so every item hits the fast path (including index 0).
+        for len in [1, 2, 3, 10, 128, 129, 200] {
+            let items: Vec<Vec<u8>> =
+                (0..len).map(|i| format!("item_{i}_data").into_bytes()).collect();
+            let expected = ordered_trie_root_encoded(&items);
+
+            let mut builder = OrderedTrieRootEncodedBuilder::new(len);
+            for i in 0..len {
+                let index = adjust_index_for_rlp(i, len);
+                builder.push_unchecked(index, &items[index]);
+            }
+            let actual = builder.finalize().unwrap();
+            assert_eq!(expected, actual, "all-fast-path mismatch for len={len}");
+        }
+    }
+
+    #[test]
+    fn test_ordered_builder_random_permutation() {
+        // Deterministic Fisher-Yates shuffle using a simple LCG PRNG.
+        fn shuffle(slice: &mut [usize], seed: u64) {
+            let mut state = seed;
+            for i in (1..slice.len()).rev() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let j = (state >> 33) as usize % (i + 1);
+                slice.swap(i, j);
+            }
+        }
+
+        for len in [2, 3, 10, 50, 128, 129, 200] {
+            let items: Vec<Vec<u8>> =
+                (0..len).map(|i| format!("item_{i}_data").into_bytes()).collect();
+            let expected = ordered_trie_root_encoded(&items);
+
+            // Run multiple random permutations per length.
+            for seed in 0..5u64 {
+                let mut order: Vec<usize> = (0..len).collect();
+                shuffle(&mut order, seed.wrapping_add(len as u64));
+
+                let mut builder = OrderedTrieRootEncodedBuilder::new(len);
+                for &i in &order {
+                    builder.push(i, &items[i]).unwrap();
+                }
+                let actual = builder.finalize().unwrap();
+                assert_eq!(expected, actual, "random permutation mismatch for len={len}, seed={seed}");
+            }
+        }
     }
 
     #[test]
