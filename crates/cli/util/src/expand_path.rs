@@ -30,6 +30,8 @@ pub fn expand_path(input: &str) -> Result<PathBuf, ExpandPathError> {
     Ok(PathBuf::from(expanded))
 }
 
+/// Expands a leading `~` or `~/` (or `~\` on Windows) to the user's home
+/// directory. A `~` appearing anywhere else in the path is left unchanged.
 fn expand_tilde(input: &str) -> Result<String, ExpandPathError> {
     if input == "~" || input.starts_with("~/") || input.starts_with("~\\") {
         let home = dirs_next::home_dir().ok_or(ExpandPathError::NoHomeDir)?;
@@ -43,6 +45,23 @@ fn expand_tilde(input: &str) -> Result<String, ExpandPathError> {
     }
 }
 
+/// Replaces `$VAR` and `${VAR}` references in `input` with their environment
+/// variable values.
+///
+/// # Syntax
+///
+/// | Pattern  | Behavior                                              |
+/// |----------|-------------------------------------------------------|
+/// | `$VAR`   | Expands a bare variable (name = `[A-Za-z0-9_]+`)     |
+/// | `${VAR}` | Expands a braced variable                             |
+/// | `$`      | A trailing or isolated `$` is kept literally          |
+/// | `${}`    | Empty braces are kept literally                       |
+/// | `${X`    | Unterminated braces are kept literally                |
+///
+/// # Errors
+///
+/// Returns [`ExpandPathError::Var`] if a well-formed variable name references
+/// an unset environment variable.
 fn expand_env_vars(input: &str) -> Result<String, ExpandPathError> {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -53,55 +72,73 @@ fn expand_env_vars(input: &str) -> Result<String, ExpandPathError> {
             continue;
         }
 
-        if chars.peek() == Some(&'{') {
-            // Braced: ${VAR}
-            chars.next();
-            let mut name = String::new();
-            let mut closed = false;
-            while let Some(&c) = chars.peek() {
-                if c == '}' {
-                    chars.next();
-                    closed = true;
-                    break;
-                }
-                name.push(c);
-                chars.next();
+        match chars.peek() {
+            Some(&'{') => expand_braced_var(&mut chars, &mut result)?,
+            Some(&c) if c.is_ascii_alphanumeric() || c == '_' => {
+                expand_bare_var(&mut chars, &mut result)?;
             }
-
-            if !closed || name.is_empty() {
-                // Unterminated `${...` or empty `${}` — keep literal
-                result.push_str("${");
-                result.push_str(&name);
-                if closed {
-                    result.push('}');
-                }
-            } else {
-                let value = std::env::var(&name)
-                    .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
-                result.push_str(&value);
-            }
-        } else {
-            // Bare: $VAR
-            let mut name = String::new();
-            while let Some(&c) = chars.peek() {
-                if !c.is_ascii_alphanumeric() && c != '_' {
-                    break;
-                }
-                name.push(c);
-                chars.next();
-            }
-
-            if name.is_empty() {
-                result.push('$');
-            } else {
-                let value = std::env::var(&name)
-                    .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
-                result.push_str(&value);
-            }
+            _ => result.push('$'), // trailing or isolated `$`
         }
     }
 
     Ok(result)
+}
+
+/// Parses and expands `${VAR}`. Assumes the leading `$` has already been
+/// consumed and `chars` is pointing at `{`.
+fn expand_braced_var(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    result: &mut String,
+) -> Result<(), ExpandPathError> {
+    chars.next(); // consume '{'
+
+    let mut name = String::new();
+    let mut closed = false;
+    for c in chars.by_ref() {
+        if c == '}' {
+            closed = true;
+            break;
+        }
+        name.push(c);
+    }
+
+    if !closed || name.is_empty() {
+        // Malformed — keep as literal text
+        result.push_str("${");
+        result.push_str(&name);
+        if closed {
+            result.push('}');
+        }
+        return Ok(());
+    }
+
+    result.push_str(&lookup_var(&name)?);
+    Ok(())
+}
+
+/// Parses and expands `$VAR`. Assumes the leading `$` has already been consumed
+/// and `chars` is pointing at the first character of the variable name.
+fn expand_bare_var(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    result: &mut String,
+) -> Result<(), ExpandPathError> {
+    let mut name = String::new();
+    while let Some(&c) = chars.peek() {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            break;
+        }
+        name.push(c);
+        chars.next();
+    }
+
+    result.push_str(&lookup_var(&name)?);
+    Ok(())
+}
+
+/// Looks up an environment variable by name, returning an [`ExpandPathError`]
+/// on failure.
+fn lookup_var(name: &str) -> Result<String, ExpandPathError> {
+    std::env::var(name).map_err(|e| ExpandPathError::Var { var_name: name.to_owned(), source: e })
 }
 
 #[cfg(test)]
