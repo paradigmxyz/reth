@@ -2,7 +2,7 @@ use crate::{
     provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
     SparseTrieUpdates,
 };
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
@@ -357,8 +357,9 @@ pub enum SparseNode {
         state: SparseNodeState,
         /// The mask of the children that are blinded.
         blinded_mask: TrieMask,
-        /// The hashes of the children that are blinded.
-        blinded_hashes: Box<[B256; 16]>,
+        /// The RLP-encoded children, indexed by nibble. Blinded children (hashes) are identified
+        /// by `blinded_mask`.
+        blinded_hashes: Box<Vec<RlpNode>>,
     },
 }
 
@@ -367,13 +368,18 @@ impl SparseNode {
     #[cfg(test)]
     pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
         let mut blinded_mask = TrieMask::default();
-        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+        let mut blinded_hashes = vec![RlpNode::default(); 16];
 
         for (nibble, hash) in blinded_children {
             blinded_mask.set_bit(*nibble);
-            blinded_hashes[*nibble as usize] = *hash;
+            blinded_hashes[*nibble as usize] = RlpNode::word_rlp(hash);
         }
-        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded_mask, blinded_hashes }
+        Self::Branch {
+            state_mask,
+            state: SparseNodeState::Dirty,
+            blinded_mask,
+            blinded_hashes: Box::new(blinded_hashes),
+        }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
@@ -386,7 +392,7 @@ impl SparseNode {
             state_mask,
             state: SparseNodeState::Dirty,
             blinded_mask: TrieMask::default(),
-            blinded_hashes: Box::new([B256::ZERO; 16]),
+            blinded_hashes: Box::new(vec![RlpNode::default(); 16]),
         }
     }
 
