@@ -333,9 +333,9 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
-        consensus: ConsensusEngineHandle<Payload>,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -344,13 +344,13 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
         Payload: PayloadTypes,
-        RethEngineApi<Payload>: RethEngineApiServer,
+        RethEngineApi<Payload>: RethEngineApiServer<Payload::ExecutionData>,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
         let mut registry = self.into_registry(config, eth, engine_events);
         let modules = registry.create_transport_rpc_modules(module_config);
-        let auth_module = registry.create_auth_module(engine, consensus);
+        let auth_module = registry.create_auth_module(engine, beacon_engine_handle);
 
         (modules, auth_module, registry)
     }
@@ -887,16 +887,16 @@ where
     pub fn create_auth_module<Payload>(
         &self,
         engine_api: impl IntoEngineApiRpcModule,
-        consensus: ConsensusEngineHandle<Payload>,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> AuthRpcModule
     where
         Payload: PayloadTypes,
-        RethEngineApi<Payload>: RethEngineApiServer,
+        RethEngineApi<Payload>: RethEngineApiServer<Payload::ExecutionData>,
     {
         let mut module = engine_api.into_rpc_module();
 
         // merge reth_newPayload endpoint
-        let reth_engine_api = RethEngineApi::new(consensus);
+        let reth_engine_api = RethEngineApi::new(beacon_engine_handle);
         module
             .merge(RethEngineApiServer::into_rpc(reth_engine_api).remove_context())
             .expect("No conflicting methods");

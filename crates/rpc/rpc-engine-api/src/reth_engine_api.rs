@@ -1,11 +1,10 @@
-use crate::{metrics::EngineApiMetrics, EngineApiError};
+use crate::EngineApiError;
 use alloy_rpc_types_engine::ExecutionData;
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_primitives::PayloadTypes;
 use reth_rpc_api::{RethEngineApiServer, RethPayloadStatus};
-use std::time::Instant;
 use tracing::trace;
 
 /// Standalone implementation of the `reth_` engine API namespace.
@@ -14,8 +13,7 @@ use tracing::trace;
 /// waits for persistence, execution cache, and sparse trie locks before processing,
 /// and returns timing breakdowns with server-measured execution latency.
 pub struct RethEngineApi<Payload: PayloadTypes> {
-    consensus: ConsensusEngineHandle<Payload>,
-    metrics: EngineApiMetrics,
+    beacon_engine_handle: ConsensusEngineHandle<Payload>,
 }
 
 impl<Payload: PayloadTypes> std::fmt::Debug for RethEngineApi<Payload> {
@@ -26,22 +24,23 @@ impl<Payload: PayloadTypes> std::fmt::Debug for RethEngineApi<Payload> {
 
 impl<Payload: PayloadTypes> RethEngineApi<Payload> {
     /// Creates a new [`RethEngineApi`].
-    pub fn new(consensus: ConsensusEngineHandle<Payload>) -> Self {
-        Self { consensus, metrics: EngineApiMetrics::default() }
+    pub fn new(beacon_engine_handle: ConsensusEngineHandle<Payload>) -> Self {
+        Self { beacon_engine_handle }
     }
 }
 
 #[async_trait]
-impl<Payload> RethEngineApiServer for RethEngineApi<Payload>
+impl<Payload> RethEngineApiServer<Payload::ExecutionData> for RethEngineApi<Payload>
 where
     Payload: PayloadTypes<ExecutionData = ExecutionData>,
 {
     async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayload");
-        let start = Instant::now();
-        let (status, timings) =
-            self.consensus.reth_new_payload(payload).await.map_err(EngineApiError::from)?;
-        self.metrics.latency.new_payload_v1.record(start.elapsed());
+        let (status, timings) = self
+            .beacon_engine_handle
+            .reth_new_payload(payload)
+            .await
+            .map_err(EngineApiError::from)?;
         Ok(RethPayloadStatus {
             status,
             latency_us: timings.latency.as_micros() as u64,
