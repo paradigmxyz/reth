@@ -159,9 +159,13 @@ impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Pro
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from).map(
+            |hm| {
+                let mut v: Vec<_> = hm.into_values().collect();
+                v.sort_unstable();
+                v
+            },
+        )
     }
 }
 

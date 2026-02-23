@@ -4,9 +4,8 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    Address, Bytes, B256, U256,
+    Address, B256, U256,
 };
-use alloy_rlp::EMPTY_STRING_CODE;
 use reth_db::{cursor::DbCursorRW, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_primitives_traits::{Account, StorageEntry};
@@ -26,16 +25,14 @@ fn includes_empty_node_preimage() {
     let hashed_address = keccak256(address);
     let hashed_slot = B256::random();
 
-    // witness includes empty state trie root node
-    assert_eq!(
-        TrieWitness::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::default(),
-            })
-            .unwrap(),
-        HashMap::from_iter([(EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))])
-    );
+    // witness for an empty trie should not include the empty root node
+    assert!(TrieWitness::from_tx(provider.tx_ref())
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::default(),
+        })
+        .unwrap()
+        .is_empty());
 
     // Insert account into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
@@ -62,8 +59,8 @@ fn includes_empty_node_preimage() {
     for node in multiproof.account_subtree.values() {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
-    // witness includes empty state trie root node
-    assert_eq!(witness.get(&EMPTY_ROOT_HASH), Some(&Bytes::from([EMPTY_STRING_CODE])));
+    // empty trie root nodes should be filtered out
+    assert!(!witness.contains_key(&EMPTY_ROOT_HASH));
 }
 
 #[test]

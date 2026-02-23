@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::database::State;
 
@@ -32,19 +32,22 @@ pub struct ExecutionWitnessRecord {
 impl ExecutionWitnessRecord {
     /// Records the state after execution.
     pub fn record_executed_state<DB>(&mut self, statedb: &State<DB>) {
-        self.codes = statedb
-            .cache
-            .contracts
-            .values()
-            .map(|code| code.original_bytes())
-            .chain(
-                // cache state does not have all the contracts, especially when
-                // a contract is created within the block
-                // the contract only exists in bundle state, therefore we need
-                // to include them as well
-                statedb.bundle_state.contracts.values().map(|code| code.original_bytes()),
-            )
-            .collect();
+        // Witness bytecodes are the bytecodes that were actually accessed
+        // during execution. `cache.contracts` tracks bytecode lookups
+        // performed by revm. Note `bundle_state.contracts` is not considered
+        // since it contains also bytecodes created during execution which are
+        // not required in the witness.
+        let mut accessed_codes = B256Map::default();
+        for code in statedb.cache.contracts.values() {
+            let code = code.original_bytes();
+            if code.is_empty() {
+                continue;
+            }
+
+            accessed_codes.entry(keccak256(&code)).or_insert(code);
+        }
+        self.codes = accessed_codes.into_values().collect();
+        self.codes.sort_unstable();
 
         for (address, account) in &statedb.cache.accounts {
             let hashed_address = keccak256(address);
