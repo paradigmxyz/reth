@@ -530,10 +530,19 @@ where
 
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
+            let block_validation_metrics = self.metrics.block_validation.clone();
             let block = block.clone();
-            self.payload_processor
-                .executor()
-                .spawn_blocking_named("payload-tx-root", move || block.body().calculate_tx_root())
+            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
+                let _span =
+                    debug_span!(target: "engine::tree::payload_validator", "payload_tx_root")
+                        .entered();
+                let start = Instant::now();
+                let tx_root = block.body().calculate_tx_root();
+                block_validation_metrics
+                    .tx_root_task_duration
+                    .record(start.elapsed().as_secs_f64());
+                tx_root
+            })
         });
         let block = block.with_senders(senders);
 
@@ -547,8 +556,18 @@ where
                 );
             })
             .ok();
-        let transaction_root =
-            transaction_root.map(|handle| handle.try_into_inner().expect("sole handle"));
+        let transaction_root = transaction_root.map(|handle| {
+            let _span =
+                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
+                    .entered();
+            let start = Instant::now();
+            let tx_root = handle.try_into_inner().expect("sole handle");
+            self.metrics
+                .block_validation
+                .tx_root_wait_duration
+                .record(start.elapsed().as_secs_f64());
+            tx_root
+        });
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(

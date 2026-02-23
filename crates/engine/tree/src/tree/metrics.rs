@@ -524,6 +524,10 @@ pub struct BlockValidationMetrics {
     pub spawn_payload_processor: Histogram,
     /// Post-execution validation duration
     pub post_execution_validation_duration: Histogram,
+    /// Time spent computing transactions root on the background task.
+    pub tx_root_task_duration: Histogram,
+    /// Time spent waiting for the transactions root task result.
+    pub tx_root_wait_duration: Histogram,
     /// Total duration of the new payload call
     pub total_duration: Histogram,
     /// Size of `HashedPostStateSorted` (`total_len`)
