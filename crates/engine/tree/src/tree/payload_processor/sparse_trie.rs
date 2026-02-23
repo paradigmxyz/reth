@@ -489,7 +489,7 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
+        // Process all storage updates, skipping tries with no pending updates.
         let span = debug_span!("process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
             if updates.is_empty() {
