@@ -39,7 +39,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    OtterscanApi, RPCApi, RethApi, RethModuleConfig, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -440,6 +440,9 @@ impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
 pub struct RpcModuleConfig {
     /// `eth` namespace settings
     eth: EthConfig,
+    /// `reth` namespace settings
+    #[serde(default)]
+    reth: RethModuleConfig,
 }
 
 // === impl RpcModuleConfig ===
@@ -451,8 +454,8 @@ impl RpcModuleConfig {
     }
 
     /// Returns a new RPC module config given the eth namespace config
-    pub const fn new(eth: EthConfig) -> Self {
-        Self { eth }
+    pub fn new(eth: EthConfig) -> Self {
+        Self { eth, reth: RethModuleConfig::default() }
     }
 
     /// Get a reference to the eth namespace config
@@ -464,12 +467,18 @@ impl RpcModuleConfig {
     pub const fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
     }
+
+    /// Get a reference to the reth namespace config.
+    pub const fn reth(&self) -> &RethModuleConfig {
+        &self.reth
+    }
 }
 
 /// Configures [`RpcModuleConfig`]
 #[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
+    reth: Option<RethModuleConfig>,
 }
 
 // === impl RpcModuleConfigBuilder ===
@@ -481,10 +490,16 @@ impl RpcModuleConfigBuilder {
         self
     }
 
+    /// Configures custom `reth` namespace settings.
+    pub const fn reth(mut self, reth: RethModuleConfig) -> Self {
+        self.reth = Some(reth);
+        self
+    }
+
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
-        let Self { eth } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default() }
+        let Self { eth, reth } = self;
+        RpcModuleConfig { eth: eth.unwrap_or_default(), reth: reth.unwrap_or_default() }
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -526,8 +541,8 @@ pub struct RpcRegistryInner<
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
-    /// eth config settings
-    eth_config: EthConfig,
+    /// Configuration for the RPC modules.
+    config: RpcModuleConfig,
     /// Notification channel for engine API events
     engine_events:
         EventSender<ConsensusEngineEvent<<EthApi::RpcConvert as RpcConvert>::Primitives>>,
@@ -585,7 +600,7 @@ where
             consensus,
             modules: Default::default(),
             blocking_pool_guard,
-            eth_config: config.eth,
+            config,
             evm_config,
             engine_events,
             beacon_engine_handle,
@@ -830,7 +845,7 @@ where
         TraceApi::new(
             self.eth_api().clone(),
             self.blocking_pool_guard.clone(),
-            self.eth_config.clone(),
+            self.config.eth.clone(),
         )
     }
 
@@ -885,6 +900,7 @@ where
             self.blocking_pool_guard.clone(),
             self.executor.clone(),
             self.beacon_engine_handle.clone(),
+            self.config.reth.clone(),
         )
     }
 }
@@ -1019,7 +1035,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            self.eth_config.clone(),
+                            self.config.eth.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1045,6 +1061,7 @@ where
                             self.blocking_pool_guard.clone(),
                             self.executor.clone(),
                             self.beacon_engine_handle.clone(),
+                            self.config.reth.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1089,7 +1106,7 @@ where
             eth: self.eth.clone(),
             blocking_pool_guard: self.blocking_pool_guard.clone(),
             modules: self.modules.clone(),
-            eth_config: self.eth_config.clone(),
+            config: self.config.clone(),
             engine_events: self.engine_events.clone(),
             beacon_engine_handle: self.beacon_engine_handle.clone(),
         }
@@ -2435,6 +2452,17 @@ mod tests {
             config,
             RpcModuleSelection::Selection([RethRpcModule::Eth, RethRpcModule::Admin].into())
         );
+    }
+
+    #[test]
+    fn test_rpc_module_config_reth_new_payload_flag() {
+        let config = RpcModuleConfig::builder()
+            .reth(RethModuleConfig::default().with_new_payload(true))
+            .build();
+        assert!(config.reth().new_payload());
+
+        let config = RpcModuleConfig::new(Default::default());
+        assert!(!config.reth().new_payload());
     }
 
     #[test]

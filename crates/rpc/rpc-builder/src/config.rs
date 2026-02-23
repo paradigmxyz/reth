@@ -1,6 +1,6 @@
 use jsonrpsee::server::ServerConfigBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
-use reth_rpc::ValidationApiConfig;
+use reth_rpc::{RethModuleConfig, ValidationApiConfig};
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
@@ -140,8 +140,12 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
-        let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config()));
+        let mut config = TransportRpcModuleConfig::default().with_config(
+            RpcModuleConfig::builder()
+                .eth(self.eth_config())
+                .reth(RethModuleConfig::default().with_new_payload(self.rpc_reth_new_payload))
+                .build(),
+        );
 
         if self.http {
             config = config.with_http(
@@ -291,6 +295,7 @@ mod tests {
             "reth",
             "--http.api",
             "eth,admin,debug",
+            "--rpc.reth-new-payload",
             "--http",
             "--ws",
         ])
@@ -302,6 +307,7 @@ mod tests {
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
+        assert!(config.config().unwrap().reth().new_payload());
     }
 
     #[test]

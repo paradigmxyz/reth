@@ -22,8 +22,29 @@ use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
+
+/// Configuration for the `reth` namespace.
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RethModuleConfig {
+    /// Whether the `reth_newPayload` method should be exposed.
+    #[serde(default)]
+    new_payload: bool,
+}
+
+impl RethModuleConfig {
+    /// Returns whether the `reth_newPayload` method is enabled.
+    pub const fn new_payload(&self) -> bool {
+        self.new_payload
+    }
+
+    /// Sets whether the `reth_newPayload` method should be enabled.
+    pub const fn with_new_payload(mut self, new_payload: bool) -> Self {
+        self.new_payload = new_payload;
+        self
+    }
+}
 
 /// `reth` API implementation.
 ///
@@ -63,6 +84,7 @@ where
         blocking_task_guard: BlockingTaskGuard,
         task_spawner: Runtime,
         beacon_engine_handle: ConsensusEngineHandle<Payload>,
+        config: RethModuleConfig,
     ) -> Self {
         let inner = Arc::new(RethApiInner {
             provider,
@@ -70,6 +92,7 @@ where
             blocking_task_guard,
             task_spawner,
             beacon_engine_handle,
+            config,
         });
         Self { inner }
     }
@@ -215,6 +238,14 @@ where
         &self,
         payload: Payload::ExecutionData,
     ) -> Result<RethPayloadStatus, jsonrpsee::types::ErrorObject<'static>> {
+        if !self.inner.config.new_payload {
+            return Err(jsonrpsee::types::error::ErrorObject::owned(
+                jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                "reth_newPayload is not enabled",
+                None::<()>,
+            ))
+        }
+
         let (status, timings) =
             self.inner.beacon_engine_handle.reth_new_payload(payload).await.map_err(|e| {
                 jsonrpsee::types::error::ErrorObject::owned(
@@ -431,4 +462,6 @@ struct RethApiInner<Provider, EvmConfig, Payload: PayloadTypes> {
     task_spawner: Runtime,
     /// Optional beacon engine handle for `reth_newPayload`.
     beacon_engine_handle: ConsensusEngineHandle<Payload>,
+    /// Configuration for the `reth` namespace.
+    config: RethModuleConfig,
 }
