@@ -47,6 +47,59 @@ pub struct DeferredStageProgress {
     pub checkpoint: StageCheckpoint,
 }
 
+/// Deferred indexer lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeferredIndexerState {
+    CaughtUp,
+    TransactionLookup,
+    StorageHistory,
+    AccountHistory,
+}
+
+impl DeferredIndexerState {
+    /// Initial state for a new deferred indexer.
+    const fn new() -> Self {
+        Self::TransactionLookup
+    }
+
+    /// Returns whether the deferred indexer is caught up to tip.
+    const fn is_caught_up(self) -> bool {
+        matches!(self, Self::CaughtUp)
+    }
+
+    /// Returns the current catch-up stage, if any.
+    const fn catching_up_stage(self) -> Option<StageId> {
+        match self {
+            Self::CaughtUp => None,
+            Self::TransactionLookup => Some(StageId::TransactionLookup),
+            Self::StorageHistory => Some(StageId::IndexStorageHistory),
+            Self::AccountHistory => Some(StageId::IndexAccountHistory),
+        }
+    }
+
+    /// Advances catch-up round-robin stage.
+    const fn advance_catch_up_stage(self) -> Self {
+        match self {
+            Self::CaughtUp => Self::CaughtUp,
+            Self::TransactionLookup => Self::StorageHistory,
+            Self::StorageHistory => Self::AccountHistory,
+            Self::AccountHistory => Self::TransactionLookup,
+        }
+    }
+
+    /// Transitions to the caught-up state.
+    const fn mark_caught_up(self) -> Self {
+        let _ = self;
+        Self::CaughtUp
+    }
+
+    /// Transitions to catch-up mode from the first deferred stage.
+    const fn mark_needs_catch_up(self) -> Self {
+        let _ = self;
+        Self::TransactionLookup
+    }
+}
+
 /// Deferred history indexer that runs pipeline stages inside the persistence service.
 ///
 /// Processes history indexing in small batches, round-robining between the three deferred
@@ -61,9 +114,8 @@ pub struct DeferredHistoryIndexer {
     tx_lookup_batch_size: u64,
     index_storage_batch_size: u64,
     index_account_batch_size: u64,
-    caught_up: bool,
-    /// Round-robin index: 0 = `tx_lookup`, 1 = `index_storage`, 2 = `index_account`.
-    next_stage: usize,
+    /// Deferred indexing lifecycle and scheduling state.
+    state: DeferredIndexerState,
 }
 
 impl std::fmt::Debug for DeferredHistoryIndexer {
@@ -72,8 +124,7 @@ impl std::fmt::Debug for DeferredHistoryIndexer {
             .field("tx_lookup_batch_size", &self.tx_lookup_batch_size)
             .field("index_storage_batch_size", &self.index_storage_batch_size)
             .field("index_account_batch_size", &self.index_account_batch_size)
-            .field("caught_up", &self.caught_up)
-            .field("next_stage", &self.next_stage)
+            .field("state", &self.state)
             .finish()
     }
 }
@@ -108,41 +159,46 @@ impl DeferredHistoryIndexer {
             tx_lookup_batch_size: TX_LOOKUP_BATCH_SIZE,
             index_storage_batch_size: INDEX_STORAGE_HISTORY_BATCH_SIZE,
             index_account_batch_size: INDEX_ACCOUNT_HISTORY_BATCH_SIZE,
-            caught_up: false,
-            next_stage: 0,
+            state: DeferredIndexerState::new(),
         }
     }
 
     /// Returns the per-stage batch size.
-    fn batch_size_for_stage(&self, stage_idx: usize) -> u64 {
-        match stage_idx {
-            0 => self.tx_lookup_batch_size,
-            1 => self.index_storage_batch_size,
-            2 => self.index_account_batch_size,
+    fn batch_size_for_stage(&self, stage_id: StageId) -> u64 {
+        match stage_id {
+            StageId::TransactionLookup => self.tx_lookup_batch_size,
+            StageId::IndexStorageHistory => self.index_storage_batch_size,
+            StageId::IndexAccountHistory => self.index_account_batch_size,
             _ => unreachable!(),
         }
     }
 
-    /// Returns the prune mode/segment pair for the deferred stage index.
+    /// Returns the prune mode/segment pair for the deferred stage.
     fn prune_mode_and_segment_for_stage(
         &self,
-        stage_idx: usize,
+        stage_id: StageId,
     ) -> (Option<PruneMode>, PruneSegment) {
-        match stage_idx {
-            0 => (self.tx_lookup_prune_mode, PruneSegment::TransactionLookup),
-            1 => (self.index_storage_prune_mode, PruneSegment::StorageHistory),
-            2 => (self.index_account_prune_mode, PruneSegment::AccountHistory),
+        match stage_id {
+            StageId::TransactionLookup => {
+                (self.tx_lookup_prune_mode, PruneSegment::TransactionLookup)
+            }
+            StageId::IndexStorageHistory => {
+                (self.index_storage_prune_mode, PruneSegment::StorageHistory)
+            }
+            StageId::IndexAccountHistory => {
+                (self.index_account_prune_mode, PruneSegment::AccountHistory)
+            }
             _ => unreachable!(),
         }
     }
 
-    /// Computes the prune floor at the provided tip for the deferred stage index.
+    /// Computes the prune floor at the provided tip for the deferred stage.
     fn prune_floor_for_stage(
         &self,
-        stage_idx: usize,
+        stage_id: StageId,
         tip: u64,
     ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
-        let (prune_mode, segment) = self.prune_mode_and_segment_for_stage(stage_idx);
+        let (prune_mode, segment) = self.prune_mode_and_segment_for_stage(stage_id);
         let Some(prune_mode) = prune_mode else {
             return Ok(None);
         };
@@ -158,7 +214,7 @@ impl DeferredHistoryIndexer {
     fn run_stage_batch<Provider>(
         &mut self,
         provider_rw: &Provider,
-        stage_idx: usize,
+        stage_id: StageId,
         tip: u64,
     ) -> Result<Option<DeferredStageProgress>, Box<dyn std::error::Error + Send + Sync>>
     where
@@ -167,22 +223,15 @@ impl DeferredHistoryIndexer {
         IndexStorageHistoryStage: Stage<Provider>,
         IndexAccountHistoryStage: Stage<Provider>,
     {
-        let stage_id = match stage_idx {
-            0 => StageId::TransactionLookup,
-            1 => StageId::IndexStorageHistory,
-            2 => StageId::IndexAccountHistory,
-            _ => unreachable!(),
-        };
-
         let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
 
         if checkpoint.block_number >= tip {
             return Ok(None);
         }
 
-        let batch_size = self.batch_size_for_stage(stage_idx);
+        let batch_size = self.batch_size_for_stage(stage_id);
         let batch_target = std::cmp::min(tip, checkpoint.block_number.saturating_add(batch_size));
-        let prune_floor = self.prune_floor_for_stage(stage_idx, tip)?;
+        let prune_floor = self.prune_floor_for_stage(stage_id, tip)?;
         let effective_target = prune_floor.map_or(batch_target, |floor| batch_target.max(floor));
 
         if effective_target > batch_target && checkpoint.block_number < effective_target {
@@ -209,10 +258,10 @@ impl DeferredHistoryIndexer {
             "Running deferred indexing batch"
         );
 
-        let result = match stage_idx {
-            0 => self.tx_lookup.execute(provider_rw, input),
-            1 => self.index_storage.execute(provider_rw, input),
-            2 => self.index_account.execute(provider_rw, input),
+        let result = match stage_id {
+            StageId::TransactionLookup => self.tx_lookup.execute(provider_rw, input),
+            StageId::IndexStorageHistory => self.index_storage.execute(provider_rw, input),
+            StageId::IndexAccountHistory => self.index_account.execute(provider_rw, input),
             _ => unreachable!(),
         };
 
@@ -280,30 +329,38 @@ impl DeferredHistoryIndexer {
             return Ok(None);
         }
 
+        if self.state.is_caught_up() {
+            if self.check_caught_up(provider_rw, tip)? {
+                return Ok(None);
+            }
+            self.state = self.state.mark_needs_catch_up();
+        }
+
         // Run one batch for the current stage.
-        let current = self.next_stage;
-        let progress = self.run_stage_batch(provider_rw, current, tip)?;
+        let current_stage =
+            self.state.catching_up_stage().expect("non-caught-up state must have a catch-up stage");
+        let progress = self.run_stage_batch(provider_rw, current_stage, tip)?;
 
         // Advance to next stage (round-robin).
-        self.next_stage = (self.next_stage + 1) % 3;
+        self.state = self.state.advance_catch_up_stage();
 
         // Check if all stages are caught up.
-        if self.check_caught_up(provider_rw, tip)? && !self.caught_up {
+        if self.check_caught_up(provider_rw, tip)? && !self.state.is_caught_up() {
             info!(target: "engine::persistence::deferred_indexer", "Deferred history indexing caught up to tip");
-            self.caught_up = true;
+            self.state = self.state.mark_caught_up();
         }
 
         Ok(progress)
     }
 
     /// Returns whether deferred indexing has caught up to the tip.
-    pub const fn is_caught_up(&self) -> bool {
-        self.caught_up
+    pub fn is_caught_up(&self) -> bool {
+        self.state.is_caught_up()
     }
 
     /// Marks the indexer as needing catch-up after reorg-related block removal.
-    pub const fn on_reorg(&mut self, _new_tip_num: u64) {
-        self.caught_up = false;
+    pub fn on_reorg(&mut self, _new_tip_num: u64) {
+        self.state = self.state.mark_needs_catch_up();
     }
 }
 
@@ -315,10 +372,11 @@ mod tests {
     fn reorg_marks_indexer_as_not_caught_up() {
         let mut indexer =
             DeferredHistoryIndexer::new(&StageConfig::default(), &PruneModes::default());
-        indexer.caught_up = true;
+        indexer.state = DeferredIndexerState::CaughtUp;
 
         indexer.on_reorg(123);
 
         assert!(!indexer.is_caught_up());
+        assert_eq!(indexer.state, DeferredIndexerState::TransactionLookup);
     }
 }
