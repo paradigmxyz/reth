@@ -1,4 +1,5 @@
 ---
+reth-cli-util: patch
 reth-node-core: patch
 reth-cli: patch
 reth-bench-compare: patch

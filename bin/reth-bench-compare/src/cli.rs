@@ -291,8 +291,10 @@ impl Args {
         match &self.jwt_secret {
             Some(path) => {
                 let jwt_secret_str = path.to_string_lossy();
-                reth_node_core::utils::parse_path(&jwt_secret_str)
-                    .unwrap_or_else(|_| PathBuf::from(path))
+                reth_node_core::utils::parse_path(&jwt_secret_str).unwrap_or_else(|err| {
+                    warn!(target: "reth::cli", %err, path = %jwt_secret_str, "failed to expand JWT secret path, using as-is");
+                    PathBuf::from(path)
+                })
             }
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
@@ -310,8 +312,10 @@ impl Args {
 
     /// Get the expanded output directory path
     pub(crate) fn output_dir_path(&self) -> PathBuf {
-        reth_node_core::utils::parse_path(&self.output_dir)
-            .unwrap_or_else(|_| PathBuf::from(&self.output_dir))
+        reth_node_core::utils::parse_path(&self.output_dir).unwrap_or_else(|err| {
+            warn!(target: "reth::cli", %err, path = %self.output_dir, "failed to expand output dir path, using as-is");
+            PathBuf::from(&self.output_dir)
+        })
     }
 
     /// Get the effective warmup blocks value - either specified or defaults to blocks

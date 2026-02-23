@@ -53,34 +53,51 @@ fn expand_env_vars(input: &str) -> Result<String, ExpandPathError> {
             continue;
         }
 
-        let braced = chars.peek() == Some(&'{');
-        if braced {
+        if chars.peek() == Some(&'{') {
+            // Braced: ${VAR}
             chars.next();
-        }
-
-        let mut name = String::new();
-        while let Some(&c) = chars.peek() {
-            if braced {
+            let mut name = String::new();
+            let mut closed = false;
+            while let Some(&c) = chars.peek() {
                 if c == '}' {
                     chars.next();
+                    closed = true;
                     break;
                 }
-            } else if !c.is_ascii_alphanumeric() && c != '_' {
-                break;
+                name.push(c);
+                chars.next();
             }
-            name.push(c);
-            chars.next();
-        }
 
-        if name.is_empty() {
-            result.push('$');
-            if braced {
-                result.push('{');
+            if !closed || name.is_empty() {
+                // Unterminated `${...` or empty `${}` — keep literal
+                result.push_str("${");
+                result.push_str(&name);
+                if closed {
+                    result.push('}');
+                }
+            } else {
+                let value = std::env::var(&name)
+                    .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
+                result.push_str(&value);
             }
         } else {
-            let value = std::env::var(&name)
-                .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
-            result.push_str(&value);
+            // Bare: $VAR
+            let mut name = String::new();
+            while let Some(&c) = chars.peek() {
+                if !c.is_ascii_alphanumeric() && c != '_' {
+                    break;
+                }
+                name.push(c);
+                chars.next();
+            }
+
+            if name.is_empty() {
+                result.push('$');
+            } else {
+                let value = std::env::var(&name)
+                    .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
+                result.push_str(&value);
+            }
         }
     }
 
@@ -142,16 +159,15 @@ mod tests {
     }
 
     #[test]
-    fn test_unclosed_brace() {
-        // unclosed ${ treats the rest as a variable name, which errors if unset
-        let result = expand_path("${UNCLOSED");
-        assert!(result.is_err());
+    fn test_unclosed_brace_is_literal() {
+        // unterminated `${...` is kept literally
+        assert_eq!(expand_path("${UNCLOSED").unwrap(), PathBuf::from("${UNCLOSED"));
     }
 
     #[test]
-    fn test_empty_braces() {
-        // empty ${} keeps ${ literally (} is consumed as the closing brace)
-        assert_eq!(expand_path("${}foo").unwrap(), PathBuf::from("${foo"));
+    fn test_empty_braces_literal() {
+        // empty `${}` is kept literally
+        assert_eq!(expand_path("${}foo").unwrap(), PathBuf::from("${}foo"));
     }
 
     #[test]
