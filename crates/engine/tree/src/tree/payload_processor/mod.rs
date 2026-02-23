@@ -55,6 +55,7 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
+pub mod post_exec;
 mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
@@ -175,6 +176,15 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
+    }
+
+    /// Creates a new block-scoped post-execution handle.
+    pub fn post_exec_handle(
+        &self,
+        receipts_len: usize,
+        withdrawals: Option<Vec<Withdrawal>>,
+    ) -> post_exec::PostExecHandle<N::Receipt> {
+        post_exec::PostExecHandle::new(&self.executor, receipts_len, withdrawals)
     }
 }
 

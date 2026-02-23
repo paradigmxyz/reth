@@ -18,7 +18,7 @@ use alloy_primitives::B256;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crate::tree::payload_processor::post_exec::PostExecHandle;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -54,8 +54,8 @@ use std::{
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
-/// Handle to a [`HashedPostState`] computed on a background thread.
-type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
+/// Shared handle to a computed [`HashedPostState`].
+type LazyHashedPostState = Arc<HashedPostState>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -494,7 +494,7 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
-        let (output, senders, receipt_root_rx) =
+        let (output, senders, mut post_exec) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -512,33 +512,29 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
+        // Queue hashed post state computation so it runs after receipt-root resolution inside the
+        // post-exec worker.
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_validator",
-                    "hashed_post_state",
-                )
+        post_exec.spawn_hashed_post_state(move || {
+            let _span = debug_span!(target: "engine::tree::payload_validator", "hashed_post_state")
                 .entered();
-                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
-            });
+            hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+        });
 
         let block = convert_to_block(input)?.with_senders(senders);
 
-        // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = receipt_root_rx
-            .blocking_recv()
-            .inspect_err(|_| {
-                tracing::error!(
-                    target: "engine::tree::payload_validator",
-                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                );
-            })
-            .ok();
+        let receipt_root_bloom = post_exec.receipt_root_bloom();
+        let withdrawals_root = post_exec.withdrawals_root();
+        let Some(hashed_state) = post_exec.hashed_post_state() else {
+            return Err(InsertBlockError::new(
+                block.into_sealed_block(),
+                InsertBlockErrorKind::Other(Box::new(std::io::Error::other(
+                    "post-exec worker did not produce hashed post state",
+                ))),
+            )
+            .into())
+        };
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -547,6 +543,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
+                withdrawals_root,
                 hashed_state,
             ),
             block
@@ -767,11 +764,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, PostExecHandle<N::Receipt>),
         InsertBlockErrorKind,
     >
     where
@@ -819,15 +812,9 @@ where
             });
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let withdrawals = input.withdrawals().map(|w| w.to_vec());
+        let mut post_exec = self.payload_processor.post_exec_handle(receipts_len, withdrawals);
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
@@ -839,9 +826,9 @@ where
             executor,
             transaction_count,
             handle.iter_transactions(),
-            &receipt_tx,
+            &post_exec,
         )?;
-        drop(receipt_tx);
+        post_exec.finish_receipts();
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -861,10 +848,10 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
 
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
-        Ok((output, senders, result_rx))
+        Ok((output, senders, post_exec))
     }
 
-    /// Executes transactions and collects senders, streaming receipts to a background task.
+    /// Executes transactions and collects senders, streaming receipts to the post-exec task.
     ///
     /// This method handles:
     /// - Applying pre-execution changes (e.g., beacon root updates)
@@ -878,7 +865,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        post_exec: &PostExecHandle<N::Receipt>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
@@ -931,7 +918,7 @@ where
                 // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    post_exec.push_receipt(tx_index, receipt.clone());
                 }
             }
         }
@@ -956,7 +943,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let hashed_state = hashed_state.get();
+        let hashed_state = hashed_state.as_ref();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
@@ -976,7 +963,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let hashed_state = hashed_state.get();
+        let hashed_state = hashed_state.as_ref();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
@@ -1215,6 +1202,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        withdrawals_root: Option<B256>,
         hashed_state: LazyHashedPostState,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
@@ -1251,10 +1239,16 @@ where
         }
         drop(_enter);
 
+        debug_assert_eq!(
+            withdrawals_root,
+            block.withdrawals_root(),
+            "post-exec withdrawals root does not match block header"
+        );
+
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) = self
             .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
+            .validate_block_post_execution_with_hashed_state(hashed_state.as_ref(), block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1495,12 +1489,7 @@ where
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
-        // already been computed and used for state root verification, so .get() returns instantly.
-        let hashed_state = match hashed_state.try_into_inner() {
-            Ok(state) => Arc::new(state),
-            Err(handle) => Arc::new(handle.get().clone()),
-        };
+        // The hashed post state is already computed and shared as an `Arc`.
         let deferred_trie_data =
             DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
