@@ -778,16 +778,12 @@ impl RpcServerArgs {
 
     /// Returns `true` if the given RPC namespace is enabled on any transport.
     pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
-        // Check HTTP API
-        if self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
             return true;
         }
-
-        // Check WS API
-        if self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
             return true;
         }
-
         // IPC exposes all modules when enabled
         !self.ipcdisable
     }
