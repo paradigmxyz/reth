@@ -19,11 +19,7 @@ reth-consensus.workspace = true
 reth-primitives-traits.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-<<<<<<< exp-hive
 tracing.workspace = true
-=======
-alloy-primitives.workspace = true
->>>>>>> bal-devnet-2
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
