@@ -292,7 +292,7 @@ where
         let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block) {
+        if let Err(consensus_err) = self.validate_block_inner(&block, None) {
             // Header validation error takes precedence over execution error
             return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
@@ -334,9 +334,10 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        // Spawn block conversion on a background thread so it runs concurrently with the
+        // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
-        // RLP decoding + header hashing; for already-converted blocks this is a no-op.
+        // RLP decoding + header hashing and pre-computes the transaction root that is validated
+        // later in post-execution checks.
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -347,7 +348,9 @@ where
                         let BlockOrPayload::Payload(payload) = payload_clone else {
                             unreachable!()
                         };
-                        validator.convert_payload_to_block(payload)
+                        let block = validator.convert_payload_to_block(payload)?;
+                        let transaction_root = block.body().calculate_tx_root();
+                        Ok((block, Some(transaction_root)))
                     },
                 );
                 Either::Left(handle)
@@ -357,16 +360,18 @@ where
 
         // Returns the sealed block, either by awaiting the background conversion task (for
         // payloads) or by extracting the already-converted block directly.
-        let convert_to_block =
-            move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
-                match convert_to_block {
-                    Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
-                    Either::Right(()) => {
-                        let BlockOrPayload::Block(block) = input else { unreachable!() };
-                        Ok(block)
-                    }
+        let convert_to_block = move |input: BlockOrPayload<T>| -> Result<
+            (SealedBlock<N::Block>, Option<B256>),
+            NewPayloadError,
+        > {
+            match convert_to_block {
+                Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
+                Either::Right(()) => {
+                    let BlockOrPayload::Block(block) = input else { unreachable!() };
+                    Ok((block, None))
                 }
-            };
+            }
+        };
 
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
@@ -375,7 +380,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = convert_to_block(input)?;
+                        let (block, _) = convert_to_block(input)?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -406,7 +411,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                convert_to_block(input)?,
+                convert_to_block(input)?.0,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -419,7 +424,7 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                convert_to_block(input)?,
+                convert_to_block(input)?.0,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -527,7 +532,8 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
-        let block = convert_to_block(input)?.with_senders(senders);
+        let (block, transaction_root) = convert_to_block(input)?;
+        let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -546,6 +552,7 @@ where
                 &parent_block,
                 &output,
                 &mut ctx,
+                transaction_root,
                 receipt_root_bloom,
                 hashed_state,
             ),
@@ -737,13 +744,19 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block_inner(
+        &self,
+        block: &SealedBlock<N::Block>,
+        transaction_root: Option<B256>,
+    ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) =
+            self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
+        {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -1208,12 +1221,14 @@ where
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::too_many_arguments)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
+        transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
@@ -1224,7 +1239,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
-        if let Err(e) = self.validate_block_inner(block) {
+        if let Err(e) = self.validate_block_inner(block, transaction_root) {
             return Err(e.into())
         }
 

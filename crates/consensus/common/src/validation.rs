@@ -2,6 +2,7 @@
 
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
@@ -145,11 +146,33 @@ where
     B: Block,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
+    validate_block_pre_execution_with_tx_root(block, chain_spec, None)
+}
+
+/// Validate a block without regard for state using an optional pre-computed transaction root.
+///
+/// - Compares the ommer hash in the block header to the block body
+/// - Compares the transactions root in the block header to the block body
+/// - Pre-execution transaction validation
+pub fn validate_block_pre_execution_with_tx_root<B, ChainSpec>(
+    block: &SealedBlock<B>,
+    chain_spec: &ChainSpec,
+    transaction_root: Option<B256>,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
     post_merge_hardfork_fields(block, chain_spec)?;
 
-    // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    let expected_transaction_root = block.header().transactions_root();
+    let calculated_transaction_root =
+        transaction_root.unwrap_or_else(|| block.body().calculate_tx_root());
+    if calculated_transaction_root != expected_transaction_root {
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: calculated_transaction_root, expected: expected_transaction_root }
+                .into(),
+        ))
     }
 
     Ok(())
