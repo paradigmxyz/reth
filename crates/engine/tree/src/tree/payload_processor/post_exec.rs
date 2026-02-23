@@ -7,17 +7,17 @@ use super::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::{self, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::Receipt;
-use std::{
-    sync::mpsc::{self, Receiver, Sender},
-    thread::JoinHandle,
-};
+use std::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tracing::error;
 
 /// Handle to the long-lived post-execution worker.
+///
+/// Dropping the coordinator disconnects the command channel, causing the worker thread to exit
+/// after finishing any in-progress block. The thread is detached on drop rather than joined to
+/// avoid blocking if the worker is waiting on an open receipt stream.
 pub struct PostExecCoordinator<R> {
     commands_tx: Sender<WorkerCommand<R>>,
-    worker: Option<JoinHandle<()>>,
 }
 
 impl<R> core::fmt::Debug for PostExecCoordinator<R> {
@@ -26,22 +26,24 @@ impl<R> core::fmt::Debug for PostExecCoordinator<R> {
     }
 }
 
-impl<R: Receipt + Send + 'static> Default for PostExecCoordinator<R> {
+impl<R: Receipt + 'static> Default for PostExecCoordinator<R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<R: Receipt + Send + 'static> PostExecCoordinator<R> {
-    /// Create a new coordinator and its worker thread.
+impl<R: Receipt + 'static> PostExecCoordinator<R> {
+    /// Create a new coordinator and spawn its worker thread.
     pub fn new() -> Self {
         let (commands_tx, commands_rx) = mpsc::channel();
-        let worker = std::thread::Builder::new()
+        // Worker thread is detached: it exits when `commands_tx` is dropped (coordinator drop)
+        // and any in-progress block finishes.
+        std::thread::Builder::new()
             .name("post-exec".to_string())
             .spawn(move || PostExecWorker::run(commands_rx))
             .expect("failed to spawn post-exec worker");
 
-        Self { commands_tx, worker: Some(worker) }
+        Self { commands_tx }
     }
 
     /// Begin receipt-root streaming for a new block.
@@ -63,16 +65,10 @@ impl<R: Receipt + Send + 'static> PostExecCoordinator<R> {
     }
 }
 
-impl<R> Drop for PostExecCoordinator<R> {
-    fn drop(&mut self) {
-        let _ = self.commands_tx.send(WorkerCommand::Shutdown);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 /// Block-scoped stream handle used by execution to send receipts and finalize.
+///
+/// The caller **must** either call [`finalize`](Self::finalize) or drop this handle to close
+/// the receipt stream and unblock the worker for the next block.
 pub struct PostExecBlockHandle<R> {
     receipt_tx: Option<CrossbeamSender<IndexedReceipt<R>>>,
     result_rx: Option<oneshot::Receiver<(B256, Bloom)>>,
@@ -84,7 +80,7 @@ impl<R> core::fmt::Debug for PostExecBlockHandle<R> {
     }
 }
 
-impl<R: Receipt + Send + 'static> PostExecBlockHandle<R> {
+impl<R: Receipt + 'static> PostExecBlockHandle<R> {
     /// Stream one receipt to the background worker.
     pub fn push_receipt(&self, index: usize, receipt: R) {
         if self
@@ -114,20 +110,16 @@ enum WorkerCommand<R> {
         receipt_rx: CrossbeamReceiver<IndexedReceipt<R>>,
         result_tx: oneshot::Sender<(B256, Bloom)>,
     },
-    Shutdown,
 }
 
 struct PostExecWorker;
 
 impl PostExecWorker {
     fn run<R: Receipt>(commands_rx: Receiver<WorkerCommand<R>>) {
-        while let Ok(command) = commands_rx.recv() {
-            match command {
-                WorkerCommand::RunBlock { receipts_len, receipt_rx, result_tx } => {
-                    ReceiptRootTaskHandle::new(receipt_rx, result_tx).run(receipts_len);
-                }
-                WorkerCommand::Shutdown => break,
-            }
+        while let Ok(WorkerCommand::RunBlock { receipts_len, receipt_rx, result_tx }) =
+            commands_rx.recv()
+        {
+            ReceiptRootTaskHandle::new(receipt_rx, result_tx).run(receipts_len);
         }
     }
 }
@@ -216,7 +208,7 @@ mod tests {
         let second = receipts.remove(0);
 
         let handle = coordinator.begin_block(2);
-        handle.push_receipt(0, first.clone());
+        handle.push_receipt(0, first);
         handle.push_receipt(0, second);
 
         assert!(handle.finalize().await.is_err());
