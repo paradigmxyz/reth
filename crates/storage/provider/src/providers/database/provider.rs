@@ -172,8 +172,10 @@ pub enum SaveBlocksMode {
     /// Used by `insert_block`.
     BlocksOnly,
     /// Like `Full`, but skips tx-hash lookup and history index writes.
-    /// Used when deferred history indexing is active and the background indexer
-    /// hasn't caught up yet.
+    /// In deferred-history mode, writing fresh history entries here would let
+    /// persisted index data run ahead of stage checkpoints, so later stage
+    /// execution can replay overlapping ranges from stale checkpoints.
+    /// Used while deferred indexing owns all history-index writes.
     FullNoHistoryIndexing,
 }
 
