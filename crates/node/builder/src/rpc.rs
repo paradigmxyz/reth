@@ -30,13 +30,13 @@ use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
 };
-use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
+use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule, RethEngineApiServer};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi, RethEngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
@@ -839,6 +839,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcServerOnlyHandle<N, EthB::EthApi>>
     where
+        RethEngineApi<<N::Types as NodeTypes>::Payload>: RethEngineApiServer,
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
@@ -891,6 +892,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
+        RethEngineApi<<N::Types as NodeTypes>::Payload>: RethEngineApiServer,
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         // Check CLI config to determine if auth server should be disabled
@@ -910,6 +912,7 @@ where
         disable_auth: bool,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
+        RethEngineApi<<N::Types as NodeTypes>::Payload>: RethEngineApiServer,
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
@@ -976,6 +979,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcSetupContext<'a, N, EthB::EthApi>>
     where
+        RethEngineApi<<N::Types as NodeTypes>::Payload>: RethEngineApiServer,
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
@@ -1020,7 +1024,13 @@ where
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
+            .build_with_auth_server(
+                module_config,
+                engine_api,
+                beacon_engine_handle.clone(),
+                eth_api,
+                engine_events.clone(),
+            );
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -1122,6 +1132,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    RethEngineApi<<N::Types as NodeTypes>::Payload>: RethEngineApiServer,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
