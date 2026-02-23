@@ -19,6 +19,7 @@ reth-consensus.workspace = true
 reth-primitives-traits.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
