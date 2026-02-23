@@ -138,6 +138,8 @@ pub struct OrderedTrieRootEncodedBuilder {
     next_insert_i: usize,
     /// Buffer for pending items, indexed by execution index.
     pending: Vec<Option<Vec<u8>>>,
+    /// Tracks which indices have been pushed (for duplicate detection).
+    pushed: Vec<bool>,
     /// The underlying hash builder.
     hb: HashBuilder,
 }
@@ -150,6 +152,7 @@ impl OrderedTrieRootEncodedBuilder {
             received: 0,
             next_insert_i: 0,
             pending: alloc::vec![None; len],
+            pushed: alloc::vec![false; len],
             hb: HashBuilder::default(),
         }
     }
@@ -170,7 +173,7 @@ impl OrderedTrieRootEncodedBuilder {
             return Err(OrderedRootError::IndexOutOfBounds { index, len: self.len });
         }
 
-        if self.pending[index].is_some() {
+        if self.pushed[index] {
             return Err(OrderedRootError::DuplicateIndex { index });
         }
 
@@ -190,11 +193,26 @@ impl OrderedTrieRootEncodedBuilder {
     #[inline]
     pub fn push_unchecked(&mut self, index: usize, bytes: &[u8]) {
         debug_assert!(index < self.len, "index {index} out of bounds for length {}", self.len);
-        debug_assert!(self.pending[index].is_none(), "duplicate item at index {index}");
+        debug_assert!(!self.pushed[index], "duplicate item at index {index}");
 
-        self.pending[index] = Some(bytes.to_vec());
         self.received += 1;
+        self.pushed[index] = true;
 
+        // Fast path: if this item is next in trie insertion order, feed it directly
+        // to the hash builder without copying into the pending buffer.
+        if self.next_insert_i < self.len &&
+            adjust_index_for_rlp(self.next_insert_i, self.len) == index
+        {
+            let index_buffer = alloy_rlp::encode_fixed_size(&index);
+            self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+            self.next_insert_i += 1;
+            // Drain any previously buffered items that are now ready.
+            self.flush();
+            return;
+        }
+
+        // Slow path: buffer for later flushing.
+        self.pending[index] = Some(bytes.to_vec());
         self.flush();
     }
 
@@ -333,6 +351,30 @@ mod tests {
     }
 
     #[test]
+    fn test_ordered_builder_fast_path_coverage() {
+        for len in [1, 2, 10, 128, 129, 200, 400] {
+            let items: Vec<Vec<u8>> =
+                (0..len).map(|i| format!("item_{i}_data").into_bytes()).collect();
+
+            let expected = ordered_trie_root_encoded(&items);
+
+            // Push in execution order (0, 1, 2, ..., N-1).
+            // All items except index 0 should hit the fast path since they arrive
+            // in trie insertion order after the first item is buffered.
+            let mut builder = OrderedTrieRootEncodedBuilder::new(len);
+            for (i, item) in items.iter().enumerate() {
+                builder.push_unchecked(i, item);
+            }
+
+            let actual = builder.finalize().unwrap();
+            assert_eq!(
+                expected, actual,
+                "fast path mismatch for len={len}: expected {expected:?}, got {actual:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_ordered_builder_index_errors() {
         let mut builder = OrderedTrieRootEncodedBuilder::new(2);
 
@@ -350,5 +392,17 @@ mod tests {
 
         builder.push(1, b"item_1").unwrap();
         assert!(builder.is_complete());
+    }
+
+    #[test]
+    fn test_ordered_builder_fast_path_duplicate_detection() {
+        // For len=3, trie order is [1, 2, 0]. Pushing index 1 first hits the fast path.
+        // Pushing index 1 again must be detected as a duplicate via the sentinel.
+        let mut builder = OrderedTrieRootEncodedBuilder::new(3);
+        builder.push(1, b"item_1").unwrap(); // fast path
+        assert_eq!(
+            builder.push(1, b"item_1_dup"),
+            Err(OrderedRootError::DuplicateIndex { index: 1 })
+        );
     }
 }
