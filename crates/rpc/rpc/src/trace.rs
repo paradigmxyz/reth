@@ -477,7 +477,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Ok(None);
+            return Err(EthApiError::HeaderNotFound(block_id).into());
         };
 
         let mut traces = self
@@ -553,7 +553,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Ok(None);
+            return Err(EthApiError::HeaderNotFound(block_id).into());
         };
 
         let Some(transactions) = self
@@ -589,7 +589,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Ok(None);
+            return Err(EthApiError::HeaderNotFound(block_id).into());
         };
 
         let Some(transactions) = self
