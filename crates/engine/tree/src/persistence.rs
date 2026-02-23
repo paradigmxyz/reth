@@ -1,5 +1,7 @@
 use crate::{
-    deferred_indexer::{DeferredHistoryIndexer, DeferredHistoryIndexerConfig},
+    deferred_indexer::{
+        DeferredHistoryIndexer, DeferredHistoryIndexerConfig, DeferredIndexerError,
+    },
     metrics::PersistenceMetrics,
 };
 use alloy_eips::BlockNumHash;
@@ -103,7 +105,7 @@ where
             if indexing_pending {
                 match self.incoming.try_recv() {
                     Ok(action) => self.handle_action(action)?,
-                    Err(TryRecvError::Empty) => self.run_deferred_indexing_tick(),
+                    Err(TryRecvError::Empty) => self.run_deferred_indexing_tick()?,
                     Err(TryRecvError::Disconnected) => break,
                 }
             } else {
@@ -119,40 +121,18 @@ where
     }
 
     /// No persistence work pending, opportunistically run one deferred indexing tick.
-    fn run_deferred_indexing_tick(&mut self) {
+    fn run_deferred_indexing_tick(&mut self) -> Result<(), PersistenceError> {
         let Some(indexer) = &mut self.deferred_indexer else {
-            return;
+            return Ok(());
         };
 
-        let provider_rw = match self.provider.database_provider_rw() {
-            Ok(provider_rw) => provider_rw,
-            Err(err) => {
-                warn!(target: "engine::persistence", %err, "Failed to open RW provider for deferred indexing tick");
-                return;
-            }
-        };
-
-        let tip = match provider_rw.get_stage_checkpoint(StageId::Finish) {
-            Ok(checkpoint) => checkpoint.map(|c| c.block_number).unwrap_or(0),
-            Err(err) => {
-                warn!(target: "engine::persistence", %err, "Failed to read Finish checkpoint for deferred indexing tick");
-                return;
-            }
-        };
+        let provider_rw = self.provider.database_provider_rw()?;
+        let tip =
+            provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|c| c.block_number).unwrap_or(0);
 
         let tick_started = Instant::now();
-        let progress = match indexer.tick_with_provider(&provider_rw, tip) {
-            Ok(progress) => progress,
-            Err(err) => {
-                warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
-                return;
-            }
-        };
-
-        if let Err(err) = provider_rw.commit() {
-            warn!(target: "engine::persistence", %err, "Failed to commit deferred indexing tick");
-            return;
-        }
+        let progress = indexer.tick_with_provider(&provider_rw, tip)?;
+        provider_rw.commit()?;
 
         if let Some(progress) = progress {
             let _ = self.sync_metrics_tx.send(MetricEvent::StageCheckpoint {
@@ -162,6 +142,8 @@ where
                 elapsed: tick_started.elapsed(),
             });
         }
+
+        Ok(())
     }
 
     /// Handle a single persistence action.
@@ -174,14 +156,12 @@ where
                 let result = self.on_remove_blocks_above(new_tip_num)?;
                 // send new sync metrics based on removed blocks
                 let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                // we ignore the error because the caller may or may not care about the result
                 let _ = sender.send(result);
             }
             PersistenceAction::SaveBlocks(blocks, sender) => {
                 let result = self.on_save_blocks(blocks)?;
                 let result_number = result.map(|r| r.number);
 
-                // we ignore the error because the caller may or may not care about the result
                 let _ = sender.send(result);
 
                 if let Some(block_number) = result_number {
@@ -292,6 +272,9 @@ pub enum PersistenceError {
     /// A provider error
     #[error(transparent)]
     ProviderError(#[from] ProviderError),
+    /// A deferred indexer error
+    #[error(transparent)]
+    DeferredIndexerError(#[from] DeferredIndexerError),
 }
 
 /// A signal to the persistence service that part of the tree state can be persisted.

@@ -5,13 +5,13 @@
 //! MDBX write-lock contention that would occur if these stages ran on a separate thread.
 
 use reth_config::config::StageConfig;
-use reth_provider::{StageCheckpointReader, StageCheckpointWriter};
-use reth_prune::{PruneMode, PruneModes, PrunePurpose, PruneSegment};
+use reth_provider::{ProviderError, StageCheckpointReader, StageCheckpointWriter};
+use reth_prune::{PruneMode, PruneModes, PrunePurpose, PruneSegment, PruneSegmentError};
 use reth_stages::{
     stages::{IndexAccountHistoryStage, IndexStorageHistoryStage, TransactionLookupStage},
-    ExecInput, Stage, StageCheckpoint, StageId,
+    ExecInput, Stage, StageCheckpoint, StageError, StageId,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Per-stage batch sizes for deferred indexing ticks.
 ///
@@ -45,6 +45,20 @@ pub struct DeferredStageProgress {
     pub stage_id: StageId,
     /// Persisted checkpoint after the stage batch completed.
     pub checkpoint: StageCheckpoint,
+}
+
+/// Errors produced by deferred history indexing.
+#[derive(Debug, thiserror::Error)]
+pub enum DeferredIndexerError {
+    /// Provider/storage error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    /// Invalid prune configuration/target computation.
+    #[error(transparent)]
+    Prune(#[from] PruneSegmentError),
+    /// Stage execution error.
+    #[error(transparent)]
+    Stage(#[from] StageError),
 }
 
 /// Deferred indexer lifecycle state.
@@ -197,7 +211,7 @@ impl DeferredHistoryIndexer {
         &self,
         stage_id: StageId,
         tip: u64,
-    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<u64>, DeferredIndexerError> {
         let (prune_mode, segment) = self.prune_mode_and_segment_for_stage(stage_id);
         let Some(prune_mode) = prune_mode else {
             return Ok(None);
@@ -216,7 +230,7 @@ impl DeferredHistoryIndexer {
         provider_rw: &Provider,
         stage_id: StageId,
         tip: u64,
-    ) -> Result<Option<DeferredStageProgress>, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<DeferredStageProgress>, DeferredIndexerError>
     where
         Provider: StageCheckpointReader + StageCheckpointWriter,
         TransactionLookupStage: Stage<Provider>,
@@ -265,21 +279,9 @@ impl DeferredHistoryIndexer {
             _ => unreachable!(),
         };
 
-        match result {
-            Ok(output) => {
-                provider_rw.save_stage_checkpoint(stage_id, output.checkpoint)?;
-                Ok(Some(DeferredStageProgress { stage_id, checkpoint: output.checkpoint }))
-            }
-            Err(err) => {
-                warn!(
-                    target: "engine::persistence::deferred_indexer",
-                    %stage_id,
-                    %err,
-                    "Deferred indexing batch failed, will retry"
-                );
-                Ok(None)
-            }
-        }
+        let output = result?;
+        provider_rw.save_stage_checkpoint(stage_id, output.checkpoint)?;
+        Ok(Some(DeferredStageProgress { stage_id, checkpoint: output.checkpoint }))
     }
 
     /// Check if all three stages have caught up to the provided pipeline tip.
@@ -287,7 +289,7 @@ impl DeferredHistoryIndexer {
         &self,
         provider: &Provider,
         tip: u64,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<bool, DeferredIndexerError>
     where
         Provider: StageCheckpointReader,
     {
@@ -314,7 +316,7 @@ impl DeferredHistoryIndexer {
         &mut self,
         provider_rw: &Provider,
         tip: u64,
-    ) -> Result<Option<DeferredStageProgress>, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<DeferredStageProgress>, DeferredIndexerError>
     where
         Provider: StageCheckpointReader + StageCheckpointWriter,
         TransactionLookupStage: Stage<Provider>,
