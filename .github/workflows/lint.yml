@@ -26,6 +26,9 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
         with:
+          # Pin nightly to avoid breakage from str::as_str() stabilization
+          # which breaks shellexpand 3.1.1 method resolution.
+          toolchain: nightly-2026-02-21
           components: clippy
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
