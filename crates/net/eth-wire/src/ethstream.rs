@@ -7,17 +7,16 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    message::{extract_response_request_id, EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
-    CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
-    UnifiedStatus,
+    CanDisconnect, DeferredResponseData, DisconnectReason, EthMessage, EthNetworkPrimitives,
+    EthVersion, ProtocolMessage, UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
-use crate::{DeferredResponseData, message::extract_response_request_id};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
@@ -158,27 +157,22 @@ where
             }
         }
 
-        let msg =
-            match ProtocolMessage::decode_message_full(self.version, &mut bytes.as_ref()) {
-                Ok(m) => m,
-                Err(err) => {
-                    let msg = if bytes.len() > 50 {
-                        format!(
-                            "{:02x?}...{:x?}",
-                            &bytes[..10],
-                            &bytes[bytes.len() - 10..]
-                        )
-                    } else {
-                        format!("{bytes:02x?}")
-                    };
-                    debug!(
-                        version=?self.version,
-                        %msg,
-                        "failed to decode protocol message"
-                    );
-                    return Err(EthStreamError::InvalidMessage(err));
-                }
-            };
+        let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
+            Ok(m) => m,
+            Err(err) => {
+                let msg = if bytes.len() > 50 {
+                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                } else {
+                    format!("{bytes:02x?}")
+                };
+                debug!(
+                    version=?self.version,
+                    %msg,
+                    "failed to decode protocol message"
+                );
+                return Err(EthStreamError::InvalidMessage(err));
+            }
+        };
 
         if matches!(msg.message, EthMessage::Status(_)) {
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));

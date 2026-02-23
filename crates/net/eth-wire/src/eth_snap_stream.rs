@@ -5,7 +5,7 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage, extract_response_request_id},
+    message::{extract_response_request_id, EthBroadcastMessage, ProtocolBroadcastMessage},
     DeferredResponseData, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
     NetworkPrimitives, ProtocolMessage, RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
@@ -246,7 +246,7 @@ where
             }
 
             let mut buf = bytes.as_ref();
-            match ProtocolMessage::decode_message_full(self.eth_version, &mut buf) {
+            match ProtocolMessage::decode_message(self.eth_version, &mut buf) {
                 Ok(protocol_msg) => {
                     if matches!(protocol_msg.message, EthMessage::Status(_)) {
                         return Err(EthSnapStreamError::StatusNotInHandshake);

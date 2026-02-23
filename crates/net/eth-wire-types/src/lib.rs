@@ -19,8 +19,7 @@ pub use version::{EthVersion, ProtocolVersion};
 
 pub mod message;
 pub use message::{
-    DeferredResponseData, EthMessage, EthMessageID, ProtocolMessage,
-    extract_response_request_id,
+    extract_response_request_id, DeferredResponseData, EthMessage, EthMessageID, ProtocolMessage,
 };
 
 pub mod header;
