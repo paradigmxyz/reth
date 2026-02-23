@@ -1437,6 +1437,9 @@ where
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
+                    // Re-enable deferred indexing after backfill so the indexer can reconcile its
+                    // internal caught-up state against DB checkpoints. SaveBlocks mode is keyed
+                    // off `is_caught_up()`, not this enable flag alone.
                     let _ = self.persistence.set_deferred_indexing_enabled(true);
                 }
                 FromOrchestrator::Terminate { tx } => {
