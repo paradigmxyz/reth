@@ -17,7 +17,7 @@ reth-db.workspace = true
 alloy-genesis.workspace = true
 
 # misc
+reth-cli-util.workspace = true
 clap.workspace = true
-dirs-next.workspace = true
 eyre.workspace = true
 serde_json.workspace = true

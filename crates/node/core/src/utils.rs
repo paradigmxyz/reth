@@ -13,90 +13,12 @@ use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
+pub use reth_cli_util::ExpandPathError;
+
 /// Parses a user-specified path with support for environment variables and common shorthands (e.g.
 /// ~ for the user's home directory).
 pub fn parse_path(value: &str) -> Result<PathBuf, ExpandPathError> {
-    let expanded = expand_path(value)?;
-    Ok(PathBuf::from(expanded))
-}
-
-/// Expands `~` to the user's home directory and `$VAR`/`${VAR}` to environment variable values.
-fn expand_path(input: &str) -> Result<String, ExpandPathError> {
-    let tilde_expanded = expand_tilde(input)?;
-    expand_env_vars(&tilde_expanded)
-}
-
-fn expand_tilde(input: &str) -> Result<String, ExpandPathError> {
-    if input == "~" || input.starts_with("~/") || input.starts_with("~\\") {
-        let home = dirs_next::home_dir().ok_or(ExpandPathError::NoHomeDir)?;
-        let mut out = home.to_string_lossy().into_owned();
-        if input.len() > 1 {
-            out.push_str(&input[1..]);
-        }
-        Ok(out)
-    } else {
-        Ok(input.to_string())
-    }
-}
-
-fn expand_env_vars(input: &str) -> Result<String, ExpandPathError> {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            result.push(c);
-            continue;
-        }
-
-        let braced = chars.peek() == Some(&'{');
-        if braced {
-            chars.next();
-        }
-
-        let mut name = String::new();
-        while let Some(&c) = chars.peek() {
-            if braced {
-                if c == '}' {
-                    chars.next();
-                    break;
-                }
-            } else if !c.is_ascii_alphanumeric() && c != '_' {
-                break;
-            }
-            name.push(c);
-            chars.next();
-        }
-
-        if name.is_empty() {
-            result.push('$');
-            if braced {
-                result.push('{');
-            }
-        } else {
-            let value = std::env::var(&name)
-                .map_err(|e| ExpandPathError::Var { var_name: name, source: e })?;
-            result.push_str(&value);
-        }
-    }
-
-    Ok(result)
-}
-
-/// An error that can occur when expanding a path.
-#[derive(Debug, thiserror::Error)]
-pub enum ExpandPathError {
-    /// Home directory could not be determined.
-    #[error("could not determine home directory")]
-    NoHomeDir,
-    /// Environment variable lookup failed.
-    #[error("environment variable `{var_name}` not found: {source}")]
-    Var {
-        /// The variable name that was looked up.
-        var_name: String,
-        /// The underlying error.
-        source: std::env::VarError,
-    },
+    reth_cli_util::expand_path(value)
 }
 
 /// Attempts to retrieve or create a JWT secret from the specified path.

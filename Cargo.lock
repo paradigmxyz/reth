@@ -7696,9 +7696,9 @@ version = "1.11.0"
 dependencies = [
  "alloy-genesis",
  "clap",
- "dirs-next",
  "eyre",
  "reth-cli-runner",
+ "reth-cli-util",
  "reth-db",
  "serde_json",
 ]
@@ -7806,6 +7806,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "cfg-if",
+ "dirs-next",
  "eyre",
  "libc",
  "rand 0.8.5",

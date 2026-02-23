@@ -25,6 +25,10 @@ pub use parsers::{
     parse_ether_value, parse_socket_address,
 };
 
+/// Shell-like path expansion utilities.
+pub mod expand_path;
+pub use expand_path::{expand_path, ExpandPathError};
+
 #[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
 pub mod sigsegv_handler;
 
