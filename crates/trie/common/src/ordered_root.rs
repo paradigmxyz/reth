@@ -415,7 +415,10 @@ mod tests {
                     builder.push(i, &items[i]).unwrap();
                 }
                 let actual = builder.finalize().unwrap();
-                assert_eq!(expected, actual, "random permutation mismatch for len={len}, seed={seed}");
+                assert_eq!(
+                    expected, actual,
+                    "random permutation mismatch for len={len}, seed={seed}"
+                );
             }
         }
     }
