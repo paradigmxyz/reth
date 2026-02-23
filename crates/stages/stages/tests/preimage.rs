@@ -950,10 +950,16 @@ fn execute_and_commit_block(
 
     let gas_used = output.gas_used;
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-    let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
-        provider.tx_ref(),
-        &hashed_state.clone().into_sorted(),
-    )?;
+    type TestStateRoot<'a, TX, A> = StateRoot<
+        reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+        reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+    >;
+    let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+        TestStateRoot::<_, A>::overlay_root_with_updates(
+            provider.tx_ref(),
+            &hashed_state.clone().into_sorted(),
+        )
+    })?;
 
     let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
     let receipts_root = calculate_receipt_root(&receipts);
