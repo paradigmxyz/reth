@@ -87,7 +87,6 @@ pub struct DefaultRpcServerArgs {
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
     rpc_pending_block: PendingBlockKind,
-    rpc_reth_new_payload: bool,
     rpc_forwarder: Option<Url>,
     builder_disallow: Option<AddressSet>,
     rpc_state_cache: RpcStateCacheArgs,
@@ -328,12 +327,6 @@ impl DefaultRpcServerArgs {
         self
     }
 
-    /// Set whether `reth_newPayload` should be enabled by default.
-    pub const fn with_rpc_reth_new_payload(mut self, v: bool) -> Self {
-        self.rpc_reth_new_payload = v;
-        self
-    }
-
     /// Set the default RPC forwarder
     pub fn with_rpc_forwarder(mut self, v: Option<Url>) -> Self {
         self.rpc_forwarder = v;
@@ -405,7 +398,6 @@ impl Default for DefaultRpcServerArgs {
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             rpc_pending_block: PendingBlockKind::Full,
-            rpc_reth_new_payload: false,
             rpc_forwarder: None,
             builder_disallow: None,
             rpc_state_cache: RpcStateCacheArgs::default(),
@@ -623,10 +615,6 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
     pub rpc_pending_block: PendingBlockKind,
 
-    /// Enables the `reth_newPayload` RPC method.
-    #[arg(long = "rpc.reth-new-payload", default_value_t = DefaultRpcServerArgs::get_global().rpc_reth_new_payload)]
-    pub rpc_reth_new_payload: bool,
-
     /// Endpoint to forward transactions to.
     #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
     pub rpc_forwarder: Option<Url>,
@@ -836,7 +824,6 @@ impl Default for RpcServerArgs {
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
-            rpc_reth_new_payload,
             rpc_forwarder,
             builder_disallow,
             rpc_state_cache,
@@ -881,7 +868,6 @@ impl Default for RpcServerArgs {
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
-            rpc_reth_new_payload,
             rpc_forwarder,
             builder_disallow,
             rpc_state_cache,
@@ -996,16 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rpc_reth_new_payload_flag() {
-        let args =
-            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.reth-new-payload"]).args;
-        assert!(args.rpc_reth_new_payload);
-
-        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
-        assert!(!args.rpc_reth_new_payload);
-    }
-
-    #[test]
     fn test_rpc_tx_fee_cap_parse_none() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
@@ -1057,7 +1033,6 @@ mod tests {
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
             rpc_pending_block: PendingBlockKind::Full,
-            rpc_reth_new_payload: false,
             rpc_forwarder: Some("http://localhost:8545".parse().unwrap()),
             builder_disallow: None,
             rpc_state_cache: RpcStateCacheArgs {
