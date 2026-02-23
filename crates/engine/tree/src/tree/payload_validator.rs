@@ -528,15 +528,6 @@ where
         // falls back to computing receipt-root + logs-bloom from `output.receipts`.
         let receipt_root_bloom = post_exec.receipt_root_bloom();
         let withdrawals_root = post_exec.withdrawals_root();
-        let Some(hashed_state) = post_exec.hashed_post_state() else {
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                InsertBlockErrorKind::Other(Box::new(std::io::Error::other(
-                    "post-exec worker did not produce hashed post state",
-                ))),
-            )
-            .into())
-        };
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -546,7 +537,7 @@ where
                 &mut ctx,
                 receipt_root_bloom,
                 withdrawals_root,
-                hashed_state,
+                &post_exec,
             ),
             block
         );
@@ -1205,7 +1196,7 @@ where
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         withdrawals_root: Option<B256>,
-        hashed_state: LazyHashedPostState,
+        post_exec: &PostExecHandle<N::Receipt>,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1252,6 +1243,12 @@ where
                 .into())
             }
         }
+
+        let Some(hashed_state) = post_exec.hashed_post_state() else {
+            return Err(InsertBlockErrorKind::Other(Box::new(std::io::Error::other(
+                "post-exec worker did not produce hashed post state",
+            ))))
+        };
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) = self
@@ -1737,6 +1734,97 @@ where
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
         self.payload_processor.wait_for_caches()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::{payload_processor::post_exec::PostExecHandle, EngineApiKind};
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_engine::ExecutionData;
+    use reth_chain_state::{test_utils::TestBlockBuilder, CanonicalInMemoryState};
+    use reth_chainspec::MAINNET;
+    use reth_engine_primitives::NoopInvalidBlockHook;
+    use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+    use reth_evm_ethereum::MockEvmConfig;
+    use reth_payload_primitives::NewPayloadError;
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_tasks::Runtime;
+    use reth_trie_db::ChangesetCache;
+    use std::{sync::Arc, time::Duration};
+
+    #[derive(Clone, Debug)]
+    struct MockPayloadValidator;
+
+    impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<reth_primitives_traits::SealedBlock<Self::Block>, NewPayloadError> {
+            unreachable!("not needed for this regression test")
+        }
+    }
+
+    #[test]
+    fn validate_post_execution_fails_fast_without_waiting_for_hashed_state() {
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            let chain_spec = MAINNET.clone();
+            let provider = MockEthProvider::<EthPrimitives>::default();
+            let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+            let validator = BasicEngineValidator::new(
+                provider,
+                consensus,
+                MockEvmConfig::default(),
+                MockPayloadValidator,
+                TreeConfig::default(),
+                Box::new(NoopInvalidBlockHook::default()),
+                ChangesetCache::new(),
+                Runtime::test(),
+            );
+
+            let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+            // Deliberately mismatch parent hash so validation fails before hashed-state use.
+            let sealed_block = builder.generate_random_block(1, B256::random());
+            let senders = vec![Address::ZERO; sealed_block.body().transactions.len()];
+            let block = reth_primitives_traits::RecoveredBlock::new_sealed(sealed_block, senders);
+
+            let parent = SealedHeader::seal_slow(chain_spec.genesis_header().clone());
+            let mut tree_state =
+                EngineApiTreeState::new(8, 8, parent.num_hash(), EngineApiKind::Ethereum);
+            let canonical = CanonicalInMemoryState::with_head(parent.clone(), None, None);
+            let mut ctx = TreeCtx::new(&mut tree_state, &canonical);
+
+            // Keep receipts/hash-state channels open and never queue hashed-state work.
+            // If hashed state is awaited eagerly, this call would block indefinitely.
+            let runtime = Runtime::test();
+            let post_exec = PostExecHandle::<Receipt>::new(&runtime, 0, None);
+
+            let result = validator.validate_post_execution::<EthEngineTypes>(
+                &block,
+                &parent,
+                &BlockExecutionOutput::default(),
+                &mut ctx,
+                None,
+                None,
+                &post_exec,
+            );
+
+            let _ = tx.send(result.is_err());
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(true),
+            "expected fast validation failure before waiting for hashed post state",
+        );
     }
 }
 
