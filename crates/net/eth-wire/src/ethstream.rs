@@ -17,6 +17,7 @@ use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
+use crate::{DeferredResponseData, message::extract_response_request_id};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
@@ -129,27 +130,55 @@ where
     }
 
     /// Decodes incoming bytes into an [`EthMessage`].
+    ///
+    /// For response messages, only the lightweight envelope (message ID + `request_id`) is
+    /// extracted and the raw bytes are retained via zero-copy [`BytesMut::freeze`]. The session
+    /// layer validates the `request_id` before committing to a full RLP decode.
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > MAX_MESSAGE_SIZE {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
 
-        let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
-            Ok(m) => m,
+        // For response messages, defer full deserialization: extract only the message ID
+        // and request_id (~19 bytes parsed) and keep the buffer via zero-copy freeze().
+        match extract_response_request_id(self.version, &bytes) {
+            Ok(Some((message_id, request_id))) => {
+                return Ok(EthMessage::DeferredResponse(DeferredResponseData {
+                    message_id,
+                    request_id,
+                    version: self.version,
+                    raw_bytes: bytes.freeze(),
+                }));
+            }
+            Ok(None) => {
+                // Not a response — fall through to full decode
+            }
             Err(err) => {
-                let msg = if bytes.len() > 50 {
-                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
-                } else {
-                    format!("{bytes:02x?}")
-                };
-                debug!(
-                    version=?self.version,
-                    %msg,
-                    "failed to decode protocol message"
-                );
                 return Err(EthStreamError::InvalidMessage(err));
             }
-        };
+        }
+
+        let msg =
+            match ProtocolMessage::decode_message_full(self.version, &mut bytes.as_ref()) {
+                Ok(m) => m,
+                Err(err) => {
+                    let msg = if bytes.len() > 50 {
+                        format!(
+                            "{:02x?}...{:x?}",
+                            &bytes[..10],
+                            &bytes[bytes.len() - 10..]
+                        )
+                    } else {
+                        format!("{bytes:02x?}")
+                    };
+                    debug!(
+                        version=?self.version,
+                        %msg,
+                        "failed to decode protocol message"
+                    );
+                    return Err(EthStreamError::InvalidMessage(err));
+                }
+            };
 
         if matches!(msg.message, EthMessage::Status(_)) {
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));

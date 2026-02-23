@@ -5,9 +5,9 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
-    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
-    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage, extract_response_request_id},
+    DeferredResponseData, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
+    NetworkPrimitives, ProtocolMessage, RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
@@ -224,8 +224,29 @@ where
         // snap message IDs are > [`EthMessageID::max()`].
         // See also <https://github.com/paradigmxyz/reth/blob/main/crates/net/eth-wire/src/capability.rs#L272-L283>.
         if message_id <= EthMessageID::max(self.eth_version) {
+            // For response messages, defer full deserialization via zero-copy freeze().
+            match extract_response_request_id(self.eth_version, &bytes) {
+                Ok(Some((msg_id, request_id))) => {
+                    return Ok(EthSnapMessage::Eth(EthMessage::DeferredResponse(
+                        DeferredResponseData {
+                            message_id: msg_id,
+                            request_id,
+                            version: self.eth_version,
+                            raw_bytes: bytes.freeze(),
+                        },
+                    )));
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    return Err(EthSnapStreamError::InvalidMessage(
+                        self.eth_version,
+                        err.to_string(),
+                    ));
+                }
+            }
+
             let mut buf = bytes.as_ref();
-            match ProtocolMessage::decode_message(self.eth_version, &mut buf) {
+            match ProtocolMessage::decode_message_full(self.eth_version, &mut buf) {
                 Ok(protocol_msg) => {
                     if matches!(protocol_msg.message, EthMessage::Status(_)) {
                         return Err(EthSnapStreamError::StatusNotInHandshake);

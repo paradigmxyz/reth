@@ -17,10 +17,7 @@ use crate::{
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
-use alloy_primitives::{
-    bytes::{Buf, BufMut},
-    Bytes,
-};
+use alloy_primitives::bytes::{Buf, BufMut, Bytes};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::fmt::Debug;
 
@@ -43,6 +40,39 @@ pub enum MessageError {
     /// Other message error with custom message
     #[error("{0}")]
     Other(String),
+}
+
+/// Holds pre-extracted metadata and raw bytes for a response message whose full deserialization
+/// has been deferred.
+///
+/// When a peer sends a response (e.g. `BlockBodies`, `PooledTransactions`), we first extract only
+/// the lightweight envelope — the message ID and `request_id` — without decoding the potentially
+/// large payload. The session layer then validates the `request_id` against pending inflight
+/// requests *before* committing to the expensive full RLP decode. This prevents a `DoS` vector where
+/// an attacker sends large responses with bogus `request_id` values, forcing the node to allocate
+/// and immediately discard up to ~40 MB of heap per message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeferredResponseData {
+    /// The response message type ID.
+    pub message_id: EthMessageID,
+    /// The pre-extracted `request_id` from the [`RequestPair`] wrapper.
+    pub request_id: u64,
+    /// The protocol version needed for correct decoding.
+    pub version: EthVersion,
+    /// The complete raw message bytes (including the leading message-ID byte).
+    pub raw_bytes: Bytes,
+}
+
+impl DeferredResponseData {
+    /// Fully decodes the deferred response message.
+    ///
+    /// This should only be called after the `request_id` has been validated against pending
+    /// inflight requests.
+    pub fn decode_full<N: NetworkPrimitives>(self) -> Result<EthMessage<N>, MessageError> {
+        let mut buf: &[u8] = &self.raw_bytes;
+        let msg = ProtocolMessage::<N>::decode_message_full(self.version, &mut buf)?;
+        Ok(msg.message)
+    }
 }
 
 /// An `eth` protocol message, containing a message ID and payload.
@@ -83,10 +113,49 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         Ok(status)
     }
 
-    /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
+    /// Create a new `ProtocolMessage` from a message type and message RLP bytes.
     ///
-    /// This will enforce decoding according to the given [`EthVersion`] of the connection.
+    /// For response messages (those carrying a `request_id` in a [`RequestPair`] wrapper),
+    /// this performs only a lightweight extraction of the message ID and `request_id` — at most
+    /// 19 bytes of RLP parsing — and returns a [`EthMessage::DeferredResponse`]. The caller
+    /// (typically the session layer) should validate the `request_id` against pending inflight
+    /// requests before calling [`DeferredResponseData::decode_full`] to complete the expensive
+    /// deserialization.
+    ///
+    /// Non-response messages (status, broadcasts, requests) are fully decoded immediately.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
+        let original_buf = *buf;
+
+        // For response messages, defer full deserialization: extract only the message ID
+        // and request_id so the session layer can validate before paying the decode cost.
+        match extract_response_request_id(version, original_buf) {
+            Ok(Some((message_id, request_id))) => {
+                // Advance the caller's buffer past the entire message
+                *buf = &[];
+                return Ok(Self {
+                    message_type: message_id,
+                    message: EthMessage::DeferredResponse(DeferredResponseData {
+                        message_id,
+                        request_id,
+                        version,
+                        raw_bytes: Bytes::copy_from_slice(original_buf),
+                    }),
+                });
+            }
+            Ok(None) => {
+                // Not a response — fall through to full decode below
+            }
+            Err(e) => return Err(e),
+        }
+
+        Self::decode_message_full(version, buf)
+    }
+
+    /// Fully decodes a protocol message without deferred-response optimisation.
+    ///
+    /// Used internally to complete the decode of a [`DeferredResponseData`] after its
+    /// `request_id` has been validated, and as the regular decode path for non-response messages.
+    pub fn decode_message_full(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
@@ -191,6 +260,48 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         };
         Ok(Self { message_type, message })
     }
+}
+
+/// Extracts the `request_id` from a response message's raw bytes without full deserialization.
+///
+/// Returns `Ok(Some((message_id, request_id)))` for response messages, `Ok(None)` for
+/// non-response messages (broadcasts, requests, status). The bytes should start with the
+/// 1-byte [`EthMessageID`], followed by the RLP-encoded [`RequestPair`]:
+/// `[list_header][u64 request_id][payload]`.
+///
+/// Total parsing cost: at most 19 bytes (1 msg ID + 9 list header + 9 u64), regardless of
+/// message size.
+pub fn extract_response_request_id(
+    version: EthVersion,
+    bytes: &[u8],
+) -> Result<Option<(EthMessageID, u64)>, MessageError> {
+    if bytes.is_empty() {
+        return Err(MessageError::RlpError(alloy_rlp::Error::InputTooShort));
+    }
+
+    let mut buf = bytes;
+    let message_id = EthMessageID::decode(&mut buf)?;
+
+    if !message_id.is_response() {
+        return Ok(None);
+    }
+
+    // Version-gating: reject message IDs that are invalid for this protocol version
+    match message_id {
+        EthMessageID::NodeData if version >= EthVersion::Eth67 => {
+            return Err(MessageError::Invalid(version, message_id));
+        }
+        EthMessageID::BlockAccessLists if version < EthVersion::Eth71 => {
+            return Err(MessageError::Invalid(version, message_id));
+        }
+        _ => {}
+    }
+
+    // Decode only the RLP list header and the u64 request_id from the RequestPair envelope
+    let _header = Header::decode(&mut buf)?;
+    let request_id = u64::decode(&mut buf)?;
+
+    Ok(Some((message_id, request_id)))
 }
 
 impl<N: NetworkPrimitives> Encodable for ProtocolMessage<N> {
@@ -356,6 +467,10 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     BlockRangeUpdate(BlockRangeUpdate),
+    /// A response message where only the `request_id` has been extracted; full deserialization is
+    /// deferred until the session layer validates the `request_id` against inflight requests.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    DeferredResponse(DeferredResponseData),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -384,6 +499,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockRangeUpdate(_) => EthMessageID::BlockRangeUpdate,
             Self::GetBlockAccessLists(_) => EthMessageID::GetBlockAccessLists,
             Self::BlockAccessLists(_) => EthMessageID::BlockAccessLists,
+            Self::DeferredResponse(data) => data.message_id,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -413,7 +529,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::BlockAccessLists(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
-                Self::NodeData(_)
+                Self::NodeData(_) |
+                Self::DeferredResponse(_)
         )
     }
 
@@ -471,6 +588,11 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::Receipts70(receipt70) => receipt70.encode(out),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
+            Self::DeferredResponse(data) => {
+                // Write the raw payload bytes (everything after the message-ID byte which
+                // is prepended by ProtocolMessage::encode).
+                out.put_slice(&data.raw_bytes[1..]);
+            }
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -498,6 +620,8 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::Receipts70(receipt70) => receipt70.length(),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
+            // raw_bytes includes the 1-byte message ID; ProtocolMessage adds that separately
+            Self::DeferredResponse(data) => data.raw_bytes.len() - 1,
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -642,6 +766,20 @@ impl EthMessageID {
     pub const fn message_count(version: EthVersion) -> u8 {
         Self::max(version) + 1
     }
+
+    /// Returns `true` if this message ID corresponds to a response message
+    /// that carries a `request_id` in a [`RequestPair`] wrapper.
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::BlockHeaders |
+                Self::BlockBodies |
+                Self::PooledTransactions |
+                Self::NodeData |
+                Self::Receipts |
+                Self::BlockAccessLists
+        )
+    }
 }
 
 impl Encodable for EthMessageID {
@@ -782,11 +920,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::MessageError;
+    use super::{extract_response_request_id, MessageError};
     use crate::{
-        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
-        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        message::RequestPair, BlockAccessLists, BlockHeaders, EthMessage, EthMessageID,
+        EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetBlockBodies, GetNodeData,
+        NodeData, PooledTransactions, ProtocolMessage, RawCapabilityMessage,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -926,21 +1064,35 @@ mod tests {
 
     #[test]
     fn empty_block_bodies_protocol() {
-        let empty_block_bodies =
+        let original =
             ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
                 request_id: 0,
                 message: Default::default(),
             }));
         let mut buf = Vec::new();
-        empty_block_bodies.encode(&mut buf);
-        let decoded =
-            ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
-        assert_eq!(empty_block_bodies, decoded);
+        original.encode(&mut buf);
+
+        // decode_message returns DeferredResponse for response messages
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut buf.as_slice(),
+        )
+        .unwrap();
+        let deferred = match decoded.message {
+            EthMessage::DeferredResponse(d) => d,
+            other => panic!("expected DeferredResponse, got {other:?}"),
+        };
+        assert_eq!(deferred.message_id, EthMessageID::BlockBodies);
+        assert_eq!(deferred.request_id, 0);
+
+        // Full decode produces the original message
+        let fully_decoded = deferred.decode_full::<EthNetworkPrimitives>().unwrap();
+        assert_eq!(original.message, fully_decoded);
     }
 
     #[test]
     fn empty_block_body_protocol() {
-        let empty_block_bodies =
+        let original =
             ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
                 request_id: 0,
                 message: vec![BlockBody {
@@ -951,21 +1103,50 @@ mod tests {
                 .into(),
             }));
         let mut buf = Vec::new();
-        empty_block_bodies.encode(&mut buf);
-        let decoded =
-            ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
-        assert_eq!(empty_block_bodies, decoded);
+        original.encode(&mut buf);
+
+        // decode_message returns DeferredResponse for response messages
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut buf.as_slice(),
+        )
+        .unwrap();
+        let deferred = match decoded.message {
+            EthMessage::DeferredResponse(d) => d,
+            other => panic!("expected DeferredResponse, got {other:?}"),
+        };
+        assert_eq!(deferred.message_id, EthMessageID::BlockBodies);
+        assert_eq!(deferred.request_id, 0);
+
+        // Full decode produces the original message
+        let fully_decoded = deferred.decode_full::<EthNetworkPrimitives>().unwrap();
+        assert_eq!(original.message, fully_decoded);
     }
 
     #[test]
     fn decode_block_bodies_message() {
+        // 06: BlockBodies message ID
+        // c4: RLP list header (len 4)
+        // 81 99: request_id = 0x99 (153)
+        // c1 c0: payload (too short for valid BlockBodies)
         let buf = hex!("06c48199c1c0");
-        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+
+        // extract_response_request_id succeeds (only reads the envelope)
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
             EthVersion::Eth68,
             &mut &buf[..],
         )
-        .unwrap_err();
-        assert!(matches!(msg, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
+        .unwrap();
+        let deferred = match decoded.message {
+            EthMessage::DeferredResponse(d) => d,
+            other => panic!("expected DeferredResponse, got {other:?}"),
+        };
+        assert_eq!(deferred.message_id, EthMessageID::BlockBodies);
+        assert_eq!(deferred.request_id, 0x99);
+
+        // Full decode fails because the payload is malformed
+        let err = deferred.decode_full::<EthNetworkPrimitives>().unwrap_err();
+        assert!(matches!(err, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
     }
 
     #[test]
@@ -1060,5 +1241,190 @@ mod tests {
             result,
             Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
         ));
+    }
+
+    // --- Deferred response tests ---
+
+    #[test]
+    fn extract_request_id_from_block_headers_response() {
+        let msg =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockHeaders(RequestPair {
+                request_id: 42,
+                message: BlockHeaders(vec![]),
+            }));
+        let buf = encode(msg);
+
+        let result = extract_response_request_id(EthVersion::Eth68, &buf).unwrap();
+        assert_eq!(result, Some((EthMessageID::BlockHeaders, 42)));
+    }
+
+    #[test]
+    fn extract_request_id_from_pooled_transactions_response() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::PooledTransactions(
+            RequestPair { request_id: 1337, message: PooledTransactions(vec![]) },
+        ));
+        let buf = encode(msg);
+
+        let result = extract_response_request_id(EthVersion::Eth68, &buf).unwrap();
+        assert_eq!(result, Some((EthMessageID::PooledTransactions, 1337)));
+    }
+
+    #[test]
+    fn extract_request_id_returns_none_for_requests() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::GetBlockBodies(
+            RequestPair { request_id: 1, message: GetBlockBodies::default() },
+        ));
+        let buf = encode(msg);
+
+        let result = extract_response_request_id(EthVersion::Eth68, &buf).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn extract_request_id_returns_none_for_broadcasts() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
+            crate::NewBlockHashes(vec![]),
+        ));
+        let buf = encode(msg);
+
+        let result = extract_response_request_id(EthVersion::Eth68, &buf).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn extract_request_id_version_gates_node_data() {
+        let msg =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::NodeData(RequestPair {
+                request_id: 1,
+                message: NodeData(vec![]),
+            }));
+        let buf = encode(msg);
+
+        // NodeData is invalid for eth/67+
+        let err = extract_response_request_id(EthVersion::Eth67, &buf).unwrap_err();
+        assert!(matches!(err, MessageError::Invalid(EthVersion::Eth67, EthMessageID::NodeData)));
+
+        // NodeData is valid for eth/66
+        let result = extract_response_request_id(EthVersion::Eth66, &buf).unwrap();
+        assert_eq!(result, Some((EthMessageID::NodeData, 1)));
+    }
+
+    #[test]
+    fn extract_request_id_version_gates_block_access_lists() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockAccessLists(
+            RequestPair { request_id: 1, message: BlockAccessLists(vec![]) },
+        ));
+        let buf = encode(msg);
+
+        // BlockAccessLists is invalid for eth/70 (< eth/71)
+        let err = extract_response_request_id(EthVersion::Eth70, &buf).unwrap_err();
+        assert!(matches!(
+            err,
+            MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists)
+        ));
+
+        // BlockAccessLists is valid for eth/71
+        let result = extract_response_request_id(EthVersion::Eth71, &buf).unwrap();
+        assert_eq!(result, Some((EthMessageID::BlockAccessLists, 1)));
+    }
+
+    #[test]
+    fn deferred_response_decode_full_roundtrip() {
+        let original_msg = EthMessage::<EthNetworkPrimitives>::BlockHeaders(RequestPair {
+            request_id: 999,
+            message: BlockHeaders(vec![]),
+        });
+        let protocol_msg = ProtocolMessage::from(original_msg.clone());
+        let buf = encode(protocol_msg);
+
+        // Go through decode_message → DeferredResponse → decode_full
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &buf[..],
+        )
+        .unwrap();
+
+        let deferred = match decoded.message {
+            EthMessage::DeferredResponse(d) => d,
+            other => panic!("expected DeferredResponse, got {other:?}"),
+        };
+        assert_eq!(deferred.request_id, 999);
+        assert_eq!(deferred.message_id, EthMessageID::BlockHeaders);
+
+        let fully_decoded = deferred.decode_full::<EthNetworkPrimitives>().unwrap();
+        assert_eq!(fully_decoded, original_msg);
+    }
+
+    #[test]
+    fn deferred_response_preserves_raw_bytes_for_re_encoding() {
+        let msg =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id: 7,
+                message: Default::default(),
+            }));
+        let original_encoded = encode(msg);
+
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &original_encoded[..],
+        )
+        .unwrap();
+
+        // Re-encoding the DeferredResponse should produce the same bytes
+        let re_encoded = encode(decoded);
+        assert_eq!(original_encoded, re_encoded);
+    }
+
+    #[test]
+    fn requests_are_not_deferred() {
+        // GetBlockHeaders is a request, not a response — should be fully decoded immediately
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::GetBlockHeaders(
+            RequestPair {
+                request_id: 5,
+                message: crate::GetBlockHeaders {
+                    start_block: alloy_primitives::B256::ZERO.into(),
+                    limit: 10,
+                    skip: 0,
+                    direction: crate::HeadersDirection::Falling,
+                },
+            },
+        ));
+        let buf = encode(msg);
+
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &buf[..],
+        )
+        .unwrap();
+        assert!(
+            !matches!(decoded.message, EthMessage::DeferredResponse(_)),
+            "request messages should not be deferred"
+        );
+        assert_eq!(decoded.message_type, EthMessageID::GetBlockHeaders);
+    }
+
+    #[test]
+    fn decode_message_full_bypasses_deferral() {
+        let original =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id: 0,
+                message: Default::default(),
+            }));
+        let mut buf = Vec::new();
+        original.encode(&mut buf);
+
+        // decode_message_full should return the fully decoded message directly
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message_full(
+            EthVersion::Eth68,
+            &mut buf.as_slice(),
+        )
+        .unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn extract_request_id_empty_input() {
+        let result = extract_response_request_id(EthVersion::Eth68, &[]);
+        assert!(matches!(result, Err(MessageError::RlpError(alloy_rlp::Error::InputTooShort))));
     }
 }

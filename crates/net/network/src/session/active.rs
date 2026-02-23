@@ -316,6 +316,33 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
                 OnIncomingMessageOutcome::Ok
             }
+            EthMessage::DeferredResponse(deferred) => {
+                // Validate the pre-extracted request_id before paying the cost of full
+                // RLP deserialization — prevents a DoS vector where an attacker sends
+                // large response messages with bogus request_ids.
+                if !self.inflight_requests.contains_key(&deferred.request_id) {
+                    trace!(
+                        peer_id=?self.remote_peer_id,
+                        request_id=?deferred.request_id,
+                        msg_id=?deferred.message_id,
+                        "received response with unknown request_id, skipping full decode"
+                    );
+                    self.on_bad_message();
+                    return OnIncomingMessageOutcome::Ok;
+                }
+
+                // request_id matches an inflight request — perform full decode now
+                match deferred.decode_full::<N>() {
+                    Ok(fully_decoded) => self.on_incoming_message(fully_decoded),
+                    Err(err) => OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(err),
+                        message: EthMessage::Other(RawCapabilityMessage::new(
+                            0,
+                            Default::default(),
+                        )),
+                    },
+                }
+            }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
