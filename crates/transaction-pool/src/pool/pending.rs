@@ -568,6 +568,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             .map(|(tx_id, _)| tx_id)
     }
 
+    /// Returns all transactions for the given sender, using a `BTree` range query.
+    pub(crate) fn txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| tx.transaction.clone())
+            .collect()
+    }
+
     /// Retrieves a transaction with the given ID from the pool, if it exists.
     fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.by_id.get(id)

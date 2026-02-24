@@ -939,10 +939,13 @@ impl PeersManager {
         self.trusted_peer_ids.remove(&peer_id);
     }
 
-    /// Returns the idle peer with the highest reputation.
+    /// Returns the best idle peer to connect to.
     ///
     /// Peers that are `trusted` or `static`, see [`PeerKind`], are prioritized as long as they're
     /// not currently marked as banned or backed off.
+    ///
+    /// Among remaining peers, the one with the highest reputation is selected. When reputation is
+    /// equal, a peer with a discovered `fork_id` is preferred since it indicates a compatible fork.
     ///
     /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
     /// `trusted` peers.
@@ -969,9 +972,15 @@ impl PeersManager {
                 return Some((*maybe_better.0, maybe_better.1))
             }
 
-            // otherwise we keep track of the best peer using the reputation
-            if maybe_better.1.reputation > best_peer.1.reputation {
-                best_peer = maybe_better;
+            // prefer higher reputation, break ties by fork_id presence
+            match maybe_better.1.reputation.cmp(&best_peer.1.reputation) {
+                std::cmp::Ordering::Greater => best_peer = maybe_better,
+                std::cmp::Ordering::Equal
+                    if maybe_better.1.fork_id.is_some() && best_peer.1.fork_id.is_none() =>
+                {
+                    best_peer = maybe_better
+                }
+                _ => {}
             }
         }
         Some((*best_peer.0, best_peer.1))
@@ -1294,6 +1303,7 @@ mod tests {
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
     };
+    use reth_ethereum_forks::{ForkHash, ForkId};
     use reth_net_banlist::BanList;
     use reth_network_api::Direction;
     use reth_network_peers::{PeerId, TrustedPeer};
@@ -3237,5 +3247,24 @@ mod tests {
         assert!(peers.on_incoming_pending_session(ip1).is_ok());
         assert!(peers.on_incoming_pending_session(ip2).is_ok());
         assert!(peers.on_incoming_pending_session(ip3).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_best_unconnected_prefers_fork_id_as_tiebreaker() {
+        let mut peers = PeersManager::default();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8008);
+
+        let fork_id = ForkId { hash: ForkHash([0xaa, 0xbb, 0xcc, 0xdd]), next: 0 };
+
+        // add two peers with equal reputation, only one has a fork_id
+        let no_fork = PeerId::random();
+        peers.add_peer(no_fork, PeerAddr::from_tcp(addr), None);
+
+        let with_fork = PeerId::random();
+        peers.add_peer(with_fork, PeerAddr::from_tcp(addr), None);
+        peers.peers.get_mut(&with_fork).unwrap().fork_id = Some(Box::new(fork_id));
+
+        let (best_id, _) = peers.best_unconnected().unwrap();
+        assert_eq!(best_id, with_fork, "fork_id should break tie when reputation is equal");
     }
 }
