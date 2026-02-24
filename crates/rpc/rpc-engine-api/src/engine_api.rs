@@ -26,9 +26,7 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::{
-    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethPayloadStatus,
-};
+use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -258,34 +256,6 @@ where
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
-    }
-
-    /// Waits for persistence, execution cache, and sparse trie locks before processing.
-    ///
-    /// Used by `reth_newPayload` endpoint.
-    pub async fn reth_new_payload(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
-        let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
-        Ok(RethPayloadStatus {
-            status,
-            latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
-            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
-            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
-        })
-    }
-
-    /// Metered version of `reth_new_payload`.
-    pub async fn reth_new_payload_metered(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> RpcResult<RethPayloadStatus> {
-        let start = Instant::now();
-        let res = Self::reth_new_payload(self, payload).await;
-        self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
-        Ok(res?)
     }
 }
 
@@ -1313,40 +1283,14 @@ where
     }
 }
 
-/// Implementation of `RethEngineApiServer` under the `reth_` namespace.
-///
-/// Waits for execution cache and sparse trie locks before processing.
-#[async_trait]
-impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer
-    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
-where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = ExecutionData>,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EngineT>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
-{
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayload");
-        self.reth_new_payload_metered(payload).await
-    }
-}
-
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
-    Self: EngineApiServer<EngineT> + RethEngineApiServer,
+    Self: EngineApiServer<EngineT>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
-        let mut module = EngineApiServer::<EngineT>::into_rpc(self.clone()).remove_context();
-
-        // Merge reth_newPayload endpoint
-        module
-            .merge(RethEngineApiServer::into_rpc(self).remove_context())
-            .expect("No conflicting methods");
-
-        module
+        EngineApiServer::<EngineT>::into_rpc(self).remove_context()
     }
 }
 
