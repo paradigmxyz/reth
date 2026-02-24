@@ -1385,6 +1385,38 @@ fn collapse_branch(
     arena.remove(branch_idx);
 }
 
+/// Recursively migrates all nodes from `src` into `dst`, starting at `src_idx`.
+/// Branch children's `Revealed` indices are remapped to the new `dst` indices during
+/// the migration.
+///
+/// If `dst_slot` is `Some(idx)`, the node at `src_idx` is placed into `dst[idx]`
+/// (overwriting); otherwise a new slot is allocated. Returns the `dst` index of the
+/// migrated node.
+fn migrate_nodes(
+    dst: &mut Arena<ArenaSparseNode>,
+    src: &mut Arena<ArenaSparseNode>,
+    src_idx: Index,
+    dst_slot: Option<Index>,
+) -> Index {
+    let mut node = src.remove(src_idx).unwrap();
+
+    // Recursively migrate children first so their new indices are known.
+    if let ArenaSparseNode::Branch(b) = &mut node {
+        for child in &mut b.children {
+            if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
+                *child_idx = migrate_nodes(dst, src, *child_idx, None);
+            }
+        }
+    }
+
+    if let Some(slot) = dst_slot {
+        dst[slot] = node;
+        slot
+    } else {
+        dst.insert(node)
+    }
+}
+
 /// Reveals a single proof node using a pre-computed [`FindAncestorResult`] from
 /// [`find_ancestor`].
 ///
@@ -1538,9 +1570,10 @@ impl ArenaParallelSparseTrie {
             .collect()
     }
 
-    /// Takes a cleared [`ArenaSparseSubtrie`] from the pool, or creates a new one with the given
-    /// root node and its absolute path in the full trie.
-    fn take_or_create_subtrie(&mut self, root: ArenaSparseNode) -> Box<ArenaSparseSubtrie> {
+    /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
+    /// pre-allocates a root slot with a placeholder. The caller must overwrite
+    /// `subtrie.arena[subtrie.root]` before use.
+    fn take_or_create_cleared_subtrie(&mut self) -> Box<ArenaSparseSubtrie> {
         let mut subtrie = if let Some(s) = self.cleared_subtries.pop() {
             debug_assert!(s.arena.is_empty());
             s
@@ -1552,7 +1585,7 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
             }
         };
-        subtrie.root = subtrie.arena.insert(root);
+        subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
         Box::new(subtrie)
     }
 
@@ -1585,9 +1618,20 @@ impl ArenaParallelSparseTrie {
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
-        let arena_node =
+        let mut subtrie = self.take_or_create_cleared_subtrie();
+        let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
-        let subtrie = self.take_or_create_subtrie(arena_node);
+
+        // Migrate any revealed children from the upper arena into the subtrie arena.
+        if let ArenaSparseNode::Branch(b) = &mut root_node {
+            for child in &mut b.children {
+                if let ArenaSparseNodeBranchChild::Revealed(idx) = child {
+                    *idx = migrate_nodes(&mut subtrie.arena, &mut self.upper_arena, *idx, None);
+                }
+            }
+        }
+
+        subtrie.arena[subtrie.root] = root_node;
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
 
@@ -1636,6 +1680,27 @@ impl ArenaParallelSparseTrie {
 
         if parent_branch.state_mask.count_bits() == 1 && !parent_branch.children[0].is_blinded() {
             collapse_branch(&mut self.upper_arena, stack, &mut self.root);
+
+            // After collapse, the remaining child (now at stack.last().index) may be a Subtrie
+            // whose path was shortened by the collapsed branch's prefix. Since
+            // should_be_subtrie requires path_len == UPPER_TRIE_MAX_DEPTH and the collapse
+            // made the path shorter, the subtrie is no longer eligible — unwrap it.
+            let child_idx = stack.last().unwrap().index;
+            if let ArenaSparseNode::Subtrie(_) = &self.upper_arena[child_idx] {
+                let ArenaSparseNode::Subtrie(mut subtrie) =
+                    mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie)
+                else {
+                    unreachable!()
+                };
+                migrate_nodes(
+                    &mut self.upper_arena,
+                    &mut subtrie.arena,
+                    subtrie.root,
+                    Some(child_idx),
+                );
+                subtrie.clear();
+                self.cleared_subtries.push(*subtrie);
+            }
         }
     }
 }
