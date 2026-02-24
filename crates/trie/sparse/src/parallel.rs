@@ -1235,8 +1235,14 @@ impl SparseTrie for ParallelSparseTrie {
                 SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
                     // For branch nodes at max depth, collapse all children onto them,
                     if depth == max_depth {
-                        let mut blinded_mask = *blinded_mask;
-                        let mut blinded_hashes = blinded_hashes.clone();
+                        // SAFETY: The branch node fields and the child nodes accessed in the
+                        // loop live in different subtries (parent at max_depth is in the upper
+                        // subtrie, children at max_depth+1 are in lower subtries), so the
+                        // mutable references do not alias.
+                        let state_mask = unsafe { decouple_lt::<TrieMask>(&*state_mask) };
+                        let blinded_mask = unsafe { decouple_lt_mut::<TrieMask>(blinded_mask) };
+                        let blinded_hashes =
+                            unsafe { decouple_lt_mut::<[B256; 16]>(blinded_hashes) };
                         for nibble in state_mask.iter() {
                             if blinded_mask.is_bit_set(nibble) {
                                 continue;
@@ -1261,22 +1267,6 @@ impl SparseTrie for ParallelSparseTrie {
                             blinded_hashes[nibble as usize] = hash;
                             effective_pruned_roots.push(child);
                         }
-
-                        let SparseNode::Branch {
-                            blinded_mask: old_blinded_mask,
-                            blinded_hashes: old_blinded_hashes,
-                            ..
-                        } = self
-                            .subtrie_for_path_mut_untracked(&path)
-                            .unwrap()
-                            .nodes
-                            .get_mut(&path)
-                            .unwrap()
-                        else {
-                            unreachable!("expected branch node at path {path:?}");
-                        };
-                        *old_blinded_mask = blinded_mask;
-                        *old_blinded_hashes = blinded_hashes;
                     } else {
                         for nibble in state_mask.iter() {
                             if blinded_mask.is_bit_set(nibble) {
@@ -8874,4 +8864,14 @@ mod tests {
         // Call root() to compute the trie root hash
         let _root = trie.root();
     }
+}
+
+/// Changes the lifetime of the given reference.
+unsafe fn decouple_lt<'a, T: ?Sized>(x: &T) -> &'a T {
+    unsafe { core::mem::transmute(x) }
+}
+
+/// Changes the lifetime of the given mutable reference.
+unsafe fn decouple_lt_mut<'a, T: ?Sized>(x: &mut T) -> &'a mut T {
+    unsafe { core::mem::transmute(x) }
 }
