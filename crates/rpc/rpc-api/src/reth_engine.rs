@@ -25,9 +25,6 @@ pub struct RethPayloadStatus {
 
 /// Input for `reth_newPayload` that accepts either `ExecutionData` directly or an RLP-encoded
 /// block.
-///
-/// When an RLP-encoded block is provided, it will be decoded and converted to `ExecutionData` via
-/// [`PayloadTypes::block_to_payload`](reth_payload_primitives::PayloadTypes::block_to_payload).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RethNewPayloadInput<ExecutionData> {
