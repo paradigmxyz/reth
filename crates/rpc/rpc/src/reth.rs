@@ -155,6 +155,12 @@ where
             return Ok(None)
         };
 
+        if start_block == 0 {
+            return Err(EthApiError::InvalidParams(
+                "cannot re-execute genesis block".into(),
+            ));
+        }
+
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
         let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
 
