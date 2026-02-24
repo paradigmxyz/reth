@@ -951,7 +951,7 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
-
+        tracing::info!("Genesis config from spec: {:?}", genesis.config);
         Self {
             chain: genesis.config.chain_id.into(),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(&genesis, &hardforks)),
