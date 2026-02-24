@@ -489,15 +489,14 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - not blob transaction (tx type mismatch)
     /// - wrong versioned kzg commitment hash
     fn on_bad_import(&mut self, err: PoolError) {
-        let peers = self.transactions_by_peers.remove(&err.hash);
-
         // if we're _currently_ syncing, we ignore a bad transaction
         if !err.is_bad_transaction() || self.network.is_syncing() {
             return
         }
+
         // otherwise we penalize the peer that sent the bad transaction, with the assumption that
         // the peer should have known that this transaction is bad (e.g. violating consensus rules)
-        if let Some(peers) = peers {
+        if let Some(peers) = self.transactions_by_peers.remove(&err.hash) {
             for peer_id in peers {
                 self.report_peer_bad_transactions(peer_id);
             }
