@@ -1,7 +1,7 @@
 //! Reth-specific engine API extensions.
 
 use alloy_primitives::Bytes;
-use alloy_rpc_types_engine::PayloadStatus;
+use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use serde::{Deserialize, Serialize};
 
@@ -53,4 +53,11 @@ pub trait RethEngineApi<ExecutionData> {
         &self,
         payload: RethNewPayloadInput<ExecutionData>,
     ) -> RpcResult<RethPayloadStatus>;
+
+    /// Reth-specific forkchoiceUpdated that sends a regular FCU with no payload attributes.
+    #[method(name = "forkchoiceUpdated")]
+    async fn reth_forkchoice_updated(
+        &self,
+        state: ForkchoiceState,
+    ) -> RpcResult<ForkchoiceUpdated>;
 }

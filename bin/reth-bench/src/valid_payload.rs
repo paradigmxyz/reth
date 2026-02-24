@@ -392,3 +392,53 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
         }
     }
 }
+
+/// Calls either `reth_forkchoiceUpdated` or the standard `engine_forkchoiceUpdated*` depending
+/// on `use_reth`.
+///
+/// When `use_reth` is true, uses the `reth_forkchoiceUpdated` endpoint which sends a regular FCU
+/// with no payload attributes and returns server-side timing breakdown.
+pub(crate) async fn call_forkchoice_updated_with_reth<
+    N: Network,
+    P: Provider<N> + EngineApiValidWaitExt<N>,
+>(
+    provider: P,
+    message_version: EngineApiMessageVersion,
+    forkchoice_state: ForkchoiceState,
+    use_reth: bool,
+) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
+    if use_reth {
+        let method = "reth_forkchoiceUpdated";
+        let reth_params = serde_json::to_value((forkchoice_state,))
+            .expect("ForkchoiceState serialization cannot fail");
+
+        debug!(target: "reth-bench", method, "Sending forkchoiceUpdated");
+
+        let mut resp: RethPayloadStatus = provider.client().request(method, &reth_params).await?;
+
+        while !resp.status.is_valid() {
+            if resp.status.is_invalid() {
+                error!(target: "reth-bench", status=?resp.status, "Invalid {method}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid {method}: {:?}", resp.status)),
+                )))
+            }
+            if resp.status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            resp = provider.client().request(method, &reth_params).await?;
+        }
+
+        Ok(Some(NewPayloadTimingBreakdown {
+            latency: Duration::from_micros(resp.latency_us),
+            persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+            execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
+            sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+        }))
+    } else {
+        call_forkchoice_updated(provider, message_version, forkchoice_state, None).await?;
+        Ok(None)
+    }
+}

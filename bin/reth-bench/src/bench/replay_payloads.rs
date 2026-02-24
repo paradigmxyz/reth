@@ -24,10 +24,10 @@ use crate::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload_with_reth},
+    valid_payload::{call_forkchoice_updated_with_reth, call_new_payload_with_reth},
 };
 use alloy_primitives::B256;
-use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
@@ -184,7 +184,7 @@ impl Command {
             );
         }
         if self.reth_new_payload {
-            info!("Using reth_newPayload endpoint");
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
         }
 
         // Set up waiter based on configured options
@@ -288,7 +288,13 @@ impl Command {
                 safe_block_hash: parent_hash,
                 finalized_block_hash: parent_hash,
             };
-            call_forkchoice_updated(&auth_provider, payload.version, fcu_state, None).await?;
+            call_forkchoice_updated_with_reth(
+                &auth_provider,
+                payload.version,
+                fcu_state,
+                self.reth_new_payload,
+            )
+            .await?;
 
             info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
 
@@ -384,11 +390,18 @@ impl Command {
                 finalized_block_hash: parent_hash,
             };
 
-            debug!(target: "reth-bench", method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
-
             let fcu_start = Instant::now();
-            let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
-            let fcu_latency = fcu_start.elapsed();
+            let fcu_server_timings = call_forkchoice_updated_with_reth(
+                &auth_provider,
+                EngineApiMessageVersion::V4,
+                fcu_state,
+                self.reth_new_payload,
+            )
+            .await?;
+            let fcu_latency = fcu_server_timings
+                .as_ref()
+                .map(|t| t.latency)
+                .unwrap_or_else(|| fcu_start.elapsed());
 
             let total_latency =
                 if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
@@ -420,7 +433,6 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
-            debug!(target: "reth-bench", ?fcu_result, "Payload executed successfully");
             parent_hash = block_hash;
         }
 
