@@ -20,9 +20,8 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_evm::Database;
 use alloy_primitives::{keccak256, StorageKey, B256};
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -33,11 +32,11 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_tasks::Runtime;
+use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc::{self, channel, Receiver, Sender, SyncSender},
+    mpsc::{self, channel, Receiver, Sender},
     Arc,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
@@ -52,15 +51,6 @@ pub enum PrewarmMode<Tx> {
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
-}
-
-/// A wrapper for transactions that includes their index in the block.
-#[derive(Clone)]
-struct IndexedTransaction<Tx> {
-    /// The transaction index in the block.
-    index: usize,
-    /// The wrapped transaction.
-    tx: Tx,
 }
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
@@ -122,44 +112,49 @@ where
         )
     }
 
-    /// Spawns all pending transactions as blocking tasks by first chunking them.
+    /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// For Optimism chains, special handling is applied to the first transaction if it's a
-    /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
-    /// subsequent transactions in the block.
+    /// Kicks off EVM init on every pool thread (non-blocking), then immediately starts
+    /// dispatching transactions as they arrive from sig recovery. If a tx lands on a
+    /// thread before its init finishes, [`Worker::get_or_init`] handles it lazily.
     fn spawn_all<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let executor = self.executor.clone();
-        let ctx = self.ctx.clone();
+        let ctx = Arc::new(self.ctx.clone());
         let span = Span::current();
 
-        self.executor.spawn_blocking_named("prewarm-spawn", move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
+        self.executor.spawn_blocking_named("prewarm-txs", move || {
+            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "prewarm_txs").entered();
 
-            let pool_threads = executor.prewarming_pool().current_num_threads();
-            // Don't spawn more workers than transactions. When transaction_count is 0
-            // (unknown), use all pool threads.
-            let workers_needed = if ctx.env.transaction_count > 0 {
-                ctx.env.transaction_count.min(pool_threads)
-            } else {
-                pool_threads
-            };
+            let pool = executor.prewarming_pool();
 
-            let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
+            // Kick off EVM init on every pool thread without blocking the recv loop.
+            {
+                let ctx = Arc::clone(&ctx);
+                pool.spawn(move || {
+                    rayon::broadcast(|_| {
+                        WorkerPool::with_worker_mut(|worker| {
+                            worker.init::<PrewarmEvmState<Evm>>(|_| {
+                                PrewarmContext::clone(&ctx).evm_for_ctx()
+                            });
+                        });
+                    });
+                });
+            }
 
-            // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
+            // Track completion of spawned tasks.
+            let (done_tx, done_rx) = mpsc::sync_channel::<()>(pool.current_num_threads());
 
-            // Distribute transactions to workers
+            // Stream transactions: spawn each onto the pool as it arrives.
             let mut tx_count = 0usize;
-            while let Ok((tx_index, tx)) = pending.recv() {
-                // Stop distributing if termination was requested
+            let parent_span = Span::current();
+            while let Ok((index, tx)) = pending.recv() {
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
@@ -168,33 +163,95 @@ where
                     break;
                 }
 
-                let indexed_tx = IndexedTransaction { index: tx_index, tx };
-
-                // Send transaction to the workers
-                // Ignore send errors: workers listen to terminate_execution and may
-                // exit early when signaled.
-                let _ = tx_sender.send(indexed_tx);
-
                 tx_count += 1;
+                let to_multi_proof = to_multi_proof.clone();
+                let done_tx = done_tx.clone();
+                let span = debug_span!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    parent: &parent_span,
+                    "prewarm_tx",
+                    i = index,
+                );
+                pool.spawn(move || {
+                    let _enter = span.entered();
+                    Self::transact_worker(index, tx, to_multi_proof.as_ref());
+                    drop(done_tx);
+                });
             }
 
-            // Send withdrawal prefetch targets after all transactions have been distributed
-            if let Some(to_multi_proof) = to_multi_proof
+            // Send withdrawal prefetch targets after all transactions have been dispatched
+            if let Some(to_multi_proof) = &to_multi_proof
                 && let Some(withdrawals) = &ctx.env.withdrawals
                 && !withdrawals.is_empty()
             {
                 let targets = multiproof_targets_from_withdrawals(withdrawals);
-                let _ = to_multi_proof
-                    .send(MultiProofMessage::PrefetchProofs(targets));
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
             }
 
-            // drop sender and wait for all tasks to finish
+            // Wait for all spawned tasks to finish, then drop per-thread EVM state
+            // so it doesn't leak into the next block.
             drop(done_tx);
-            drop(tx_sender);
             while done_rx.recv().is_ok() {}
+            pool.clear();
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
+        });
+    }
+
+    /// Executes a single prewarm transaction on the current pool thread's EVM.
+    ///
+    /// Expects per-thread [`PrewarmEvmState`] to already be initialised via
+    /// the init spawns in [`spawn_all`](Self::spawn_all).
+    fn transact_worker<Tx>(
+        index: usize,
+        tx: Tx,
+        to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        WorkerPool::with_worker_mut(|worker| {
+            let (evm, metrics, terminate_execution) = worker
+                .get_mut::<PrewarmEvmState<Evm>>()
+                .as_mut()
+                .expect("prewarm worker EVM state not initialized");
+
+            if terminate_execution.load(Ordering::Relaxed) {
+                return;
+            }
+
+            let start = Instant::now();
+
+            let (tx_env, tx) = tx.into_parts();
+            let res = match evm.transact(tx_env) {
+                Ok(res) => res,
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        tx_hash=%tx.tx().tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
+                    metrics.transaction_errors.increment(1);
+                    return;
+                }
+            };
+            metrics.execution_duration.record(start.elapsed());
+
+            if terminate_execution.load(Ordering::Relaxed) {
+                return;
+            }
+
+            if index > 0 {
+                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                metrics.prefetch_storage_targets.record(storage_targets as f64);
+                if let Some(to_multi_proof) = to_multi_proof {
+                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                }
+            }
+
+            metrics.total_runtime.record(start.elapsed());
         });
     }
 
@@ -370,7 +427,7 @@ where
     )]
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         // Spawn execution tasks based on mode
         match mode {
@@ -454,6 +511,14 @@ where
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
+/// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
+/// [`WorkerPool`] workers via [`Worker::init`](reth_tasks::pool::Worker::init).
+type PrewarmEvmState<Evm> = Option<(
+    EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
+    PrewarmMetrics,
+    Arc<AtomicBool>,
+)>;
+
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
@@ -462,7 +527,7 @@ where
 {
     /// Splits this context into an evm, metrics, and the atomic bool for terminating execution.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
+    fn evm_for_ctx(self) -> PrewarmEvmState<Evm> {
         let Self {
             env,
             evm_config,
@@ -523,115 +588,6 @@ where
         }
 
         Some((evm, metrics, terminate_execution))
-    }
-
-    /// Accepts a [`CrossbeamReceiver`] of transactions and a handle to prewarm task. Executes
-    /// transactions and streams [`MultiProofMessage::PrefetchProofs`] messages for each
-    /// transaction.
-    ///
-    /// This function processes transactions sequentially from the receiver and emits outcome events
-    /// via the provided sender. Execution errors are logged and tracked but do not stop the batch
-    /// processing unless the task is explicitly cancelled.
-    ///
-    /// Note: There are no ordering guarantees; this does not reflect the state produced by
-    /// sequential execution.
-    fn transact_batch<Tx>(
-        self,
-        txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: SyncSender<()>,
-    ) where
-        Tx: ExecutableTxFor<Evm>,
-    {
-        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
-
-        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
-            let _enter = debug_span!(
-                target: "engine::tree::payload_processor::prewarm",
-                "prewarm tx",
-                i=index,
-            )
-            .entered();
-
-            // create the tx env
-            let start = Instant::now();
-
-            // If the task was cancelled, stop execution, and exit.
-            if terminate_execution.load(Ordering::Relaxed) {
-                break
-            }
-
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    // Track transaction execution errors
-                    metrics.transaction_errors.increment(1);
-                    // skip error because we can ignore these errors and continue with the next tx
-                    continue
-                }
-            };
-            metrics.execution_duration.record(start.elapsed());
-
-            // If the task was cancelled, stop execution, and exit.
-            if terminate_execution.load(Ordering::Relaxed) {
-                break
-            }
-
-            // Only send outcome for transactions after the first txn
-            // as the main execution will be just as fast
-            if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-                metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_multi_proof) = &to_multi_proof {
-                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
-                }
-            }
-
-            metrics.total_runtime.record(start.elapsed());
-        }
-
-        // send a message to the main task to flag that we're done
-        let _ = done_tx.send(());
-    }
-
-    /// Spawns worker tasks that pull transactions from a shared channel.
-    ///
-    /// Returns the sender for distributing transactions to workers.
-    fn spawn_workers<Tx>(
-        self,
-        workers_needed: usize,
-        task_executor: &Runtime,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: SyncSender<()>,
-    ) -> CrossbeamSender<IndexedTransaction<Tx>>
-    where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
-    {
-        let (tx_sender, tx_receiver) = crossbeam_channel::unbounded();
-
-        // Spawn workers that all pull from the shared receiver
-        let span = Span::current();
-        for idx in 0..workers_needed {
-            let ctx = self.clone();
-            let to_multi_proof = to_multi_proof.clone();
-            let done_tx = done_tx.clone();
-            let rx = tx_receiver.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm_worker", idx);
-            task_executor.prewarming_pool().spawn(move || {
-                let _enter = span.entered();
-                ctx.transact_batch(rx, to_multi_proof, done_tx);
-            });
-        }
-
-        tx_sender
     }
 
     /// Prefetches a single account and all its storage slots from the BAL into the cache.
