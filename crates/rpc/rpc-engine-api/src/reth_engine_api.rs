@@ -18,7 +18,7 @@ pub struct RethEngineApi<Payload: PayloadTypes> {
 
 impl<Payload: PayloadTypes> RethEngineApi<Payload> {
     /// Creates a new [`RethEngineApi`].
-    pub fn new(beacon_engine_handle: ConsensusEngineHandle<Payload>) -> Self {
+    pub const fn new(beacon_engine_handle: ConsensusEngineHandle<Payload>) -> Self {
         Self { beacon_engine_handle }
     }
 }
