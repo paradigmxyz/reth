@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -448,9 +448,9 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DecodedMultiProofV2 {
     /// Account trie proof nodes
-    pub account_proofs: Vec<ProofTrieNode>,
+    pub account_proofs: Vec<ProofTrieNodeV2>,
     /// Storage trie proof nodes indexed by account
-    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
+    pub storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
 }
 
 impl DecodedMultiProofV2 {
@@ -475,6 +475,34 @@ impl DecodedMultiProofV2 {
             }
         }
     }
+}
+
+impl From<DecodedMultiProof> for DecodedMultiProofV2 {
+    fn from(proof: DecodedMultiProof) -> Self {
+        let account_proofs =
+            decoded_proof_nodes_to_v2(proof.account_subtree, &proof.branch_node_masks);
+        let storage_proofs = proof
+            .storages
+            .into_iter()
+            .map(|(address, storage)| {
+                (address, decoded_proof_nodes_to_v2(storage.subtree, &storage.branch_node_masks))
+            })
+            .collect();
+        Self { account_proofs, storage_proofs }
+    }
+}
+
+/// Converts a [`DecodedProofNodes`] (path → [`TrieNode`] map) into a `Vec<ProofTrieNodeV2>`,
+/// merging extension nodes into their child branch nodes.
+fn decoded_proof_nodes_to_v2(
+    nodes: DecodedProofNodes,
+    masks: &BranchNodeMasksMap,
+) -> Vec<ProofTrieNodeV2> {
+    let mut sorted: Vec<_> = nodes.into_inner().into_iter().collect();
+    sorted.sort_unstable_by(|a, b| crate::depth_first_cmp(&a.0, &b.0));
+    ProofTrieNodeV2::from_sorted_trie_nodes(
+        sorted.into_iter().map(|(path, node)| (path, node, masks.get(&path).copied())),
+    )
 }
 
 /// The merkle multiproof of storage trie.

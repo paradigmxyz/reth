@@ -20,7 +20,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKin
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use std::{
     fmt,
     future::Future,
@@ -48,11 +48,11 @@ pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitive
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
+pub struct BasicPayloadJobGenerator<Client, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// The task executor to spawn payload building tasks on.
-    executor: Tasks,
+    executor: Runtime,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
     /// Restricts how many generator tasks can be executed at once.
@@ -67,12 +67,12 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
+impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     /// Creates a new [`BasicPayloadJobGenerator`] with the given config and custom
     /// [`PayloadBuilder`]
     pub fn with_builder(
         client: Client,
-        executor: Tasks,
+        executor: Runtime,
         config: BasicPayloadJobGeneratorConfig,
         builder: Builder,
     ) -> Self {
@@ -112,7 +112,7 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
     }
 
     /// Returns a reference to the tasks type
-    pub const fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Runtime {
         &self.executor
     }
 
@@ -125,20 +125,18 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Tasks, Builder> PayloadJobGenerator
-    for BasicPayloadJobGenerator<Client, Tasks, Builder>
+impl<Client, Builder> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Builder>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
         + 'static,
-    Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = BasicPayloadJob<Tasks, Builder>;
+    type Job = BasicPayloadJob<Builder>;
 
     fn new_payload_job(
         &self,
@@ -299,14 +297,14 @@ impl Default for BasicPayloadJobGeneratorConfig {
 /// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
 /// deadline is reached.
 #[derive(Debug)]
-pub struct BasicPayloadJob<Tasks, Builder>
+pub struct BasicPayloadJob<Builder>
 where
     Builder: PayloadBuilder,
 {
     /// The configuration for how the payload will be created.
     config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
-    executor: Tasks,
+    executor: Runtime,
     /// The deadline when this job should resolve.
     deadline: Pin<Box<Sleep>>,
     /// The interval at which the job should build a new payload after the last.
@@ -330,9 +328,8 @@ where
     builder: Builder,
 }
 
-impl<Tasks, Builder> BasicPayloadJob<Tasks, Builder>
+impl<Builder> BasicPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -349,22 +346,21 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking_task(Box::pin(async move {
+        self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
             let args =
                 BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
             let result = builder.try_build(args);
             let _ = tx.send(result);
-        }));
+        });
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
     }
 }
 
-impl<Tasks, Builder> Future for BasicPayloadJob<Tasks, Builder>
+impl<Builder> Future for BasicPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -425,9 +421,8 @@ where
     }
 }
 
-impl<Tasks, Builder> PayloadJob for BasicPayloadJob<Tasks, Builder>
+impl<Builder> PayloadJob for BasicPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -495,10 +490,10 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking_task(Box::pin(async move {
+                    self.executor.spawn_blocking_task(async move {
                         let res = builder.build_empty_payload(config);
                         let _ = tx.send(res);
-                    }));
+                    });
 
                     empty_payload = Some(rx);
                 }
@@ -506,9 +501,9 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking_task(Box::pin(async move {
+                    self.executor.spawn_blocking_task(async move {
                         let _ = tx.send(job());
-                    }));
+                    });
                     empty_payload = Some(rx);
                 }
             };

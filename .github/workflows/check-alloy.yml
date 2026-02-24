@@ -25,7 +25,7 @@ env:
 jobs:
   check:
     name: Check compilation with patched alloy
-    runs-on: depot-ubuntu-latest-16
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

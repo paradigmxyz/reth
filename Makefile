@@ -80,7 +80,7 @@ build-native-%:
 #
 # These commands require that:
 #
-# - `cross` is installed (`cargo install cross`).
+# - `cross` is installed (`cargo install --locked cross`).
 # - Docker is running.
 # - The current user is in the `docker` group.
 #
@@ -261,7 +261,7 @@ lint-typos: ensure-typos
 
 ensure-typos:
 	@if ! command -v typos &> /dev/null; then \
-		echo "typos not found. Please install it by running the command 'cargo install typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
+		echo "typos not found. Please install it by running the command 'cargo install --locked typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
 		exit 1; \
     fi
 
