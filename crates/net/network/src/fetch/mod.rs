@@ -300,6 +300,36 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Some(BlockResponseOutcome::Request(peer_id, req, request_id))
     }
 
+    /// Called when sending a request to a peer's session failed (e.g. channel full or closed).
+    ///
+    /// This cleans up the inflight state that was already recorded by
+    /// [`Self::prepare_block_request`] so the peer's capacity is not permanently leaked.
+    pub(crate) fn on_request_send_failed(&mut self, peer_id: &PeerId, request_id: u64) {
+        // Try to find and remove the inflight request from either map
+        let header_req = self.inflight_headers_requests.get_mut(peer_id).and_then(|requests| {
+            let pos = requests.iter().position(|(id, _)| *id == request_id)?;
+            Some(requests.swap_remove(pos).1)
+        });
+
+        if let Some(req) = header_req {
+            let _ = req.response.send(Err(RequestError::ChannelClosed));
+        } else {
+            // Check bodies map
+            let body_req = self.inflight_bodies_requests.get_mut(peer_id).and_then(|requests| {
+                let pos = requests.iter().position(|(id, _)| *id == request_id)?;
+                Some(requests.swap_remove(pos).1)
+            });
+            if let Some(req) = body_req {
+                let _ = req.response.send(Err(RequestError::ChannelClosed));
+            }
+        }
+
+        // Decrement the peer's inflight count
+        if let Some(peer) = self.peers.get_mut(peer_id) {
+            peer.state.on_request_finished();
+        }
+    }
+
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
     /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
@@ -1361,5 +1391,138 @@ mod tests {
 
         // Now at capacity
         assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+    }
+
+    #[tokio::test]
+    async fn test_on_request_send_failed_cleans_up_headers_inflight() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Queue a headers request and dispatch it
+        let (client_tx, client_rx) = oneshot::channel();
+        let req = DownloadRequest::GetBlockHeaders {
+            request: HeadersRequest {
+                start: alloy_eips::BlockHashOrNumber::Number(0),
+                limit: 1,
+                direction: reth_eth_wire::HeadersDirection::Falling,
+            },
+            response: client_tx,
+            priority: Priority::default(),
+        };
+        let (_, request_id) = fetcher.prepare_block_request(peer1, req);
+
+        // Verify inflight state is tracked
+        assert_eq!(fetcher.peers.get(&peer1).unwrap().state.inflight, 1);
+        assert_eq!(fetcher.inflight_headers_requests.get(&peer1).unwrap().len(), 1);
+
+        // Simulate send failure
+        fetcher.on_request_send_failed(&peer1, request_id);
+
+        // Inflight count should be decremented
+        assert_eq!(fetcher.peers.get(&peer1).unwrap().state.inflight, 0);
+        // Inflight request should be removed
+        assert!(fetcher.inflight_headers_requests.get(&peer1).unwrap().is_empty());
+        // Peer should still be available (not removed)
+        assert!(fetcher.peers.contains_key(&peer1));
+        // Client should receive a ChannelClosed error
+        assert_eq!(client_rx.await.unwrap().unwrap_err(), RequestError::ChannelClosed);
+    }
+
+    #[tokio::test]
+    async fn test_on_request_send_failed_cleans_up_bodies_inflight() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Queue a bodies request and dispatch it
+        let (client_tx, client_rx) = oneshot::channel();
+        let req = DownloadRequest::GetBlockBodies {
+            request: vec![B256::random()],
+            response: client_tx,
+            priority: Priority::default(),
+            range_hint: None,
+        };
+        let (_, request_id) = fetcher.prepare_block_request(peer1, req);
+
+        // Verify inflight state is tracked
+        assert_eq!(fetcher.peers.get(&peer1).unwrap().state.inflight, 1);
+        assert_eq!(fetcher.inflight_bodies_requests.get(&peer1).unwrap().len(), 1);
+
+        // Simulate send failure
+        fetcher.on_request_send_failed(&peer1, request_id);
+
+        // Inflight count should be decremented
+        assert_eq!(fetcher.peers.get(&peer1).unwrap().state.inflight, 0);
+        // Inflight request should be removed
+        assert!(fetcher.inflight_bodies_requests.get(&peer1).unwrap().is_empty());
+        // Peer should still be available
+        assert!(fetcher.peers.contains_key(&peer1));
+        // Client should receive a ChannelClosed error
+        assert_eq!(client_rx.await.unwrap().unwrap_err(), RequestError::ChannelClosed);
+    }
+
+    #[tokio::test]
+    async fn test_on_request_send_failed_restores_capacity() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Fill up the peer to max capacity
+        let mut request_ids = Vec::new();
+        for _ in 0..MAX_CONCURRENT_PER_PEER {
+            let (client_tx, _) = oneshot::channel();
+            let req = DownloadRequest::GetBlockBodies {
+                request: vec![B256::random()],
+                response: client_tx,
+                priority: Priority::default(),
+                range_hint: None,
+            };
+            let (_, request_id) = fetcher.prepare_block_request(peer1, req);
+            request_ids.push(request_id);
+        }
+
+        // Peer is at max capacity
+        assert!(!fetcher.peers.get(&peer1).unwrap().has_capacity());
+
+        // Simulate one send failure
+        fetcher.on_request_send_failed(&peer1, request_ids[0]);
+
+        // Peer should have capacity again
+        assert!(fetcher.peers.get(&peer1).unwrap().has_capacity());
+        assert_eq!(fetcher.peers.get(&peer1).unwrap().state.inflight, MAX_CONCURRENT_PER_PEER - 1);
     }
 }
