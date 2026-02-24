@@ -421,7 +421,9 @@ where
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
-            ThreadPriority::Max.set_for_current().ok();
+            if let Err(err) = ThreadPriority::Max.set_for_current() {
+                debug!(target: "engine::tree", ?err, "failed to set max thread priority for engine task");
+            }
             task.run()
         });
         (incoming, outgoing)
