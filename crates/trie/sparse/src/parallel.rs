@@ -3535,6 +3535,16 @@ enum SparseTrieUpdatesAction {
     InsertUpdated(Nibbles, BranchNodeCompact),
 }
 
+/// Changes the lifetime of the given reference.
+unsafe fn decouple_lt<'a, T: ?Sized>(x: &T) -> &'a T {
+    unsafe { core::mem::transmute(x) }
+}
+
+/// Changes the lifetime of the given mutable reference.
+unsafe fn decouple_lt_mut<'a, T: ?Sized>(x: &mut T) -> &'a mut T {
+    unsafe { core::mem::transmute(x) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -8864,14 +8874,4 @@ mod tests {
         // Call root() to compute the trie root hash
         let _root = trie.root();
     }
-}
-
-/// Changes the lifetime of the given reference.
-unsafe fn decouple_lt<'a, T: ?Sized>(x: &T) -> &'a T {
-    unsafe { core::mem::transmute(x) }
-}
-
-/// Changes the lifetime of the given mutable reference.
-unsafe fn decouple_lt_mut<'a, T: ?Sized>(x: &mut T) -> &'a mut T {
-    unsafe { core::mem::transmute(x) }
 }
