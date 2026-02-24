@@ -1,28 +1,68 @@
-//! Global log level handle for runtime filter changes.
+//! Global log handle for runtime filter changes.
 //!
-//! Provides functions to install and use a global [`LogFilterReloadHandle`] that allows
-//! changing log filters at runtime, used by RPC methods like `debug_verbosity` and
-//! `debug_vmodule`.
+//! Provides a single global [`LogFilterHandle`] that collects reload handles from all
+//! reloadable layers (stdout, file, etc.). `set_log_verbosity` and `set_log_vmodule`
+//! update every registered layer in one shot.
 
 use std::sync::OnceLock;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
-/// Type alias for the reload handle used to dynamically update log filters.
+/// Type alias for a single layer's reload handle.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
-/// Global log level handle for runtime filter changes.
-static GLOBAL_LOG_HANDLE: OnceLock<LogFilterReloadHandle> = OnceLock::new();
-
-/// Installs the global log level handle.
-/// Returns `true` if the handle was installed, `false` if one was already installed.
-pub fn install_log_handle(handle: LogFilterReloadHandle) -> bool {
-    GLOBAL_LOG_HANDLE.set(handle).is_ok()
+/// Collects reload handles so all layers can be updated together.
+#[derive(Debug)]
+pub struct LogFilterHandle {
+    handles: Vec<LogFilterReloadHandle>,
 }
 
-/// Returns `true` if a global log handle is available.
+impl LogFilterHandle {
+    /// Creates a new, empty handle collection.
+    fn new() -> Self {
+        Self { handles: Vec::new() }
+    }
+
+    /// Adds a reload handle for a layer.
+    fn push(&mut self, handle: LogFilterReloadHandle) {
+        self.handles.push(handle);
+    }
+
+    /// Returns `true` if at least one handle is registered.
+    fn is_available(&self) -> bool {
+        !self.handles.is_empty()
+    }
+
+    /// Reloads every registered layer with a fresh filter built by `make_filter`.
+    fn reload_all(
+        &self,
+        make_filter: impl Fn() -> Result<EnvFilter, String>,
+    ) -> Result<(), String> {
+        for handle in &self.handles {
+            let filter = make_filter()?;
+            handle.reload(filter).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+/// Single global log handle shared by all reloadable layers.
+static LOG_HANDLE: OnceLock<std::sync::Mutex<LogFilterHandle>> = OnceLock::new();
+
+fn global_handle() -> &'static std::sync::Mutex<LogFilterHandle> {
+    LOG_HANDLE.get_or_init(|| std::sync::Mutex::new(LogFilterHandle::new()))
+}
+
+/// Registers a reload handle for a layer (stdout, file, etc.).
+///
+/// Can be called multiple times — each handle is appended.
+pub fn install_log_handle(handle: LogFilterReloadHandle) {
+    global_handle().lock().expect("log handle poisoned").push(handle);
+}
+
+/// Returns `true` if at least one global log handle is available.
 pub fn log_handle_available() -> bool {
-    GLOBAL_LOG_HANDLE.get().is_some()
+    global_handle().lock().expect("log handle poisoned").is_available()
 }
 
 /// Sets the global log verbosity level.
@@ -34,11 +74,15 @@ pub fn log_handle_available() -> bool {
 /// - 4: DEBUG
 /// - 5+: TRACE
 ///
+/// Updates all reloadable layers (stdout, file, etc.).
+///
 /// Returns an error if no log handle is installed or if the reload fails.
 pub fn set_log_verbosity(level: usize) -> Result<(), String> {
-    let Some(handle) = GLOBAL_LOG_HANDLE.get() else {
+    let guard = global_handle().lock().expect("log handle poisoned");
+
+    if !guard.is_available() {
         return Err("Log filter reload not available".to_string());
-    };
+    }
 
     let level_filter = match level {
         0 => LevelFilter::OFF,
@@ -49,10 +93,9 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
         _ => LevelFilter::TRACE,
     };
 
-    // Use parse_lossy to avoid reading from RUST_LOG env var
-    let filter = EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy("");
-
-    handle.reload(filter).map_err(|e| e.to_string())
+    guard.reload_all(|| {
+        Ok(EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy(""))
+    })
 }
 
 /// Sets module-specific log levels using a pattern string.
@@ -64,18 +107,27 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
 ///
 /// An empty string resets the filter to the default level (INFO).
 ///
+/// Updates all reloadable layers (stdout, file, etc.).
+///
 /// Returns an error if no log handle is installed or if parsing fails.
 pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
-    let Some(handle) = GLOBAL_LOG_HANDLE.get() else {
+    let guard = global_handle().lock().expect("log handle poisoned");
+
+    if !guard.is_available() {
         return Err("Log filter reload not available".to_string());
-    };
+    }
 
-    let filter = if pattern.trim().is_empty() {
-        // Reset to default INFO level when pattern is empty
-        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).parse_lossy("")
+    if pattern.trim().is_empty() {
+        guard.reload_all(|| {
+            Ok(EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .parse_lossy(""))
+        })
     } else {
-        EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?
-    };
-
-    handle.reload(filter).map_err(|e| e.to_string())
+        // Validate the pattern once before reloading all handles
+        EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
+        guard.reload_all(|| {
+            EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))
+        })
+    }
 }

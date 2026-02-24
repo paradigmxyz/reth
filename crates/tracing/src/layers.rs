@@ -131,23 +131,30 @@ impl Layers {
     /// * `format` - The format for log messages.
     /// * `filter` - Additional filter directives as a string.
     /// * `file_info` - Information about the log file including path and rotation strategy.
+    /// * `reloadable` - If true, wraps the filter in a reload layer so it can be changed at
+    ///   runtime, and returns the reload handle.
     ///
     /// # Returns
-    /// An `eyre::Result<FileWorkerGuard>` representing the file logging worker.
+    /// An `eyre::Result` with the file worker guard and an optional [`LogFilterReloadHandle`]
+    /// (present when `reloadable` is true).
     pub(crate) fn file(
         &mut self,
         format: LogFormat,
         filter: &str,
         file_info: FileInfo,
-    ) -> eyre::Result<FileWorkerGuard> {
+        reloadable: bool,
+    ) -> eyre::Result<(FileWorkerGuard, Option<LogFilterReloadHandle>)> {
         let (writer, guard) = file_info.create_log_writer()?;
         let file_filter = build_env_filter(None, filter)?;
 
-        // File layers use their own independent filter — runtime changes via
-        // debug_verbosity/debug_vmodule only affect stdout, not log files.
-        // This prevents RPC-triggered level changes from flooding disk.
-        self.add_layer(format.apply(file_filter, None, true, Some(writer)));
-        Ok(guard)
+        if reloadable {
+            let (reloadable_filter, handle) = reload::Layer::new(file_filter);
+            self.add_layer(format.apply(reloadable_filter, None, true, Some(writer)));
+            Ok((guard, Some(handle)))
+        } else {
+            self.add_layer(format.apply(file_filter, None, true, Some(writer)));
+            Ok((guard, None))
+        }
     }
 
     pub(crate) fn samply(&mut self, config: LayerInfo) -> eyre::Result<()> {
