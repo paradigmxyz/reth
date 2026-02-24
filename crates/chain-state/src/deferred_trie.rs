@@ -1,5 +1,5 @@
 use alloy_primitives::B256;
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -19,7 +19,7 @@ use tracing::instrument;
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
-    state: Arc<(Mutex<DeferredState>, Condvar)>,
+    state: Arc<Mutex<DeferredState>>,
 }
 
 /// Sorted trie data computed for an executed block.
@@ -69,8 +69,7 @@ static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
 /// Internal state for deferred trie data.
 enum DeferredState {
     /// Data is not yet available; raw inputs stored for fallback computation.
-    /// Wrapped in `Option` to allow taking ownership during computation.
-    Pending(Option<PendingInputs>),
+    Pending(PendingInputs),
     /// Data has been computed and is ready.
     Ready(ComputedTrieData),
 }
@@ -90,7 +89,7 @@ struct PendingInputs {
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.0.lock();
+        let state = self.state.lock();
         match &*state {
             DeferredState::Pending(_) => {
                 f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
@@ -120,15 +119,12 @@ impl DeferredTrieData {
         ancestors: Vec<Self>,
     ) -> Self {
         Self {
-            state: Arc::new((
-                Mutex::new(DeferredState::Pending(Some(PendingInputs {
-                    hashed_state,
-                    trie_updates,
-                    anchor_hash,
-                    ancestors,
-                }))),
-                Condvar::new(),
-            )),
+            state: Arc::new(Mutex::new(DeferredState::Pending(PendingInputs {
+                hashed_state,
+                trie_updates,
+                anchor_hash,
+                ancestors,
+            }))),
         }
     }
 
@@ -137,7 +133,7 @@ impl DeferredTrieData {
     /// Useful when trie data is available immediately.
     /// [`Self::wait_cloned`] will return without any computation.
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { state: Arc::new((Mutex::new(DeferredState::Ready(bundle)), Condvar::new())) }
+        Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
@@ -312,10 +308,6 @@ impl DeferredTrieData {
     /// prevents deadlocks when callers participate in the rayon pool while holding external
     /// locks that other rayon tasks may contend on.
     ///
-    /// If a second caller arrives while the first is computing (inputs already taken),
-    /// it spins briefly until the result is published. This avoids both duplicate
-    /// computation and holding the mutex across rayon work.
-    ///
     /// Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
     /// - Each block only waits on its ancestors (blocks on the path to the persisted root)
     /// - Sibling blocks (forks) are never in each other's ancestor lists
@@ -324,50 +316,22 @@ impl DeferredTrieData {
     /// Given that invariant, circular wait dependencies are impossible.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        let (lock, cv) = &*self.state;
-
-        // Take pending inputs while holding the lock briefly. Using `take()` ensures
-        // Arc::try_unwrap can succeed in sort_and_build_trie_input (avoiding expensive clones).
-        let inputs = loop {
-            let mut state = lock.lock();
-            match &mut *state {
+        // Clone pending inputs while holding the lock briefly.
+        let inputs = {
+            let state = self.state.lock();
+            match &*state {
                 DeferredState::Ready(bundle) => {
                     DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
                     return bundle.clone();
                 }
-                DeferredState::Pending(maybe_inputs) => {
-                    if let Some(inputs) = maybe_inputs.take() {
-                        DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-                        break inputs;
-                    }
-                    // Another caller has taken the inputs and is computing.
-                    // Park until they publish the result or restore inputs on panic.
-                    cv.wait(&mut state);
+                DeferredState::Pending(inputs) => {
+                    DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
+                    inputs.clone()
                 }
             }
         };
 
-        // Guard restores inputs if computation panics, so waiters don't block forever.
-        struct RestoreOnPanic<'a> {
-            inputs: Option<PendingInputs>,
-            state: &'a (Mutex<DeferredState>, Condvar),
-        }
-        impl Drop for RestoreOnPanic<'_> {
-            fn drop(&mut self) {
-                if let Some(inputs) = self.inputs.take() {
-                    let (lock, cv) = self.state;
-                    let mut state = lock.lock();
-                    if matches!(&*state, DeferredState::Pending(None)) {
-                        *state = DeferredState::Pending(Some(inputs));
-                    }
-                    cv.notify_all();
-                }
-            }
-        }
-        let mut guard = RestoreOnPanic { inputs: Some(inputs), state: &self.state };
-
         // Expensive work (rayon::join inside) runs without holding the mutex.
-        let inputs = guard.inputs.take().unwrap();
         let computed = Self::sort_and_build_trie_input(
             inputs.hashed_state,
             inputs.trie_updates,
@@ -375,18 +339,11 @@ impl DeferredTrieData {
             &inputs.ancestors,
         );
 
-        // Disarm the panic guard — computation succeeded.
-        std::mem::forget(guard);
-
-        // Publish the result. Replace the old state outside the lock to avoid dropping
-        // potentially large PendingInputs (and their ancestor Arcs) while holding it.
-        let old_state = {
-            let mut state = lock.lock();
-            let old = std::mem::replace(&mut *state, DeferredState::Ready(computed.clone()));
-            cv.notify_all();
-            old
-        };
-        drop(old_state);
+        // Publish the result if no other caller beat us.
+        let mut state = self.state.lock();
+        if matches!(&*state, DeferredState::Pending(_)) {
+            *state = DeferredState::Ready(computed.clone());
+        }
 
         computed
     }
@@ -512,12 +469,9 @@ mod tests {
         assert_eq!(first.anchor_hash(), second.anchor_hash());
     }
 
-    /// Verifies that concurrent `wait_cloned` calls all receive the same cached result.
-    ///
-    /// Only one caller takes the pending inputs and computes; others spin until the
-    /// result is published, then return the cached `Ready` value.
+    /// Verifies that concurrent `wait_cloned` calls all receive logically equivalent results.
     #[test]
-    fn concurrent_wait_cloned_shares_result() {
+    fn concurrent_wait_cloned_returns_equivalent_results() {
         let deferred = empty_pending();
 
         // Spawn multiple threads that all call wait_cloned concurrently
@@ -528,14 +482,13 @@ mod tests {
             })
             .collect();
 
-        // Collect all results
         let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-        // All results should share the same Arc pointers (same computed result)
+        // All results should be logically equivalent
         let first = &results[0];
         for result in &results[1..] {
-            assert!(Arc::ptr_eq(&first.hashed_state, &result.hashed_state));
-            assert!(Arc::ptr_eq(&first.trie_updates, &result.trie_updates));
+            assert_eq!(first.hashed_state.is_empty(), result.hashed_state.is_empty());
+            assert_eq!(first.anchor_hash(), result.anchor_hash());
         }
     }
 
