@@ -904,7 +904,7 @@ where
         // send hashes if any
         if let Some(new_pooled_hashes) = pooled {
             for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+                propagated.record(hash, PropagateKind::Hash(peer_id));
                 // mark transaction as seen by peer
                 peer.seen_transactions.insert(hash);
             }
@@ -916,7 +916,7 @@ where
         // send full transactions, if any
         if let Some(new_full_transactions) = full {
             for tx in &new_full_transactions {
-                propagated.0.entry(*tx.tx_hash()).or_default().push(PropagateKind::Full(peer_id));
+                propagated.record(*tx.tx_hash(), PropagateKind::Full(peer_id));
                 // mark transaction as seen by peer
                 peer.seen_transactions.insert(*tx.tx_hash());
             }
@@ -926,7 +926,7 @@ where
         }
 
         // Update propagated transactions metrics
-        self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+        self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
         Some(propagated)
     }
@@ -977,7 +977,7 @@ where
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+                propagated.record(hash, PropagateKind::Hash(peer_id));
             }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
@@ -986,7 +986,7 @@ where
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
             // Update propagated transactions metrics
-            self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+            self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
             propagated
         };
@@ -1057,7 +1057,7 @@ where
                     .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
 
                 for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+                    propagated.record(hash, PropagateKind::Hash(*peer_id));
                     // mark transaction as seen by peer
                     peer.seen_transactions.insert(hash);
                 }
@@ -1071,11 +1071,7 @@ where
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
                 for tx in &new_full_transactions {
-                    propagated
-                        .0
-                        .entry(*tx.tx_hash())
-                        .or_default()
-                        .push(PropagateKind::Full(*peer_id));
+                    propagated.record(*tx.tx_hash(), PropagateKind::Full(*peer_id));
                     // mark transaction as seen by peer
                     peer.seen_transactions.insert(*tx.tx_hash());
                 }
@@ -1088,7 +1084,7 @@ where
         }
 
         // Update propagated transactions metrics
-        self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
+        self.metrics.propagated_transactions.increment(propagated.len() as u64);
 
         propagated
     }
@@ -1236,7 +1232,7 @@ where
             msg_builder.push_pooled(pooled_tx);
         }
 
-        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.is_empty(), "Broadcasting transaction hashes");
+        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
         let msg = msg_builder.build();
         self.network.send_transactions_hashes(peer_id, msg);
     }
@@ -1924,6 +1920,14 @@ impl PooledTransactionsHashesBuilder {
         }
     }
 
+    /// Returns the number of transactions in the builder.
+    fn len(&self) -> usize {
+        match self {
+            Self::Eth66(hashes) => hashes.len(),
+            Self::Eth68(hashes) => hashes.len(),
+        }
+    }
+
     /// Appends all hashes
     fn extend<T: SignedTransaction>(
         &mut self,
@@ -2167,6 +2171,7 @@ mod tests {
         sync::{NetworkSyncUpdater, SyncState},
     };
     use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
@@ -2196,7 +2201,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::eth(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2266,7 +2271,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2332,7 +2337,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
@@ -2440,7 +2445,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2518,7 +2523,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2902,12 +2907,12 @@ mod tests {
 
         let propagated =
             tx_manager.propagate_transactions(propagate.clone(), PropagationMode::Basic);
-        assert_eq!(propagated.0.len(), 2);
-        let prop_txs = propagated.0.get(eip1559_tx.transaction.hash()).unwrap();
+        assert_eq!(propagated.len(), 2);
+        let prop_txs = propagated.get(eip1559_tx.transaction.hash()).unwrap();
         assert_eq!(prop_txs.len(), 1);
         assert!(prop_txs[0].is_full());
 
-        let prop_txs = propagated.0.get(eip4844_tx.transaction.hash()).unwrap();
+        let prop_txs = propagated.get(eip4844_tx.transaction.hash()).unwrap();
         assert_eq!(prop_txs.len(), 1);
         assert!(prop_txs[0].is_hash());
 
@@ -2918,7 +2923,7 @@ mod tests {
 
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
-        assert!(propagated.0.is_empty());
+        assert!(propagated.is_empty());
     }
 
     #[tokio::test]
@@ -2936,7 +2941,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let network_config = NetworkConfigBuilder::new(secret_key)
+        let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .listener_port(0)
             .disable_discovery()
             .build(client.clone());

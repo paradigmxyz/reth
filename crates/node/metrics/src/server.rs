@@ -445,7 +445,7 @@ mod tests {
             build_profile: "test",
         };
 
-        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+        let runtime = Runtime::test();
 
         let hooks = Hooks::builder().build();
 

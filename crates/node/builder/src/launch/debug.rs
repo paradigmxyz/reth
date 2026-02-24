@@ -7,7 +7,7 @@ use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
     BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
 };
-use reth_engine_local::LocalMiner;
+use reth_engine_local::{LocalMiner, MiningMode};
 use reth_node_api::{
     BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder,
     PayloadTypes,
@@ -132,6 +132,7 @@ where
     map_attributes:
         Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
     debug_block_provider: Option<B>,
+    mining_mode: Option<MiningMode<N::Pool>>,
 }
 
 impl<L, Target, N, AddOns, B> DebugNodeLauncherFuture<L, Target, N, B>
@@ -152,6 +153,7 @@ where
             local_payload_attributes_builder: Some(Box::new(builder)),
             map_attributes: None,
             debug_block_provider: self.debug_block_provider,
+            mining_mode: self.mining_mode,
         }
     }
 
@@ -166,7 +168,17 @@ where
             local_payload_attributes_builder: None,
             map_attributes: Some(Box::new(f)),
             debug_block_provider: self.debug_block_provider,
+            mining_mode: self.mining_mode,
         }
+    }
+
+    /// Sets a custom [`MiningMode`] for the local miner in dev mode.
+    ///
+    /// This overrides the default mining mode that is derived from the node configuration
+    /// (instant or interval). This can be used to provide a custom trigger-based mining mode.
+    pub fn with_mining_mode(mut self, mode: MiningMode<N::Pool>) -> Self {
+        self.mining_mode = Some(mode);
+        self
     }
 
     /// Sets a custom block provider for the debug consensus client.
@@ -186,6 +198,7 @@ where
             local_payload_attributes_builder: self.local_payload_attributes_builder,
             map_attributes: self.map_attributes,
             debug_block_provider: Some(provider),
+            mining_mode: self.mining_mode,
         }
     }
 
@@ -196,6 +209,7 @@ where
             local_payload_attributes_builder,
             map_attributes,
             debug_block_provider,
+            mining_mode,
         } = self;
 
         let handle = inner.launch_node(target).await?;
@@ -291,7 +305,8 @@ where
                 Either::Right(builder)
             };
 
-            let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
+            let dev_mining_mode =
+                mining_mode.unwrap_or_else(|| handle.node.config.dev_mining_mode(pool));
             handle.node.task_executor.spawn_critical_task("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,
@@ -343,6 +358,7 @@ where
             local_payload_attributes_builder: None,
             map_attributes: None,
             debug_block_provider: None,
+            mining_mode: None,
         }
     }
 }

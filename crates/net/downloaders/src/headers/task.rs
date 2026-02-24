@@ -1,5 +1,5 @@
 use alloy_primitives::Sealable;
-use futures::{FutureExt, Stream};
+use futures::Stream;
 use futures_util::StreamExt;
 use pin_project::pin_project;
 use reth_network_p2p::headers::{
@@ -7,7 +7,7 @@ use reth_network_p2p::headers::{
     error::HeadersDownloaderResult,
 };
 use reth_primitives_traits::SealedHeader;
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::Runtime;
 use std::{
     fmt::Debug,
     future::Future,
@@ -33,42 +33,11 @@ pub struct TaskDownloader<H: Sealable> {
 // === impl TaskDownloader ===
 
 impl<H: Sealable + Send + Sync + Unpin + 'static> TaskDownloader<H> {
-    /// Spawns the given `downloader` via [`tokio::task::spawn`] and returns a [`TaskDownloader`]
+    /// Spawns the given `downloader` via the given [`Runtime`] and returns a [`TaskDownloader`]
     /// that's connected to that task.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if called outside of a Tokio runtime
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use std::sync::Arc;
-    /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
-    /// # use reth_downloaders::headers::task::TaskDownloader;
-    /// # use reth_consensus::HeaderValidator;
-    /// # use reth_network_p2p::headers::client::HeadersClient;
-    /// # use reth_primitives_traits::BlockHeader;
-    /// # fn t<H: HeadersClient<Header: BlockHeader> + 'static>(consensus:Arc<dyn HeaderValidator<H::Header>>, client: Arc<H>) {
-    ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
-    ///        client,
-    ///        consensus
-    ///     );
-    ///   let downloader = TaskDownloader::spawn(downloader);
-    /// # }
-    pub fn spawn<T>(downloader: T) -> Self
+    pub fn spawn_with<T>(downloader: T, runtime: &Runtime) -> Self
     where
         T: HeaderDownloader<Header = H> + 'static,
-    {
-        Self::spawn_with(downloader, &TokioTaskExecutor::default())
-    }
-
-    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
-    /// that's connected to that task.
-    pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
-    where
-        T: HeaderDownloader<Header = H> + 'static,
-        S: TaskSpawner,
     {
         let (headers_tx, headers_rx) = mpsc::channel(HEADERS_TASK_BUFFER_SIZE);
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
@@ -78,7 +47,7 @@ impl<H: Sealable + Send + Sync + Unpin + 'static> TaskDownloader<H> {
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
-        spawner.spawn_task(downloader.boxed());
+        runtime.spawn_task(downloader);
 
         Self { from_downloader: ReceiverStream::new(headers_rx), to_downloader }
     }
@@ -209,7 +178,8 @@ mod tests {
             .request_limit(1)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
 
-        let mut downloader = TaskDownloader::spawn(downloader);
+        let runtime = Runtime::test();
+        let mut downloader = TaskDownloader::spawn_with(downloader, &runtime);
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 

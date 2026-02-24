@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: depot-ubuntu-latest
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     needs:
       - build-reth
     steps:

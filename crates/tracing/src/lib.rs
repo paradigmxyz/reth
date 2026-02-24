@@ -249,11 +249,10 @@ impl Tracer for RethTracer {
             layers.journald(&config)?;
         }
 
-        let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
-        } else {
-            None
-        };
+        let file_guard = self
+            .file
+            .map(|(config, file_info)| layers.file(config.format, &config.filters, file_info))
+            .transpose()?;
 
         if let Some(config) = self.samply {
             layers.samply(config)?;
