@@ -275,7 +275,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         let mut iter = self.by_id.iter().peekable();
 
         while let Some((id, tx)) = iter.next() {
-            if tx.transaction.transaction.max_fee_per_gas() < basefee {
+            if tx.transaction.max_fee_per_gas() < basefee {
                 // still parked -> skip descendant transactions
                 'this: while let Some((peek, _)) = iter.peek() {
                     if peek.sender != id.sender {

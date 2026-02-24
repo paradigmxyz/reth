@@ -416,9 +416,7 @@ where
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -430,9 +428,7 @@ where
             // few transactions are recovered sequentially and sent immediately before
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
@@ -1074,11 +1070,13 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
+impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
 where
     EvmEnvFor<Evm>: Default,
 {
-    fn default() -> Self {
+    /// Creates a new [`ExecutionEnv`] with default values for testing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn test_default() -> Self {
         Self {
             evm_env: Default::default(),
             hash: Default::default(),
@@ -1096,7 +1094,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
+        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1371,7 +1369,7 @@ mod tests {
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
         let mut handle = payload_processor.spawn(
-            Default::default(),
+            ExecutionEnv::test_default(),
             (
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,

@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.11.0"
+version = "1.11.1"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT OR Apache-2.0"
@@ -138,6 +138,7 @@ members = [
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",
+    "examples/migrate-trie-to-packed",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -397,7 +398,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives = { path = "crates/primitives", default-features = false }
+reth-primitives = { path = "crates/primitives", default-features = false, features = ["__internal"] }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }

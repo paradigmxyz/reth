@@ -25,7 +25,7 @@ use reth_tracing::tracing::error;
 use std::{
     collections::HashMap,
     ops::{Deref, Range},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -244,6 +244,8 @@ impl DatabaseArguments {
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
+    /// Path to the database directory.
+    path: PathBuf,
     /// Opened DBIs for reuse.
     /// Important: Do not manually close these DBIs, like via `mdbx_dbi_close`.
     /// More generally, do not dynamically create, re-open, or drop tables at
@@ -276,6 +278,10 @@ impl Database for DatabaseEnv {
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
+    }
+
+    fn path(&self) -> PathBuf {
+        self.path.clone()
     }
 }
 
@@ -508,6 +514,7 @@ impl DatabaseEnv {
 
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
             _lock_file,
