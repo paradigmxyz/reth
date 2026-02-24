@@ -17,7 +17,9 @@ use crate::{
             GAS_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth},
+    valid_payload::{
+        block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+    },
 };
 use alloy_eips::BlockNumHash;
 use alloy_network::Ethereum;
@@ -129,7 +131,7 @@ impl Command {
         let total_blocks = benchmark_mode.total_blocks();
 
         if use_reth_namespace {
-            info!("Using reth_newPayload endpoint");
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
         }
 
         let buffer_size = self.rpc_block_buffer_size;
@@ -229,7 +231,13 @@ impl Command {
             };
 
             let fcu_start = Instant::now();
-            call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
+            call_forkchoice_updated_with_reth(
+                &auth_provider,
+                version,
+                forkchoice_state,
+                use_reth_namespace,
+            )
+            .await?;
             let fcu_latency = fcu_start.elapsed();
 
             let total_latency = if server_timings.is_some() {
