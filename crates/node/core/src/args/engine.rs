@@ -29,7 +29,6 @@ pub struct DefaultEngineValues {
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
-    multiproof_chunking_enabled: bool,
     multiproof_chunk_size: usize,
     reserved_cpu_cores: usize,
     precompile_cache_disabled: bool,
@@ -108,12 +107,6 @@ impl DefaultEngineValues {
     /// Set whether to accept execution requests hash by default
     pub const fn with_accept_execution_requests_hash(mut self, v: bool) -> Self {
         self.accept_execution_requests_hash = v;
-        self
-    }
-
-    /// Set whether to enable multiproof chunking by default
-    pub const fn with_multiproof_chunking_enabled(mut self, v: bool) -> Self {
-        self.multiproof_chunking_enabled = v;
         self
     }
 
@@ -217,7 +210,6 @@ impl Default for DefaultEngineValues {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
             accept_execution_requests_hash: false,
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
@@ -299,10 +291,6 @@ pub struct EngineArgs {
     /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
     #[arg(long = "engine.accept-execution-requests-hash", default_value_t = DefaultEngineValues::get_global().accept_execution_requests_hash)]
     pub accept_execution_requests_hash: bool,
-
-    /// Whether multiproof task should chunk proof targets.
-    #[arg(long = "engine.multiproof-chunking", default_value_t = DefaultEngineValues::get_global().multiproof_chunking_enabled)]
-    pub multiproof_chunking_enabled: bool,
 
     /// Multiproof task chunk size for proof targets.
     #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
@@ -404,7 +392,6 @@ impl Default for EngineArgs {
             cross_block_cache_size,
             state_root_task_compare_updates,
             accept_execution_requests_hash,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
@@ -433,7 +420,6 @@ impl Default for EngineArgs {
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_enabled: true,
@@ -467,7 +453,6 @@ impl EngineArgs {
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
-            .with_multiproof_chunking_enabled(self.multiproof_chunking_enabled)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .without_precompile_cache(self.precompile_cache_disabled)
@@ -521,7 +506,6 @@ mod tests {
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
             precompile_cache_enabled: true,
@@ -553,7 +537,6 @@ mod tests {
             "256",
             "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
-            "--engine.multiproof-chunking",
             "--engine.multiproof-chunk-size",
             "512",
             "--engine.reserved-cpu-cores",

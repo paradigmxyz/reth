@@ -114,9 +114,10 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread (non-blocking via `pool.spawn`), then
-    /// uses `in_place_scope` to dispatch transactions as they arrive and wait for all
-    /// spawned tasks to complete before clearing per-thread state.
+    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
+    /// transactions as they arrive and wait for all spawned tasks to complete before
+    /// clearing per-thread state. Workers that start via work-stealing lazily initialise
+    /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -166,7 +167,7 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(index, tx, to_multi_proof);
+                        Self::transact_worker(ctx, index, tx, to_multi_proof);
                     });
                 }
 
@@ -190,9 +191,10 @@ where
 
     /// Executes a single prewarm transaction on the current pool thread's EVM.
     ///
-    /// Expects per-thread [`PrewarmEvmState`] to already be initialised via
-    /// the init spawns in [`spawn_txs_prewarm`](Self::spawn_txs_prewarm).
+    /// Lazily initialises per-thread [`PrewarmEvmState`] via
+    /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
     fn transact_worker<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
         to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
@@ -200,10 +202,11 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let (evm, metrics, terminate_execution) = worker
-                .get_mut::<PrewarmEvmState<Evm>>()
-                .as_mut()
-                .expect("prewarm worker EVM state not initialized");
+            let Some((evm, metrics, terminate_execution)) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
+            else {
+                return;
+            };
 
             if terminate_execution.load(Ordering::Relaxed) {
                 return;
@@ -501,7 +504,7 @@ where
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
-/// [`WorkerPool`] workers via [`Worker::init`](reth_tasks::pool::Worker::init).
+/// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> = Option<(
     EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
     PrewarmMetrics,

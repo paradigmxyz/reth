@@ -350,10 +350,10 @@ impl Worker {
     ///
     /// Panics if the state was previously initialized with a different type.
     pub fn get_or_init<T: 'static>(&mut self, f: impl FnOnce() -> T) -> &mut T {
-        if self.state.is_none() {
-            self.state = Some(Box::new(f()));
-        }
-        self.state.as_mut().unwrap().downcast_mut::<T>().expect("worker state type mismatch")
+        self.state
+            .get_or_insert_with(|| Box::new(f()))
+            .downcast_mut::<T>()
+            .expect("worker state type mismatch")
     }
 
     /// Clears the worker state, dropping the contained value.
