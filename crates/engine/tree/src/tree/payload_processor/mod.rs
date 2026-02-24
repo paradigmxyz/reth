@@ -33,7 +33,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::{ForEachOrdered, Runtime};
+use reth_tasks::{utils::ThreadPriority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -558,6 +558,8 @@ where
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
+            ThreadPriority::Max.set_for_current().ok();
+
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 

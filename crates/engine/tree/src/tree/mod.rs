@@ -38,7 +38,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::spawn_os_thread;
+use reth_tasks::{spawn_os_thread, utils::ThreadPriority};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -420,7 +420,10 @@ where
             use_hashed_state,
         );
         let incoming = task.incoming_tx.clone();
-        spawn_os_thread("engine", || task.run());
+        spawn_os_thread("engine", || {
+            ThreadPriority::Max.set_for_current().ok();
+            task.run()
+        });
         (incoming, outgoing)
     }
 
