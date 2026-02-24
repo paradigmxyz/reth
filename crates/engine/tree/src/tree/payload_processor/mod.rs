@@ -381,7 +381,7 @@ where
         let size = if gas_used > 0 && gas_used <= SMALL_BLOCK_GAS_THRESHOLD {
             SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE
         } else {
-            config.multiproof_chunk_size()
+            SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE
         };
 
         Some(size)
