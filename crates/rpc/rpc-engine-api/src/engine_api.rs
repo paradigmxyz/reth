@@ -1,13 +1,18 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    bal_cache::BalCache,
+    bal_store::{BalStore, BalStoreError},
+    capabilities::EngineCapabilities,
+    metrics::EngineApiMetrics,
+    EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
+    BlockNumHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -22,7 +27,7 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
@@ -47,6 +52,134 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
+
+#[derive(Clone)]
+struct BalProvider {
+    store: Arc<dyn BalStore>,
+    cache: BalCache,
+}
+
+impl BalProvider {
+    fn new(store: Arc<dyn BalStore>, cache: BalCache) -> Self {
+        Self { store, cache }
+    }
+
+    const fn cache(&self) -> &BalCache {
+        &self.cache
+    }
+
+    // Persist first: store is the source of truth. We only populate the in-memory cache if
+    // durability succeeds, so cache visibility cannot outlive failed persistence.
+    // `Bytes` is consumed by each insert call, so we clone once for store and move the original
+    // into cache.
+    fn cache_bal(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: Bytes,
+    ) -> Result<(), BalStoreError> {
+        self.store.insert(block_hash, block_number, bal.clone())?;
+        self.cache.insert(block_hash, block_number, bal);
+        Ok(())
+    }
+
+    // Intent: serve BAL hash queries with cache-first latency while preserving
+    // request-order semantics and filling only missing entries from durable storage.
+    // Cache-first lookup: keep request order and fill only cache misses from durable storage.
+    fn get_by_hashes(
+        &self,
+        block_hashes: &[BlockHash],
+        metrics: &crate::metrics::BalQueryMetrics,
+    ) -> Vec<Option<Bytes>> {
+        let mut results = self.cache.get_by_hashes(block_hashes);
+
+        // Collect missing positions so store fallback can patch holes in-place.
+        let mut missing_hashes = Vec::new();
+        let mut missing_indices = Vec::new();
+        for (idx, result) in results.iter().enumerate() {
+            if result.is_none() {
+                missing_indices.push(idx);
+                missing_hashes.push(block_hashes[idx]);
+            }
+        }
+
+        if missing_hashes.is_empty() {
+            return results;
+        }
+
+        metrics.store_hash_fallback_requests.increment(1);
+        match self.store.get_by_hashes(&missing_hashes) {
+            Ok(store_results) => {
+                let mut recovered = 0_u64;
+                let mut still_missing = 0_u64;
+
+                for (missing_idx, store_result) in
+                    missing_indices.into_iter().zip(store_results.into_iter())
+                {
+                    if let Some(value) = store_result {
+                        results[missing_idx] = Some(value);
+                        recovered += 1;
+                    } else {
+                        still_missing += 1;
+                    }
+                }
+
+                if recovered > 0 {
+                    metrics.store_hash_fallback_hits.increment(recovered);
+                }
+                if still_missing > 0 {
+                    metrics.store_hash_fallback_misses.increment(still_missing);
+                }
+            }
+            Err(err) => {
+                metrics.store_hash_fallback_errors.increment(1);
+                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by hash from BAL store");
+            }
+        }
+
+        results
+    }
+
+    // Intent: serve contiguous BAL range queries with cache-first latency and
+    // append-only fallback from store, so the returned slice remains ordered and gap-safe.
+    // Cache range reads are contiguous and stop at the first gap.
+    fn get_by_range(
+        &self,
+        start: BlockNumber,
+        count: u64,
+        metrics: &crate::metrics::BalQueryMetrics,
+    ) -> Vec<Bytes> {
+        let mut cache_results = self.cache.get_by_range(start, count);
+        if cache_results.len() as u64 == count {
+            return cache_results;
+        }
+
+        // Only the missing suffix can be queried from store, which avoids re-reading cached prefix.
+        let cached_len = cache_results.len() as u64;
+        let missing_start = start.saturating_add(cached_len);
+        let missing_count = count - cached_len;
+
+        metrics.store_range_fallback_requests.increment(1);
+        match self.store.get_by_range(missing_start, missing_count) {
+            Ok(mut store_results) => {
+                let recovered = store_results.len() as u64;
+                if recovered > 0 {
+                    metrics.store_range_fallback_hits.increment(recovered);
+                }
+                if recovered < missing_count {
+                    metrics.store_range_fallback_misses.increment(missing_count - recovered);
+                }
+                cache_results.append(&mut store_results);
+                cache_results
+            }
+            Err(err) => {
+                metrics.store_range_fallback_errors.increment(1);
+                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by range from BAL store");
+                cache_results
+            }
+        }
+    }
+}
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -99,8 +232,109 @@ where
         validator: Validator,
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
+        bal_store: Arc<dyn BalStore>,
+    ) -> Self {
+        Self::with_bal_store_and_cache(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            bal_store,
+            BalCache::new(),
+        )
+    }
+
+    /// Create new instance of [`EngineApi`] with a custom BAL cache.
+    #[expect(clippy::too_many_arguments)]
+    pub fn with_bal_cache(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Runtime,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bal_cache: BalCache,
+    ) -> Self {
+        Self::with_bal_store_and_cache(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            Arc::new(bal_cache.clone()),
+            bal_cache,
+        )
+    }
+
+    /// Create new instance of [`EngineApi`] with a custom BAL store.
+    #[expect(clippy::too_many_arguments)]
+    pub fn with_bal_store(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Runtime,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bal_store: Arc<dyn BalStore>,
+    ) -> Self {
+        Self::new(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            bal_store,
+        )
+    }
+
+    /// Internal constructor that wires explicit BAL store and cache layers.
+    #[expect(clippy::too_many_arguments)]
+    fn with_bal_store_and_cache(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Runtime,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bal_store: Arc<dyn BalStore>,
+        bal_cache: BalCache,
     ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
+        let bal_provider = BalProvider::new(bal_store, bal_cache);
         let inner = Arc::new(EngineApiInner {
             provider,
             chain_spec,
@@ -114,8 +348,30 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
+            bal_provider,
         });
         Self { inner }
+    }
+
+    /// Returns a reference to the BAL cache.
+    pub fn bal_cache(&self) -> &BalCache {
+        self.inner.bal_provider.cache()
+    }
+
+    /// Caches the BAL if the status is valid.
+    fn maybe_cache_bal(&self, num_hash: BlockNumHash, bal: Option<Bytes>, status: &PayloadStatus) {
+        if status.is_valid() &&
+            let Some(bal) = bal &&
+            let Err(err) = self.inner.bal_provider.cache_bal(num_hash.hash, num_hash.number, bal)
+        {
+            warn!(
+                target: "rpc::engine",
+                ?err,
+                block_hash = ?num_hash.hash,
+                block_number = num_hash.number,
+                "Failed to persist BAL into BAL store"
+            );
+        }
     }
 
     /// Fetches the client version.
@@ -152,7 +408,11 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v1`.
@@ -180,7 +440,12 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v2`.
@@ -209,7 +474,11 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v3`
@@ -239,7 +508,11 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v4`
@@ -966,6 +1239,26 @@ where
 
         res
     }
+
+    /// Retrieves BALs for the given block hashes from the cache.
+    ///
+    /// Returns the RLP-encoded BALs for blocks found in the cache or BAL store.
+    /// Missing blocks are returned as empty bytes.
+    pub fn get_bals_by_hash(&self, block_hashes: Vec<BlockHash>) -> Vec<alloy_primitives::Bytes> {
+        self.inner
+            .bal_provider
+            .get_by_hashes(&block_hashes, &self.inner.metrics.bal_metrics)
+            .into_iter()
+            .map(|opt| opt.unwrap_or_default())
+            .collect()
+    }
+
+    /// Retrieves BALs for a range of blocks from the cache or BAL store.
+    ///
+    /// Returns the RLP-encoded BALs for blocks in the range `[start, start + count)`.
+    pub fn get_bals_by_range(&self, start: u64, count: u64) -> Vec<alloy_primitives::Bytes> {
+        self.inner.bal_provider.get_by_range(start, count, &self.inner.metrics.bal_metrics)
+    }
 }
 
 // This is the concrete ethereum engine API implementation.
@@ -1395,6 +1688,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Block Access List (BAL) provider with cache-first fallback semantics.
+    bal_provider: BalProvider,
 }
 
 #[cfg(test)]
@@ -1450,6 +1745,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
             NoopNetwork::default(),
+            Arc::new(crate::bal_store::NoopBalStore),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -1555,6 +1851,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec),
             false,
             TestNetworkInfo { syncing: true },
+            Arc::new(crate::bal_store::NoopBalStore),
         );
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
@@ -1681,6 +1978,179 @@ mod tests {
             let hashes = blocks.iter().map(|b| b.hash()).collect();
             let res = api.get_payload_bodies_by_hash_v1(hashes).await.unwrap();
             assert_eq!(res, expected);
+        }
+    }
+
+    mod bal_queries {
+        use super::*;
+        use alloy_rpc_types_engine::ClientCode;
+        use parking_lot::{Mutex, RwLock};
+        use std::{
+            collections::{BTreeMap, HashMap},
+            future::Future,
+            sync::{
+                atomic::{AtomicUsize, Ordering},
+                Arc,
+            },
+        };
+
+        #[derive(Debug, Clone, Default)]
+        struct TestBalStore {
+            by_hash: Arc<RwLock<HashMap<BlockHash, Bytes>>>,
+            by_number: Arc<RwLock<BTreeMap<BlockNumber, BlockHash>>>,
+            hash_queries: Arc<AtomicUsize>,
+            range_queries: Arc<Mutex<Vec<(BlockNumber, u64)>>>,
+        }
+
+        impl TestBalStore {
+            fn insert_raw(&self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
+                self.by_hash.write().insert(block_hash, bal);
+                self.by_number.write().insert(block_number, block_hash);
+            }
+
+            fn hash_query_count(&self) -> usize {
+                self.hash_queries.load(Ordering::Relaxed)
+            }
+
+            fn range_queries(&self) -> Vec<(BlockNumber, u64)> {
+                self.range_queries.lock().clone()
+            }
+        }
+
+        impl BalStore for TestBalStore {
+            fn insert(
+                &self,
+                block_hash: BlockHash,
+                block_number: BlockNumber,
+                bal: Bytes,
+            ) -> Result<(), BalStoreError> {
+                self.insert_raw(block_hash, block_number, bal);
+                Ok(())
+            }
+
+            fn get_by_hashes(
+                &self,
+                block_hashes: &[BlockHash],
+            ) -> Result<Vec<Option<Bytes>>, BalStoreError> {
+                self.hash_queries.fetch_add(1, Ordering::Relaxed);
+                let by_hash = self.by_hash.read();
+                Ok(block_hashes.iter().map(|hash| by_hash.get(hash).cloned()).collect())
+            }
+
+            fn get_by_range(
+                &self,
+                start: BlockNumber,
+                count: u64,
+            ) -> Result<Vec<Bytes>, BalStoreError> {
+                self.range_queries.lock().push((start, count));
+                let by_hash = self.by_hash.read();
+                let by_number = self.by_number.read();
+                let mut result = Vec::new();
+
+                for block_number in start..start.saturating_add(count) {
+                    let Some(hash) = by_number.get(&block_number) else {
+                        break;
+                    };
+                    let Some(bal) = by_hash.get(hash) else {
+                        break;
+                    };
+                    result.push(bal.clone());
+                }
+                Ok(result)
+            }
+        }
+
+        fn setup_engine_api_with_store(
+            bal_store: Arc<dyn BalStore>,
+        ) -> EngineApi<
+            Arc<MockEthProvider>,
+            EthEngineTypes,
+            NoopTransactionPool,
+            EthereumEngineValidator,
+            ChainSpec,
+        > {
+            let chain_spec: Arc<ChainSpec> = MAINNET.clone();
+            let provider = Arc::new(MockEthProvider::default());
+            let payload_store = spawn_test_payload_service();
+            let (to_engine, _) = unbounded_channel();
+
+            EngineApi::with_bal_store(
+                provider,
+                chain_spec.clone(),
+                ConsensusEngineHandle::new(to_engine),
+                payload_store.into(),
+                NoopTransactionPool::default(),
+                Runtime::test(),
+                ClientVersionV1 {
+                    code: ClientCode::RH,
+                    name: "Reth".to_string(),
+                    version: "v0.0.0-test".to_string(),
+                    commit: "test".to_string(),
+                },
+                EngineCapabilities::default(),
+                EthereumEngineValidator::new(chain_spec),
+                false,
+                NoopNetwork::default(),
+                bal_store,
+            )
+        }
+
+        fn run_with_tokio_runtime(test: impl Future<Output = ()>) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime for test");
+            runtime.block_on(test);
+        }
+
+        #[test]
+        fn by_hash_uses_partial_store_fallback() {
+            run_with_tokio_runtime(async {
+                let store = TestBalStore::default();
+                let hash1 = B256::random();
+                let hash2 = B256::random();
+                let hash3 = B256::random();
+                let bal1 = Bytes::from_static(b"bal1");
+                let bal2 = Bytes::from_static(b"bal2");
+
+                store.insert_raw(hash2, 2, bal2.clone());
+                let api = setup_engine_api_with_store(Arc::new(store.clone()));
+                api.bal_cache().insert(hash1, 1, bal1.clone());
+
+                let results = api.get_bals_by_hash(vec![hash1, hash2, hash3]);
+                assert_eq!(results, vec![bal1, bal2, Bytes::new()]);
+                assert_eq!(store.hash_query_count(), 1);
+            });
+        }
+
+        #[test]
+        fn by_range_fallback_queries_only_missing_suffix() {
+            run_with_tokio_runtime(async {
+                let store = TestBalStore::default();
+                let hash1 = B256::random();
+                let hash2 = B256::random();
+                let hash3 = B256::random();
+                let hash4 = B256::random();
+                let hash5 = B256::random();
+
+                let bal1 = Bytes::from_static(b"bal1");
+                let bal2 = Bytes::from_static(b"bal2");
+                let bal3 = Bytes::from_static(b"bal3");
+                let bal4 = Bytes::from_static(b"bal4");
+                let bal5 = Bytes::from_static(b"bal5");
+
+                store.insert_raw(hash3, 3, bal3.clone());
+                store.insert_raw(hash4, 4, bal4.clone());
+                store.insert_raw(hash5, 5, bal5.clone());
+
+                let api = setup_engine_api_with_store(Arc::new(store.clone()));
+                api.bal_cache().insert(hash1, 1, bal1.clone());
+                api.bal_cache().insert(hash2, 2, bal2.clone());
+
+                let results = api.get_bals_by_range(1, 5);
+                assert_eq!(results, vec![bal1, bal2, bal3, bal4, bal5]);
+                assert_eq!(store.range_queries(), vec![(3, 3)]);
+            });
         }
     }
 }

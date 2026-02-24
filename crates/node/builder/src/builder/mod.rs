@@ -11,6 +11,7 @@ use crate::{
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
+use reth_bal_store::BalStore;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
@@ -736,6 +737,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) executor: TaskExecutor,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    /// Shared BAL store used by network handlers and RPC Engine API.
+    pub(crate) bal_store: Arc<dyn BalStore>,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -745,8 +748,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         provider: Node::Provider,
         executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+        bal_store: Arc<dyn BalStore>,
     ) -> Self {
-        Self { head, provider, executor, config_container }
+        Self { head, provider, executor, config_container, bal_store }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -779,6 +783,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// This can be used to execute async tasks or functions during the setup.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
+    }
+
+    /// Returns the shared BAL store.
+    pub fn bal_store(&self) -> &Arc<dyn BalStore> {
+        &self.bal_store
     }
 
     /// Returns the chain spec of the node.
@@ -900,7 +909,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler(self.provider().clone())
+            .request_handler_with_bal_store(self.provider().clone(), self.bal_store().clone())
             .split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", Box::pin(txpool));

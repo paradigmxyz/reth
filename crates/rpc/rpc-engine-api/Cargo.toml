@@ -24,6 +24,7 @@ reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 reth-network-api.workspace = true
+reth-bal-store.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -41,6 +42,7 @@ metrics.workspace = true
 async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -56,3 +58,4 @@ reth-node-ethereum.workspace = true
 reth-tasks = { workspace = true, features = ["test-utils"] }
 
 assert_matches.workspace = true
+tempfile.workspace = true

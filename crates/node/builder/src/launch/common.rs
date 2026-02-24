@@ -38,6 +38,7 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
+use reth_bal_store::{BalStore, DiskFileBalStore, DiskFileBalStoreConfig};
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
@@ -789,12 +790,20 @@ where
     {
         // fetch the head block from the database
         let head = self.lookup_head()?;
+        let bal_store = Arc::new(
+            DiskFileBalStore::open(
+                self.node_config().datadir().balstore(),
+                DiskFileBalStoreConfig::default(),
+            )
+            .wrap_err("failed to open BAL store")?,
+        ) as Arc<dyn BalStore>;
 
         let builder_ctx = BuilderContext::new(
             head,
             self.blockchain_db().clone(),
             self.task_executor().clone(),
             self.configs().clone(),
+            bal_store.clone(),
         );
 
         debug!(target: "reth::cli", "creating components");
@@ -818,6 +827,7 @@ where
             },
             node_adapter,
             head,
+            bal_store,
         };
 
         let ctx = LaunchContextWith {
@@ -1003,6 +1013,11 @@ where
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
+    }
+
+    /// Returns the shared BAL store instance.
+    pub fn bal_store(&self) -> &Arc<dyn BalStore> {
+        &self.right().bal_store
     }
 
     /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
@@ -1236,6 +1251,7 @@ where
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
+    bal_store: Arc<dyn BalStore>,
 }
 
 /// Returns the metrics hooks for the node.

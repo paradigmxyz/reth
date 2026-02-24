@@ -347,6 +347,14 @@ impl<D> ChainPath<D> {
         self.data_dir().join("blobstore")
     }
 
+    /// Returns the path to the BAL store directory for this chain where EIP-7928
+    /// block access lists are persisted.
+    ///
+    /// `<DIR>/<CHAIN_ID>/balstore`
+    pub fn balstore(&self) -> PathBuf {
+        self.data_dir().join("balstore")
+    }
+
     /// Returns the path to the local transactions backup file
     ///
     /// `<DIR>/<CHAIN_ID>/txpool-transactions-backup.rlp`
