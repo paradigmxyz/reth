@@ -224,10 +224,7 @@ impl ArenaSparseNode {
     /// RLP is a hash (>= 32 bytes). Small branches whose RLP is embedded don't get a
     /// hash_mask bit.
     fn hash_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| {
-            b.short_key.is_empty() &&
-                matches!(&b.state, ArenaSparseNodeState::Cached { rlp_node, .. } if rlp_node.is_hash())
-        })
+        self.as_branch().is_some_and(|b| b.short_key.is_empty())
     }
 
     /// Returns `true` if this node should contribute a set bit in its parent's `tree_mask`.
@@ -829,19 +826,6 @@ fn update_cached_rlp(
                         ArenaSparseNode::TakenSubtrie => {
                             unreachable!("TakenSubtrie should not appear during update_cached_rlp");
                         }
-                    }
-
-                    // Update the parent's branch_masks for this child. Dirty branch
-                    // children also get updated via pop_and_propagate, but doing it
-                    // here for all non-descended revealed children ensures stale mask
-                    // bits (e.g. from a child that was a branch in the DB but is now
-                    // a leaf) are cleared.
-                    if !descended {
-                        let hash_bit = arena[child_idx].hash_mask_bit();
-                        let tree_bit = arena[child_idx].tree_mask_bit();
-                        arena[head_idx]
-                            .branch_mut()
-                            .set_child_mask_bits(nibble, hash_bit, tree_bit);
                     }
                 }
             }
