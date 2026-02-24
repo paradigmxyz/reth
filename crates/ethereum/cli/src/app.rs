@@ -137,8 +137,8 @@ where
     ///
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
-        if self.guard.is_none() {
-            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
+        if let Some(layers) = self.layers.take() {
+            self.guard = self.cli.init_tracing(runner, layers)?;
         }
 
         Ok(())
