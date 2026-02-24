@@ -19,7 +19,7 @@ pub struct LogFilterHandle {
 
 impl LogFilterHandle {
     /// Creates a new, empty handle collection.
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { handles: Vec::new() }
     }
 
@@ -29,7 +29,7 @@ impl LogFilterHandle {
     }
 
     /// Returns `true` if at least one handle is registered.
-    fn is_available(&self) -> bool {
+    const fn is_available(&self) -> bool {
         !self.handles.is_empty()
     }
 
