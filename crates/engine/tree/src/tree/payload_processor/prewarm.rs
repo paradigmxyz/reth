@@ -117,7 +117,7 @@ where
     /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
     /// transactions as they arrive and wait for all spawned tasks to complete before
     /// clearing per-thread state. Workers that start via work-stealing lazily initialise
-    /// their EVM state on first access via [`Worker::get_or_init`].
+    /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -191,8 +191,8 @@ where
 
     /// Executes a single prewarm transaction on the current pool thread's EVM.
     ///
-    /// Lazily initialises per-thread [`PrewarmEvmState`] via [`Worker::get_or_init`] on first
-    /// access.
+    /// Lazily initialises per-thread [`PrewarmEvmState`] via
+    /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
