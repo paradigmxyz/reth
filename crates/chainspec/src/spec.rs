@@ -528,7 +528,9 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> &H {
-        &self.genesis_header
+        let h = &self.genesis_header;
+        tracing::debug!("Genesis header from spec {:?}", h);
+        h
     }
 
     /// Get the sealed header for the genesis block.
