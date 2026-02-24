@@ -143,9 +143,7 @@ where
             let mut tx_count = 0usize;
             let to_multi_proof = to_multi_proof.as_ref();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
-                });
+                pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
 
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.terminate_execution.load(Ordering::Relaxed) {
