@@ -114,9 +114,10 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Uses `in_place_scope` to dispatch transactions as they arrive and wait for all
-    /// spawned tasks to complete before clearing per-thread state. Per-thread EVM state
-    /// is lazily initialized on first access via [`Worker::get_or_init`].
+    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
+    /// transactions as they arrive and wait for all spawned tasks to complete before
+    /// clearing per-thread state. Workers that start via work-stealing lazily initialise
+    /// their EVM state on first access via [`Worker::get_or_init`].
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -143,6 +144,10 @@ where
             let mut tx_count = 0usize;
             let to_multi_proof = to_multi_proof.as_ref();
             pool.in_place_scope(|s| {
+                s.spawn(|_| {
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                });
+
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.terminate_execution.load(Ordering::Relaxed) {
                         trace!(
