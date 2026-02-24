@@ -28,6 +28,7 @@ reth-network-api.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # async
@@ -42,6 +43,7 @@ async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
@@ -51,7 +53,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
-alloy-rlp.workspace = true
 reth-node-ethereum.workspace = true
 reth-tasks = { workspace = true, features = ["test-utils"] }
 

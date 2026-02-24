@@ -1,6 +1,7 @@
 //! Reth-specific engine API extensions.
 
-use alloy_rpc_types_engine::{ExecutionData, PayloadStatus};
+use alloy_primitives::Bytes;
+use alloy_rpc_types_engine::PayloadStatus;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use serde::{Deserialize, Serialize};
 
@@ -24,16 +25,35 @@ pub struct RethPayloadStatus {
 
 /// Reth-specific engine API extensions.
 ///
-/// This trait provides a `reth_newPayload` endpoint that takes `ExecutionData` directly
-/// (payload + sidecar), waiting for persistence and cache locks before processing.
+/// This trait provides a `reth_newPayload` endpoint that accepts either an `ExecutionData` JSON
+/// object or an RLP-encoded primitive block (hex bytes), waiting for persistence and cache locks
+/// before processing.
 ///
 /// Responses include timing breakdowns with server-measured execution latency.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
 pub trait RethEngineApi {
-    /// Reth-specific newPayload that takes `ExecutionData` directly.
+    /// Reth-specific newPayload that takes either `ExecutionData` directly or an RLP-encoded
+    /// primitive block.
     ///
     /// Waits for persistence, execution cache, and sparse trie locks before processing.
     #[method(name = "newPayload")]
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus>;
+    async fn reth_new_payload(&self, payload: RethNewPayloadInput) -> RpcResult<RethPayloadStatus>;
+}
+
+/// Input for `reth_newPayload`.
+///
+/// Accepts either an `ExecutionData` JSON object or a hex-encoded RLP primitive block.
+/// Uses `#[serde(untagged)]` to distinguish: a JSON string is decoded as RLP bytes, a JSON object
+/// is forwarded as-is for deserialization into the engine's `ExecutionData` type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RethNewPayloadInput {
+    /// RLP-encoded primitive block (hex-encoded bytes).
+    ///
+    /// Listed first so serde tries matching a JSON string before falling back to the object
+    /// variant.
+    RlpBlock(Bytes),
+    /// Standard execution data (JSON object).
+    ExecutionData(serde_json::Value),
 }

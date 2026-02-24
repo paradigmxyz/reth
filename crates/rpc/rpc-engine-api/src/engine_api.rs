@@ -25,9 +25,10 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 use reth_rpc_api::{
-    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethPayloadStatus,
+    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethNewPayloadInput,
+    RethPayloadStatus,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -275,6 +276,22 @@ where
             execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
             sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
         })
+    }
+
+    /// Decodes an RLP-encoded primitive block and converts it to `ExecutionData` via
+    /// [`PayloadTypes::block_to_payload`].
+    pub fn rlp_to_execution_data(rlp: &[u8]) -> EngineApiResult<PayloadT::ExecutionData> {
+        type BlockFor<T> = <<<T as PayloadTypes>::BuiltPayload as reth_payload_primitives::BuiltPayload>::Primitives as reth_primitives_traits::NodePrimitives>::Block;
+
+        let block: BlockFor<PayloadT> = alloy_rlp::Decodable::decode(&mut &*rlp).map_err(|e| {
+            EngineApiError::other(jsonrpsee_types::ErrorObject::owned(
+                jsonrpsee_types::error::INVALID_PARAMS_CODE,
+                format!("failed to RLP-decode block: {e}"),
+                None::<()>,
+            ))
+        })?;
+
+        Ok(PayloadT::block_to_payload(SealedBlock::seal_slow(block)))
     }
 
     /// Metered version of `reth_new_payload`.
@@ -1316,19 +1333,36 @@ where
 /// Implementation of `RethEngineApiServer` under the `reth_` namespace.
 ///
 /// Waits for execution cache and sparse trie locks before processing.
+///
+/// Accepts either `ExecutionData` (JSON object) or an RLP-encoded primitive block (hex bytes).
 #[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = ExecutionData>,
+    EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
+    async fn reth_new_payload(&self, input: RethNewPayloadInput) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayload");
-        self.reth_new_payload_metered(payload).await
+        let start = Instant::now();
+        let execution_data = match input {
+            RethNewPayloadInput::RlpBlock(rlp) => Self::rlp_to_execution_data(&rlp)?,
+            RethNewPayloadInput::ExecutionData(value) => {
+                serde_json::from_value::<EngineT::ExecutionData>(value).map_err(|e| {
+                    EngineApiError::other(jsonrpsee_types::ErrorObject::owned(
+                        jsonrpsee_types::error::INVALID_PARAMS_CODE,
+                        format!("failed to deserialize ExecutionData: {e}"),
+                        None::<()>,
+                    ))
+                })?
+            }
+        };
+        let res = Self::reth_new_payload(self, execution_data).await;
+        self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
+        Ok(res?)
     }
 }
 
