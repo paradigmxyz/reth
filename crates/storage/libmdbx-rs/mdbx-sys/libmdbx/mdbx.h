@@ -3278,6 +3278,20 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_warmup_flags)
 LIBMDBX_API int mdbx_env_warmup(const MDBX_env *env, const MDBX_txn *txn, MDBX_warmup_flags_t flags,
                                 unsigned timeout_seconds_16dot16);
 
+/** \brief Warms up the branch (internal) pages of a specific database's
+ * B-tree by walking the tree and touching only non-leaf pages.
+ * \ingroup c_settings
+ *
+ * This is useful for preloading the B-tree navigation structure into the
+ * OS page cache on startup, so that subsequent key lookups avoid page faults
+ * on internal nodes. Leaf pages (which hold the actual data) are not touched.
+ *
+ * \param [in] txn  A transaction handle returned by \ref mdbx_txn_begin().
+ * \param [in] dbi  A database handle returned by \ref mdbx_dbi_open().
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
+LIBMDBX_API int mdbx_dbi_warmup(const MDBX_txn *txn, MDBX_dbi dbi);
+
 /** \brief Set environment flags.
  * \ingroup c_settings
  *

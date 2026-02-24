@@ -7104,6 +7104,46 @@ __cold int mdbx_env_warmup(const MDBX_env *env, const MDBX_txn *txn, MDBX_warmup
   return LOG_IFERR(rc);
 }
 
+static int warmup_walk_branches(const MDBX_cursor *mc, const pgno_t pgno,
+                                const unsigned remaining,
+                                const txnid_t front) {
+  if (remaining == 0)
+    return MDBX_SUCCESS;
+
+  page_t *mp;
+  int rc = page_get(mc, pgno, &mp, front);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return rc;
+
+  cASSERT(mc, is_branch(mp));
+  const size_t nkeys = page_numkeys(mp);
+  for (size_t i = 0; i < nkeys; i++) {
+    const node_t *node = page_node(mp, i);
+    rc = warmup_walk_branches(mc, node_pgno(node), remaining - 1, mp->txnid);
+    if (unlikely(rc != MDBX_SUCCESS))
+      return rc;
+  }
+  return MDBX_SUCCESS;
+}
+
+__cold int mdbx_dbi_warmup(const MDBX_txn *txn, MDBX_dbi dbi) {
+  int rc = check_txn(txn, MDBX_TXN_FINISHED | MDBX_TXN_ERROR);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  cursor_couple_t couple;
+  rc = cursor_init(&couple.outer, txn, dbi);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  const tree_t *tree = &txn->dbs[dbi];
+  if (tree->root == P_INVALID || tree->height <= 1)
+    return MDBX_SUCCESS;
+
+  return LOG_IFERR(warmup_walk_branches(
+      &couple.outer, tree->root, tree->height - 1, tree->mod_txnid));
+}
+
 /*----------------------------------------------------------------------------*/
 
 __cold int mdbx_env_get_fd(const MDBX_env *env, mdbx_filehandle_t *arg) {

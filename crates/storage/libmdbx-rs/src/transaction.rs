@@ -241,6 +241,13 @@ where
         self.db_stat_with_dbi(dbi)
     }
 
+    /// Warms up the branch (internal) pages of the given database's B-tree by
+    /// walking the tree and faulting only non-leaf pages into the mmap.
+    pub fn warmup_branch_pages(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        self.txn_execute(|txn| unsafe { mdbx_result(ffi::mdbx_dbi_warmup(txn, dbi)) })??;
+        Ok(())
+    }
+
     /// Retrieves database statistics by the given dbi.
     pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {

@@ -12,6 +12,17 @@ pub use reth_libmdbx::*;
 /// versions. These will be dropped during database initialization.
 const ORPHAN_TABLES: &[&str] = &["AccountsTrieChangeSets", "StoragesTrieChangeSets"];
 
+/// Tables whose branch pages are warmed up on startup to reduce page fault latency
+/// during block execution and state root computation.
+const WARMUP_TABLES: &[&str] = &[
+    "AccountsTrie",
+    "StoragesTrie",
+    "HashedAccounts",
+    "HashedStorages",
+    "PlainAccountState",
+    "PlainStorageState",
+];
+
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
@@ -50,6 +61,7 @@ pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
     db.create_and_track_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
     drop_orphan_tables(&db);
+    db.warmup_branch_pages(WARMUP_TABLES);
     Ok(db)
 }
 

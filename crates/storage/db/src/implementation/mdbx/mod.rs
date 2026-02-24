@@ -615,6 +615,55 @@ impl DatabaseEnv {
         }
     }
 
+    /// Warms up the branch pages of the specified tables by faulting them into the mmap.
+    pub fn warmup_branch_pages(&self, table_names: &[&str]) {
+        let tx = match self.inner.begin_ro_txn() {
+            Ok(tx) => tx,
+            Err(e) => {
+                reth_tracing::tracing::warn!(
+                    target: "storage::db::mdbx",
+                    %e,
+                    "Failed to begin read transaction for branch page warmup"
+                );
+                return
+            }
+        };
+
+        for table_name in table_names {
+            match tx.open_db(Some(table_name)) {
+                Ok(db) => {
+                    let stat = tx.db_stat(db.dbi()).ok();
+                    if let Err(e) = tx.warmup_branch_pages(db.dbi()) {
+                        reth_tracing::tracing::warn!(
+                            target: "storage::db::mdbx",
+                            table = %table_name,
+                            %e,
+                            "Failed to warmup branch pages"
+                        );
+                    } else if let Some(stat) = stat {
+                        reth_tracing::tracing::info!(
+                            target: "storage::db::mdbx",
+                            table = %table_name,
+                            branch_pages = %stat.branch_pages(),
+                            "Warmed up branch pages"
+                        );
+                    }
+                }
+                Err(reth_libmdbx::Error::NotFound) => {}
+                Err(e) => {
+                    reth_tracing::tracing::warn!(
+                        target: "storage::db::mdbx",
+                        table = %table_name,
+                        %e,
+                        "Failed to open table for branch page warmup"
+                    );
+                }
+            }
+        }
+
+        let _ = tx.commit();
+    }
+
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
