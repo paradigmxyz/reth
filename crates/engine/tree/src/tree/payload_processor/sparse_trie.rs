@@ -663,67 +663,69 @@ where
         skip_all
     )]
     fn dispatch_pending_targets(&mut self) {
-        if !self.pending_targets.is_empty() {
-            let (targets, chunking_length) = self.pending_targets.take();
-            dispatch_with_chunking(
-                targets,
-                chunking_length,
-                self.chunk_size,
-                self.max_targets_for_chunking,
-                self.proof_worker_handle.available_account_workers(),
-                self.proof_worker_handle.available_storage_workers(),
-                MultiProofTargetsV2::chunks,
-                |mut proof_targets| {
-                    let account_addresses: B256Set =
-                        proof_targets.account_targets.iter().map(|t| t.key()).collect();
-
-                    // Separate storage-only targets (no matching account target) from
-                    // those that accompany an account proof.
-                    let (with_account, storage_only): (B256Map<_>, B256Map<_>) = proof_targets
-                        .storage_targets
-                        .drain()
-                        .partition(|(addr, _)| account_addresses.contains(addr));
-                    proof_targets.storage_targets = with_account;
-
-                    // Pre-dispatch storage proofs that accompany account targets first.
-                    let storage_proof_receivers = self
-                        .proof_worker_handle
-                        .dispatch_v2_storage_proofs(&proof_targets)
-                        .map_err(|e| {
-                            error!("failed to dispatch storage proofs: {e:?}");
-                        })
-                        .ok();
-                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput {
-                            targets: proof_targets,
-                            proof_result_sender: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                            storage_proof_receivers,
-                        },
-                    ) {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                    }
-
-                    // Dispatch storage-only targets — results go straight back to the
-                    // SparseTrieCacheTask.
-                    for (hashed_address, targets) in storage_only {
-                        if let Err(e) = self.proof_worker_handle.dispatch_direct_storage_proof(
-                            StorageProofInput::new(hashed_address, targets),
-                            ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        ) {
-                            error!("failed to dispatch storage-only proof: {e:?}");
-                        }
-                    }
-                },
-            );
+        if self.pending_targets.is_empty() {
+            return;
         }
+
+        let (targets, chunking_length) = self.pending_targets.take();
+        dispatch_with_chunking(
+            targets,
+            chunking_length,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+            self.proof_worker_handle.available_account_workers(),
+            self.proof_worker_handle.available_storage_workers(),
+            MultiProofTargetsV2::chunks,
+            |mut proof_targets| {
+                let account_addresses: B256Set =
+                    proof_targets.account_targets.iter().map(|t| t.key()).collect();
+
+                // Separate storage-only targets (no matching account target) from
+                // those that accompany an account proof.
+                let (with_account, storage_only): (B256Map<_>, B256Map<_>) = proof_targets
+                    .storage_targets
+                    .drain()
+                    .partition(|(addr, _)| account_addresses.contains(addr));
+                proof_targets.storage_targets = with_account;
+
+                // Pre-dispatch storage proofs that accompany account targets first.
+                let storage_proof_receivers = self
+                    .proof_worker_handle
+                    .dispatch_v2_storage_proofs(&proof_targets)
+                    .map_err(|e| {
+                        error!("failed to dispatch storage proofs: {e:?}");
+                    })
+                    .ok();
+                if let Err(e) =
+                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                        targets: proof_targets,
+                        proof_result_sender: ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                        storage_proof_receivers,
+                    })
+                {
+                    error!("failed to dispatch account multiproof: {e:?}");
+                }
+
+                // Dispatch storage-only targets — results go straight back to the
+                // SparseTrieCacheTask.
+                for (hashed_address, targets) in storage_only {
+                    if let Err(e) = self.proof_worker_handle.dispatch_direct_storage_proof(
+                        StorageProofInput::new(hashed_address, targets),
+                        ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                    ) {
+                        error!("failed to dispatch storage-only proof: {e:?}");
+                    }
+                }
+            },
+        );
     }
 }
 

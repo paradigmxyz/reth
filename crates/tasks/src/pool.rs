@@ -191,6 +191,13 @@ impl WorkerPool {
         self.pool.current_num_threads()
     }
 
+    /// Initializes per-thread [`Worker`] state on every thread in the pool.
+    pub fn init<T: 'static>(&self, f: impl Fn(Option<&mut T>) -> T + Sync) {
+        self.broadcast(self.pool.current_num_threads(), |worker| {
+            worker.init::<T>(&f);
+        });
+    }
+
     /// Runs a closure on `num_threads` threads in the pool, giving mutable access to each
     /// thread's [`Worker`].
     ///
@@ -255,12 +262,24 @@ impl WorkerPool {
         self.pool.spawn(f);
     }
 
+    /// Executes `f` on this pool using [`rayon::in_place_scope`], which converts the calling
+    /// thread into a worker for the duration — tasks spawned inside the scope run on the pool
+    /// and the call blocks until all of them complete.
+    pub fn in_place_scope<'scope, R>(&self, f: impl FnOnce(&rayon::Scope<'scope>) -> R) -> R {
+        self.pool.in_place_scope(f)
+    }
+
     /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`
     /// reference from `install` belongs to a different thread.
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
         WORKER.with_borrow(|worker| f(worker))
+    }
+
+    /// Mutably access the current thread's [`Worker`] from within a pool closure.
+    pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
+        WORKER.with_borrow_mut(|worker| f(worker))
     }
 }
 
@@ -310,6 +329,31 @@ impl Worker {
             .expect("worker not initialized")
             .downcast_ref::<T>()
             .expect("worker state type mismatch")
+    }
+
+    /// Returns a mutable reference to the state, downcasted to `T`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the worker has not been initialized or if the type does not match.
+    pub fn get_mut<T: 'static>(&mut self) -> &mut T {
+        self.state
+            .as_mut()
+            .expect("worker not initialized")
+            .downcast_mut::<T>()
+            .expect("worker state type mismatch")
+    }
+
+    /// Returns a mutable reference to the state, initializing it with `f` on first access.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the state was previously initialized with a different type.
+    pub fn get_or_init<T: 'static>(&mut self, f: impl FnOnce() -> T) -> &mut T {
+        if self.state.is_none() {
+            self.state = Some(Box::new(f()));
+        }
+        self.state.as_mut().unwrap().downcast_mut::<T>().expect("worker state type mismatch")
     }
 
     /// Clears the worker state, dropping the contained value.
