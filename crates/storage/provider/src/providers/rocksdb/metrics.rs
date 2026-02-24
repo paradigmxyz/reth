@@ -10,6 +10,8 @@ pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::TransactionHashNumbers.name(),
     Tables::StoragesHistory.name(),
     Tables::AccountsHistory.name(),
+    Tables::AccountsTrie.name(),
+    Tables::StoragesTrie.name(),
 ];
 
 /// Metrics for the `RocksDB` provider.

@@ -3785,6 +3785,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-migrate-trie-to-rocksdb"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "reth-db",
+ "reth-db-api",
+ "reth-provider",
+ "reth-trie-common",
+ "reth-trie-db",
+]
+
+[[package]]
 name = "example-network"
 version = "0.0.0"
 dependencies = [

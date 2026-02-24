@@ -9,14 +9,14 @@ use crate::StaticFileProviderFactory;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
 use rayon::prelude::*;
-use reth_db_api::tables;
+use reth_db_api::{cursor::DbCursorRO, tables, tables::PackedAccountsTrie, transaction::DbTx, DatabaseError};
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionsProvider,
 };
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::HashSet;
 
 /// Batch size for changeset iteration during history healing.
@@ -61,6 +61,11 @@ impl RocksDBProvider {
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
+        // Bail if storage_v2 is enabled but trie data hasn't been migrated to RocksDB
+        if provider.cached_storage_settings().storage_v2 {
+            self.check_trie_migrated(provider)?;
+        }
+
         // Heal TransactionHashNumbers if stored in RocksDB
         if provider.cached_storage_settings().storage_v2 &&
             let Some(target) = self.heal_transaction_hash_numbers(provider)?
@@ -83,6 +88,39 @@ impl RocksDBProvider {
         }
 
         Ok(unwind_target)
+    }
+
+    /// Checks that trie data has been migrated to RocksDB when running in storage v2 mode.
+    ///
+    /// If MDBX has trie data but RocksDB does not, the node cannot start — the operator
+    /// must run the `migrate-trie-to-rocksdb` example first.
+    fn check_trie_migrated<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    where
+        Provider: DBProvider,
+    {
+        // Already migrated
+        if self.first::<PackedAccountsTrie>()?.is_some() {
+            return Ok(());
+        }
+
+        // Check if MDBX has trie data that should have been migrated
+        let has_mdbx_trie_data = provider
+            .tx_ref()
+            .cursor_read::<tables::AccountsTrie>()
+            .ok()
+            .and_then(|mut c| c.first().ok().flatten())
+            .is_some();
+
+        if has_mdbx_trie_data {
+            return Err(ProviderError::Database(DatabaseError::Other(
+                "Storage v2 is enabled but trie data has not been migrated to RocksDB. \
+                 Run `cargo run -p example-migrate-trie-to-rocksdb -- --datadir <your-datadir>` \
+                 to perform the one-time migration before starting the node."
+                    .into(),
+            )));
+        }
+
+        Ok(())
     }
 
     /// Heals the `TransactionHashNumbers` table.
@@ -1648,5 +1686,73 @@ mod tests {
             assert_eq!(before.0, after.0, "Entry key should be unchanged");
             assert_eq!(before.1, after.1, "Entry block list should be unchanged");
         }
+    }
+
+    /// Tests that check_consistency bails when MDBX has trie data but RocksDB does not.
+    #[test]
+    fn test_check_consistency_bails_when_trie_not_migrated() {
+        use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+        use reth_trie::{BranchNodeCompact, StoredNibbles};
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Write trie data into MDBX
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+            let node = BranchNodeCompact::new(0b1111, 0, 0, Vec::new(), None);
+            cursor.upsert(StoredNibbles::from(vec![0x1, 0x2]), &node).unwrap();
+            provider.commit().unwrap();
+        }
+
+        // RocksDB has no trie data — check_consistency should error
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider);
+        assert!(result.is_err(), "Should bail when trie not migrated to RocksDB");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("trie data has not been migrated"),
+            "Error should mention trie migration, got: {err_msg}"
+        );
+    }
+
+    /// Tests that check_consistency passes when RocksDB already has trie data.
+    #[test]
+    fn test_check_consistency_passes_when_trie_already_migrated() {
+        use reth_db_api::tables::PackedAccountsTrie;
+        use reth_trie::{BranchNodeCompact, PackedStoredNibbles, StoredNibbles};
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Put trie data directly into RocksDB (as if migration already ran)
+        let node = BranchNodeCompact::new(0b1111, 0, 0, Vec::new(), None);
+        let nibbles = PackedStoredNibbles::from(StoredNibbles::from(vec![0x1, 0x2]));
+        rocksdb.put::<PackedAccountsTrie>(nibbles, &node).unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should pass when RocksDB already has trie data");
+    }
+
+    /// Tests that check_consistency passes when both MDBX and RocksDB have no trie data.
+    #[test]
+    fn test_check_consistency_passes_when_no_trie_data_anywhere() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should pass when no trie data exists anywhere");
     }
 }

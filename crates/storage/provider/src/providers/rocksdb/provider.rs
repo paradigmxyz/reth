@@ -10,13 +10,16 @@ use metrics::Label;
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
+    cursor::DbCursorRO,
     database_metrics::DatabaseMetrics,
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
         StorageSettings,
     },
     table::{Compress, Decode, Decompress, Encode, Table},
-    tables, BlockNumberList, DatabaseError,
+    tables::{self, PackedAccountsTrie},
+    transaction::DbTx,
+    BlockNumberList, DatabaseError,
 };
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
@@ -24,11 +27,15 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use reth_trie::{
+    updates::TrieUpdatesSorted, BranchNodeCompact, PackedStoredNibbles, PackedStoredNibblesSubKey,
+    StoredNibblesSubKey,
+};
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
-    DB,
+    OptimisticTransactionOptions, Options, ReadOptions, SliceTransform, Transaction,
+    WriteBatchWithTransaction, WriteOptions, DB,
 };
 use std::{
     collections::BTreeMap,
@@ -241,6 +248,54 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates optimized column family options for `AccountsTrie`.
+    ///
+    /// Keys are fixed 33-byte packed nibbles, values are `BranchNodeCompact`.
+    /// Access pattern: `seek()` + `next()` forward iteration, `seek_exact()` point lookups.
+    /// 4KB blocks reduce read amplification for small trie node lookups.
+    /// No compression: trie node values are already compact binary data.
+    fn account_trie_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(4 * 1024);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
+
+        cf_options
+    }
+
+    /// Creates optimized column family options for `StoragesTrie`.
+    ///
+    /// Keys are fixed 65-byte compound keys (`B256 || PackedStoredNibblesSubKey`).
+    /// Every read is scoped to a 32-byte `hashed_address` prefix.
+    /// 4KB blocks and no compression minimize read amplification and CPU overhead.
+    /// Prefix extractor enables RocksDB to scope seeks to the address prefix.
+    fn storage_trie_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(4 * 1024);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
+        // 32-byte fixed prefix extractor: all reads are scoped to a hashed_address.
+        cf_options.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
+
+        cf_options
+    }
+
     /// Creates optimized column family options for `TransactionHashNumbers`.
     ///
     /// This table stores `B256 -> TxNumber` mappings where:
@@ -279,10 +334,14 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::AccountsTrie`] - Account trie nodes
+    /// - [`tables::StoragesTrie`] - Storage trie nodes
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::AccountsTrie>()
+            .with_table::<tables::StoragesTrie>()
     }
 
     /// Enables metrics.
@@ -330,6 +389,10 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsTrie::NAME {
+                    Self::account_trie_column_family_options(&self.block_cache)
+                } else if name == tables::StoragesTrie::NAME {
+                    Self::storage_trie_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
@@ -501,6 +564,22 @@ impl RocksDBProviderInner {
         match self {
             Self::ReadWrite { db, .. } => RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf(cf)),
             Self::ReadOnly { db, .. } => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
+        }
+    }
+
+    /// Returns a raw iterator over a column family with custom read options.
+    fn raw_iterator_cf_opt(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        readopts: ReadOptions,
+    ) -> RocksDBRawIterEnum<'_> {
+        match self {
+            Self::ReadWrite { db, .. } => {
+                RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf_opt(cf, readopts))
+            }
+            Self::ReadOnly { db, .. } => {
+                RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf_opt(cf, readopts))
+            }
         }
     }
 
@@ -995,6 +1074,111 @@ impl RocksDBProvider {
         }
 
         Ok(())
+    }
+
+    /// Migrates trie data from MDBX to RocksDB.
+    ///
+    /// Reads all entries from `AccountsTrie` and `StoragesTrie` tables in MDBX,
+    /// converts them from legacy nibble encoding to packed encoding, and writes
+    /// them to the corresponding RocksDB column families.
+    ///
+    /// For `StoragesTrie`, MDBX's DupSort entries are converted to compound keys
+    /// (`hashed_address || packed_nibbles_subkey`).
+    ///
+    /// This should be called during the transition to storage v2.
+    #[instrument(level = "info", target = "providers::rocksdb", skip_all)]
+    pub fn migrate_trie_from_mdbx<TX>(&self, tx: &TX) -> ProviderResult<()>
+    where
+        TX: DbTx,
+    {
+        // Clear existing RocksDB trie data
+        self.clear::<PackedAccountsTrie>()?;
+        self.clear::<tables::StoragesTrie>()?;
+
+        let mut batch = self.batch_with_auto_commit();
+
+        // Migrate AccountsTrie: read legacy keys, convert to packed, write to RocksDB
+        let mut accounts_cursor = tx.cursor_read::<tables::AccountsTrie>()?;
+        let mut accounts_count = 0usize;
+        let mut walk = accounts_cursor.walk_range(..)?;
+        while let Some(entry) = walk.next() {
+            let (stored_nibbles, node) = entry?;
+            let packed = PackedStoredNibbles::from(stored_nibbles);
+            batch.put_account_trie(packed, &node)?;
+            accounts_count += 1;
+        }
+
+        tracing::info!(
+            target: "providers::rocksdb",
+            accounts_count,
+            "Migrated AccountsTrie entries to RocksDB"
+        );
+
+        // Migrate StoragesTrie: read DupSort entries, convert to compound keys
+        let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>()?;
+        let mut storage_count = 0usize;
+        let mut walk = storage_cursor.walk_range(..)?;
+        while let Some(entry) = walk.next() {
+            let (hashed_address, storage_entry) = entry?;
+            let packed_subkey =
+                PackedStoredNibblesSubKey::from(StoredNibblesSubKey::from(storage_entry.nibbles));
+            batch.put_storage_trie(hashed_address, packed_subkey, &storage_entry.node)?;
+            storage_count += 1;
+        }
+
+        tracing::info!(
+            target: "providers::rocksdb",
+            storage_count,
+            "Migrated StoragesTrie entries to RocksDB"
+        );
+
+        batch.commit()?;
+
+        Ok(())
+    }
+
+    /// Creates a raw iterator for the given column family name.
+    ///
+    /// Used by trie cursors to iterate over trie CFs with compound key encoding.
+    pub(super) fn raw_iterator_for_cf(
+        &self,
+        name: &str,
+    ) -> Result<RocksDBRawIterEnum<'_>, DatabaseError> {
+        let cf = match &*self.0 {
+            RocksDBProviderInner::ReadWrite { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+            RocksDBProviderInner::ReadOnly { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+        };
+        Ok(self.0.raw_iterator_cf(cf))
+    }
+
+    /// Creates a raw iterator for the given column family with bounded prefix.
+    ///
+    /// Sets `iterate_lower_bound` and `iterate_upper_bound` so RocksDB can skip
+    /// SSTs and blocks outside the prefix range. Also enables `total_order_seek`
+    /// to ensure correct iteration when a prefix extractor is configured on the CF
+    /// but we need full-range seeks within the bounded window.
+    pub(super) fn raw_iterator_for_cf_bounded(
+        &self,
+        name: &str,
+        lower: Vec<u8>,
+        upper: Vec<u8>,
+    ) -> Result<RocksDBRawIterEnum<'_>, DatabaseError> {
+        let cf = match &*self.0 {
+            RocksDBProviderInner::ReadWrite { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+            RocksDBProviderInner::ReadOnly { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+        };
+        let mut readopts = ReadOptions::default();
+        readopts.set_iterate_lower_bound(lower);
+        readopts.set_iterate_upper_bound(upper);
+        Ok(self.0.raw_iterator_cf_opt(cf, readopts))
     }
 
     /// Creates a raw iterator over all entries in the specified table.
@@ -2153,6 +2337,147 @@ impl<'a> RocksDBBatch<'a> {
         }
         Ok(())
     }
+
+    /// Puts an entry into the `AccountsTrie` column family.
+    pub fn put_account_trie(
+        &mut self,
+        key: PackedStoredNibbles,
+        node: &BranchNodeCompact,
+    ) -> ProviderResult<()> {
+        self.put::<PackedAccountsTrie>(key, node)
+    }
+
+    /// Deletes an entry from the `AccountsTrie` column family.
+    pub fn delete_account_trie(&mut self, key: PackedStoredNibbles) -> ProviderResult<()> {
+        self.delete::<PackedAccountsTrie>(key)
+    }
+
+    /// Puts an entry into the `StoragesTrie` column family using a compound key.
+    ///
+    /// In RocksDB, `StoragesTrie` uses compound keys (`hashed_address || packed_nibbles`)
+    /// instead of MDBX's DupSort. The value is just the `BranchNodeCompact` node.
+    pub fn put_storage_trie(
+        &mut self,
+        hashed_address: B256,
+        nibbles: PackedStoredNibblesSubKey,
+        node: &BranchNodeCompact,
+    ) -> ProviderResult<()> {
+        let cf = self.provider.0.cf_handle_rw(tables::StoragesTrie::NAME)?;
+        let mut compound_key = [0u8; 65];
+        compound_key[..32].copy_from_slice(hashed_address.as_ref());
+        compound_key[32..].copy_from_slice(&nibbles.encode());
+        let value_bytes = compress_to_buf_or_ref!(self.buf, node).unwrap_or(&self.buf);
+        self.inner.put_cf(&cf, &compound_key, value_bytes);
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Deletes an entry from the `StoragesTrie` column family using a compound key.
+    pub fn delete_storage_trie(
+        &mut self,
+        hashed_address: B256,
+        nibbles: PackedStoredNibblesSubKey,
+    ) -> ProviderResult<()> {
+        let cf = self.provider.0.cf_handle_rw(tables::StoragesTrie::NAME)?;
+        let mut compound_key = [0u8; 65];
+        compound_key[..32].copy_from_slice(hashed_address.as_ref());
+        compound_key[32..].copy_from_slice(&nibbles.encode());
+        self.inner.delete_cf(&cf, &compound_key);
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Deletes all storage trie entries for the given hashed address.
+    ///
+    /// This is equivalent to MDBX's `delete_current_duplicates` for the StoragesTrie DupSort table.
+    /// Iterates through all entries with the address prefix and deletes them.
+    pub fn delete_storage_trie_entries(&mut self, hashed_address: B256) -> ProviderResult<()> {
+        let cf = self.provider.get_cf_handle::<tables::StoragesTrie>()?;
+        let prefix = hashed_address.as_ref();
+        let iter = self
+            .provider
+            .0
+            .iterator_cf(cf, IteratorMode::From(prefix, rocksdb::Direction::Forward));
+        let mut keys_to_delete = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, _)) => {
+                    if key_bytes.get(..32) != Some(prefix) {
+                        break;
+                    }
+                    keys_to_delete.push(key_bytes.to_vec());
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+        let cf = self.provider.0.cf_handle_rw(tables::StoragesTrie::NAME)?;
+        for key in keys_to_delete {
+            self.inner.delete_cf(&cf, &key);
+        }
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Writes sorted trie updates to RocksDB.
+    ///
+    /// Returns the number of entries modified.
+    pub fn write_trie_updates_sorted(
+        &mut self,
+        trie_updates: &TrieUpdatesSorted,
+    ) -> ProviderResult<usize> {
+        if trie_updates.is_empty() {
+            return Ok(0);
+        }
+
+        let mut num_entries = 0;
+
+        // Write account trie updates
+        for (key, updated_node) in trie_updates.account_nodes_ref() {
+            if key.is_empty() {
+                continue;
+            }
+            num_entries += 1;
+            let nibbles = PackedStoredNibbles::from(*key);
+            match updated_node {
+                Some(node) => {
+                    self.put_account_trie(nibbles, node)?;
+                }
+                None => {
+                    self.delete_account_trie(nibbles)?;
+                }
+            }
+        }
+
+        // Write storage trie updates
+        for (hashed_address, storage_trie_updates) in trie_updates.storage_tries_ref() {
+            // Delete all existing entries for this address if the trie was wiped
+            if storage_trie_updates.is_deleted() {
+                self.delete_storage_trie_entries(*hashed_address)?;
+            }
+
+            for (nibbles, maybe_updated) in
+                storage_trie_updates.storage_nodes_ref().iter().filter(|(n, _)| !n.is_empty())
+            {
+                num_entries += 1;
+                let subkey = PackedStoredNibblesSubKey::from(*nibbles);
+                match maybe_updated {
+                    Some(node) => {
+                        self.put_storage_trie(*hashed_address, subkey, node)?;
+                    }
+                    None => {
+                        self.delete_storage_trie(*hashed_address, subkey)?;
+                    }
+                }
+            }
+        }
+
+        Ok(num_entries)
+    }
 }
 
 /// `RocksDB` transaction wrapper providing MDBX-like semantics.
@@ -2442,7 +2767,7 @@ impl Iterator for RocksDBIterEnum<'_> {
 ///
 /// Unlike [`RocksDBIterEnum`], raw iterators expose `seek()` for efficient repositioning
 /// without reinitializing the iterator.
-enum RocksDBRawIterEnum<'db> {
+pub(super) enum RocksDBRawIterEnum<'db> {
     /// Raw iterator from read-write `OptimisticTransactionDB`.
     ReadWrite(DBRawIteratorWithThreadMode<'db, OptimisticTransactionDB>),
     /// Raw iterator from read-only `DB`.
@@ -2451,7 +2776,7 @@ enum RocksDBRawIterEnum<'db> {
 
 impl RocksDBRawIterEnum<'_> {
     /// Positions the iterator at the first key >= `key`.
-    fn seek(&mut self, key: impl AsRef<[u8]>) {
+    pub(super) fn seek(&mut self, key: impl AsRef<[u8]>) {
         match self {
             Self::ReadWrite(iter) => iter.seek(key),
             Self::ReadOnly(iter) => iter.seek(key),
@@ -2459,7 +2784,7 @@ impl RocksDBRawIterEnum<'_> {
     }
 
     /// Returns true if the iterator is positioned at a valid key-value pair.
-    fn valid(&self) -> bool {
+    pub(super) fn valid(&self) -> bool {
         match self {
             Self::ReadWrite(iter) => iter.valid(),
             Self::ReadOnly(iter) => iter.valid(),
@@ -2467,7 +2792,7 @@ impl RocksDBRawIterEnum<'_> {
     }
 
     /// Returns the current key, if valid.
-    fn key(&self) -> Option<&[u8]> {
+    pub(super) fn key(&self) -> Option<&[u8]> {
         match self {
             Self::ReadWrite(iter) => iter.key(),
             Self::ReadOnly(iter) => iter.key(),
@@ -2475,7 +2800,7 @@ impl RocksDBRawIterEnum<'_> {
     }
 
     /// Returns the current value, if valid.
-    fn value(&self) -> Option<&[u8]> {
+    pub(super) fn value(&self) -> Option<&[u8]> {
         match self {
             Self::ReadWrite(iter) => iter.value(),
             Self::ReadOnly(iter) => iter.value(),
@@ -2483,7 +2808,7 @@ impl RocksDBRawIterEnum<'_> {
     }
 
     /// Advances the iterator to the next key.
-    fn next(&mut self) {
+    pub(super) fn next(&mut self) {
         match self {
             Self::ReadWrite(iter) => iter.next(),
             Self::ReadOnly(iter) => iter.next(),
@@ -2491,7 +2816,7 @@ impl RocksDBRawIterEnum<'_> {
     }
 
     /// Returns the status of the iterator.
-    fn status(&self) -> Result<(), rocksdb::Error> {
+    pub(super) fn status(&self) -> Result<(), rocksdb::Error> {
         match self {
             Self::ReadWrite(iter) => iter.status(),
             Self::ReadOnly(iter) => iter.status(),

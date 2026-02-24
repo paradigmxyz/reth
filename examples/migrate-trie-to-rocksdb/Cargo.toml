@@ -1,0 +1,15 @@
+[package]
+name = "example-migrate-trie-to-rocksdb"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api = { workspace = true }
+reth-provider = { workspace = true, features = ["rocksdb"] }
+reth-trie-common = { workspace = true }
+reth-trie-db = { workspace = true }
+eyre.workspace = true
+clap = { workspace = true, features = ["derive"] }

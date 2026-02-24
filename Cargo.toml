@@ -139,6 +139,7 @@ members = [
     "examples/exex-test",
     "examples/full-contract-state",
     "examples/migrate-trie-to-packed",
+    "examples/migrate-trie-to-rocksdb",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
