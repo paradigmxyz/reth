@@ -2295,29 +2295,36 @@ mod tests {
             }
             let prefix_set = prefix_set.freeze();
 
-            // Build sorted overlay from changes.
-            let hashed_storage =
-                HashedStorage::from_iter(false, changes.iter().map(|(&k, &v)| (k, v)));
-            let overlay = HashedPostStateSorted::new(
-                Vec::new(),
-                [(HASHED_ADDRESS, hashed_storage.into_sorted())].into_iter().collect(),
-            );
-
-            // Create overlay cursor factory on top of the existing base.
-            let overlay_cursor_factory =
-                HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
-
             // Compute expected root and trie updates via StorageRoot.
-            let (expected_root, _, mut expected_trie_updates) = StorageRoot::new_hashed(
-                self.trie_cursor_factory.clone(),
-                overlay_cursor_factory,
-                HASHED_ADDRESS,
-                prefix_set,
-                #[cfg(feature = "metrics")]
-                reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-            )
-            .root_with_updates()
-            .expect("StorageRoot should succeed");
+            let (expected_root, mut expected_trie_updates) = if changes.is_empty() {
+                (self.expected_root, Default::default())
+            } else {
+                // Build sorted overlay from changes.
+                let hashed_storage =
+                    HashedStorage::from_iter(false, changes.iter().map(|(&k, &v)| (k, v)));
+
+                let overlay = HashedPostStateSorted::new(
+                    Vec::new(),
+                    [(HASHED_ADDRESS, hashed_storage.into_sorted())].into_iter().collect(),
+                );
+
+                // Create overlay cursor factory on top of the existing base.
+                let overlay_cursor_factory =
+                    HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
+
+                let (root, _, trie_updates) = StorageRoot::new_hashed(
+                    self.trie_cursor_factory.clone(),
+                    overlay_cursor_factory,
+                    HASHED_ADDRESS,
+                    prefix_set,
+                    #[cfg(feature = "metrics")]
+                    reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+                )
+                .root_with_updates()
+                .expect("StorageRoot should succeed");
+
+                (root, trie_updates)
+            };
 
             self.minimize_trie_updates(&mut expected_trie_updates);
 
