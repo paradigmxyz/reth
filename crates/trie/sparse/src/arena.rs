@@ -1,5 +1,6 @@
 use crate::{
-    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
+    arena, LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates,
+    SparseTrieUpdatesAction,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
@@ -388,19 +389,43 @@ fn find_ancestor(
             }
             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                 let child_idx = *child_idx;
-                if maybe_push_child(arena, stack, child_idx, child_nibble) {
-                    // Child was pushed; if it's a leaf we stop, if a branch we continue.
-                    if matches!(arena[child_idx], ArenaSparseNode::Leaf { .. }) {
+                let path = child_path(arena, stack, child_nibble);
+                match &arena[child_idx] {
+                    ArenaSparseNode::Branch(b) => {
+                        stack.push(ArenaStackEntry {
+                            index: child_idx,
+                            path,
+                            prev_num_leaves: b.state.num_leaves(),
+                            prev_dirty_leaves: b.state.num_dirty_leaves(),
+                        });
+                        // Continue descending through the branch.
+                    }
+                    ArenaSparseNode::Leaf { state, .. } => {
+                        stack.push(ArenaStackEntry {
+                            index: child_idx,
+                            path,
+                            prev_num_leaves: state.num_leaves(),
+                            prev_dirty_leaves: state.num_dirty_leaves(),
+                        });
                         trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: descended to revealed leaf");
                         return FindAncestorResult::RevealedLeaf;
                     }
-                } else {
-                    trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: revealed subtrie");
-                    return FindAncestorResult::RevealedSubtrie {
-                        dense_idx,
-                        child_nibble,
-                        child_idx,
-                    };
+                    ArenaSparseNode::Subtrie(_) => {
+                        let node = &arena[child_idx];
+                        stack.push(ArenaStackEntry {
+                            index: child_idx,
+                            path,
+                            prev_num_leaves: node.num_leaves(),
+                            prev_dirty_leaves: node.num_dirty_leaves(),
+                        });
+                        trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: revealed subtrie");
+                        return FindAncestorResult::RevealedSubtrie {
+                            dense_idx,
+                            child_nibble,
+                            child_idx,
+                        };
+                    }
+                    _ => unreachable!("unexpected child node type: {:?}", arena[child_idx]),
                 }
             }
         }
@@ -419,42 +444,6 @@ fn child_path(
     path.extend(&arena[parent.index].branch_ref().short_key);
     path.push_unchecked(child_nibble);
     path
-}
-
-/// If `child_idx` is a branch or leaf node, pushes it onto the stack and returns `true`.
-/// Returns `false` for subtries and other non-pushable node types.
-///
-/// The parent's path and `short_key` are read from the current top of the stack.
-fn maybe_push_child(
-    arena: &Arena<ArenaSparseNode>,
-    stack: &mut Vec<ArenaStackEntry>,
-    child_idx: Index,
-    child_nibble: u8,
-) -> bool {
-    let node = &arena[child_idx];
-    match node {
-        ArenaSparseNode::Branch(b) => {
-            let path = child_path(arena, stack, child_nibble);
-            stack.push(ArenaStackEntry {
-                index: child_idx,
-                path,
-                prev_num_leaves: b.state.num_leaves(),
-                prev_dirty_leaves: b.state.num_dirty_leaves(),
-            });
-            true
-        }
-        ArenaSparseNode::Leaf { state, .. } => {
-            let path = child_path(arena, stack, child_nibble);
-            stack.push(ArenaStackEntry {
-                index: child_idx,
-                path,
-                prev_num_leaves: state.num_leaves(),
-                prev_dirty_leaves: state.num_dirty_leaves(),
-            });
-            true
-        }
-        _ => false,
-    }
 }
 
 /// Assert that the popped branch's leaf counts are consistent with its revealed children.
@@ -1029,10 +1018,9 @@ fn replace_child_in_parent(
 enum UpsertLeafResult {
     /// No new subtrie-eligible child was created (value update or same-leaf overwrite).
     None,
-    /// A new child (branch or leaf) was created or inserted. Contains the parent's arena
-    /// index, the child nibble under which it sits, and the parent's path — enough for the
-    /// caller to call `maybe_wrap_in_subtrie`.
-    NewChild { parent_idx: Index, child_nibble: u8, parent_path: Nibbles },
+    /// A new child (branch or leaf) was created or inserted. The child is at the top of
+    /// the stack and its parent is second-to-top.
+    NewChild,
 }
 
 /// Performs a leaf upsert using a pre-computed [`FindAncestorResult`] from
@@ -1051,7 +1039,7 @@ enum UpsertLeafResult {
 /// can decide whether to wrap it as a subtrie.
 fn upsert_leaf(
     arena: &mut Arena<ArenaSparseNode>,
-    stack: &mut [ArenaStackEntry],
+    stack: &mut Vec<ArenaStackEntry>,
     root: &mut Index,
     full_path: &Nibbles,
     value: &[u8],
@@ -1102,13 +1090,7 @@ fn upsert_leaf(
                 stack.last_mut().unwrap().index = new_branch_idx;
 
                 if stack.len() >= 2 {
-                    let parent_entry = &stack[stack.len() - 2];
-                    let child_nibble = stack.last().unwrap().path.last().unwrap();
-                    return UpsertLeafResult::NewChild {
-                        parent_idx: parent_entry.index,
-                        child_nibble,
-                        parent_path: parent_entry.path,
-                    };
+                    return UpsertLeafResult::NewChild;
                 }
             }
             UpsertLeafResult::None
@@ -1128,13 +1110,7 @@ fn upsert_leaf(
 
             // The new branch replaced the stack head. Its parent is stack[len-2].
             if stack.len() >= 2 {
-                let parent_entry = &stack[stack.len() - 2];
-                let child_nibble = stack.last().unwrap().path.last().unwrap();
-                return UpsertLeafResult::NewChild {
-                    parent_idx: parent_entry.index,
-                    child_nibble,
-                    parent_path: parent_entry.path,
-                };
+                return UpsertLeafResult::NewChild;
             }
             UpsertLeafResult::None
         }
@@ -1142,8 +1118,6 @@ fn upsert_leaf(
             let head_idx = head.index;
             let head_path = head.path;
             let head_branch = arena[head_idx].branch_ref();
-            let old_num_leaves = head_branch.state.num_leaves();
-            let old_dirty_leaves = head_branch.state.num_dirty_leaves();
             let state_mask = head_branch.state_mask;
             let insert_pos =
                 (state_mask.get() & ((1u16 << child_nibble) - 1)).count_ones() as usize;
@@ -1160,15 +1134,19 @@ fn upsert_leaf(
             let branch = arena[head_idx].branch_mut();
             branch.state_mask.set_bit(child_nibble);
             branch.children.insert(insert_pos, ArenaSparseNodeBranchChild::Revealed(new_leaf));
-            branch.state = ArenaSparseNodeState::Dirty {
-                num_leaves: old_num_leaves + 1,
-                num_dirty_leaves: old_dirty_leaves + 1,
-            };
-            UpsertLeafResult::NewChild {
-                parent_idx: head_idx,
-                child_nibble,
-                parent_path: head_path,
-            }
+
+            // Push the leaf onto the stack so pop_and_propagate handles marking
+            // the parent dirty and propagating leaf counts.
+            let mut leaf_path = head_branch_logical_path;
+            leaf_path.push_unchecked(child_nibble);
+            stack.push(ArenaStackEntry {
+                index: new_leaf,
+                path: leaf_path,
+                prev_num_leaves: 0,
+                prev_dirty_leaves: 0,
+            });
+
+            UpsertLeafResult::NewChild
         }
         FindAncestorResult::RevealedSubtrie { .. } => {
             unreachable!("RevealedSubtrie must be handled by caller")
@@ -1493,14 +1471,15 @@ fn reveal_node(
     arena[head_idx].branch_mut().children[dense_idx] =
         ArenaSparseNodeBranchChild::Revealed(child_idx);
 
-    // Only push branches onto the stack (leaves have no children to descend into).
-    if let ArenaSparseNode::Branch(b) = &arena[child_idx] {
+    // Push the revealed child onto the stack with prev_num_leaves=0 (it was previously
+    // blinded). pop_and_propagate will propagate the child's leaf count to the parent.
+    if matches!(arena[child_idx], ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. }) {
         let path = child_path(arena, stack, child_nibble);
         stack.push(ArenaStackEntry {
             index: child_idx,
             path,
-            prev_num_leaves: b.state.num_leaves(),
-            prev_dirty_leaves: b.state.num_dirty_leaves(),
+            prev_num_leaves: 0,
+            prev_dirty_leaves: 0,
         });
     }
 }
@@ -1614,26 +1593,18 @@ impl ArenaParallelSparseTrie {
         path_len == UPPER_TRIE_MAX_DEPTH
     }
 
-    /// If the child node at `child_idx` (under `parent_idx` at `child_nibble`) should be a
-    /// subtrie based on its depth, wraps it in [`ArenaSparseNode::Subtrie`] and updates the
-    /// parent's child pointer. Also pops the stack entry if the child was pushed by
-    /// [`reveal_node`] (since subtrie roots are not traversed by the upper trie's stack).
-    fn maybe_wrap_in_subtrie(
-        &mut self,
-        parent_idx: Index,
-        child_nibble: u8,
-        parent_path: Nibbles,
-        stack: &mut Vec<ArenaStackEntry>,
-    ) {
-        let parent = self.upper_arena[parent_idx].branch_ref();
-        let child_path_len = parent_path.len() + parent.short_key.len() + 1;
-        let Some(child_dense_idx) = child_dense_index(parent.state_mask, child_nibble) else {
+    /// If the child at the top of the stack should be a subtrie based on its depth, pops it,
+    /// wraps it in [`ArenaSparseNode::Subtrie`], and updates the parent's child pointer.
+    ///
+    /// The child must be at `stack.last()` and its parent at `stack[len-2]`.
+    fn maybe_wrap_in_subtrie(&mut self, stack: &mut Vec<ArenaStackEntry>) {
+        let child_entry = stack.last().unwrap();
+        let child_idx = child_entry.index;
+        let child_path_len = child_entry.path.len();
+
+        if !Self::should_be_subtrie(child_path_len) {
             return;
-        };
-        let ArenaSparseNodeBranchChild::Revealed(child_idx) = parent.children[child_dense_idx]
-        else {
-            return;
-        };
+        }
 
         // Only branch and leaf nodes can become subtrie roots.
         if !matches!(
@@ -1643,20 +1614,20 @@ impl ArenaParallelSparseTrie {
             return;
         }
 
-        if !Self::should_be_subtrie(child_path_len) {
-            return;
-        }
+        let child_nibble = child_entry.path.last().unwrap();
 
-        // If the child was pushed onto the stack, pop it — the upper trie doesn't traverse
-        // into subtrie roots.
-        if stack.last().is_some_and(|e| e.index == child_idx) {
-            stack.pop();
-        }
+        // Pop the child and propagate its leaf counts to the parent.
+        pop_and_propagate(&mut self.upper_arena, stack);
 
         trace!(target: TRACE_TARGET, child_path_len, ?child_nibble, "Wrapping child into subtrie");
         let arena_node = self.upper_arena.remove(child_idx).unwrap();
         let subtrie = self.take_or_create_subtrie(arena_node);
         let subtrie_idx = self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
+
+        let parent_idx = stack.last().unwrap().index;
+        let parent_branch = self.upper_arena[parent_idx].branch_ref();
+        let child_dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+            .expect("child nibble not in parent state_mask");
         self.upper_arena[parent_idx].branch_mut().children[child_dense_idx] =
             ArenaSparseNodeBranchChild::Revealed(subtrie_idx);
     }
@@ -1872,13 +1843,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     );
                     node_idx += 1;
 
-                    self.maybe_wrap_in_subtrie(head_idx, child_nibble, head_path, &mut stack);
+                    self.maybe_wrap_in_subtrie(&mut stack);
                 }
                 FindAncestorResult::RevealedSubtrie { child_idx, child_nibble, .. }
                     if matches!(self.upper_arena[child_idx], ArenaSparseNode::Subtrie(_)) =>
                 {
                     let subtrie_start = node_idx;
-                    let prefix = child_path(&self.upper_arena, &stack, child_nibble);
+                    let prefix = stack.last().unwrap().path;
                     while node_idx < nodes.len() && nodes[node_idx].path.starts_with(&prefix) {
                         node_idx += 1;
                     }
@@ -2081,7 +2052,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 FindAncestorResult::RevealedSubtrie { child_idx, child_nibble, .. } => {
                     let subtrie_start = update_idx;
-                    let subtrie_root_path = child_path(&self.upper_arena, &stack, child_nibble);
+                    let subtrie_root_path = stack.last().unwrap().path;
                     while update_idx < sorted.len() &&
                         sorted[update_idx].1.starts_with(&subtrie_root_path)
                     {
@@ -2096,7 +2067,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     // a proof for the sibling and skip the subtrie's updates.
                     if let Some(proof) = check_subtrie_collapse_needs_proof(
                         &self.upper_arena,
-                        &stack,
+                        &stack[..stack.len() - 1],
                         child_idx,
                         child_nibble,
                         subtrie_updates,
@@ -2107,6 +2078,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
+                        // Pop the subtrie entry before continuing.
+                        pop_and_propagate(&mut self.upper_arena, &mut stack);
                         continue;
                     }
 
@@ -2126,6 +2099,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     }
 
                     self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+
+                    // Pop the subtrie entry, propagating leaf count deltas to the parent.
+                    pop_and_propagate(&mut self.upper_arena, &mut stack);
 
                     // Check if the subtrie's root still qualifies as a subtrie after updates.
                     let parent_idx = stack.last().unwrap().index;
@@ -2155,18 +2131,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             v,
                             find_result,
                         );
-                        if let UpsertLeafResult::NewChild {
-                            parent_idx,
-                            child_nibble,
-                            parent_path,
-                        } = result
-                        {
-                            self.maybe_wrap_in_subtrie(
-                                parent_idx,
-                                child_nibble,
-                                parent_path,
-                                &mut stack,
-                            );
+                        if matches!(result, UpsertLeafResult::NewChild) {
+                            self.maybe_wrap_in_subtrie(&mut stack);
                         }
                     }
                     LeafUpdate::Changed(_) => {
