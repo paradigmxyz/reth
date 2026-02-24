@@ -147,6 +147,7 @@ mod block_bincode {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxTy;
     use alloy_eips::eip4895::Withdrawals;
+    use core::fmt::Debug;
     use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -319,8 +320,8 @@ mod block_bincode {
         }
     }
 
-    impl<T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + 'static>
-        super::SerdeBincodeCompat for alloy_consensus::EthereumTxEnvelope<T>
+    impl<T: Clone + Serialize + DeserializeOwned + Debug + 'static> super::SerdeBincodeCompat
+        for alloy_consensus::EthereumTxEnvelope<T>
     {
         type BincodeRepr<'a> =
             alloy_consensus::serde_bincode_compat::transaction::EthereumTxEnvelope<'a, T>;
