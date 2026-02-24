@@ -319,8 +319,8 @@ mod block_bincode {
         }
     }
 
-    impl<T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + 'static> super::SerdeBincodeCompat
-        for alloy_consensus::EthereumTxEnvelope<T>
+    impl<T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + 'static>
+        super::SerdeBincodeCompat for alloy_consensus::EthereumTxEnvelope<T>
     {
         type BincodeRepr<'a> =
             alloy_consensus::serde_bincode_compat::transaction::EthereumTxEnvelope<'a, T>;
