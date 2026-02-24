@@ -1001,10 +1001,11 @@ jobs:
               }
             } catch (e) {}
 
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.updateComment({
               owner: context.repo.owner, repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})${errorDetails}`,
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${jobUrl})${errorDetails}`,
             });
 
       - name: Send Slack notification (failure)
