@@ -125,7 +125,7 @@ where
     let mut stopped_on_invalid_block = false;
     let mut bad_block_number: Option<u64> = None;
     let mut last_valid_block_number: Option<u64> = None;
-
+    tracing::debug!("Sealed header in import core: {:?}", sealed_header);
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
     {
