@@ -12,6 +12,9 @@ use reth_trie_common::{
 };
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
+use tracing::{instrument, trace};
+
+const TRACE_TARGET: &str = "trie::arena";
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
@@ -332,6 +335,7 @@ enum FindAncestorResult {
 /// deepest ancestor is reached.
 ///
 /// Returns a [`FindAncestorResult`] describing the state at the stack head.
+#[instrument(level = "trace", target = "trie::arena", skip(arena, stack), ret)]
 fn find_ancestor(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
@@ -347,8 +351,14 @@ fn find_ancestor(
         let head_idx = head.index;
 
         let head_branch = match &arena[head_idx] {
-            ArenaSparseNode::EmptyRoot => return FindAncestorResult::EmptyRoot,
-            ArenaSparseNode::Leaf { .. } => return FindAncestorResult::RevealedLeaf,
+            ArenaSparseNode::EmptyRoot => {
+                trace!(target: TRACE_TARGET, ?full_path, "find_ancestor: empty root");
+                return FindAncestorResult::EmptyRoot;
+            }
+            ArenaSparseNode::Leaf { .. } => {
+                trace!(target: TRACE_TARGET, ?full_path, head_path = ?head.path, "find_ancestor: revealed leaf");
+                return FindAncestorResult::RevealedLeaf;
+            }
             ArenaSparseNode::Branch(b) => b,
             _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
         };
@@ -361,24 +371,31 @@ fn find_ancestor(
         if full_path.len() <= head_branch_logical_path.len() ||
             !full_path.starts_with(&head_branch_logical_path)
         {
+            trace!(target: TRACE_TARGET, ?full_path, ?head_branch_logical_path, "find_ancestor: diverged");
             return FindAncestorResult::Diverged;
         }
 
         let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
         let Some(dense_idx) = child_dense_index(head_branch.state_mask, child_nibble) else {
+            trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: no child");
             return FindAncestorResult::NoChild { child_nibble };
         };
 
         match &head_branch.children[dense_idx] {
-            ArenaSparseNodeBranchChild::Blinded(_) => return FindAncestorResult::Blinded,
+            ArenaSparseNodeBranchChild::Blinded(_) => {
+                trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: blinded");
+                return FindAncestorResult::Blinded;
+            }
             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                 let child_idx = *child_idx;
                 if maybe_push_child(arena, stack, child_idx, child_nibble) {
                     // Child was pushed; if it's a leaf we stop, if a branch we continue.
                     if matches!(arena[child_idx], ArenaSparseNode::Leaf { .. }) {
+                        trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: descended to revealed leaf");
                         return FindAncestorResult::RevealedLeaf;
                     }
                 } else {
+                    trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: revealed subtrie");
                     return FindAncestorResult::RevealedSubtrie {
                         dense_idx,
                         child_nibble,
@@ -476,11 +493,13 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
 /// Pops the top entry from the stack and propagates `num_leaves` and dirty state/count
 /// deltas to the new top (its parent). Returns the popped entry's path, or `None` if
 /// the stack was empty.
+#[instrument(level = "trace", target = "trie::arena", skip(arena, stack), ret)]
 fn pop_and_propagate(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
 ) -> Option<Nibbles> {
     let entry = stack.pop()?;
+    trace!(target: TRACE_TARGET, path = ?entry.path, "Popped entry");
 
     #[cfg(debug_assertions)]
     debug_assert_branch_consistency(arena, entry.index);
@@ -497,11 +516,13 @@ fn pop_and_propagate(
         // it would indicate the branch was deleted, and so wouldn't be on the stack.
         if cur_dirty_leaves > 0 {
             let dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
+            trace!(target: TRACE_TARGET, path = ?entry.path, leaves_delta, dirty_delta, "Propagating dirty state to parent");
             *parent_state = ArenaSparseNodeState::Dirty {
                 num_leaves: (parent_state.num_leaves() as i64 + leaves_delta) as u64,
                 num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + dirty_delta) as u64,
             };
         } else if leaves_delta != 0 {
+            trace!(target: TRACE_TARGET, path = ?entry.path, leaves_delta, "Propagating leaf count delta to parent");
             parent_state.add_num_leaves(leaves_delta);
         }
     }
@@ -510,6 +531,7 @@ fn pop_and_propagate(
 
 /// Drains the stack, propagating `num_leaves` deltas from each entry to its parent.
 fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEntry>) {
+    trace!(target: TRACE_TARGET, "Draining stack");
     while stack.len() > 1 {
         pop_and_propagate(arena, stack);
     }
@@ -547,6 +569,15 @@ impl ArenaSparseSubtrie {
     ///
     /// Any required proofs are appended to `self.required_proofs` and should be drained by the
     /// caller after this method returns.
+    #[instrument(
+        level = "trace",
+        target = "trie::arena",
+        skip_all,
+        fields(
+            subtrie = ?root_path,
+            num_updates = sorted_updates.len(),
+        ),
+    )]
     fn update_leaves(
         &mut self,
         sorted_updates: &[(B256, Nibbles, LeafUpdate)],
@@ -555,6 +586,7 @@ impl ArenaSparseSubtrie {
         if sorted_updates.is_empty() {
             return;
         }
+        trace!(target: TRACE_TARGET, "Subtrie update_leaves");
 
         debug_assert!(
             !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
@@ -633,6 +665,7 @@ impl ArenaSparseSubtrie {
         if nodes.is_empty() {
             return Ok(());
         }
+        trace!(target: TRACE_TARGET, ?root_path, num_nodes = nodes.len(), "Subtrie reveal_nodes");
 
         debug_assert!(
             !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
@@ -902,6 +935,7 @@ fn split_and_insert_leaf(
     old_child_idx: Index,
 ) -> Index {
     let diverge_len = new_leaf_path.common_prefix_length(old_child_path);
+    trace!(target: TRACE_TARGET, ?new_leaf_path, ?old_child_path, diverge_len, "Splitting node and inserting new leaf");
     let old_child_nibble = old_child_path.get_unchecked(diverge_len);
     let old_child_suffix = old_child_path.slice(diverge_len + 1..);
 
@@ -1023,6 +1057,7 @@ fn upsert_leaf(
     value: &[u8],
     find_result: FindAncestorResult,
 ) -> UpsertLeafResult {
+    trace!(target: TRACE_TARGET, ?full_path, ?find_result, "Upserting leaf");
     let head = stack.last().unwrap();
 
     match find_result {
@@ -1175,6 +1210,7 @@ fn remove_leaf(
     full_path: &Nibbles,
     find_result: FindAncestorResult,
 ) -> RemoveLeafResult {
+    trace!(target: TRACE_TARGET, ?full_path, ?find_result, "Removing leaf");
     match find_result {
         FindAncestorResult::Blinded | FindAncestorResult::RevealedSubtrie { .. } => {
             unreachable!("Blinded/RevealedSubtrie must be handled by caller")
@@ -1219,6 +1255,7 @@ fn remove_leaf(
                         let mut sibling_path = parent_path;
                         sibling_path.extend(&parent_branch.short_key);
                         sibling_path.push_unchecked(sibling_nibble);
+                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
                         return RemoveLeafResult::NeedsProof {
                             key,
                             proof_key: nibbles_to_padded_b256(&sibling_path),
@@ -1343,6 +1380,7 @@ fn collapse_branch(
     branch_idx: Index,
 ) {
     let branch = arena[branch_idx].branch_ref();
+    trace!(target: TRACE_TARGET, short_key = ?branch.short_key, "Collapsing single-child branch");
     debug_assert_eq!(branch.state_mask.count_bits(), 1, "collapse_branch requires exactly 1 child");
     debug_assert!(
         !branch.children[0].is_blinded(),
@@ -1615,6 +1653,7 @@ impl ArenaParallelSparseTrie {
             stack.pop();
         }
 
+        trace!(target: TRACE_TARGET, child_path_len, ?child_nibble, "Wrapping child into subtrie");
         let arena_node = self.upper_arena.remove(child_idx).unwrap();
         let subtrie = self.take_or_create_subtrie(arena_node);
         let subtrie_idx = self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
@@ -1668,6 +1707,7 @@ impl ArenaParallelSparseTrie {
         self.cleared_subtries.push(*subtrie);
 
         if matches!(root_node, ArenaSparseNode::EmptyRoot) {
+            trace!(target: TRACE_TARGET, ?child_nibble, "Unwrapping empty subtrie, removing child slot");
             // All leaves were removed from this subtrie. Remove the child slot from the
             // parent branch and potentially collapse it.
             let parent_branch = self.upper_arena[parent_idx].branch_ref();
@@ -1689,6 +1729,7 @@ impl ArenaParallelSparseTrie {
                 collapse_branch(&mut self.upper_arena, stack, &mut self.root, parent_idx);
             }
         } else {
+            trace!(target: TRACE_TARGET, ?child_nibble, "Unwrapping subtrie back into upper arena");
             // Move the subtrie's root (Leaf or non-qualifying Branch) into the upper arena.
             let new_child_idx = self.upper_arena.insert(root_node);
             let dense_idx = child_dense_index(
@@ -1717,6 +1758,7 @@ impl Default for ArenaParallelSparseTrie {
 }
 
 impl SparseTrie for ArenaParallelSparseTrie {
+    #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn set_root(
         &mut self,
         root: TrieNodeV2,
@@ -1732,9 +1774,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         match root {
             TrieNodeV2::EmptyRoot => {
-                // Already EmptyRoot, nothing to do.
+                trace!(target: TRACE_TARGET, "Setting empty root");
             }
             TrieNodeV2::Leaf(leaf) => {
+                trace!(target: TRACE_TARGET, key = ?leaf.key, "Setting leaf root");
                 self.upper_arena[self.root] = ArenaSparseNode::Leaf {
                     state: ArenaSparseNodeState::Revealed { num_leaves: 1 },
                     key: leaf.key,
@@ -1742,6 +1785,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 };
             }
             TrieNodeV2::Branch(branch) => {
+                trace!(target: TRACE_TARGET, state_mask = ?branch.state_mask, num_children = branch.state_mask.count_bits(), "Setting branch root");
                 let mut children = SmallVec::with_capacity(branch.state_mask.count_bits() as usize);
                 for (stack_ptr, _nibble) in branch.state_mask.iter().enumerate() {
                     children
@@ -1772,12 +1816,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // thunderdome::Arena does not support reserve; no-op.
     }
 
+    #[instrument(level = "trace", target = "trie::arena", skip_all, fields(num_nodes = nodes.len()))]
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
             return Ok(());
         }
 
         if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
+            trace!(target: TRACE_TARGET, "Skipping reveal_nodes on empty root");
             return Ok(());
         }
 
@@ -1805,7 +1851,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             match find_result {
                 FindAncestorResult::RevealedLeaf => {
-                    // Leaf heads have no blinded children — skip.
+                    trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, "Skipping reveal: leaf head");
                     node_idx += 1;
                 }
                 FindAncestorResult::Blinded => {
@@ -1815,6 +1861,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let head_branch = self.upper_arena[head_idx].branch_ref();
                     let child_nibble_offset = head_path.len() + head_branch.short_key.len();
                     let child_nibble = nodes[node_idx].path.get_unchecked(child_nibble_offset);
+
+                    trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, ?child_nibble, "Revealing blinded child in upper trie");
 
                     reveal_node(
                         &mut self.upper_arena,
@@ -1834,6 +1882,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     while node_idx < nodes.len() && nodes[node_idx].path.starts_with(&prefix) {
                         node_idx += 1;
                     }
+
+                    trace!(target: TRACE_TARGET, ?prefix, num_subtrie_nodes = node_idx - subtrie_start, "Delegating reveal to subtrie");
+
                     let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
                         &mut self.upper_arena[child_idx],
                         ArenaSparseNode::TakenSubtrie,
@@ -1845,7 +1896,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
                 }
                 _ => {
-                    // Diverged, NoChild, or Revealed non-subtrie — skip this proof node.
+                    trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, ?find_result, "Skipping reveal: no blinded child");
                     node_idx += 1;
                 }
             }
@@ -1877,6 +1928,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         todo!()
     }
 
+    #[instrument(level = "trace", target = "trie::arena", skip_all, ret)]
     fn root(&mut self) -> B256 {
         self.update_subtrie_hashes();
         let rlp_node = update_cached_rlp(
@@ -1899,8 +1951,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         )
     }
 
+    #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn update_subtrie_hashes(&mut self) {
-        for idx in self.all_subtries() {
+        let subtries = self.all_subtries();
+        trace!(target: TRACE_TARGET, num_subtries = subtries.len(), "Updating subtrie hashes");
+        for idx in subtries {
             let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[idx] else {
                 unreachable!()
             };
@@ -1937,11 +1992,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
+    #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn wipe(&mut self) {
+        trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
+    #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn clear(&mut self) {
         for idx in self.all_subtries() {
             if let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(idx).unwrap() {
@@ -1973,6 +2031,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         todo!()
     }
 
+    #[instrument(
+        level = "trace",
+        target = "trie::arena",
+        skip_all,
+        fields(num_updates = updates.len()),
+    )]
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
@@ -2010,6 +2074,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let head_branch = self.upper_arena[head.index].branch_ref();
                     let logical_len = head.path.len() + head_branch.short_key.len();
                     let min_len = (logical_len as u8 + 1).min(64);
+                    trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, min_len);
                     updates.insert(key, LeafUpdate::Touched);
                 }
@@ -2024,6 +2089,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     }
 
                     let subtrie_updates = &sorted[subtrie_start..update_idx];
+                    trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates = subtrie_updates.len(), "Forwarding updates to subtrie");
 
                     // Edge-case: if all updates are removals that would empty the
                     // subtrie and collapse the parent onto a blinded sibling, request
@@ -2035,6 +2101,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         child_nibble,
                         subtrie_updates,
                     ) {
+                        trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.min_len);
                         updates.insert(proof.key, LeafUpdate::Touched);
                         for &(key, _, ref update) in subtrie_updates {
@@ -2406,6 +2473,7 @@ mod tests {
             changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=200usize),
             overlap_pct in 0.0..=0.5f64,
         ) {
+            reth_tracing::init_test_tracing();
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
                 .filter(|(_, v)| *v != U256::ZERO)
