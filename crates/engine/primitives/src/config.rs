@@ -30,7 +30,7 @@ fn default_account_worker_count() -> usize {
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 1;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
 
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
