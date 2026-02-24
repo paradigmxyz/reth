@@ -2039,7 +2039,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let min_len = (logical_len as u8 + 1).min(64);
                     trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, min_len);
-                    updates.insert(key, LeafUpdate::Touched);
+                    updates.insert(key, update.clone());
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 FindAncestorResult::RevealedSubtrie => {
