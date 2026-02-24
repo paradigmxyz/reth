@@ -263,17 +263,14 @@ impl Command {
             };
 
             let fcu_start = Instant::now();
-            let fcu_server_timings = call_forkchoice_updated_with_reth(
+            call_forkchoice_updated_with_reth(
                 &auth_provider,
                 version,
                 forkchoice_state,
                 use_reth_namespace,
             )
             .await?;
-            let fcu_latency = fcu_server_timings
-                .as_ref()
-                .map(|t| t.latency)
-                .unwrap_or_else(|| fcu_start.elapsed());
+            let fcu_latency = fcu_start.elapsed();
 
             let total_latency = if server_timings.is_some() {
                 // When using server-side latency for newPayload, derive total from the
