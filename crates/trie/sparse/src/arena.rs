@@ -1209,8 +1209,10 @@ fn remove_leaf(
                 }
             }
 
-            // Pop the leaf entry from the stack.
-            stack.pop();
+            // Pop the leaf entry, propagating any pending num_leaves delta to the
+            // parent. This is important when collapse_branch has replaced the stack
+            // entry's node (changing num_leaves) without updating prev_num_leaves.
+            pop_and_propagate(arena, stack);
 
             if stack.is_empty() {
                 // The leaf is the root — replace with EmptyRoot and push it back onto
