@@ -361,7 +361,7 @@ pub fn blob_params_to_schedule(
     for (timestamp, blob_params) in &params.scheduled {
         for bpo_fork in EthereumHardfork::bpo_variants()
             .iter()
-            .chain(std::iter::once(&EthereumHardfork::Amsterdam))
+            .chain(core::iter::once(&EthereumHardfork::Amsterdam))
         {
             if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
                 fork_ts == *timestamp
