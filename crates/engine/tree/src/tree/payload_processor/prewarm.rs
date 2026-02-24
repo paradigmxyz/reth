@@ -117,7 +117,7 @@ where
     /// Kicks off EVM init on every pool thread (non-blocking via `pool.spawn`), then
     /// uses `in_place_scope` to dispatch transactions as they arrive and wait for all
     /// spawned tasks to complete before clearing per-thread state.
-    fn spawn_all<Tx>(
+    fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
@@ -126,30 +126,27 @@ where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let executor = self.executor.clone();
-        let ctx = Arc::new(self.ctx.clone());
+        let ctx = self.ctx.clone();
         let span = Span::current();
 
         self.executor.spawn_blocking_named("prewarm-txs", move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "prewarm_txs").entered();
+            let _enter = debug_span!(
+                target: "engine::tree::payload_processor::prewarm",
+                parent: span,
+                "prewarm_txs"
+            )
+            .entered();
 
+            let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
-            // Kick off EVM init on every pool thread without blocking the recv loop.
-            {
-                let ctx = Arc::clone(&ctx);
-                let executor = executor.clone();
-                pool.spawn(move || {
-                    executor.prewarming_pool().init::<PrewarmEvmState<Evm>>(|_| {
-                        PrewarmContext::clone(&ctx).evm_for_ctx()
-                    });
+            let mut tx_count = 0usize;
+            let to_multi_proof = to_multi_proof.as_ref();
+            pool.in_place_scope(|s| {
+                s.spawn(|_| {
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.clone().evm_for_ctx());
                 });
-            }
 
-            // Stream transactions inside a scope — `in_place_scope` runs spawned tasks
-            // on the pool and blocks until all of them complete.
-            let parent_span = Span::current();
-            let tx_count = pool.in_place_scope(|s| {
-                let mut count = 0usize;
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.terminate_execution.load(Ordering::Relaxed) {
                         trace!(
@@ -159,30 +156,28 @@ where
                         break;
                     }
 
-                    count += 1;
-                    let to_multi_proof = to_multi_proof.clone();
-                    let span = debug_span!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        parent: &parent_span,
-                        "prewarm_tx",
-                        i = index,
-                    );
+                    tx_count += 1;
+                    let parent_span = Span::current();
                     s.spawn(move |_| {
-                        let _enter = span.entered();
-                        Self::transact_worker(index, tx, to_multi_proof.as_ref());
+                        let _enter = debug_span!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            parent: parent_span,
+                            "prewarm_tx",
+                            i = index,
+                        )
+                        .entered();
+                        Self::transact_worker(index, tx, to_multi_proof);
                     });
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_multi_proof) = &to_multi_proof
-                    && let Some(withdrawals) = &ctx.env.withdrawals
-                    && !withdrawals.is_empty()
+                if let Some(to_multi_proof) = to_multi_proof &&
+                    let Some(withdrawals) = &ctx.env.withdrawals &&
+                    !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
-
-                count
             });
 
             // All tasks are done — clear per-thread EVM state for the next block.
@@ -196,7 +191,7 @@ where
     /// Executes a single prewarm transaction on the current pool thread's EVM.
     ///
     /// Expects per-thread [`PrewarmEvmState`] to already be initialised via
-    /// the init spawns in [`spawn_all`](Self::spawn_all).
+    /// the init spawns in [`spawn_txs_prewarm`](Self::spawn_txs_prewarm).
     fn transact_worker<Tx>(
         index: usize,
         tx: Tx,
@@ -426,7 +421,7 @@ where
         // Spawn execution tasks based on mode
         match mode {
             PrewarmMode::Transactions(pending) => {
-                self.spawn_all(pending, actions_tx, self.to_multi_proof.clone());
+                self.spawn_txs_prewarm(pending, actions_tx, self.to_multi_proof.clone());
             }
             PrewarmMode::BlockAccessList(bal) => {
                 self.run_bal_prewarm(bal, actions_tx);
