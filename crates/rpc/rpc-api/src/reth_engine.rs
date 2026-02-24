@@ -54,10 +54,11 @@ pub trait RethEngineApi<ExecutionData> {
         payload: RethNewPayloadInput<ExecutionData>,
     ) -> RpcResult<RethPayloadStatus>;
 
-    /// Reth-specific forkchoiceUpdated that sends a regular FCU with no payload attributes.
+    /// Reth-specific forkchoiceUpdated that sends a regular forkchoice update with no payload
+    /// attributes.
     #[method(name = "forkchoiceUpdated")]
     async fn reth_forkchoice_updated(
         &self,
-        state: ForkchoiceState,
+        forkchoice_state: ForkchoiceState,
     ) -> RpcResult<ForkchoiceUpdated>;
 }

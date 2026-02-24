@@ -59,11 +59,11 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
     async fn reth_forkchoice_updated(
         &self,
-        state: ForkchoiceState,
+        forkchoice_state: ForkchoiceState,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
         self.beacon_engine_handle
-            .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
+            .fork_choice_updated(forkchoice_state, None, EngineApiMessageVersion::V3)
             .await
             .map_err(|e| EngineApiError::from(e).into())
     }
