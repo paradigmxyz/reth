@@ -17,6 +17,7 @@ use reth_provider::{
     providers::ProviderNodeTypes, test_utils::create_test_provider_factory, DatabaseProviderRW,
     StorageTrieWriter, TrieWriter,
 };
+use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
@@ -25,8 +26,15 @@ use reth_trie::{
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
     StateRootProgress, StorageRoot, TrieMask,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
+};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
+
+type DbStateRoot<'a, TX, A> =
+    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbStorageRoot<'a, TX, A> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 fn insert_account(
     tx: &impl DbTxMut,
@@ -62,39 +70,44 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value }).unwrap();
     }
 
-    // Generate the intermediate nodes on the receiving end of the channel
-    let (_, _, trie_updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+    reth_trie_db::with_adapter!(tx, |A| {
+        // Generate the intermediate nodes on the receiving end of the channel
+        let (_, _, trie_updates) =
+            DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+                .root_with_updates()
+                .unwrap();
 
-    // 1. Some state transition happens, update the hashed storage to the new value
-    let modified_key = B256::from_str(modified).unwrap();
-    let value = U256::from(1);
-    if hashed_storage_cursor.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some() {
-        hashed_storage_cursor.delete_current().unwrap();
-    }
-    hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: modified_key, value })
+        // 1. Some state transition happens, update the hashed storage to the new value
+        let modified_key = B256::from_str(modified).unwrap();
+        let value = U256::from(1);
+        if hashed_storage_cursor.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some()
+        {
+            hashed_storage_cursor.delete_current().unwrap();
+        }
+        hashed_storage_cursor
+            .upsert(hashed_address, &StorageEntry { key: modified_key, value })
+            .unwrap();
+
+        // 2. Calculate full merkle root
+        let loader = DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address);
+        let modified_root = loader.root().unwrap();
+
+        // Update the intermediate roots table so that we can run the incremental verification
+        tx.write_storage_trie_updates_sorted(core::iter::once((
+            &hashed_address,
+            &trie_updates.into_sorted(),
+        )))
         .unwrap();
 
-    // 2. Calculate full merkle root
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
-    let modified_root = loader.root().unwrap();
+        // 3. Calculate the incremental root
+        let mut storage_changes = PrefixSetMut::default();
+        storage_changes.insert(Nibbles::unpack(modified_key));
+        let loader = DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .with_prefix_set(storage_changes.freeze());
+        let incremental_root = loader.root().unwrap();
 
-    // Update the intermediate roots table so that we can run the incremental verification
-    tx.write_storage_trie_updates_sorted(core::iter::once((
-        &hashed_address,
-        &trie_updates.into_sorted(),
-    )))
-    .unwrap();
-
-    // 3. Calculate the incremental root
-    let mut storage_changes = PrefixSetMut::default();
-    storage_changes.insert(Nibbles::unpack(modified_key));
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
-        .with_prefix_set(storage_changes.freeze());
-    let incremental_root = loader.root().unwrap();
-
-    assert_eq!(modified_root, incremental_root);
+        assert_eq!(modified_root, incremental_root);
+    });
 }
 
 #[test]
@@ -130,9 +143,11 @@ fn arbitrary_storage_root() {
         tx.commit().unwrap();
 
         let tx =  factory.provider_rw().unwrap();
-        let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
-        let expected = storage_root(storage.into_iter());
-        assert_eq!(expected, got);
+        reth_trie_db::with_adapter!(tx, |A| {
+            let got = DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address).root().unwrap();
+            let expected = storage_root(storage.into_iter());
+            assert_eq!(expected, got);
+        });
     });
 }
 
@@ -189,8 +204,10 @@ fn test_empty_storage_root() {
     tx.commit().unwrap();
 
     let tx = factory.provider_rw().unwrap();
-    let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
-    assert_eq!(got, EMPTY_ROOT_HASH);
+    reth_trie_db::with_adapter!(tx, |A| {
+        let got = DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address).root().unwrap();
+        assert_eq!(got, EMPTY_ROOT_HASH);
+    });
 }
 
 #[test]
@@ -214,9 +231,10 @@ fn test_storage_root() {
     tx.commit().unwrap();
 
     let tx = factory.provider_rw().unwrap();
-    let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
-
-    assert_eq!(storage_root(storage.into_iter()), got);
+    reth_trie_db::with_adapter!(tx, |A| {
+        let got = DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address).root().unwrap();
+        assert_eq!(storage_root(storage.into_iter()), got);
+    });
 }
 
 type State = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
@@ -253,21 +271,23 @@ fn arbitrary_state_root_with_progress() {
             let mut hashed_entries_walked = 0;
 
             let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
-            while got.is_none() {
-                let calculator = StateRoot::from_tx(tx.tx_ref())
-                    .with_threshold(threshold)
-                    .with_intermediate_state(intermediate_state.take().map(|state| *state));
-                match calculator.root_with_progress().unwrap() {
-                    StateRootProgress::Progress(state, walked, _) => {
-                        intermediate_state = Some(state);
-                        hashed_entries_walked += walked;
-                    },
-                    StateRootProgress::Complete(root, walked, _) => {
-                        got = Some(root);
-                        hashed_entries_walked += walked;
-                    },
-                };
-            }
+            reth_trie_db::with_adapter!(tx, |A| {
+                while got.is_none() {
+                    let calculator = DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+                        .with_threshold(threshold)
+                        .with_intermediate_state(intermediate_state.take().map(|state| *state));
+                    match calculator.root_with_progress().unwrap() {
+                        StateRootProgress::Progress(state, walked, _) => {
+                            intermediate_state = Some(state);
+                            hashed_entries_walked += walked;
+                        },
+                        StateRootProgress::Complete(root, walked, _) => {
+                            got = Some(root);
+                            hashed_entries_walked += walked;
+                        },
+                    };
+                }
+            });
             assert_eq!(expected, got.unwrap());
             assert_eq!(hashed_entries_total, hashed_entries_walked)
         }
@@ -285,8 +305,10 @@ fn test_state_root_with_state(state: State) {
     let expected = state_root(state);
 
     let tx = factory.provider_rw().unwrap();
-    let got = StateRoot::from_tx(tx.tx_ref()).root().unwrap();
-    assert_eq!(expected, got);
+    reth_trie_db::with_adapter!(tx, |A| {
+        let got = DbStateRoot::<_, A>::from_tx(tx.tx_ref()).root().unwrap();
+        assert_eq!(expected, got);
+    });
 }
 
 fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
@@ -324,9 +346,12 @@ fn storage_root_regression() {
     tx.commit().unwrap();
     let tx = factory.provider_rw().unwrap();
 
-    let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
-    let expected_root = storage_root_prehashed(storage);
-    assert_eq!(expected_root, account3_storage_root);
+    reth_trie_db::with_adapter!(tx, |A| {
+        let account3_storage_root =
+            DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address3).root().unwrap();
+        let expected_root = storage_root_prehashed(storage);
+        assert_eq!(expected_root, account3_storage_root);
+    });
 }
 
 #[test]
@@ -386,7 +411,9 @@ fn account_and_storage_trie() {
         }
         hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
     }
-    let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
+    let account3_storage_root = reth_trie_db::with_adapter!(tx, |A| {
+        DbStorageRoot::<_, A>::from_tx(tx.tx_ref(), address3).root().unwrap()
+    });
     hash_builder
         .add_leaf(Nibbles::unpack(key3), &encode_account(account3, Some(account3_storage_root)));
 
@@ -422,7 +449,9 @@ fn account_and_storage_trie() {
     assert_eq!(hash_builder.root(), computed_expected_root);
 
     // Check state root calculation from scratch
-    let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
+    let (root, trie_updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref()).root_with_updates().unwrap()
+    });
     assert_eq!(root, computed_expected_root);
 
     // Check account trie
@@ -462,13 +491,15 @@ fn account_and_storage_trie() {
     let expected_state_root =
         b256!("0x8e263cd4eefb0c3cbbb14e5541a66a755cad25bcfab1e10dd9d706263e811b28");
 
-    let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-        .with_prefix_sets(TriePrefixSets {
-            account_prefix_set: prefix_set.freeze(),
-            ..Default::default()
-        })
-        .root_with_updates()
-        .unwrap();
+    let (root, trie_updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+            .with_prefix_sets(TriePrefixSets {
+                account_prefix_set: prefix_set.freeze(),
+                ..Default::default()
+            })
+            .root_with_updates()
+            .unwrap()
+    });
     assert_eq!(root, expected_state_root);
 
     let account_updates = trie_updates.into_sorted();
@@ -513,13 +544,15 @@ fn account_and_storage_trie() {
             (key6, encode_account(account6, None)),
         ]);
 
-        let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-            .with_prefix_sets(TriePrefixSets {
-                account_prefix_set: account_prefix_set.freeze(),
-                ..Default::default()
-            })
-            .root_with_updates()
-            .unwrap();
+        let (root, trie_updates) = reth_trie_db::with_adapter!(tx, |A| {
+            DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
+                .root_with_updates()
+                .unwrap()
+        });
         assert_eq!(root, computed_expected_root);
         assert_eq!(
             trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
@@ -568,13 +601,15 @@ fn account_and_storage_trie() {
             (key6, encode_account(account6, None)),
         ]);
 
-        let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-            .with_prefix_sets(TriePrefixSets {
-                account_prefix_set: account_prefix_set.freeze(),
-                ..Default::default()
-            })
-            .root_with_updates()
-            .unwrap();
+        let (root, trie_updates) = reth_trie_db::with_adapter!(tx, |A| {
+            DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
+                .root_with_updates()
+                .unwrap()
+        });
         assert_eq!(root, computed_expected_root);
         assert_eq!(
             trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
@@ -610,7 +645,9 @@ fn account_trie_around_extension_node() {
 
     let expected = extension_node_trie(&tx);
 
-    let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
+    let (got, updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref()).root_with_updates().unwrap()
+    });
     assert_eq!(expected, got);
     assert_trie_updates(updates.account_nodes_ref());
 }
@@ -622,7 +659,9 @@ fn account_trie_around_extension_node_with_dbtrie() {
 
     let expected = extension_node_trie(&tx);
 
-    let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
+    let (got, updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref()).root_with_updates().unwrap()
+    });
     assert_eq!(expected, got);
     tx.write_trie_updates(updates).unwrap();
 
@@ -661,10 +700,12 @@ proptest! {
                 }
             }
 
-            let (state_root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-                .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
-                .root_with_updates()
-                .unwrap();
+            let (state_root, trie_updates) = reth_trie_db::with_adapter!(tx, |A| {
+                DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+                    .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
+                    .root_with_updates()
+                    .unwrap()
+            });
 
             state.append(&mut accounts.clone());
             let expected_root = state_root_prehashed(
@@ -684,11 +725,14 @@ fn storage_trie_around_extension_node() {
     let hashed_address = B256::random();
     let (expected_root, expected_updates) = extension_node_storage_trie(&tx, hashed_address);
 
-    let (got, _, updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
-    assert_eq!(expected_root, got);
-    assert_eq!(expected_updates, updates);
-    assert_trie_updates(updates.storage_nodes_ref());
+    reth_trie_db::with_adapter!(tx, |A| {
+        let (got, _, updates) = DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .root_with_updates()
+            .unwrap();
+        assert_eq!(expected_root, got);
+        assert_eq!(expected_updates, updates);
+        assert_trie_updates(updates.storage_nodes_ref());
+    });
 }
 
 fn extension_node_storage_trie<N: ProviderNodeTypes>(

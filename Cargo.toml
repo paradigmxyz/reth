@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.11.0"
+version = "1.11.1"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT OR Apache-2.0"
@@ -138,6 +138,7 @@ members = [
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",
+    "examples/migrate-trie-to-packed",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
