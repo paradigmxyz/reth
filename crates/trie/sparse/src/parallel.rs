@@ -1864,6 +1864,9 @@ impl ParallelSparseTrie {
         update_actions: impl Iterator<Item = SparseTrieUpdatesAction>,
     ) {
         if let Some(updates) = self.updates.as_mut() {
+            let additional = update_actions.size_hint().0;
+            updates.updated_nodes.reserve(additional);
+            updates.removed_nodes.reserve(additional);
             for action in update_actions {
                 match action {
                     SparseTrieUpdatesAction::InsertRemoved(path) => {
