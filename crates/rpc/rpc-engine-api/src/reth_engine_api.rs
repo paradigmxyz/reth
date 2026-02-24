@@ -3,8 +3,8 @@ use alloy_rlp::Decodable;
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_payload_primitives::PayloadTypes;
+use reth_primitives_traits::SealedBlock;
 use reth_rpc_api::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus};
 use tracing::trace;
 
@@ -35,9 +35,10 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
-            RethNewPayloadInput::RlpEncodedBlock(rlp) => {
-                let block = Decodable::decode(&mut rlp.as_ref()).map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                Payload::block_to_payload(SealedBlock::seal_slow(block))
+            RethNewPayloadInput::BlockRlp(rlp) => {
+                let block = Decodable::decode(&mut rlp.as_ref())
+                    .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+                Payload::block_to_payload(SealedBlock::new_unhashed(block))
             }
         };
 

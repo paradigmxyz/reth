@@ -34,7 +34,7 @@ pub enum RethNewPayloadInput<ExecutionData> {
     /// Standard execution data (payload + sidecar).
     ExecutionData(ExecutionData),
     /// An RLP-encoded block.
-    RlpEncodedBlock(Bytes),
+    BlockRlp(Bytes),
 }
 
 /// Reth-specific engine API extensions.
