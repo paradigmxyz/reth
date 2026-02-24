@@ -23,6 +23,7 @@ use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, 
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    StateRootValidationOutcome,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -33,8 +34,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
@@ -631,21 +632,26 @@ where
                         }
 
                         // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
-                        } else {
-                            warn!(
-                                target: "engine::tree::payload_validator",
-                                ?state_root,
-                                block_state_root = ?block.header().state_root(),
-                                "State root task returned incorrect state root"
-                            );
-                            #[cfg(feature = "trie-debug")]
-                            Self::write_trie_debug_recorders(
-                                block.header().number(),
-                                &trie_debug_recorders,
-                            );
-                            state_root_task_failed = true;
+                        match self.validator.validate_computed_state_root(&block, state_root) {
+                            Ok(
+                                StateRootValidationOutcome::Valid |
+                                StateRootValidationOutcome::Skipped,
+                            ) => maybe_state_root = Some((state_root, trie_updates, elapsed)),
+                            Err(error) => {
+                                warn!(
+                                    target: "engine::tree::payload_validator",
+                                    ?state_root,
+                                    block_state_root = ?block.header().state_root(),
+                                    %error,
+                                    "State root task result rejected by payload validator"
+                                );
+                                #[cfg(feature = "trie-debug")]
+                                Self::write_trie_debug_recorders(
+                                    block.header().number(),
+                                    &trie_debug_recorders,
+                                );
+                                state_root_task_failed = true;
+                            }
                         }
                     }
                     Err(error) => {
@@ -708,8 +714,9 @@ where
             .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
-        // ensure state root matches
-        if state_root != block.header().state_root() {
+        // ensure state root matches (or is otherwise accepted by the payload validator)
+        if let Err(consensus_error) = self.validator.validate_computed_state_root(&block, state_root)
+        {
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 
@@ -721,13 +728,9 @@ where
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
-            let block_state_root = block.header().state_root();
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
-                )
-                .into(),
+                consensus_error.into(),
             )
             .into())
         }

@@ -21,12 +21,16 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_consensus::ConsensusError;
+use reth_engine_primitives::{
+    EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, PayloadValidator,
+    StateRootValidationOutcome,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, GotExpected};
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::spawn_os_thread;
 use std::{
@@ -40,8 +44,16 @@ use std::{
 use tokio::sync::oneshot;
 
 /// Mock engine validator for tests
-#[derive(Debug, Clone)]
-struct MockEngineValidator;
+#[derive(Debug, Clone, Default)]
+struct MockEngineValidator {
+    skip_state_root_validation: bool,
+}
+
+impl MockEngineValidator {
+    const fn skip_state_root_validation() -> Self {
+        Self { skip_state_root_validation: true }
+    }
+}
 
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
@@ -57,6 +69,25 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         Ok(block.seal_slow())
+    }
+
+    fn validate_computed_state_root(
+        &self,
+        block: &reth_primitives_traits::RecoveredBlock<Self::Block>,
+        computed_state_root: B256,
+    ) -> Result<StateRootValidationOutcome, ConsensusError> {
+        if self.skip_state_root_validation {
+            return Ok(StateRootValidationOutcome::Skipped)
+        }
+
+        let header_state_root = block.header().state_root();
+        if computed_state_root == header_state_root {
+            Ok(StateRootValidationOutcome::Valid)
+        } else {
+            Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: computed_state_root, expected: header_state_root }.into(),
+            ))
+        }
     }
 }
 
@@ -82,6 +113,34 @@ impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
         // Mock implementation - always valid
         Ok(())
     }
+}
+
+#[test]
+fn test_validate_block_allows_state_root_skip_policy() {
+    let sealed = TestBlockBuilder::eth()
+        .with_chain_spec(MAINNET.as_ref().clone())
+        .generate_random_block(1, MAINNET.genesis_hash())
+        .into_block()
+        .seal_slow();
+    let recovered = sealed.try_recover().expect("recover senders");
+
+    let computed_state_root = if recovered.header().state_root() == B256::ZERO {
+        B256::with_last_byte(1)
+    } else {
+        B256::ZERO
+    };
+
+    let strict = MockEngineValidator::default();
+    let err = strict
+        .validate_computed_state_root(&recovered, computed_state_root)
+        .expect_err("strict validator should reject mismatched state root");
+    assert_matches!(err, ConsensusError::BodyStateRootDiff(_));
+
+    let skip = MockEngineValidator::skip_state_root_validation();
+    let result = skip
+        .validate_computed_state_root(&recovered, computed_state_root)
+        .expect("skip policy should accept mismatched state root");
+    assert_eq!(result, StateRootValidationOutcome::Skipped);
 }
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -180,7 +239,7 @@ impl TestHarness {
 
         let provider = MockEthProvider::default();
 
-        let payload_validator = MockEngineValidator;
+        let payload_validator = MockEngineValidator::default();
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
@@ -389,12 +448,18 @@ pub(crate) struct ValidatorTestHarness {
 
 impl ValidatorTestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new_with_payload_validator(chain_spec, MockEngineValidator::default())
+    }
+
+    fn new_with_payload_validator(
+        chain_spec: Arc<ChainSpec>,
+        payload_validator: MockEngineValidator,
+    ) -> Self {
         let harness = TestHarness::new(chain_spec.clone());
 
         // Create validator identical to the one in TestHarness
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
         let provider = harness.provider.clone();
-        let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
         let changeset_cache = ChangesetCache::new();
 
