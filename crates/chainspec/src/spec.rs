@@ -358,9 +358,11 @@ pub fn blob_params_to_schedule(
     schedule.insert("osaka".to_string(), params.osaka);
 
     // Map scheduled entries back to bpo fork names by matching timestamps
-    let bpo_forks = EthereumHardfork::bpo_variants();
     for (timestamp, blob_params) in &params.scheduled {
-        for bpo_fork in bpo_forks {
+        for bpo_fork in EthereumHardfork::bpo_variants()
+            .iter()
+            .chain(std::iter::once(&EthereumHardfork::Amsterdam))
+        {
             if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
                 fork_ts == *timestamp
             {
@@ -369,7 +371,7 @@ pub fn blob_params_to_schedule(
             }
         }
     }
-
+    tracing::info!("Blob schedule: {schedule:#?}");
     schedule
 }
 
