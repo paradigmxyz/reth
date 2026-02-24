@@ -304,6 +304,15 @@ impl DeferredTrieData {
     /// - If the async task has completed (`Ready`), returns the cached result.
     /// - If pending, computes synchronously from stored inputs.
     ///
+    /// The mutex is only held for state inspection and result publishing, never across
+    /// the expensive `sort_and_build_trie_input` call (which uses `rayon::join`). This
+    /// prevents deadlocks when callers participate in the rayon pool while holding external
+    /// locks that other rayon tasks may contend on.
+    ///
+    /// If two callers race on `Pending`, both may compute independently; the first to
+    /// re-acquire the lock publishes, the second sees `Ready` and discards its duplicate.
+    /// This is safe because the computation is deterministic.
+    ///
     /// Deadlock is avoided as long as the provided ancestors form a true ancestor chain (a DAG):
     /// - Each block only waits on its ancestors (blocks on the path to the persisted root)
     /// - Sibling blocks (forks) are never in each other's ancestor lists
@@ -312,35 +321,36 @@ impl DeferredTrieData {
     /// Given that invariant, circular wait dependencies are impossible.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
+        // Clone pending inputs (if any) while holding the lock briefly.
+        let inputs = {
+            let state = self.state.lock();
+            match &*state {
+                DeferredState::Ready(bundle) => {
+                    DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                    return bundle.clone();
+                }
+                DeferredState::Pending(maybe_inputs) => {
+                    DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
+                    maybe_inputs.as_ref().expect("inputs must be present in Pending state").clone()
+                }
+            }
+        };
+
+        // Expensive work (rayon::join inside) runs without holding the mutex.
+        let computed = Self::sort_and_build_trie_input(
+            inputs.hashed_state,
+            inputs.trie_updates,
+            inputs.anchor_hash,
+            &inputs.ancestors,
+        );
+
+        // Publish the result if no other caller has done so yet.
         let mut state = self.state.lock();
-        match &mut *state {
-            // If the deferred trie data is ready, return the cached result.
-            DeferredState::Ready(bundle) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle.clone()
-            }
-            // If the deferred trie data is pending, compute the trie data synchronously and return
-            // the result. This is the fallback path if the async task hasn't completed.
-            DeferredState::Pending(maybe_inputs) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-
-                let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
-
-                let computed = Self::sort_and_build_trie_input(
-                    inputs.hashed_state,
-                    inputs.trie_updates,
-                    inputs.anchor_hash,
-                    &inputs.ancestors,
-                );
-                *state = DeferredState::Ready(computed.clone());
-
-                // Release lock before inputs (and its ancestors) drop to avoid holding it
-                // while their potential last Arc refs drop (which could trigger recursive locking)
-                drop(state);
-
-                computed
-            }
+        if matches!(&*state, DeferredState::Pending(_)) {
+            *state = DeferredState::Ready(computed.clone());
         }
+
+        computed
     }
 }
 
@@ -464,10 +474,13 @@ mod tests {
         assert_eq!(first.anchor_hash(), second.anchor_hash());
     }
 
-    /// Verifies that concurrent `wait_cloned` calls result in only one computation,
-    /// with all callers receiving the same cached result.
+    /// Verifies that concurrent `wait_cloned` calls all produce equivalent results.
+    ///
+    /// Because the mutex is not held across the expensive computation, concurrent callers
+    /// may compute independently. The first to re-acquire the lock publishes its result;
+    /// subsequent callers either see `Ready` or compute an equivalent duplicate.
     #[test]
-    fn concurrent_wait_cloned_computes_once() {
+    fn concurrent_wait_cloned_produces_equivalent_results() {
         let deferred = empty_pending();
 
         // Spawn multiple threads that all call wait_cloned concurrently
@@ -481,11 +494,12 @@ mod tests {
         // Collect all results
         let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-        // All results should share the same Arc pointers (same computed result)
+        // All results should be logically equivalent
         let first = &results[0];
         for result in &results[1..] {
-            assert!(Arc::ptr_eq(&first.hashed_state, &result.hashed_state));
-            assert!(Arc::ptr_eq(&first.trie_updates, &result.trie_updates));
+            assert_eq!(first.hashed_state.total_len(), result.hashed_state.total_len());
+            assert_eq!(first.trie_updates.total_len(), result.trie_updates.total_len());
+            assert_eq!(first.anchor_hash(), result.anchor_hash());
         }
     }
 
