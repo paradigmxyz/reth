@@ -58,7 +58,7 @@ impl InvalidHeaderCache {
         header_hash: B256,
         invalid_ancestor: BlockWithParent,
     ) {
-        if self.get(&header_hash).is_none() {
+        if self.headers.peek(&header_hash).is_none() {
             warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
             self.insert_entry(header_hash, invalid_ancestor);
 
@@ -70,7 +70,7 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid ancestor into the map.
     pub fn insert(&mut self, invalid_ancestor: BlockWithParent) {
-        if self.get(&invalid_ancestor.block.hash).is_none() {
+        if self.headers.peek(&invalid_ancestor.block.hash).is_none() {
             warn!(target: "consensus::engine", ?invalid_ancestor, "Bad block with hash");
             self.insert_entry(invalid_ancestor.block.hash, invalid_ancestor);
 
