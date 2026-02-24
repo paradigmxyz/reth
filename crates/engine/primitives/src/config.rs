@@ -34,7 +34,7 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
 /// The size of proof targets chunk optimized for small blocks (≤20M gas used).
 /// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
-pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 15;
+pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 10;
 
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
