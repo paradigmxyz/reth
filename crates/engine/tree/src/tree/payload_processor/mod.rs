@@ -394,7 +394,6 @@ where
     /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
@@ -416,9 +415,7 @@ where
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx_iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -430,9 +427,7 @@ where
             // few transactions are recovered sequentially and sent immediately before
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx_iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
