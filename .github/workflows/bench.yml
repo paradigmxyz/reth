@@ -742,8 +742,8 @@ jobs:
             LOG="$BENCH_WORK_DIR/$run_dir/node.log"
             if [ ! -f "$LOG" ]; then continue; fi
 
-            panics=$(grep -c -E 'panicked at' "$LOG" 2>/dev/null || echo 0)
-            errors=$(grep -c ' ERROR ' "$LOG" 2>/dev/null || echo 0)
+            panics=$(grep -c -E 'panicked at' "$LOG" || true)
+            errors=$(grep -c ' ERROR ' "$LOG" || true)
 
             if [ "$panics" -gt 0 ] || [ "$errors" -gt 0 ]; then
               if [ "$found" = false ]; then
