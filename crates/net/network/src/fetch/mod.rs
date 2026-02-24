@@ -30,8 +30,15 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+/// Maximum number of concurrent requests allowed per peer.
+/// High-quality peers (low latency, no bad responses) can handle up to this many simultaneous
+/// requests, while peers with recent bad responses are limited to 1.
+const MAX_CONCURRENT_PER_PEER: u8 = 4;
+
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
+type InflightHeadersMap<H> = HashMap<PeerId, Vec<(u64, InflightHeadersRequest<H>)>>;
+type InflightBodiesMap<B> = HashMap<PeerId, Vec<(u64, InflightBodiesRequest<B>)>>;
 
 /// Manages data fetching operations.
 ///
@@ -41,10 +48,11 @@ type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 /// This type maintains a list of connected peers that are available for requests.
 #[derive(Debug)]
 pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
-    /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+    /// Currently active [`GetBlockHeaders`] requests, keyed by peer.
+    /// Each peer may have multiple inflight requests, identified by a unique `u64` request ID.
+    inflight_headers_requests: InflightHeadersMap<N::BlockHeader>,
+    /// Currently active [`GetBlockBodies`] requests, keyed by peer.
+    inflight_bodies_requests: InflightBodiesMap<N::BlockBody>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -57,6 +65,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Monotonically increasing counter for assigning unique request IDs.
+    next_request_id: u64,
 }
 
 // === impl StateSyncer ===
@@ -73,6 +83,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            next_request_id: 0,
         }
     }
 
@@ -89,7 +100,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         self.peers.insert(
             peer_id,
             Peer {
-                state: PeerState::Idle,
+                state: PeerState::new(),
                 best_hash,
                 best_number,
                 capabilities,
@@ -108,11 +119,15 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// This cancels also inflight request and sends an error to the receiver.
     pub(crate) fn on_session_closed(&mut self, peer: &PeerId) {
         self.peers.remove(peer);
-        if let Some(req) = self.inflight_headers_requests.remove(peer) {
-            let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        if let Some(requests) = self.inflight_headers_requests.remove(peer) {
+            for (_, req) in requests {
+                let _ = req.response.send(Err(RequestError::ConnectionDropped));
+            }
         }
-        if let Some(req) = self.inflight_bodies_requests.remove(peer) {
-            let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        if let Some(requests) = self.inflight_bodies_requests.remove(peer) {
+            for (_, req) in requests {
+                let _ = req.response.send(Err(RequestError::ConnectionDropped));
+            }
         }
     }
 
@@ -133,20 +148,20 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// Invoked when an active session is about to be disconnected.
     pub(crate) fn on_pending_disconnect(&mut self, peer_id: &PeerId) {
         if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.state = PeerState::Closing;
+            peer.state.closing = true;
         }
     }
 
-    /// Returns the _next_ idle peer that's ready to accept a request,
+    /// Returns the _next_ peer that has capacity to accept a request,
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
-    /// full history available
+    /// full history available.
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
-        let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
+        let mut eligible = self.peers.iter().filter(|(_, peer)| peer.has_capacity());
 
-        let mut best_peer = idle.next()?;
+        let mut best_peer = eligible.next()?;
 
-        for maybe_better in idle {
+        for maybe_better in eligible {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
@@ -184,9 +199,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoPeersAvailable
         };
 
-        let request = self.prepare_block_request(peer_id, request);
+        let (request, request_id) = self.prepare_block_request(peer_id, request);
 
-        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+        PollAction::Ready(FetchAction::BlockRequest { peer_id, request, request_id })
     }
 
     /// Advance the state the syncer
@@ -232,17 +247,29 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Handles a new request to a peer.
     ///
-    /// Caution: this assumes the peer exists and is idle
-    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> BlockRequest {
-        // update the peer's state
+    /// Caution: this assumes the peer exists and has capacity.
+    ///
+    /// Returns the block request and the unique request ID assigned to it.
+    fn prepare_block_request(
+        &mut self,
+        peer_id: PeerId,
+        req: DownloadRequest<N>,
+    ) -> (BlockRequest, u64) {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+
+        // update the peer's inflight count
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = req.peer_state();
+            peer.state.on_request_dispatched();
         }
 
-        match req {
+        let block_request = match req {
             DownloadRequest::GetBlockHeaders { request, response, .. } => {
                 let inflight = Request { request: request.clone(), response };
-                self.inflight_headers_requests.insert(peer_id, inflight);
+                self.inflight_headers_requests
+                    .entry(peer_id)
+                    .or_default()
+                    .push((request_id, inflight));
                 let HeadersRequest { start, limit, direction } = request;
                 BlockRequest::GetBlockHeaders(GetBlockHeaders {
                     start_block: start,
@@ -253,10 +280,15 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             }
             DownloadRequest::GetBlockBodies { request, response, .. } => {
                 let inflight = Request { request: (), response };
-                self.inflight_bodies_requests.insert(peer_id, inflight);
+                self.inflight_bodies_requests
+                    .entry(peer_id)
+                    .or_default()
+                    .push((request_id, inflight));
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
-        }
+        };
+
+        (block_request, request_id)
     }
 
     /// Returns a new followup request for the peer.
@@ -264,8 +296,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
         let req = self.queued_requests.pop_front()?;
-        let req = self.prepare_block_request(peer_id, req);
-        Some(BlockResponseOutcome::Request(peer_id, req))
+        let (req, request_id) = self.prepare_block_request(peer_id, req);
+        Some(BlockResponseOutcome::Request(peer_id, req, request_id))
     }
 
     /// Called on a `GetBlockHeaders` response from a peer.
@@ -276,12 +308,17 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
+        request_id: u64,
         res: RequestResult<Vec<N::BlockHeader>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
 
-        let resp = self.inflight_headers_requests.remove(&peer_id);
+        // Find and remove the specific inflight request by request_id
+        let resp = self.inflight_headers_requests.get_mut(&peer_id).and_then(|requests| {
+            let pos = requests.iter().position(|(id, _)| *id == request_id)?;
+            Some(requests.swap_remove(pos).1)
+        });
 
         let is_likely_bad_response =
             resp.as_ref().is_some_and(|r| res.is_likely_bad_headers_response(&r.request));
@@ -289,16 +326,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         if let Some(resp) = resp {
             // delegate the response
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
-        }
 
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // update the peer's response state
-            peer.last_response_likely_bad = is_likely_bad_response;
+            if let Some(peer) = self.peers.get_mut(&peer_id) {
+                // update the peer's response state
+                peer.last_response_likely_bad = is_likely_bad_response;
 
-            // If the peer is still ready to accept new requests, we try to send a followup
-            // request immediately.
-            if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+                // If the peer is still ready to accept new requests, we try to send a followup
+                // request immediately.
+                if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
+                    return self.followup_request(peer_id)
+                }
             }
         }
 
@@ -312,19 +349,27 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     pub(crate) fn on_block_bodies_response(
         &mut self,
         peer_id: PeerId,
+        request_id: u64,
         res: RequestResult<Vec<N::BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |bodies| bodies.is_empty());
 
-        if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
-            let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
-        }
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // update the peer's response state
-            peer.last_response_likely_bad = is_likely_bad_response;
+        // Find and remove the specific inflight request by request_id
+        let resp = self.inflight_bodies_requests.get_mut(&peer_id).and_then(|requests| {
+            let pos = requests.iter().position(|(id, _)| *id == request_id)?;
+            Some(requests.swap_remove(pos).1)
+        });
 
-            if peer.state.on_request_finished() && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+        if let Some(resp) = resp {
+            let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
+
+            if let Some(peer) = self.peers.get_mut(&peer_id) {
+                // update the peer's response state
+                peer.last_response_likely_bad = is_likely_bad_response;
+
+                if peer.state.on_request_finished() && !is_likely_bad_response {
+                    return self.followup_request(peer_id)
+                }
             }
         }
         None
@@ -375,6 +420,19 @@ struct Peer {
 impl Peer {
     fn timeout(&self) -> u64 {
         self.timeout.load(Ordering::Relaxed)
+    }
+
+    /// Returns the maximum number of concurrent requests for this peer.
+    const fn max_concurrent(&self) -> u8 {
+        if self.last_response_likely_bad {
+            return 1;
+        }
+        MAX_CONCURRENT_PER_PEER
+    }
+
+    /// Returns true if the peer can accept another request.
+    const fn has_capacity(&self) -> bool {
+        self.state.has_capacity(self.max_concurrent())
     }
 
     /// Returns the earliest block number available from the peer.
@@ -444,38 +502,45 @@ impl Peer {
     }
 }
 
-/// Tracks the state of an individual peer
+/// Tracks the state of an individual peer, including how many requests are currently inflight.
 #[derive(Debug)]
-enum PeerState {
-    /// Peer is currently not handling requests and is available.
-    Idle,
-    /// Peer is handling a `GetBlockHeaders` request.
-    GetBlockHeaders,
-    /// Peer is handling a `GetBlockBodies` request.
-    GetBlockBodies,
-    /// Peer session is about to close
-    Closing,
+struct PeerState {
+    /// Number of inflight requests (headers + bodies combined).
+    inflight: u8,
+    /// Whether the peer session is about to close.
+    closing: bool,
 }
 
 // === impl PeerState ===
 
 impl PeerState {
-    /// Returns true if the peer is currently idle.
-    const fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle)
+    /// Returns a new idle peer state.
+    const fn new() -> Self {
+        Self { inflight: 0, closing: false }
     }
 
-    /// Resets the state on a received response.
+    /// Returns true if the peer is currently idle (no inflight requests and not closing).
+    #[cfg(test)]
+    const fn is_idle(&self) -> bool {
+        self.inflight == 0 && !self.closing
+    }
+
+    /// Returns true if the peer can accept another request given the provided max.
+    const fn has_capacity(&self, max: u8) -> bool {
+        !self.closing && self.inflight < max
+    }
+
+    /// Increments the inflight request count.
+    const fn on_request_dispatched(&mut self) {
+        self.inflight = self.inflight.saturating_add(1);
+    }
+
+    /// Decrements the inflight request count on a received response.
     ///
-    /// If the state was already marked as `Closing` do nothing.
-    ///
-    /// Returns `true` if the peer is ready for another request.
+    /// Returns `true` if the peer is ready for another request (not closing).
     const fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, Self::Closing) {
-            *self = Self::Idle;
-            return true
-        }
-        false
+        self.inflight = self.inflight.saturating_sub(1);
+        !self.closing
     }
 }
 
@@ -510,14 +575,6 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
 // === impl DownloadRequest ===
 
 impl<N: NetworkPrimitives> DownloadRequest<N> {
-    /// Returns the corresponding state for a peer that handles the request.
-    const fn peer_state(&self) -> PeerState {
-        match self {
-            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
-        }
-    }
-
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
@@ -555,6 +612,8 @@ pub(crate) enum FetchAction {
         peer_id: PeerId,
         /// The request to send
         request: BlockRequest,
+        /// Unique identifier for this request, used to match responses
+        request_id: u64,
     },
 }
 
@@ -564,7 +623,7 @@ pub(crate) enum FetchAction {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
-    Request(PeerId, BlockRequest),
+    Request(PeerId, BlockRequest, u64),
     /// How to handle a bad response and the reputation change to apply, if any.
     BadResponse(PeerId, ReputationChangeKind),
 }
@@ -703,26 +762,29 @@ mod tests {
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
-        assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, 0, Ok(vec![Header::default()])),
+            None
+        );
 
         assert_eq!(
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::Timeout)),
             Some(BlockResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
         );
         assert_eq!(
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::BadResponse)),
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::BadResponse)),
             None
         );
         assert_eq!(
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::ChannelClosed)),
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::ChannelClosed)),
             None
         );
         assert_eq!(
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::ConnectionDropped)),
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::ConnectionDropped)),
             None
         );
         assert_eq!(
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::UnsupportedCapability)),
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::UnsupportedCapability)),
             None
         );
     }
@@ -758,14 +820,15 @@ mod tests {
         );
 
         let (req, header) = request_pair();
-        fetcher.inflight_headers_requests.insert(peer_id, req);
+        fetcher.inflight_headers_requests.entry(peer_id).or_default().push((0, req));
+        fetcher.peers.get_mut(&peer_id).unwrap().state.on_request_dispatched();
 
-        let outcome = fetcher.on_block_headers_response(peer_id, Ok(vec![header]));
+        let outcome = fetcher.on_block_headers_response(peer_id, 0, Ok(vec![header]));
         assert!(outcome.is_none());
         assert!(fetcher.peers[&peer_id].state.is_idle());
 
         let outcome =
-            fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)).unwrap();
+            fetcher.on_block_headers_response(peer_id, 0, Err(RequestError::Timeout)).unwrap();
 
         assert!(EthResponseValidator::reputation_change_err(&Err::<Vec<Header>, _>(
             RequestError::Timeout
@@ -776,7 +839,7 @@ mod tests {
             BlockResponseOutcome::BadResponse(peer, _) => {
                 assert_eq!(peer, peer_id)
             }
-            BlockResponseOutcome::Request(_, _) => {
+            BlockResponseOutcome::Request(_, _, _) => {
                 unreachable!()
             }
         };
@@ -787,7 +850,7 @@ mod tests {
     #[test]
     fn test_peer_is_better_none_requirement() {
         let peer1 = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -797,7 +860,7 @@ mod tests {
         };
 
         let peer2 = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 50,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -815,7 +878,7 @@ mod tests {
     fn test_peer_is_better_full_block_requirement() {
         // Peer with full history (earliest = 0)
         let peer_full = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -826,7 +889,7 @@ mod tests {
 
         // Peer without full history (earliest = 50)
         let peer_partial = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -837,7 +900,7 @@ mod tests {
 
         // Peer without range info (treated as full history)
         let peer_no_range = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -865,7 +928,7 @@ mod tests {
 
         // Peer that covers the requested range
         let peer_covers = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -876,7 +939,7 @@ mod tests {
 
         // Peer that doesn't cover the range (earliest too high)
         let peer_no_cover = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -899,7 +962,7 @@ mod tests {
 
         // Peer with full history that covers the range
         let peer_full = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -910,7 +973,7 @@ mod tests {
 
         // Peer without full history that also covers the range
         let peer_partial = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -931,7 +994,7 @@ mod tests {
 
         // Peer with full history that covers the range
         let peer_full = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -942,7 +1005,7 @@ mod tests {
 
         // Peer without full history that also covers the range
         let peer_partial = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -963,7 +1026,7 @@ mod tests {
 
         // Peer with full history that doesn't cover the range (latest too low)
         let peer_full = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 30,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -974,7 +1037,7 @@ mod tests {
 
         // Peer without full history that also doesn't cover the range
         let peer_partial = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 30,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -995,7 +1058,7 @@ mod tests {
 
         // Peer with range info
         let peer_with_range = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1006,7 +1069,7 @@ mod tests {
 
         // Peer without range info
         let peer_no_range = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1031,7 +1094,7 @@ mod tests {
 
         // Peer with range info that covers the requested range
         let peer_with_range_covers = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1042,7 +1105,7 @@ mod tests {
 
         // Peer without range info (treated as full history with unknown latest)
         let peer_no_range = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1066,7 +1129,7 @@ mod tests {
 
         // Peer with range info that does NOT cover the requested range (too high)
         let peer_with_range_no_cover = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1077,7 +1140,7 @@ mod tests {
 
         // Peer without range info (treated as full history)
         let peer_no_range = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1102,7 +1165,7 @@ mod tests {
 
         // Peer that exactly covers the range
         let peer_exact = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1113,7 +1176,7 @@ mod tests {
 
         // Peer that's one block short at the start
         let peer_short_start = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1124,7 +1187,7 @@ mod tests {
 
         // Peer that's one block short at the end
         let peer_short_end = Peer {
-            state: PeerState::Idle,
+            state: PeerState::new(),
             best_hash: B256::random(),
             best_number: 100,
             capabilities: Arc::new(Capabilities::new(vec![])),
@@ -1145,5 +1208,158 @@ mod tests {
         assert!(
             !peer_short_end.is_better(&peer_exact, &BestPeerRequirements::FullBlockRange(range))
         );
+    }
+
+    #[tokio::test]
+    async fn test_peer_at_max_concurrency_is_skipped() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Saturate the peer to its max concurrent capacity
+        for _ in 0..MAX_CONCURRENT_PER_PEER {
+            fetcher.peers.get_mut(&peer1).unwrap().state.on_request_dispatched();
+        }
+
+        // Peer at max capacity should not be selected
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+
+        // Free one slot
+        fetcher.peers.get_mut(&peer1).unwrap().state.on_request_finished();
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), Some(peer1));
+    }
+
+    #[tokio::test]
+    async fn test_peer_with_lower_inflight_preferred() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let peer2 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+
+        // peer1 has slightly lower latency, so it would normally be preferred
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(5)),
+            None,
+        );
+        fetcher.new_active_peer(
+            peer2,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Verify peer1 (lower timeout) is preferred when both are idle
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), Some(peer1));
+
+        // Saturate peer1 to max capacity
+        for _ in 0..MAX_CONCURRENT_PER_PEER {
+            fetcher.peers.get_mut(&peer1).unwrap().state.on_request_dispatched();
+        }
+
+        // Now peer2 must be selected since peer1 is at capacity
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), Some(peer2));
+    }
+
+    #[tokio::test]
+    async fn test_closing_peer_never_selected() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Mark as closing
+        fetcher.on_pending_disconnect(&peer1);
+
+        // Closing peer must never be selected, even if it has zero inflight
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+    }
+
+    #[tokio::test]
+    async fn test_bad_response_peer_gets_reduced_cap() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Mark as having sent a bad response
+        fetcher.peers.get_mut(&peer1).unwrap().last_response_likely_bad = true;
+
+        // Should still be selectable with 0 inflight (cap is 1 for bad peers)
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), Some(peer1));
+
+        // But after 1 dispatch, should be at cap
+        fetcher.peers.get_mut(&peer1).unwrap().state.on_request_dispatched();
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_requests_dispatch_to_same_peer() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer1 = B512::random();
+        let capabilities = Arc::new(Capabilities::from(vec![]));
+        fetcher.new_active_peer(
+            peer1,
+            B256::random(),
+            1,
+            Arc::clone(&capabilities),
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Dispatch multiple requests to the same peer
+        for i in 0..MAX_CONCURRENT_PER_PEER {
+            assert_eq!(
+                fetcher.next_best_peer(BestPeerRequirements::None),
+                Some(peer1),
+                "peer should be selectable at inflight={i}"
+            );
+            fetcher.peers.get_mut(&peer1).unwrap().state.on_request_dispatched();
+        }
+
+        // Now at capacity
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
     }
 }

@@ -172,7 +172,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 best_hash: status.blockhash,
                 capabilities,
                 request_tx,
-                pending_response: None,
+                pending_responses: Vec::new(),
                 blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
@@ -378,11 +378,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         }
     }
 
-    /// Sends The message to the peer's session and queues in a response.
-    ///
-    /// Caution: this will replace an already pending response. It's the responsibility of the
-    /// caller to select the peer.
-    fn handle_block_request(&mut self, peer: PeerId, request: BlockRequest) {
+    /// Sends the message to the peer's session and queues in a response.
+    fn handle_block_request(&mut self, peer: PeerId, request: BlockRequest, request_id: u64) {
         if let Some(ref mut peer) = self.active_peers.get_mut(&peer) {
             let (request, response) = match request {
                 BlockRequest::GetBlockHeaders(request) => {
@@ -399,15 +396,15 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
-            peer.pending_response = Some(response);
+            peer.pending_responses.push((request_id, response));
         }
     }
 
     /// Handle the outcome of processed response, for example directly queue another request.
     fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) {
         match outcome {
-            BlockResponseOutcome::Request(peer, request) => {
-                self.handle_block_request(peer, request);
+            BlockResponseOutcome::Request(peer, request, request_id) => {
+                self.handle_block_request(peer, request, request_id);
             }
             BlockResponseOutcome::BadResponse(peer, reputation_change) => {
                 self.peers_manager.apply_reputation_change(&peer, reputation_change);
@@ -420,13 +417,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Delegates the response result to the fetcher which may return an outcome specific
     /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
-    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult<N>) {
+    fn on_eth_response(&mut self, peer: PeerId, request_id: u64, resp: PeerResponseResult<N>) {
         let outcome = match resp {
             PeerResponseResult::BlockHeaders(res) => {
-                self.state_fetcher.on_block_headers_response(peer, res)
+                self.state_fetcher.on_block_headers_response(peer, request_id, res)
             }
             PeerResponseResult::BlockBodies(res) => {
-                self.state_fetcher.on_block_bodies_response(peer, res)
+                self.state_fetcher.on_block_bodies_response(peer, request_id, res)
             }
             _ => None,
         };
@@ -450,8 +447,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
             while let Poll::Ready(action) = self.state_fetcher.poll(cx) {
                 match action {
-                    FetchAction::BlockRequest { peer_id, request } => {
-                        self.handle_block_request(peer_id, request)
+                    FetchAction::BlockRequest { peer_id, request, request_id } => {
+                        self.handle_block_request(peer_id, request, request_id)
                     }
                 }
             }
@@ -463,31 +460,30 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
                 // poll all connected peers for responses
                 for (id, peer) in &mut self.active_peers {
-                    let Some(mut response) = peer.pending_response.take() else { continue };
-                    match response.poll(cx) {
-                        Poll::Ready(res) => {
-                            // check if the error is due to a closed channel to the session
-                            if res.err().is_some_and(|err| err.is_channel_closed()) {
-                                debug!(
-                                    target: "net",
-                                    ?id,
-                                    "Request canceled, response channel from session closed."
-                                );
-                                // if the channel is closed, this means the peer session is also
-                                // closed, in which case we can invoke the
-                                // [Self::on_closed_session]
-                                // immediately, preventing followup requests and propagate the
-                                // connection dropped error
-                                closed_sessions.push(*id);
-                            } else {
-                                received_responses.push((*id, res));
+                    let mut i = 0;
+                    while i < peer.pending_responses.len() {
+                        let (_, response) = &mut peer.pending_responses[i];
+                        match response.poll(cx) {
+                            Poll::Ready(res) => {
+                                let (request_id, _) = peer.pending_responses.swap_remove(i);
+                                // check if the error is due to a closed channel to the session
+                                if res.err().is_some_and(|err| err.is_channel_closed()) {
+                                    debug!(
+                                        target: "net",
+                                        ?id,
+                                        "Request canceled, response channel from session closed."
+                                    );
+                                    closed_sessions.push(*id);
+                                    break;
+                                }
+                                received_responses.push((*id, request_id, res));
+                                // don't increment i: swap_remove moved last element here
+                            }
+                            Poll::Pending => {
+                                i += 1;
                             }
                         }
-                        Poll::Pending => {
-                            // not ready yet, store again.
-                            peer.pending_response = Some(response);
-                        }
-                    };
+                    }
                 }
 
                 for peer in closed_sessions {
@@ -498,8 +494,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     break;
                 }
 
-                for (peer_id, resp) in received_responses {
-                    self.on_eth_response(peer_id, resp);
+                for (peer_id, request_id, resp) in received_responses {
+                    self.on_eth_response(peer_id, request_id, resp);
                 }
             }
 
@@ -529,8 +525,9 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
-    /// The response receiver for a currently active request to that peer.
-    pub(crate) pending_response: Option<PeerResponse<N>>,
+    /// The response receivers for currently active requests to that peer.
+    /// Each entry is a `(request_id, response)` pair for matching back to the fetcher.
+    pub(crate) pending_responses: Vec<(u64, PeerResponse<N>)>,
     /// Blocks we know the peer has.
     pub(crate) blocks: LruCache<B256>,
 }
