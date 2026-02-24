@@ -202,10 +202,11 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let (evm, metrics, terminate_execution) = worker
-                .get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx())
-                .as_mut()
-                .expect("prewarm worker EVM state not initialized");
+            let Some((evm, metrics, terminate_execution)) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
+            else {
+                return;
+            };
 
             if terminate_execution.load(Ordering::Relaxed) {
                 return;
