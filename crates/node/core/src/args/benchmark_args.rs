@@ -78,6 +78,17 @@ pub struct BenchmarkArgs {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
+
+    /// Fetch blocks via `debug_getRawBlock` and send RLP-encoded bytes directly to
+    /// `reth_newPayload`.
+    ///
+    /// This avoids the intermediate JSON-to-ExecutionData conversion by fetching raw
+    /// RLP-encoded blocks from the source RPC and forwarding them as-is. The server
+    /// decodes the RLP and converts to ExecutionData internally.
+    ///
+    /// Implies `--reth-new-payload`.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    pub rlp_blocks: bool,
 }
 
 #[cfg(test)]

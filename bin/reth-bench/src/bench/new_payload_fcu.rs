@@ -21,15 +21,23 @@ use crate::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
-    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth},
+    valid_payload::{
+        block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth,
+        call_reth_new_payload_rlp, fetch_raw_block,
+    },
 };
-use alloy_provider::Provider;
+use alloy_consensus::BlockHeader;
+use alloy_primitives::{Bytes, B256};
+use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
+use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::BenchmarkArgs;
+use reth_primitives_traits::Block;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
@@ -152,13 +160,16 @@ impl Command {
             mut next_block,
             is_optimism,
             use_reth_namespace,
+            rlp_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
 
         let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
 
-        if use_reth_namespace {
+        if rlp_blocks {
+            info!("Using RLP blocks via debug_getRawBlock → reth_newPayload");
+        } else if use_reth_namespace {
             info!("Using reth_newPayload endpoint");
         }
 
@@ -170,46 +181,24 @@ impl Command {
 
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider
-                    .get_block_by_number(next_block.into())
-                    .full()
-                    .await
-                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
-                    Ok(block) => block,
+                let prefetched = if rlp_blocks {
+                    fetch_rlp_block_with_fcu_hashes(&block_provider, next_block).await
+                } else {
+                    fetch_json_block_with_fcu_hashes(&block_provider, next_block).await
+                };
+
+                match prefetched {
+                    Ok(data) => {
+                        next_block += 1;
+                        if sender.send(data).await.is_err() {
+                            break;
+                        }
+                    }
                     Err(e) => {
                         tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
-                };
-
-                let head_block_hash = block.header.hash;
-                let safe_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(32).into());
-
-                let finalized_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(64).into());
-
-                let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
-
-                let safe_block_hash = match safe {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                let finalized_block_hash = match finalized {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                next_block += 1;
-                if let Err(e) = sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
-                    .await
-                {
-                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
-                    break;
                 }
             }
         });
@@ -219,33 +208,69 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((block, head, safe, finalized)) = {
+        while let Some(prefetched) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
-            let gas_used = block.header.gas_used;
-            let gas_limit = block.header.gas_limit;
-            let block_number = block.header.number;
-            let transaction_count = block.transactions.len() as u64;
-
-            debug!(target: "reth-bench", ?block_number, "Sending payload");
-
             let forkchoice_state = ForkchoiceState {
-                head_block_hash: head,
-                safe_block_hash: safe,
-                finalized_block_hash: finalized,
+                head_block_hash: prefetched.head_hash,
+                safe_block_hash: prefetched.safe_hash,
+                finalized_block_hash: prefetched.finalized_hash,
             };
 
-            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
-            let start = Instant::now();
-            let reth_data = use_reth_namespace.then_some(execution_data);
-            let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
+            let (block_number, transaction_count, gas_used, gas_limit, server_timings, version) =
+                match prefetched.block {
+                    PrefetchedPayload::Rlp {
+                        rlp,
+                        block_number,
+                        transaction_count,
+                        gas_used,
+                        gas_limit,
+                    } => {
+                        debug!(target: "reth-bench", ?block_number, rlp_len = rlp.len(), "Sending RLP payload");
+                        let timings = call_reth_new_payload_rlp(&auth_provider, rlp).await?;
+                        (
+                            block_number,
+                            transaction_count,
+                            gas_used,
+                            gas_limit,
+                            Some(timings),
+                            EngineApiMessageVersion::V4,
+                        )
+                    }
+                    PrefetchedPayload::Json(block) => {
+                        let block_number = block.header.number;
+                        let transaction_count = block.transactions.len() as u64;
+                        let gas_used = block.header.gas_used as u64;
+                        let gas_limit = block.header.gas_limit as u64;
 
-            let np_latency =
-                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+                        debug!(target: "reth-bench", ?block_number, "Sending payload");
+
+                        let (version, params, execution_data) =
+                            block_to_new_payload(block, is_optimism)?;
+                        let start = Instant::now();
+                        let reth_data = use_reth_namespace.then_some(execution_data);
+                        let timings =
+                            call_new_payload_with_reth(&auth_provider, version, params, reth_data)
+                                .await?;
+                        let client_latency = start.elapsed();
+                        (
+                            block_number,
+                            transaction_count,
+                            gas_used,
+                            gas_limit,
+                            timings.or(Some(crate::valid_payload::NewPayloadTimingBreakdown {
+                                latency: client_latency,
+                                ..Default::default()
+                            })),
+                            version,
+                        )
+                    }
+                };
+
+            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_default();
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
@@ -264,14 +289,7 @@ impl Command {
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
             let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = if server_timings.is_some() {
-                // When using server-side latency for newPayload, derive total from the
-                // independently measured components to avoid mixing server-side and
-                // client-side (network-inclusive) timings.
-                np_latency + fcu_latency
-            } else {
-                start.elapsed()
-            };
+            let total_latency = np_latency + fcu_latency;
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
@@ -342,4 +360,95 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Payload data for a single block, either JSON or RLP.
+enum PrefetchedPayload {
+    Json(AnyRpcBlock),
+    Rlp { rlp: Bytes, block_number: u64, transaction_count: u64, gas_used: u64, gas_limit: u64 },
+}
+
+/// A prefetched block with forkchoice hashes.
+struct PrefetchedBlockWithFcu {
+    block: PrefetchedPayload,
+    head_hash: B256,
+    safe_hash: B256,
+    finalized_hash: B256,
+}
+
+/// Fetches a JSON block and resolves safe/finalized hashes for FCU.
+async fn fetch_json_block_with_fcu_hashes(
+    provider: &alloy_provider::RootProvider<alloy_network::AnyNetwork>,
+    block_number: u64,
+) -> eyre::Result<PrefetchedBlockWithFcu> {
+    let block = provider
+        .get_block_by_number(block_number.into())
+        .full()
+        .await
+        .wrap_err_with(|| format!("Failed to fetch block by number {block_number}"))?
+        .ok_or_eyre("Block not found")?;
+
+    let head_hash = block.header.hash;
+    let (safe, finalized) = resolve_fcu_hashes(provider, head_hash, block.header.number).await;
+
+    Ok(PrefetchedBlockWithFcu {
+        block: PrefetchedPayload::Json(block),
+        head_hash,
+        safe_hash: safe,
+        finalized_hash: finalized,
+    })
+}
+
+/// Fetches a raw RLP block and resolves safe/finalized hashes for FCU.
+async fn fetch_rlp_block_with_fcu_hashes(
+    provider: &alloy_provider::RootProvider<alloy_network::AnyNetwork>,
+    block_number: u64,
+) -> eyre::Result<PrefetchedBlockWithFcu> {
+    let rlp = fetch_raw_block(provider, block_number)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to fetch raw block {block_number}: {e}"))?;
+
+    let block = reth_ethereum_primitives::Block::decode(&mut rlp.as_ref())
+        .map_err(|e| eyre::eyre!("Failed to decode RLP block {block_number}: {e}"))?;
+
+    let head_hash = block.header().hash_slow();
+    let number = block.header().number();
+    let (safe, finalized) = resolve_fcu_hashes(provider, head_hash, number).await;
+
+    Ok(PrefetchedBlockWithFcu {
+        block: PrefetchedPayload::Rlp {
+            rlp,
+            block_number: number,
+            transaction_count: block.body().transactions().count() as u64,
+            gas_used: block.header().gas_used(),
+            gas_limit: block.header().gas_limit(),
+        },
+        head_hash,
+        safe_hash: safe,
+        finalized_hash: finalized,
+    })
+}
+
+/// Resolves safe and finalized block hashes for forkchoice by looking up blocks at
+/// head-32 and head-64.
+async fn resolve_fcu_hashes(
+    provider: &alloy_provider::RootProvider<alloy_network::AnyNetwork>,
+    head_hash: B256,
+    block_number: u64,
+) -> (B256, B256) {
+    let safe_fut = provider.get_block_by_number(block_number.saturating_sub(32).into());
+    let finalized_fut = provider.get_block_by_number(block_number.saturating_sub(64).into());
+
+    let (safe, finalized) = tokio::join!(safe_fut, finalized_fut);
+
+    let safe_hash = match safe {
+        Ok(Some(block)) => block.header.hash,
+        _ => head_hash,
+    };
+    let finalized_hash = match finalized {
+        Ok(Some(block)) => block.header.hash,
+        _ => head_hash,
+    };
+
+    (safe_hash, finalized_hash)
 }

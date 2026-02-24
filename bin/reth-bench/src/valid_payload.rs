@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
@@ -366,6 +366,55 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
         }
         Ok(None)
     }
+}
+
+/// Sends an RLP-encoded block to the `reth_newPayload` endpoint.
+///
+/// The server decodes the RLP and converts it to `ExecutionData` via `block_to_payload`.
+/// Returns server-side timing breakdown.
+pub(crate) async fn call_reth_new_payload_rlp<N: Network, P: Provider<N>>(
+    provider: P,
+    rlp: Bytes,
+) -> TransportResult<NewPayloadTimingBreakdown> {
+    let method = "reth_newPayload";
+    let reth_params =
+        serde_json::to_value((rlp.clone(),)).expect("Bytes serialization cannot fail");
+
+    debug!(target: "reth-bench", method, rlp_len = rlp.len(), "Sending RLP block");
+
+    let mut resp: RethPayloadStatus = provider.client().request(method, &reth_params).await?;
+
+    while !resp.status.is_valid() {
+        if resp.status.is_invalid() {
+            error!(target: "reth-bench", status=?resp.status, "Invalid {method}");
+            return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
+                format!("Invalid {method}: {:?}", resp.status),
+            ))))
+        }
+        if resp.status.is_syncing() {
+            return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                "invalid range: no canonical state found for parent of requested block",
+            ))
+        }
+        resp = provider.client().request(method, &reth_params).await?;
+    }
+
+    Ok(NewPayloadTimingBreakdown {
+        latency: Duration::from_micros(resp.latency_us),
+        persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+        execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
+        sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+    })
+}
+
+/// Fetches a raw RLP-encoded block via `debug_getRawBlock`.
+pub(crate) async fn fetch_raw_block<N: Network, P: Provider<N>>(
+    provider: &P,
+    block_number: u64,
+) -> TransportResult<Bytes> {
+    let params = serde_json::to_value((format!("0x{block_number:x}",),))
+        .expect("block number serialization cannot fail");
+    provider.client().request("debug_getRawBlock", &params).await
 }
 
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given

@@ -9,14 +9,21 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{block_to_new_payload, call_new_payload_with_reth},
+    valid_payload::{
+        block_to_new_payload, call_new_payload_with_reth, call_reth_new_payload_rlp,
+        fetch_raw_block, NewPayloadTimingBreakdown,
+    },
 };
-use alloy_provider::Provider;
+use alloy_consensus::BlockHeader;
+use alloy_primitives::Bytes;
+use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_rlp::Decodable;
 use clap::Parser;
 use csv::Writer;
 use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
+use reth_primitives_traits::Block;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
@@ -41,6 +48,12 @@ pub struct Command {
     benchmark: BenchmarkArgs,
 }
 
+/// Prefetched block data: either a full JSON block or RLP bytes with decoded metadata.
+enum PrefetchedBlock {
+    Json(AnyRpcBlock),
+    Rlp { rlp: Bytes, block_number: u64, transaction_count: u64, gas_used: u64 },
+}
+
 impl Command {
     /// Execute `benchmark new-payload-only` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
@@ -51,13 +64,16 @@ impl Command {
             mut next_block,
             is_optimism,
             use_reth_namespace,
+            rlp_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
 
         let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
 
-        if use_reth_namespace {
+        if rlp_blocks {
+            info!("Using RLP blocks via debug_getRawBlock → reth_newPayload");
+        } else if use_reth_namespace {
             info!("Using reth_newPayload endpoint");
         }
 
@@ -69,24 +85,45 @@ impl Command {
 
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider
-                    .get_block_by_number(next_block.into())
-                    .full()
-                    .await
-                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
-                    Ok(block) => block,
+                let prefetched = if rlp_blocks {
+                    match fetch_raw_block(&block_provider, next_block).await {
+                        Ok(rlp) => {
+                            match reth_ethereum_primitives::Block::decode(&mut rlp.as_ref()) {
+                                Ok(block) => Ok(PrefetchedBlock::Rlp {
+                                    rlp,
+                                    block_number: block.header().number(),
+                                    transaction_count: block.body().transactions().count() as u64,
+                                    gas_used: block.header().gas_used(),
+                                }),
+                                Err(e) => {
+                                    Err(eyre::eyre!("Failed to decode RLP block {next_block}: {e}"))
+                                }
+                            }
+                        }
+                        Err(e) => Err(eyre::eyre!("Failed to fetch raw block {next_block}: {e}")),
+                    }
+                } else {
+                    block_provider
+                        .get_block_by_number(next_block.into())
+                        .full()
+                        .await
+                        .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"))
+                        .and_then(|opt| opt.ok_or_eyre("Block not found"))
+                        .map(PrefetchedBlock::Json)
+                };
+
+                match prefetched {
+                    Ok(block) => {
+                        next_block += 1;
+                        if sender.send(block).await.is_err() {
+                            break;
+                        }
+                    }
                     Err(e) => {
                         tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
-                };
-
-                next_block += 1;
-                if let Err(e) = sender.send(block).await {
-                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
-                    break;
                 }
             }
         });
@@ -96,27 +133,46 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some(block) = {
+        while let Some(prefetched) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
-            let block_number = block.header.number;
-            let transaction_count = block.transactions.len() as u64;
-            let gas_used = block.header.gas_used;
+            let (block_number, transaction_count, gas_used, server_timings) = match prefetched {
+                PrefetchedBlock::Rlp { rlp, block_number, transaction_count, gas_used } => {
+                    debug!(target: "reth-bench", ?block_number, rlp_len = rlp.len(), "Sending RLP payload to engine");
+                    let timings = call_reth_new_payload_rlp(&auth_provider, rlp).await?;
+                    (block_number, transaction_count, gas_used, Some(timings))
+                }
+                PrefetchedBlock::Json(block) => {
+                    let block_number = block.header.number;
+                    let transaction_count = block.transactions.len() as u64;
+                    let gas_used = block.header.gas_used as u64;
 
-            debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
+                    debug!(target: "reth-bench", ?block_number, "Sending payload to engine");
 
-            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
+                    let (version, params, execution_data) =
+                        block_to_new_payload(block, is_optimism)?;
+                    let start = Instant::now();
+                    let reth_data = use_reth_namespace.then_some(execution_data);
+                    let timings =
+                        call_new_payload_with_reth(&auth_provider, version, params, reth_data)
+                            .await?;
+                    let client_latency = start.elapsed();
+                    (
+                        block_number,
+                        transaction_count,
+                        gas_used,
+                        timings.or(Some(NewPayloadTimingBreakdown {
+                            latency: client_latency,
+                            ..Default::default()
+                        })),
+                    )
+                }
+            };
 
-            let start = Instant::now();
-            let reth_data = use_reth_namespace.then_some(execution_data);
-            let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
-
-            let latency =
-                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_default();
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency,
