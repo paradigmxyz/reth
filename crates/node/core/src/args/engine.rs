@@ -537,7 +537,6 @@ mod tests {
             "256",
             "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
-            "--engine.multiproof-chunking",
             "--engine.multiproof-chunk-size",
             "512",
             "--engine.reserved-cpu-cores",
