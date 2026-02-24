@@ -13,7 +13,7 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2)
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
     }
     #[cfg(not(feature = "std"))]
     {
