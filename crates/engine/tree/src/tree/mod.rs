@@ -38,7 +38,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::ThreadPriority};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -421,9 +421,7 @@ where
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
-            if let Err(err) = ThreadPriority::Max.set_for_current() {
-                debug!(target: "engine::tree", ?err, "failed to set max thread priority for engine task");
-            }
+            increase_thread_priority();
             task.run()
         });
         (incoming, outgoing)
