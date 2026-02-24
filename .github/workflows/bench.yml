@@ -733,6 +733,38 @@ jobs:
         id: run-baseline-2
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
 
+      - name: Scan logs for errors
+        if: "!cancelled()"
+        run: |
+          ERRORS_FILE="$BENCH_WORK_DIR/errors.md"
+          found=false
+          for run_dir in baseline-1 feature-1 feature-2 baseline-2; do
+            LOG="$BENCH_WORK_DIR/$run_dir/node.log"
+            if [ ! -f "$LOG" ]; then continue; fi
+
+            panics=$(grep -c -E 'panicked at' "$LOG" || true)
+            errors=$(grep -c ' ERROR ' "$LOG" || true)
+
+            if [ "$panics" -gt 0 ] || [ "$errors" -gt 0 ]; then
+              if [ "$found" = false ]; then
+                printf '### ⚠️ Node Errors\n\n' >> "$ERRORS_FILE"
+                found=true
+              fi
+              printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
+              if [ "$panics" -gt 0 ]; then
+                printf '**Panics:**\n```\n' >> "$ERRORS_FILE"
+                grep -E 'panicked at' "$LOG" | head -10 >> "$ERRORS_FILE"
+                printf '```\n' >> "$ERRORS_FILE"
+              fi
+              if [ "$errors" -gt 0 ]; then
+                printf '**Errors (first 20):**\n```\n' >> "$ERRORS_FILE"
+                grep ' ERROR ' "$LOG" | head -20 >> "$ERRORS_FILE"
+                printf '```\n' >> "$ERRORS_FILE"
+              fi
+              printf '\n</details>\n\n' >> "$ERRORS_FILE"
+            fi
+          done
+
       - name: Upload samply profiles
         if: success() && env.BENCH_SAMPLY == 'true'
         run: |
@@ -909,6 +941,14 @@ jobs:
               }
             }
 
+            // Node errors (panics / ERROR logs)
+            try {
+              const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
+              if (errors.trim()) {
+                comment += '\n\n' + errors;
+              }
+            } catch (e) {}
+
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
             const ackCommentId = process.env.BENCH_COMMENT_ID;
@@ -952,10 +992,19 @@ jobs:
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
 
+            const fs = require('fs');
+            let errorDetails = '';
+            try {
+              const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
+              if (errors.trim()) {
+                errorDetails = '\n\n' + errors;
+              }
+            } catch (e) {}
+
             await github.rest.issues.updateComment({
               owner: context.repo.owner, repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})${errorDetails}`,
             });
 
       - name: Send Slack notification (failure)

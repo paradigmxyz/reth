@@ -51,7 +51,7 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
 
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
-    chunk_size: Option<usize>,
+    chunk_size: usize,
     /// If this number is exceeded and chunking is enabled, then this will override whether or not
     /// there are any active workers and force chunking across workers. This is to prevent tasks
     /// which are very long from hitting a single worker.
@@ -112,7 +112,7 @@ where
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
-        chunk_size: Option<usize>,
+        chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
@@ -307,7 +307,7 @@ where
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
                 self.dispatch_pending_targets();
-            } else if self.pending_targets.len() > self.chunk_size.unwrap_or_default() {
+            } else if self.pending_targets.len() > self.chunk_size {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
@@ -428,12 +428,12 @@ where
         })
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        if self.pending_updates == 0 {
+            return Ok(());
+        }
+
+        let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
@@ -656,39 +656,37 @@ where
         Ok(())
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     fn dispatch_pending_targets(&mut self) {
-        if !self.pending_targets.is_empty() {
-            let (targets, chunking_length) = self.pending_targets.take();
-            dispatch_with_chunking(
-                targets,
-                chunking_length,
-                self.chunk_size,
-                self.max_targets_for_chunking,
-                self.proof_worker_handle.available_account_workers(),
-                self.proof_worker_handle.available_storage_workers(),
-                MultiProofTargetsV2::chunks,
-                |proof_targets| {
-                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput {
-                            targets: proof_targets,
-                            proof_result_sender: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                0,
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        },
-                    ) {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                    }
-                },
-            );
+        if self.pending_targets.is_empty() {
+            return;
         }
+
+        let _span = debug_span!("dispatch_pending_targets").entered();
+        let (targets, chunking_length) = self.pending_targets.take();
+        dispatch_with_chunking(
+            targets,
+            chunking_length,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+            self.proof_worker_handle.available_account_workers(),
+            self.proof_worker_handle.available_storage_workers(),
+            MultiProofTargetsV2::chunks,
+            |proof_targets| {
+                if let Err(e) =
+                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                        targets: proof_targets,
+                        proof_result_sender: ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            0,
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                    })
+                {
+                    error!("failed to dispatch account multiproof: {e:?}");
+                }
+            },
+        );
     }
 }
 

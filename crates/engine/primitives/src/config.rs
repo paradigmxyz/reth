@@ -30,11 +30,7 @@ fn default_account_worker_count() -> usize {
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
-
-/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
-/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
-pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
@@ -127,8 +123,6 @@ pub struct TreeConfig {
     cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
-    /// Whether multiproof task should chunk proof targets.
-    multiproof_chunking_enabled: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -187,7 +181,6 @@ impl Default for TreeConfig {
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
@@ -221,7 +214,6 @@ impl TreeConfig {
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
-        multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
@@ -248,7 +240,6 @@ impl TreeConfig {
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
@@ -288,11 +279,6 @@ impl TreeConfig {
     /// Return the maximum execute block batch size.
     pub const fn max_execute_block_batch_size(&self) -> usize {
         self.max_execute_block_batch_size
-    }
-
-    /// Return whether the multiproof task chunking is enabled.
-    pub const fn multiproof_chunking_enabled(&self) -> bool {
-        self.multiproof_chunking_enabled
     }
 
     /// Return the multiproof task chunk size.
@@ -455,15 +441,6 @@ impl TreeConfig {
     /// Setter for state provider metrics.
     pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
         self.state_provider_metrics = state_provider_metrics;
-        self
-    }
-
-    /// Setter for whether multiproof task should chunk proof targets.
-    pub const fn with_multiproof_chunking_enabled(
-        mut self,
-        multiproof_chunking_enabled: bool,
-    ) -> Self {
-        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
         self
     }
 
