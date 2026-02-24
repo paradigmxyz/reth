@@ -44,6 +44,7 @@ use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
+    tracing::info!("Making genesis header with genesis: {:?}", genesis);
     // If London is activated at genesis, we set the initial base fee as per EIP-1559.
     let base_fee_per_gas = hardforks
         .fork(EthereumHardfork::London)
