@@ -1,6 +1,5 @@
 use crate::{
-    arena, LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates,
-    SparseTrieUpdatesAction,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
@@ -326,9 +325,8 @@ enum FindAncestorResult {
     Diverged,
     /// The target nibble has no child in the branch's `state_mask`.
     NoChild { child_nibble: u8 },
-    /// The target nibble has a revealed subtrie child at the given dense index.
-    #[expect(dead_code)]
-    RevealedSubtrie { dense_idx: usize, child_nibble: u8, child_idx: Index },
+    /// The target nibble has a revealed subtrie child (now pushed onto the stack).
+    RevealedSubtrie,
 }
 
 /// Pops the stack until the head is an ancestor of `full_path`, then descends from that head
@@ -353,14 +351,15 @@ fn find_ancestor(
 
         let head_branch = match &arena[head_idx] {
             ArenaSparseNode::EmptyRoot => {
-                trace!(target: TRACE_TARGET, ?full_path, "find_ancestor: empty root");
                 return FindAncestorResult::EmptyRoot;
             }
             ArenaSparseNode::Leaf { .. } => {
-                trace!(target: TRACE_TARGET, ?full_path, head_path = ?head.path, "find_ancestor: revealed leaf");
                 return FindAncestorResult::RevealedLeaf;
             }
             ArenaSparseNode::Branch(b) => b,
+            ArenaSparseNode::Subtrie(_) => {
+                return FindAncestorResult::RevealedSubtrie;
+            }
             _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
         };
 
@@ -372,61 +371,28 @@ fn find_ancestor(
         if full_path.len() <= head_branch_logical_path.len() ||
             !full_path.starts_with(&head_branch_logical_path)
         {
-            trace!(target: TRACE_TARGET, ?full_path, ?head_branch_logical_path, "find_ancestor: diverged");
             return FindAncestorResult::Diverged;
         }
 
         let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
         let Some(dense_idx) = child_dense_index(head_branch.state_mask, child_nibble) else {
-            trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: no child");
             return FindAncestorResult::NoChild { child_nibble };
         };
 
         match &head_branch.children[dense_idx] {
             ArenaSparseNodeBranchChild::Blinded(_) => {
-                trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: blinded");
                 return FindAncestorResult::Blinded;
             }
             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                 let child_idx = *child_idx;
                 let path = child_path(arena, stack, child_nibble);
-                match &arena[child_idx] {
-                    ArenaSparseNode::Branch(b) => {
-                        stack.push(ArenaStackEntry {
-                            index: child_idx,
-                            path,
-                            prev_num_leaves: b.state.num_leaves(),
-                            prev_dirty_leaves: b.state.num_dirty_leaves(),
-                        });
-                        // Continue descending through the branch.
-                    }
-                    ArenaSparseNode::Leaf { state, .. } => {
-                        stack.push(ArenaStackEntry {
-                            index: child_idx,
-                            path,
-                            prev_num_leaves: state.num_leaves(),
-                            prev_dirty_leaves: state.num_dirty_leaves(),
-                        });
-                        trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: descended to revealed leaf");
-                        return FindAncestorResult::RevealedLeaf;
-                    }
-                    ArenaSparseNode::Subtrie(_) => {
-                        let node = &arena[child_idx];
-                        stack.push(ArenaStackEntry {
-                            index: child_idx,
-                            path,
-                            prev_num_leaves: node.num_leaves(),
-                            prev_dirty_leaves: node.num_dirty_leaves(),
-                        });
-                        trace!(target: TRACE_TARGET, ?full_path, child_nibble, "find_ancestor: revealed subtrie");
-                        return FindAncestorResult::RevealedSubtrie {
-                            dense_idx,
-                            child_nibble,
-                            child_idx,
-                        };
-                    }
-                    _ => unreachable!("unexpected child node type: {:?}", arena[child_idx]),
-                }
+                let node = &arena[child_idx];
+                stack.push(ArenaStackEntry {
+                    index: child_idx,
+                    path,
+                    prev_num_leaves: node.num_leaves(),
+                    prev_dirty_leaves: node.num_dirty_leaves(),
+                });
             }
         }
     }
@@ -1148,7 +1114,7 @@ fn upsert_leaf(
 
             UpsertLeafResult::NewChild
         }
-        FindAncestorResult::RevealedSubtrie { .. } => {
+        FindAncestorResult::RevealedSubtrie => {
             unreachable!("RevealedSubtrie must be handled by caller")
         }
     }
@@ -1190,7 +1156,7 @@ fn remove_leaf(
 ) -> RemoveLeafResult {
     trace!(target: TRACE_TARGET, ?full_path, ?find_result, "Removing leaf");
     match find_result {
-        FindAncestorResult::Blinded | FindAncestorResult::RevealedSubtrie { .. } => {
+        FindAncestorResult::Blinded | FindAncestorResult::RevealedSubtrie => {
             unreachable!("Blinded/RevealedSubtrie must be handled by caller")
         }
         FindAncestorResult::EmptyRoot |
@@ -1285,7 +1251,7 @@ fn remove_leaf(
             // If the branch now has only one child, collapse it. The blinded sibling
             // case was already handled above before any mutations.
             if parent_branch.state_mask.count_bits() == 1 {
-                collapse_branch(arena, stack, root, parent_idx);
+                collapse_branch(arena, stack, root);
             }
             RemoveLeafResult::None
         }
@@ -1300,8 +1266,6 @@ fn remove_leaf(
 fn check_subtrie_collapse_needs_proof(
     arena: &Arena<ArenaSparseNode>,
     stack: &[ArenaStackEntry],
-    child_idx: Index,
-    child_nibble: u8,
     subtrie_updates: &[(B256, Nibbles, LeafUpdate)],
 ) -> Option<ArenaRequiredProof> {
     let num_removals = subtrie_updates
@@ -1313,12 +1277,17 @@ fn check_subtrie_collapse_needs_proof(
         return None;
     }
 
-    let subtrie_num_leaves = arena[child_idx].num_leaves();
+    // The subtrie is at the top of the stack; its parent is one below.
+    let subtrie_entry = stack.last()?;
+    let subtrie_num_leaves = arena[subtrie_entry.index].num_leaves();
     if num_removals < subtrie_num_leaves {
         return None;
     }
 
-    let parent_entry = stack.last()?;
+    let child_nibble =
+        subtrie_entry.path.last().expect("subtrie path must have at least one nibble");
+
+    let parent_entry = stack.get(stack.len().checked_sub(2)?)?;
     let parent_branch = arena[parent_entry.index].branch_ref();
     if parent_branch.state_mask.count_bits() != 2 {
         return None;
@@ -1355,8 +1324,8 @@ fn collapse_branch(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut [ArenaStackEntry],
     root: &mut Index,
-    branch_idx: Index,
 ) {
+    let branch_idx = stack.last().unwrap().index;
     let branch = arena[branch_idx].branch_ref();
     trace!(target: TRACE_TARGET, short_key = ?branch.short_key, "Collapsing single-child branch");
     debug_assert_eq!(branch.state_mask.count_bits(), 1, "collapse_branch requires exactly 1 child");
@@ -1597,10 +1566,11 @@ impl ArenaParallelSparseTrie {
     /// wraps it in [`ArenaSparseNode::Subtrie`], and updates the parent's child pointer.
     ///
     /// The child must be at `stack.last()` and its parent at `stack[len-2]`.
-    fn maybe_wrap_in_subtrie(&mut self, stack: &mut Vec<ArenaStackEntry>) {
+    fn maybe_wrap_in_subtrie(&mut self, stack: &[ArenaStackEntry]) {
         let child_entry = stack.last().unwrap();
         let child_idx = child_entry.index;
-        let child_path_len = child_entry.path.len();
+        let child_path = child_entry.path;
+        let child_path_len = child_path.len();
 
         if !Self::should_be_subtrie(child_path_len) {
             return;
@@ -1614,102 +1584,58 @@ impl ArenaParallelSparseTrie {
             return;
         }
 
-        let child_nibble = child_entry.path.last().unwrap();
-
-        // Pop the child and propagate its leaf counts to the parent.
-        pop_and_propagate(&mut self.upper_arena, stack);
-
-        trace!(target: TRACE_TARGET, child_path_len, ?child_nibble, "Wrapping child into subtrie");
-        let arena_node = self.upper_arena.remove(child_idx).unwrap();
+        trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
+        let arena_node =
+            mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
         let subtrie = self.take_or_create_subtrie(arena_node);
-        let subtrie_idx = self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
-
-        let parent_idx = stack.last().unwrap().index;
-        let parent_branch = self.upper_arena[parent_idx].branch_ref();
-        let child_dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not in parent state_mask");
-        self.upper_arena[parent_idx].branch_mut().children[child_dense_idx] =
-            ArenaSparseNodeBranchChild::Revealed(subtrie_idx);
+        self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
 
-    /// Checks whether a subtrie node at `subtrie_idx` (child of `parent_idx` at
-    /// `child_nibble`) should still be a subtrie. If the subtrie's root is no longer a branch,
-    /// or if its path + `short_key` no longer meets the subtrie depth threshold, its root node
-    /// is moved into the upper arena and the subtrie is returned to the pool.
-    ///
+    /// Checks whether the subtrie at the top of the stack has become empty after updates.
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
-    /// child slot is removed from the parent branch entirely. If the parent is left with a
-    /// single revealed child, it is collapsed via [`collapse_branch`].
-    fn maybe_unwrap_subtrie(
-        &mut self,
-        parent_idx: Index,
-        child_nibble: u8,
-        parent_path: &Nibbles,
-        subtrie_idx: Index,
-        stack: &mut [ArenaStackEntry],
-    ) {
+    /// child slot is removed from the parent branch entirely, the subtrie is recycled, and
+    /// if the parent is left with a single revealed child, it is collapsed via
+    /// [`collapse_branch`].
+    ///
+    /// The subtrie entry must be at `stack.last()` and its parent at `stack[len-2]`.
+    /// Pops the subtrie entry (propagating leaf count deltas) before returning.
+    fn maybe_unwrap_subtrie(&mut self, stack: &mut Vec<ArenaStackEntry>) {
+        let subtrie_idx = stack.last().unwrap().index;
+
         let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[subtrie_idx] else {
             return;
         };
 
-        let subtrie_root = &subtrie.arena[subtrie.root];
-        let child_path_len =
-            parent_path.len() + self.upper_arena[parent_idx].branch_ref().short_key.len() + 1;
-
-        let should_remain = match subtrie_root {
-            ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
-                Self::should_be_subtrie(child_path_len)
-            }
-            _ => false,
-        };
-
-        if should_remain {
+        if !matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot) {
             return;
         }
+
+        let child_nibble =
+            stack.last().unwrap().path.last().expect("subtrie path must have at least one nibble");
+        let parent_idx = stack[stack.len() - 2].index;
+
+        // Pop the subtrie entry before mutating, so collapse_branch sees the parent at
+        // stack.last().
+        pop_and_propagate(&mut self.upper_arena, stack);
 
         // Extract the subtrie and recycle it.
         let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(subtrie_idx).unwrap()
         else {
             unreachable!()
         };
-
-        let root_node = subtrie.arena.remove(subtrie.root).unwrap();
         subtrie.clear();
         self.cleared_subtries.push(*subtrie);
 
-        if matches!(root_node, ArenaSparseNode::EmptyRoot) {
-            trace!(target: TRACE_TARGET, ?child_nibble, "Unwrapping empty subtrie, removing child slot");
-            // All leaves were removed from this subtrie. Remove the child slot from the
-            // parent branch and potentially collapse it.
-            let parent_branch = self.upper_arena[parent_idx].branch_ref();
-            let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
-                .expect("child nibble not found in parent state_mask");
-            let old_num_leaves = parent_branch.state.num_leaves();
-            let old_dirty_leaves = parent_branch.state.num_dirty_leaves();
-
-            let parent_branch = self.upper_arena[parent_idx].branch_mut();
-            parent_branch.children.remove(dense_idx);
-            parent_branch.state_mask.unset_bit(child_nibble);
-            parent_branch.state = ArenaSparseNodeState::Dirty {
-                num_leaves: old_num_leaves,
-                num_dirty_leaves: if old_dirty_leaves > 0 { old_dirty_leaves } else { 0 },
-            };
-
-            if parent_branch.state_mask.count_bits() == 1 && !parent_branch.children[0].is_blinded()
-            {
-                collapse_branch(&mut self.upper_arena, stack, &mut self.root, parent_idx);
-            }
-        } else {
-            trace!(target: TRACE_TARGET, ?child_nibble, "Unwrapping subtrie back into upper arena");
-            // Move the subtrie's root (Leaf or non-qualifying Branch) into the upper arena.
-            let new_child_idx = self.upper_arena.insert(root_node);
-            let dense_idx = child_dense_index(
-                self.upper_arena[parent_idx].branch_ref().state_mask,
-                child_nibble,
-            )
+        trace!(target: TRACE_TARGET, ?child_nibble, "Unwrapping empty subtrie, removing child slot");
+        let parent_branch = self.upper_arena[parent_idx].branch_mut();
+        let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
-            self.upper_arena[parent_idx].branch_mut().children[dense_idx] =
-                ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+
+        parent_branch.children.remove(dense_idx);
+        parent_branch.state_mask.unset_bit(child_nibble);
+
+        if parent_branch.state_mask.count_bits() == 1 && !parent_branch.children[0].is_blinded() {
+            collapse_branch(&mut self.upper_arena, stack, &mut self.root);
         }
     }
 }
@@ -1843,13 +1769,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     );
                     node_idx += 1;
 
-                    self.maybe_wrap_in_subtrie(&mut stack);
+                    self.maybe_wrap_in_subtrie(&stack);
                 }
-                FindAncestorResult::RevealedSubtrie { child_idx, child_nibble, .. }
-                    if matches!(self.upper_arena[child_idx], ArenaSparseNode::Subtrie(_)) =>
-                {
+                FindAncestorResult::RevealedSubtrie => {
+                    let subtrie_entry = stack.last().unwrap();
+                    let child_idx = subtrie_entry.index;
+                    let prefix = subtrie_entry.path;
+
                     let subtrie_start = node_idx;
-                    let prefix = stack.last().unwrap().path;
                     while node_idx < nodes.len() && nodes[node_idx].path.starts_with(&prefix) {
                         node_idx += 1;
                     }
@@ -2050,9 +1977,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     updates.insert(key, LeafUpdate::Touched);
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
-                FindAncestorResult::RevealedSubtrie { child_idx, child_nibble, .. } => {
+                FindAncestorResult::RevealedSubtrie => {
+                    let subtrie_entry = stack.last().unwrap();
+                    let child_idx = subtrie_entry.index;
+                    let subtrie_root_path = subtrie_entry.path;
+
                     let subtrie_start = update_idx;
-                    let subtrie_root_path = stack.last().unwrap().path;
                     while update_idx < sorted.len() &&
                         sorted[update_idx].1.starts_with(&subtrie_root_path)
                     {
@@ -2067,9 +1997,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     // a proof for the sibling and skip the subtrie's updates.
                     if let Some(proof) = check_subtrie_collapse_needs_proof(
                         &self.upper_arena,
-                        &stack[..stack.len() - 1],
-                        child_idx,
-                        child_nibble,
+                        &stack,
                         subtrie_updates,
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
@@ -2079,7 +2007,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             updates.insert(key, update.clone());
                         }
                         // Pop the subtrie entry before continuing.
-                        pop_and_propagate(&mut self.upper_arena, &mut stack);
                         continue;
                     }
 
@@ -2100,19 +2027,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
 
-                    // Pop the subtrie entry, propagating leaf count deltas to the parent.
-                    pop_and_propagate(&mut self.upper_arena, &mut stack);
-
-                    // Check if the subtrie's root still qualifies as a subtrie after updates.
-                    let parent_idx = stack.last().unwrap().index;
-                    let parent_path = stack.last().unwrap().path;
-                    self.maybe_unwrap_subtrie(
-                        parent_idx,
-                        child_nibble,
-                        &parent_path,
-                        child_idx,
-                        &mut stack,
-                    );
+                    // Check if the subtrie's root still qualifies as a subtrie after
+                    // updates. This also pops the subtrie entry from the stack.
+                    self.maybe_unwrap_subtrie(&mut stack);
 
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
@@ -2132,7 +2049,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             find_result,
                         );
                         if matches!(result, UpsertLeafResult::NewChild) {
-                            self.maybe_wrap_in_subtrie(&mut stack);
+                            self.maybe_wrap_in_subtrie(&stack);
                         }
                     }
                     LeafUpdate::Changed(_) => {
