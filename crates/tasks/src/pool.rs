@@ -262,6 +262,13 @@ impl WorkerPool {
         self.pool.spawn(f);
     }
 
+    /// Executes `f` on this pool using [`rayon::in_place_scope`], which converts the calling
+    /// thread into a worker for the duration — tasks spawned inside the scope run on the pool
+    /// and the call blocks until all of them complete.
+    pub fn in_place_scope<'scope, R>(&self, f: impl FnOnce(&rayon::Scope<'scope>) -> R) -> R {
+        self.pool.in_place_scope(f)
+    }
+
     /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`

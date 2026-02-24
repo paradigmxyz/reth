@@ -114,9 +114,9 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread (non-blocking), then immediately starts
-    /// dispatching transactions as they arrive from sig recovery. If a tx lands on a
-    /// thread before its init finishes, [`Worker::get_or_init`] handles it lazily.
+    /// Kicks off EVM init on every pool thread (non-blocking via `pool.spawn`), then
+    /// uses `in_place_scope` to dispatch transactions as they arrive and wait for all
+    /// spawned tasks to complete before clearing per-thread state.
     fn spawn_all<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -137,61 +137,55 @@ where
             // Kick off EVM init on every pool thread without blocking the recv loop.
             {
                 let ctx = Arc::clone(&ctx);
+                let executor = executor.clone();
                 pool.spawn(move || {
-                    rayon::broadcast(|_| {
-                        WorkerPool::with_worker_mut(|worker| {
-                            worker.init::<PrewarmEvmState<Evm>>(|_| {
-                                PrewarmContext::clone(&ctx).evm_for_ctx()
-                            });
-                        });
+                    executor.prewarming_pool().init::<PrewarmEvmState<Evm>>(|_| {
+                        PrewarmContext::clone(&ctx).evm_for_ctx()
                     });
                 });
             }
 
-            // Track completion of spawned tasks.
-            let (done_tx, done_rx) = mpsc::sync_channel::<()>(pool.current_num_threads());
-
-            // Stream transactions: spawn each onto the pool as it arrives.
-            let mut tx_count = 0usize;
+            // Stream transactions inside a scope — `in_place_scope` runs spawned tasks
+            // on the pool and blocks until all of them complete.
             let parent_span = Span::current();
-            while let Ok((index, tx)) = pending.recv() {
-                if ctx.terminate_execution.load(Ordering::Relaxed) {
-                    trace!(
+            let tx_count = pool.in_place_scope(|s| {
+                let mut count = 0usize;
+                while let Ok((index, tx)) = pending.recv() {
+                    if ctx.terminate_execution.load(Ordering::Relaxed) {
+                        trace!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            "Termination requested, stopping transaction distribution"
+                        );
+                        break;
+                    }
+
+                    count += 1;
+                    let to_multi_proof = to_multi_proof.clone();
+                    let span = debug_span!(
                         target: "engine::tree::payload_processor::prewarm",
-                        "Termination requested, stopping transaction distribution"
+                        parent: &parent_span,
+                        "prewarm_tx",
+                        i = index,
                     );
-                    break;
+                    s.spawn(move |_| {
+                        let _enter = span.entered();
+                        Self::transact_worker(index, tx, to_multi_proof.as_ref());
+                    });
                 }
 
-                tx_count += 1;
-                let to_multi_proof = to_multi_proof.clone();
-                let done_tx = done_tx.clone();
-                let span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &parent_span,
-                    "prewarm_tx",
-                    i = index,
-                );
-                pool.spawn(move || {
-                    let _enter = span.entered();
-                    Self::transact_worker(index, tx, to_multi_proof.as_ref());
-                    drop(done_tx);
-                });
-            }
+                // Send withdrawal prefetch targets after all transactions dispatched
+                if let Some(to_multi_proof) = &to_multi_proof
+                    && let Some(withdrawals) = &ctx.env.withdrawals
+                    && !withdrawals.is_empty()
+                {
+                    let targets = multiproof_targets_from_withdrawals(withdrawals);
+                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                }
 
-            // Send withdrawal prefetch targets after all transactions have been dispatched
-            if let Some(to_multi_proof) = &to_multi_proof
-                && let Some(withdrawals) = &ctx.env.withdrawals
-                && !withdrawals.is_empty()
-            {
-                let targets = multiproof_targets_from_withdrawals(withdrawals);
-                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
-            }
+                count
+            });
 
-            // Wait for all spawned tasks to finish, then drop per-thread EVM state
-            // so it doesn't leak into the next block.
-            drop(done_tx);
-            while done_rx.recv().is_ok() {}
+            // All tasks are done — clear per-thread EVM state for the next block.
             pool.clear();
 
             let _ = actions_tx
