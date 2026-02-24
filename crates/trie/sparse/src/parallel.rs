@@ -999,6 +999,7 @@ impl SparseTrie for ParallelSparseTrie {
                 // Sync branch_node_masks with what's being committed to DB.
                 // This ensures that on subsequent root() calls, the masks reflect the actual
                 // DB state, which is needed for correct removal detection.
+                self.branch_node_masks.reserve(updates.updated_nodes.len());
                 for (path, node) in &updates.updated_nodes {
                     self.branch_node_masks.insert(
                         *path,
