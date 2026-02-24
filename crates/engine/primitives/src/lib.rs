@@ -15,7 +15,7 @@ use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
-    NewPayloadError, PayloadAttributes, PayloadOrAttributes,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
@@ -24,7 +24,7 @@ use serde::{de::DeserializeOwned, Serialize};
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 #[cfg(feature = "std")]
 pub use reth_evm::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
-pub use reth_payload_primitives::{ExecutionPayload, PayloadTypes};
+pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
 pub use error::*;

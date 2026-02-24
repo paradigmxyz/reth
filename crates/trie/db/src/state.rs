@@ -145,11 +145,6 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
-    ///
-    /// Storage keys from changesets are tagged as
-    /// [`Plain`](reth_primitives_traits::StorageSlotKey::Plain) or
-    /// [`Hashed`](reth_primitives_traits::StorageSlotKey::Hashed) by the reader, so no
-    /// `use_hashed_state` flag is needed. Addresses are always hashed.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
@@ -269,9 +264,6 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 }
 
 /// Calls [`HashedPostStateSorted::from_reverts`].
-///
-/// This is a convenience wrapper kept for backward compatibility. The storage
-/// key tagging is now handled internally by the changeset reader.
 pub fn from_reverts_auto(
     provider: &(impl ChangeSetReader
           + StorageChangeSetReader
@@ -291,8 +283,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
-    /// - Storage keys are tagged by the changeset reader and hashed via
-    ///   [`StorageSlotKey::to_hashed`](reth_primitives_traits::StorageSlotKey::to_hashed).
+    /// - Storage keys are always plain and are hashed via `keccak256`.
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
@@ -333,12 +324,12 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             for (BlockNumberAddress((_, address)), storage) in
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
-                if seen_storage_keys.insert((address, storage.key.as_b256())) {
+                if seen_storage_keys.insert((address, storage.key)) {
                     let hashed_address = keccak256(address);
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((storage.key.to_hashed(), storage.value));
+                        .push((keccak256(storage.key), storage.value));
                 }
             }
         }
@@ -598,7 +589,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot2,
+                        key: plain_slot2,
                         value: U256::from(200),
                     }],
                     1,
@@ -608,7 +599,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot1,
+                        key: plain_slot1,
                         value: U256::from(100),
                     }],
                     2,
@@ -618,7 +609,7 @@ mod tests {
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
                         address: address1,
-                        key: hashed_slot1,
+                        key: plain_slot1,
                         value: U256::from(999),
                     }],
                     3,

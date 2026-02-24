@@ -47,7 +47,7 @@ where
         provider.storage_changesets_range(from..=tip)?
     {
         if storage_address == address {
-            let hashed_slot = storage_change.key.to_hashed();
+            let hashed_slot = keccak256(storage_change.key);
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
             }
@@ -213,9 +213,9 @@ mod tests {
             &factory,
             vec![
                 (0, vec![]),
-                (1, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(10) }]),
-                (2, vec![StorageBeforeTx { address, key: hashed_slot2, value: U256::from(20) }]),
-                (3, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(999) }]),
+                (1, vec![StorageBeforeTx { address, key: plain_slot1, value: U256::from(10) }]),
+                (2, vec![StorageBeforeTx { address, key: plain_slot2, value: U256::from(20) }]),
+                (3, vec![StorageBeforeTx { address, key: plain_slot1, value: U256::from(999) }]),
             ],
         );
 

@@ -3,7 +3,7 @@
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
@@ -89,11 +89,6 @@ fn assert_changesets_queryable(
             "storage changesets should be queryable from static files for blocks {:?}",
             block_range
         );
-
-        // Verify keys are in hashed format (v2 mode)
-        for (_, entry) in &storage_changesets {
-            assert!(entry.key.is_hashed(), "v2: storage changeset keys should be tagged as hashed");
-        }
     } else {
         let storage_changesets: Vec<_> = provider
             .tx_ref()
@@ -105,16 +100,6 @@ fn assert_changesets_queryable(
             "storage changesets should be queryable from MDBX for blocks {:?}",
             block_range
         );
-
-        // Verify keys are plain (not hashed) in v1 mode
-        for (_, entry) in &storage_changesets {
-            let key = entry.key;
-            assert_ne!(
-                key,
-                keccak256(key),
-                "v1: storage changeset key should be plain (not its own keccak256)"
-            );
-        }
     }
 
     // Verify account changesets

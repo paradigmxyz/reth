@@ -5,9 +5,7 @@ use jsonrpsee::{
     server::middleware::rpc::RpcServiceT,
     types::Request,
 };
-use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_ethereum::EthEngineTypes;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -19,7 +17,6 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::mpsc::unbounded_channel;
 use tower::Layer;
 
 #[derive(Clone, Default)]
@@ -81,7 +78,6 @@ async fn test_rpc_middleware() {
         TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
         eth_api,
         EventSender::new(1),
-        ConsensusEngineHandle::<EthEngineTypes>::new(unbounded_channel().0),
     );
 
     let mylayer = MyMiddlewareLayer::default();

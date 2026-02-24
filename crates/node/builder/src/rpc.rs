@@ -211,7 +211,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <Node::Types as NodeTypes>::Payload,
     >,
 }
 
@@ -227,7 +226,6 @@ where
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <Node::Types as NodeTypes>::Payload,
     >;
 
     fn deref(&self) -> &Self::Target {

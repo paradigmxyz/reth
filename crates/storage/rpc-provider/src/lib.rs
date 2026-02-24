@@ -1091,14 +1091,6 @@ where
         })
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn account_code(&self, addr: &Address) -> Result<Option<Bytecode>, ProviderError> {
         self.block_on_async(async {
             let code = self
