@@ -46,7 +46,6 @@ serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 
 # Path manipulation
-shellexpand.workspace = true
 
 # CSV handling
 csv.workspace = true
