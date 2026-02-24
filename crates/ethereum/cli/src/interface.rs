@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
-    use reth_chainspec::SEPOLIA;
+    use reth_chainspec::{EthChainSpec, SEPOLIA};
     use reth_node_core::args::ColorMode;
 
     #[test]
