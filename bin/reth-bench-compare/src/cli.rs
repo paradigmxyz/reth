@@ -304,7 +304,7 @@ impl Args {
         chain_path.data_dir().to_path_buf()
     }
 
-    /// Get the expanded output directory path
+    /// Get the output directory path
     pub(crate) fn output_dir_path(&self) -> PathBuf {
         PathBuf::from(&self.output_dir)
     }
