@@ -144,7 +144,7 @@ where
             let to_multi_proof = to_multi_proof.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.clone().evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -514,21 +514,10 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Splits this context into an evm, metrics, and the atomic bool for terminating execution.
+    /// Creates a per-thread EVM, metrics handle, and termination flag for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(self) -> PrewarmEvmState<Evm> {
-        let Self {
-            env,
-            evm_config,
-            saved_cache,
-            provider,
-            metrics,
-            terminate_execution,
-            precompile_cache_disabled,
-            precompile_cache_map,
-        } = self;
-
-        let mut state_provider = match provider.build() {
+    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+        let mut state_provider = match self.provider.build() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -541,7 +530,7 @@ where
         };
 
         // Use the caches to create a new provider with caching
-        if let Some(saved_cache) = saved_cache {
+        if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
             state_provider =
@@ -550,7 +539,7 @@ where
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
-        let mut evm_env = env.evm_env;
+        let mut evm_env = self.env.evm_env.clone();
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
@@ -562,21 +551,21 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
 
-        if !precompile_cache_disabled {
+        if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
             evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
-                    precompile_cache_map.cache_for_address(*address),
+                    self.precompile_cache_map.cache_for_address(*address),
                     spec_id,
                     None, // No metrics for prewarm
                 )
             });
         }
 
-        Some((evm, metrics, terminate_execution))
+        Some((evm, self.metrics.clone(), self.terminate_execution.clone()))
     }
 
     /// Prefetches a single account and all its storage slots from the BAL into the cache.
