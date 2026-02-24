@@ -36,8 +36,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
             RethNewPayloadInput::RlpEncodedBlock(rlp) => {
-                let block = <<Payload::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block::decode(&mut rlp.as_ref())
-                    .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+                let block = Decodable::decode(&mut rlp.as_ref()).map_err(|err| EngineApiError::Internal(Box::new(err)))?;
                 Payload::block_to_payload(SealedBlock::seal_slow(block))
             }
         };
