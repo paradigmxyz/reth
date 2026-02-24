@@ -139,7 +139,12 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
         &self,
         hashed_state: &HashedPostStateSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        Ok(StateRoot::overlay_root_with_updates(self.tx(), hashed_state)?)
+        reth_trie_db::with_adapter!(self.0, |A| {
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
+                self.tx(),
+                hashed_state,
+            )?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(

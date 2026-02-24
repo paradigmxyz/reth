@@ -413,9 +413,11 @@ impl<
         &self,
         hashed_state: &HashedPostStateSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut revert_state = self.revert_state()?;
-        revert_state.extend_ref_and_sort(hashed_state);
-        Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let mut revert_state = self.revert_state()?;
+            revert_state.extend_ref_and_sort(hashed_state);
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_with_updates(self.tx(), &revert_state)?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
