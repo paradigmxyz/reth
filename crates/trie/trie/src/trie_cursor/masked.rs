@@ -6,8 +6,8 @@ use reth_trie_common::{
     BranchNodeCompact, Nibbles,
 };
 
-/// A [`TrieCursorFactory`] wrapper that creates cursors which skip trie nodes whose paths match the
-/// prefix sets in a [`TriePrefixSets`].
+/// A [`TrieCursorFactory`] wrapper that creates cursors which invalidate cached trie hash data
+/// for children whose paths match the prefix sets in a [`TriePrefixSets`].
 ///
 /// The `destroyed_accounts` field of the prefix sets is not used by the cursor — it is only
 /// relevant during trie update finalization, not during cursor traversal.
@@ -53,39 +53,86 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for MaskedTrieCursorFactory<CF> {
     }
 }
 
-/// A [`TrieCursor`] wrapper that skips trie nodes whose paths match a [`PrefixSet`].
+/// A [`TrieCursor`] wrapper that invalidates cached trie hash data for children whose paths match
+/// a [`PrefixSet`].
 ///
-/// For `seek`, `seek_exact`, and `next` calls, if the returned node's path matches the prefix set,
-/// the cursor keeps calling `next` on the inner cursor until a non-matching node is found or the
-/// cursor is exhausted.
+/// For each node returned by the inner cursor, hash bits are unset for children whose paths match
+/// the prefix set, and the corresponding hashes are removed from the node. If a node's `hash_mask`
+/// and `tree_mask` are both empty after masking, the node is skipped entirely.
 #[derive(Debug)]
 pub struct MaskedTrieCursor<C> {
     /// The inner cursor.
     cursor: C,
-    /// Prefix set used to determine which nodes to skip.
+    /// Prefix set used to determine which children's hashes to invalidate.
     prefix_set: PrefixSet,
 }
 
 impl<C> MaskedTrieCursor<C> {
-    /// Create a new cursor wrapping `cursor`, skipping nodes whose paths match `prefix_set`.
+    /// Create a new cursor wrapping `cursor`, masking hash bits for children whose paths match
+    /// `prefix_set`.
     pub const fn new(cursor: C, prefix_set: PrefixSet) -> Self {
         Self { cursor, prefix_set }
     }
 }
 
 impl<C: TrieCursor> MaskedTrieCursor<C> {
-    /// Advance past entries that match the prefix set, returning the first non-matching entry.
-    fn skip_matching(
+    /// Mask hash bits on a node for children whose paths match the prefix set.
+    ///
+    /// Returns `true` if the node should be kept, `false` if it should be skipped (both
+    /// `hash_mask` and `tree_mask` are empty after masking).
+    fn mask_node(&mut self, key: &Nibbles, node: &mut BranchNodeCompact) -> bool {
+        if !self.prefix_set.contains(key) {
+            return true;
+        }
+
+        let original_hash_mask = node.hash_mask;
+        if original_hash_mask.is_empty() {
+            return true;
+        }
+
+        let mut new_hash_mask = original_hash_mask;
+        let mut new_hashes = Vec::with_capacity(node.hashes.len());
+        let mut hash_idx = 0;
+        let mut child_path = key.clone();
+        let key_len = key.len();
+
+        for nibble in original_hash_mask.iter() {
+            child_path.truncate(key_len);
+            child_path.push(nibble);
+
+            if self.prefix_set.contains(&child_path) {
+                new_hash_mask.unset_bit(nibble);
+            } else {
+                new_hashes.push(node.hashes[hash_idx]);
+            }
+            hash_idx += 1;
+        }
+
+        if new_hash_mask != original_hash_mask {
+            node.hash_mask = new_hash_mask;
+            node.hashes = new_hashes.into();
+            node.root_hash = None;
+
+            if node.hash_mask.is_empty() && node.tree_mask.is_empty() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Apply masking to entries, advancing past fully-masked nodes.
+    fn mask_entries(
         &mut self,
         mut entry: Option<(Nibbles, BranchNodeCompact)>,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        while let Some((ref key, _)) = entry {
-            if !self.prefix_set.contains(key) {
-                break;
+        while let Some((key, mut node)) = entry {
+            if self.mask_node(&key, &mut node) {
+                return Ok(Some((key, node)));
             }
             entry = self.cursor.next()?;
         }
-        Ok(entry)
+        Ok(None)
     }
 }
 
@@ -94,10 +141,14 @@ impl<C: TrieCursor> TrieCursor for MaskedTrieCursor<C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.cursor.seek_exact(key)?;
-        match entry {
-            Some((ref k, _)) if self.prefix_set.contains(k) => Ok(None),
-            _ => Ok(entry),
+        if let Some((key, mut node)) = self.cursor.seek_exact(key)? {
+            if self.mask_node(&key, &mut node) {
+                Ok(Some((key, node)))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
         }
     }
 
@@ -106,12 +157,12 @@ impl<C: TrieCursor> TrieCursor for MaskedTrieCursor<C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.cursor.seek(key)?;
-        self.skip_matching(entry)
+        self.mask_entries(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.cursor.next()?;
-        self.skip_matching(entry)
+        self.mask_entries(entry)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
@@ -146,134 +197,259 @@ mod tests {
         BranchNodeCompact::new(state_mask, 0, 0, vec![], None)
     }
 
-    #[test]
-    fn test_seek_skips_matching_nodes() {
-        let nodes = vec![
-            (Nibbles::from_nibbles([0x1]), node(1)),
-            (Nibbles::from_nibbles([0x2]), node(2)),
-            (Nibbles::from_nibbles([0x3]), node(3)),
-        ];
+    fn node_with_hashes(state_mask: u16, hash_mask: u16, hashes: Vec<B256>) -> BranchNodeCompact {
+        BranchNodeCompact::new(state_mask, 0, hash_mask, hashes, None)
+    }
 
-        let mut ps = PrefixSetMut::default();
-        // Mark [0x1] and [0x2] as changed — these should be skipped.
-        ps.insert(Nibbles::from_nibbles([0x1]));
-        ps.insert(Nibbles::from_nibbles([0x2]));
+    fn node_with_tree_mask(
+        state_mask: u16,
+        tree_mask: u16,
+        hash_mask: u16,
+        hashes: Vec<B256>,
+    ) -> BranchNodeCompact {
+        BranchNodeCompact::new(state_mask, tree_mask, hash_mask, hashes, None)
+    }
 
-        let inner = make_cursor(nodes);
-        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
-
-        // Seeking from the start should skip [0x1] and [0x2], returning [0x3].
-        let result = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(result, Some((Nibbles::from_nibbles([0x3]), node(3))));
+    fn hash(byte: u8) -> B256 {
+        B256::repeat_byte(byte)
     }
 
     #[test]
-    fn test_seek_exact_returns_none_for_matching() {
-        let nodes =
-            vec![(Nibbles::from_nibbles([0x1]), node(1)), (Nibbles::from_nibbles([0x2]), node(2))];
+    fn test_seek_masks_matching_child_hashes() {
+        // Node at [0x1] with children 2 and 5 hashed.
+        // Prefix set marks child 2 as changed.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]),
+        )];
 
         let mut ps = PrefixSetMut::default();
-        ps.insert(Nibbles::from_nibbles([0x1]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x2]));
 
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
-        // seek_exact on a matching node returns None.
+        let result = cursor.seek(Nibbles::default()).unwrap();
+        let (key, node) = result.unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        // Hash bit 2 should be unset, only bit 5 remains.
+        assert!(!node.hash_mask.is_bit_set(2));
+        assert!(node.hash_mask.is_bit_set(5));
+        assert_eq!(&*node.hashes, &[hash(5)]);
+    }
+
+    #[test]
+    fn test_seek_skips_fully_masked_node() {
+        // Node at [0x1] with only child 3 hashed, tree_mask empty.
+        // Prefix set marks child 3 as changed → fully masked → skipped.
+        // Node at [0x2] is unaffected → returned.
+        let nodes = vec![
+            (
+                Nibbles::from_nibbles([0x1]),
+                node_with_hashes(0b0000_0000_0000_1000, 0b0000_0000_0000_1000, vec![hash(3)]),
+            ),
+            (Nibbles::from_nibbles([0x2]), node(0b0000_0000_0000_0001)),
+        ];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x3]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let result = cursor.seek(Nibbles::default()).unwrap();
+        assert_eq!(result, Some((Nibbles::from_nibbles([0x2]), node(0b0000_0000_0000_0001))));
+    }
+
+    #[test]
+    fn test_node_with_tree_mask_not_skipped() {
+        // Node at [0x1] with child 3 hashed, tree_mask has bit 3 set.
+        // Prefix set marks child 3 → hash cleared, but tree_mask keeps the node alive.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_0000_1000,
+                0b0000_0000_0000_1000,
+                0b0000_0000_0000_1000,
+                vec![hash(3)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x3]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let result = cursor.seek(Nibbles::default()).unwrap();
+        let (key, node) = result.unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        assert!(node.hash_mask.is_empty());
+        assert!(node.tree_mask.is_bit_set(3));
+        assert!(node.hashes.is_empty());
+    }
+
+    #[test]
+    fn test_seek_exact_masks_hash_bits() {
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                vec![hash(2), hash(5)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x5]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let result = cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap();
+        let (_, node) = result.unwrap();
+        assert!(node.hash_mask.is_bit_set(2));
+        assert!(!node.hash_mask.is_bit_set(5));
+        assert_eq!(&*node.hashes, &[hash(2)]);
+    }
+
+    #[test]
+    fn test_seek_exact_returns_none_for_fully_masked() {
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_hashes(0b0000_0000_0000_0100, 0b0000_0000_0000_0100, vec![hash(2)]),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x2]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap();
         assert_eq!(result, None);
-
-        // seek_exact on a non-matching node returns the entry.
-        let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
-        assert_eq!(result, Some((Nibbles::from_nibbles([0x2]), node(2))));
     }
 
     #[test]
-    fn test_next_skips_matching_nodes() {
+    fn test_next_masks_and_skips() {
+        // Three nodes: [0x1] unaffected, [0x2] fully masked, [0x3] unaffected.
         let nodes = vec![
-            (Nibbles::from_nibbles([0x1]), node(1)),
-            (Nibbles::from_nibbles([0x2]), node(2)),
-            (Nibbles::from_nibbles([0x3]), node(3)),
-            (Nibbles::from_nibbles([0x4]), node(4)),
+            (
+                Nibbles::from_nibbles([0x1]),
+                node_with_hashes(0b0000_0000_0000_0010, 0b0000_0000_0000_0010, vec![hash(1)]),
+            ),
+            (
+                Nibbles::from_nibbles([0x2]),
+                node_with_hashes(0b0000_0000_0001_0000, 0b0000_0000_0001_0000, vec![hash(4)]),
+            ),
+            (
+                Nibbles::from_nibbles([0x3]),
+                node_with_hashes(0b0000_0000_0100_0000, 0b0000_0000_0100_0000, vec![hash(6)]),
+            ),
         ];
 
         let mut ps = PrefixSetMut::default();
-        ps.insert(Nibbles::from_nibbles([0x2]));
-        ps.insert(Nibbles::from_nibbles([0x3]));
+        ps.insert(Nibbles::from_nibbles([0x2, 0x4]));
 
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
-        // Seek to [0x1] (not matching).
+        // seek to [0x1], no match → returned unchanged.
         let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
-        assert_eq!(result, Some((Nibbles::from_nibbles([0x1]), node(1))));
+        let (key, node) = result.unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        assert_eq!(&*node.hashes, &[hash(1)]);
 
-        // next() should skip [0x2] and [0x3], returning [0x4].
+        // next() should skip [0x2] (fully masked), returning [0x3].
         let result = cursor.next().unwrap();
-        assert_eq!(result, Some((Nibbles::from_nibbles([0x4]), node(4))));
+        let (key, node) = result.unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x3]));
+        assert_eq!(&*node.hashes, &[hash(6)]);
     }
 
     #[test]
-    fn test_all_nodes_matching_returns_none() {
-        let nodes =
-            vec![(Nibbles::from_nibbles([0x1]), node(1)), (Nibbles::from_nibbles([0x2]), node(2))];
+    fn test_no_match_returns_unchanged() {
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x2]),
+            node_with_hashes(0b0000_0000_0000_0010, 0b0000_0000_0000_0010, vec![hash(1)]),
+        )];
 
         let mut ps = PrefixSetMut::default();
-        ps.insert(Nibbles::from_nibbles([0x1]));
-        ps.insert(Nibbles::from_nibbles([0x2]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x3]));
 
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let result = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(result, None);
+        let (key, node) = result.unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x2]));
+        // Unchanged — prefix set doesn't match [0x2].
+        assert!(node.hash_mask.is_bit_set(1));
+        assert_eq!(&*node.hashes, &[hash(1)]);
     }
 
     #[test]
-    fn test_empty_prefix_set_returns_all() {
+    fn test_empty_prefix_set_returns_all_unchanged() {
+        let h1 = hash(1);
+        let h2 = hash(2);
         let nodes = vec![
-            (Nibbles::from_nibbles([0x1]), node(1)),
-            (Nibbles::from_nibbles([0x2]), node(2)),
-            (Nibbles::from_nibbles([0x3]), node(3)),
+            (
+                Nibbles::from_nibbles([0x1]),
+                node_with_hashes(0b0000_0000_0000_0010, 0b0000_0000_0000_0010, vec![h1]),
+            ),
+            (
+                Nibbles::from_nibbles([0x2]),
+                node_with_hashes(0b0000_0000_0000_0100, 0b0000_0000_0000_0100, vec![h2]),
+            ),
         ];
 
         let ps = PrefixSetMut::default();
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
-        let r1 = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(r1, Some((Nibbles::from_nibbles([0x1]), node(1))));
+        let r1 = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(r1.0, Nibbles::from_nibbles([0x1]));
+        assert_eq!(&*r1.1.hashes, &[h1]);
 
-        let r2 = cursor.next().unwrap();
-        assert_eq!(r2, Some((Nibbles::from_nibbles([0x2]), node(2))));
+        let r2 = cursor.next().unwrap().unwrap();
+        assert_eq!(r2.0, Nibbles::from_nibbles([0x2]));
+        assert_eq!(&*r2.1.hashes, &[h2]);
 
-        let r3 = cursor.next().unwrap();
-        assert_eq!(r3, Some((Nibbles::from_nibbles([0x3]), node(3))));
-
-        let r4 = cursor.next().unwrap();
-        assert_eq!(r4, None);
+        assert_eq!(cursor.next().unwrap(), None);
     }
 
     #[test]
-    fn test_prefix_matching_skips_children() {
-        // A prefix set entry [0x1] should match nodes [0x1], [0x1, 0x2], etc.
-        let nodes = vec![
-            (Nibbles::from_nibbles([0x1, 0x0]), node(1)),
-            (Nibbles::from_nibbles([0x1, 0x5]), node(2)),
-            (Nibbles::from_nibbles([0x2, 0x0]), node(3)),
-        ];
+    fn test_root_hash_cleared_on_mask() {
+        let mut n =
+            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]);
+        n.root_hash = Some(hash(0xFF));
+
+        let nodes = vec![(Nibbles::from_nibbles([0x1]), n)];
 
         let mut ps = PrefixSetMut::default();
-        // Insert a key that starts with [0x1] — `contains` checks if any key in the set
-        // starts with the given prefix, so [0x1, 0x0] and [0x1, 0x5] will match prefix [0x1].
-        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
-        ps.insert(Nibbles::from_nibbles([0x1, 0x5]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x2]));
 
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
-        // Seeking from start should skip [0x1, 0x0] and [0x1, 0x5], returning [0x2, 0x0].
+        let (_, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(node.root_hash, None);
+    }
+
+    #[test]
+    fn test_node_without_hashes_returned_unchanged() {
+        // Node with state_mask only (no hashes, no tree_mask) should pass through.
+        let nodes = vec![(Nibbles::from_nibbles([0x1]), node(0b0000_0000_0000_0011))];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
         let result = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(result, Some((Nibbles::from_nibbles([0x2, 0x0]), node(3))));
+        assert_eq!(result, Some((Nibbles::from_nibbles([0x1]), node(0b0000_0000_0000_0011))));
     }
 
     #[test]
@@ -283,8 +459,7 @@ mod tests {
         let inner = make_cursor(nodes);
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
-        let result = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(result, None);
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap(), None);
     }
 
     #[test]
@@ -301,5 +476,36 @@ mod tests {
 
         cursor.reset();
         assert_eq!(cursor.current().unwrap(), None);
+    }
+
+    #[test]
+    fn test_partial_mask_preserves_remaining_hashes() {
+        // Node at [0x1] with children 0, 3, 7 hashed.
+        // Prefix set marks children 0 and 7 as changed.
+        // Only hash for child 3 should remain.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_1000_1001,
+                0b0000_0000_1000_1001,
+                0b0000_0000_1000_1001,
+                vec![hash(0), hash(3), hash(7)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x7]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        assert!(!node.hash_mask.is_bit_set(0));
+        assert!(node.hash_mask.is_bit_set(3));
+        assert!(!node.hash_mask.is_bit_set(7));
+        assert_eq!(&*node.hashes, &[hash(3)]);
+        assert_eq!(node.root_hash, None);
     }
 }
