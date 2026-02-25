@@ -431,8 +431,13 @@ where
                             tx
                         })
                     })
-                    .for_each_ordered(|tx| {
-                        let _ = execute_tx.send(tx);
+                    .for_each_ordered({
+                        let mut idx = prefetch;
+                        move |tx| {
+                            let _ = execute_tx.send(tx);
+                            debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            idx += 1;
+                        }
                     });
             });
         }
@@ -717,6 +722,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
+        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 
