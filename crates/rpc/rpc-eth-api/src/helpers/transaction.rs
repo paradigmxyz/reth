@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::TransactionInfo;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -24,13 +24,13 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
-    utils::{binary_search, recover_raw_transaction},
+    utils::recover_raw_transaction,
     EthApiError::{self, TransactionConfirmationTimeout},
     FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
-    TransactionsProvider,
+    StateProviderFactory, TransactionsProvider,
 };
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
@@ -335,27 +335,58 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             // Note: we can't optimize for contracts (account with code) and cannot shortcircuit if
             // the address has code, because with 7702 EOAs can also have code
 
-            let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
+            // Perform the binary search entirely inside a single blocking IO task to avoid
+            // spawning O(log N) separate blocking tasks.
+            let block_num = self
+                .spawn_blocking_io(move |this| {
+                    let provider = this.provider();
 
-            // If the nonce is higher or equal to the highest nonce, the transaction is pending or
-            // not exists.
-            if nonce >= highest {
+                    let highest = provider
+                        .latest()
+                        .map_err(Self::Error::from_eth_err)?
+                        .account_nonce(&sender)
+                        .map_err(Self::Error::from_eth_err)?
+                        .unwrap_or_default();
+
+                    // If the nonce is higher or equal to the highest nonce, the transaction is
+                    // pending or does not exist.
+                    if nonce >= highest {
+                        return Ok(None);
+                    }
+
+                    let high = provider.best_block_number().map_err(Self::Error::from_eth_err)?;
+
+                    // Binary search: find the block where the sender's nonce first exceeds
+                    // the requested nonce, reading account nonce directly from historical
+                    // state providers.
+                    let mut low = 1u64;
+                    let mut hi = high;
+                    let mut num = high;
+
+                    while low <= hi {
+                        let mid = (low + hi) / 2;
+                        let mid_nonce = provider
+                            .history_by_block_number(mid)
+                            .map_err(Self::Error::from_eth_err)?
+                            .account_nonce(&sender)
+                            .map_err(Self::Error::from_eth_err)?
+                            .unwrap_or_default();
+
+                        if mid_nonce > nonce {
+                            hi = mid - 1;
+                            num = mid;
+                        } else {
+                            low = mid + 1;
+                        }
+                    }
+
+                    Ok(Some(num))
+                })
+                .await?;
+
+            let Some(num) = block_num else {
                 return Ok(None);
-            }
-
-            let Ok(high) = self.provider().best_block_number() else {
-                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
-
-            // Perform a binary search over the block range to find the block in which the sender's
-            // nonce reached the requested nonce.
-            let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
-                let mid_nonce =
-                    self.transaction_count(sender, Some(mid.into())).await?.saturating_to::<u64>();
-
-                Ok(mid_nonce > nonce)
-            })
-            .await?;
 
             let block_id = num.into();
             self.recovered_block(block_id)
