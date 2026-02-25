@@ -96,7 +96,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         genesis.timestamp
     );
 
-    Header {
+    let header = Header {
         number: genesis.number.unwrap_or_default(),
         parent_hash: genesis.parent_hash.unwrap_or_default(),
         gas_limit: genesis.gas_limit,
@@ -116,7 +116,9 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         block_access_list_hash,
         slot_number,
         ..Default::default()
-    }
+    };
+    tracing::info!("Header in make genesis is  {:#?}", header);
+    header
 }
 
 /// The Ethereum mainnet spec

@@ -95,7 +95,7 @@ where
         } else {
             None
         };
-
+        tracing::debug!("Base fees in assemble block : {:?}", Some(evm_env.block_env.basefee()));
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
