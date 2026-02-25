@@ -87,6 +87,7 @@ tokio-stream.workspace = true
 reqwest.workspace = true
 url.workspace = true
 metrics.workspace = true
+blake3.workspace = true
 
 # io
 fdlimit.workspace = true

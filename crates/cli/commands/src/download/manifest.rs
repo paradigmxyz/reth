@@ -1,7 +1,8 @@
+use blake3::Hasher;
 use eyre::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, io::Read, path::Path};
 use tracing::info;
 
 /// A snapshot manifest describes available components for a snapshot at a given block height.
@@ -50,6 +51,9 @@ pub struct SingleArchive {
     pub file: String,
     /// Compressed archive size in bytes.
     pub size: u64,
+    /// Optional BLAKE3 checksum of the compressed archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blake3: Option<String>,
 }
 
 /// A chunked archive set where each chunk covers a fixed block range.
@@ -63,6 +67,19 @@ pub struct ChunkedArchive {
     /// Computed during manifest generation. Older manifests may omit this.
     #[serde(default)]
     pub chunk_sizes: Vec<u64>,
+    /// BLAKE3 checksums per chunk, ordered from first to last.
+    /// Computed during manifest generation. Older manifests may omit this.
+    #[serde(default)]
+    pub chunk_blake3: Vec<String>,
+}
+
+/// A single archive with concrete URL and optional integrity metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveDescriptor {
+    pub url: String,
+    pub file_name: String,
+    pub size: u64,
+    pub blake3: Option<String>,
 }
 
 /// How much of a component to download.
@@ -261,6 +278,62 @@ impl SnapshotManifest {
         }
     }
 
+    /// Returns concrete archive descriptors for a component, optionally limited to distance.
+    pub fn archive_descriptors_for_distance(
+        &self,
+        ty: SnapshotComponentType,
+        distance: Option<u64>,
+    ) -> Vec<ArchiveDescriptor> {
+        let Some(component) = self.component(ty) else {
+            return vec![];
+        };
+
+        match component {
+            ComponentManifest::Single(single) => {
+                vec![ArchiveDescriptor {
+                    url: format!("{}/{}", self.base_url, single.file),
+                    file_name: single.file.clone(),
+                    size: single.size,
+                    blake3: single.blake3.clone(),
+                }]
+            }
+            ComponentManifest::Chunked(chunked) => {
+                let key = ty.key();
+                let num_chunks = chunked.num_chunks();
+
+                let start_chunk = match distance {
+                    Some(dist) => {
+                        let needed_blocks = dist.min(chunked.total_blocks);
+                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
+                        num_chunks.saturating_sub(needed_chunks)
+                    }
+                    None => 0,
+                };
+
+                (start_chunk..num_chunks)
+                    .map(|i| {
+                        let start = i * chunked.blocks_per_file;
+                        let end = (i + 1) * chunked.blocks_per_file - 1;
+                        let file_name = format!("{key}-{start}-{end}.tar.zst");
+                        let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
+                        let blake3 = chunked
+                            .chunk_blake3
+                            .get(i as usize)
+                            .cloned()
+                            .filter(|hash| !hash.is_empty());
+
+                        ArchiveDescriptor {
+                            url: format!("{}/{}", self.base_url, file_name),
+                            file_name,
+                            size,
+                            blake3,
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+
     /// Returns the exact download size for a component given a distance selection.
     ///
     /// For single archives, returns the full size. For chunked archives, sums the
@@ -346,9 +419,14 @@ pub fn generate_manifest(
     let state_path = archive_dir.join("state.tar.zst");
     if state_path.exists() {
         let size = std::fs::metadata(&state_path)?.len();
+        let blake3 = Some(file_blake3_hex(&state_path)?);
         components.insert(
             SnapshotComponentType::State.key().to_string(),
-            ComponentManifest::Single(SingleArchive { file: "state.tar.zst".to_string(), size }),
+            ComponentManifest::Single(SingleArchive {
+                file: "state.tar.zst".to_string(),
+                size,
+                blake3,
+            }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found state archive");
     }
@@ -357,11 +435,13 @@ pub fn generate_manifest(
     let rocksdb_indices_path = archive_dir.join("rocksdb_indices.tar.zst");
     if rocksdb_indices_path.exists() {
         let size = std::fs::metadata(&rocksdb_indices_path)?.len();
+        let blake3 = Some(file_blake3_hex(&rocksdb_indices_path)?);
         components.insert(
             SnapshotComponentType::RocksdbIndices.key().to_string(),
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size,
+                blake3,
             }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found RocksDB indices archive");
@@ -384,12 +464,16 @@ pub fn generate_manifest(
 
             // Collect per-chunk sizes
             let mut chunk_sizes = Vec::with_capacity(num_chunks as usize);
+            let mut chunk_blake3 = Vec::with_capacity(num_chunks as usize);
             for i in 0..num_chunks {
                 let start = i * blocks_per_file;
                 let end = (i + 1) * blocks_per_file - 1;
                 let chunk_path = archive_dir.join(format!("{key}-{start}-{end}.tar.zst"));
                 let size = std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0);
                 chunk_sizes.push(size);
+                let checksum =
+                    if chunk_path.exists() { file_blake3_hex(&chunk_path)? } else { String::new() };
+                chunk_blake3.push(checksum);
             }
 
             let total_size: u64 = chunk_sizes.iter().sum();
@@ -406,6 +490,7 @@ pub fn generate_manifest(
                     blocks_per_file,
                     total_blocks: block,
                     chunk_sizes,
+                    chunk_blake3,
                 }),
             );
         }
@@ -428,6 +513,22 @@ pub fn chunk_filename(component_key: &str, start: u64, end: u64) -> String {
     format!("{component_key}-{start}-{end}.tar.zst")
 }
 
+fn file_blake3_hex(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Hasher::new();
+    let mut buf = [0_u8; 64 * 1024];
+
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +540,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "state.tar.zst".to_string(),
                 size: 100,
+                blake3: None,
             }),
         );
         components.insert(
@@ -447,6 +549,7 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![80_000, 100_000, 120_000],
+                chunk_blake3: vec![],
             }),
         );
         components.insert(
@@ -455,6 +558,7 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![40_000, 50_000, 60_000],
+                chunk_blake3: vec![],
             }),
         );
         SnapshotManifest {
@@ -503,6 +607,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 777,
+                blake3: None,
             }),
         );
         let m = SnapshotManifest {
@@ -571,6 +676,7 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 24_396_822,
                 chunk_sizes: vec![100; 49], // 49 chunks
+                chunk_blake3: vec![],
             }),
         );
         let m = SnapshotManifest {
@@ -609,5 +715,46 @@ mod tests {
         assert_eq!(m.size_for_distance(SnapshotComponentType::State, Some(100)), 100);
         // Missing component
         assert_eq!(m.size_for_distance(SnapshotComponentType::Receipts, None), 0);
+    }
+
+    #[test]
+    fn archive_descriptors_include_checksum_metadata() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "state".to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "state.tar.zst".to_string(),
+                size: 100,
+                blake3: Some("abc123".to_string()),
+            }),
+        );
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_000_000,
+                chunk_sizes: vec![80_000, 120_000],
+                chunk_blake3: vec!["hash0".to_string(), "hash1".to_string()],
+            }),
+        );
+
+        let m = SnapshotManifest {
+            block: 1_000_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: "https://example.com".to_string(),
+            components,
+        };
+
+        let state = m.archive_descriptors_for_distance(SnapshotComponentType::State, None);
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].file_name, "state.tar.zst");
+        assert_eq!(state[0].blake3.as_deref(), Some("abc123"));
+
+        let tx = m.archive_descriptors_for_distance(SnapshotComponentType::Transactions, None);
+        assert_eq!(tx.len(), 2);
+        assert_eq!(tx[0].blake3.as_deref(), Some("hash0"));
+        assert_eq!(tx[1].blake3.as_deref(), Some("hash1"));
     }
 }

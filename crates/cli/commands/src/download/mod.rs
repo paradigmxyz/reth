@@ -4,6 +4,7 @@ pub mod manifest_cmd;
 mod tui;
 
 use crate::common::EnvironmentArgs;
+use blake3::Hasher;
 use clap::Parser;
 use config_gen::{
     config_for_selections, reset_index_stage_checkpoints, write_config, write_prune_checkpoints,
@@ -11,7 +12,7 @@ use config_gen::{
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
-use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
+use manifest::{ArchiveDescriptor, ComponentSelection, SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -31,7 +32,7 @@ use std::{
 };
 use tar::Archive;
 use tokio::task;
-use tracing::info;
+use tracing::{info, warn};
 use tui::{run_selector, SelectionResult};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
@@ -40,6 +41,7 @@ const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
 const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
+const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 
 /// Maximum number of concurrent archive downloads.
 const MAX_CONCURRENT_DOWNLOADS: usize = 4;
@@ -255,31 +257,36 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let selections = self.resolve_components(&manifest)?;
 
-        // Collect all archive URLs across all selected components
+        // Collect all archive descriptors across all selected components.
+        // Verification is performed lazily per archive task, so downloads can
+        // start immediately without a full pre-scan of the datadir.
         let target_dir = data_dir.data_dir();
-        let mut all_downloads: Vec<(String, String)> = Vec::new();
+        let mut all_downloads: Vec<PlannedArchive> = Vec::new();
         for (ty, sel) in &selections {
             let distance = match sel {
                 ComponentSelection::All => None,
                 ComponentSelection::Distance(d) => Some(*d),
                 ComponentSelection::None => continue,
             };
-            let urls = manifest.archive_urls_for_distance(*ty, distance);
+            let descriptors = manifest.archive_descriptors_for_distance(*ty, distance);
             let name = ty.display_name().to_string();
 
-            if !urls.is_empty() {
+            if !descriptors.is_empty() {
                 info!(target: "reth::cli",
                     component = %name,
-                    archives = urls.len(),
+                    archives = descriptors.len(),
                     selection = %sel,
                     "Queued component for download"
                 );
             }
 
-            for url in urls {
-                all_downloads.push((url, name.clone()));
+            for descriptor in descriptors {
+                all_downloads.push(PlannedArchive { component: name.clone(), archive: descriptor });
             }
         }
+
+        let download_cache_dir = target_dir.join(DOWNLOAD_CACHE_DIR);
+        fs::create_dir_all(&download_cache_dir)?;
 
         let total_archives = all_downloads.len();
         let total_size: u64 = selections
@@ -290,6 +297,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 ComponentSelection::None => 0,
             })
             .sum();
+
+        let startup_summary = summarize_archive_cache(&all_downloads, &download_cache_dir);
+        info!(target: "reth::cli",
+            reusable = startup_summary.reusable,
+            needs_download = startup_summary.needs_download(),
+            invalid = startup_summary.invalid_size,
+            "Startup archive cache summary (size-only)"
+        );
+        info!(target: "reth::cli", "Checksums are verified lazily per archive task; downloads start immediately");
+
         info!(target: "reth::cli",
             archives = total_archives,
             total = %DownloadProgress::format_size(total_size),
@@ -300,13 +317,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
 
         let target = target_dir.to_path_buf();
+        let cache_dir = download_cache_dir;
         let resumable = self.resumable;
         let results: Vec<Result<()>> = stream::iter(all_downloads)
-            .map(|(url, _component)| {
+            .map(|planned| {
                 let dir = target.clone();
+                let cache = cache_dir.clone();
                 let sp = Arc::clone(&shared);
                 async move {
-                    stream_and_extract(&url, &dir, Some(sp), resumable).await?;
+                    process_modular_archive(planned, &dir, &cache, Some(sp), resumable).await?;
                     Ok(())
                 }
             })
@@ -472,6 +491,51 @@ pub(crate) struct DownloadProgress {
     total_size: u64,
     last_displayed: Instant,
     started_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedArchive {
+    component: String,
+    archive: ArchiveDescriptor,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ArchiveStartupSummary {
+    reusable: usize,
+    missing: usize,
+    invalid_size: usize,
+}
+
+impl ArchiveStartupSummary {
+    const fn needs_download(self) -> usize {
+        self.missing + self.invalid_size
+    }
+}
+
+fn summarize_archive_cache(
+    all_downloads: &[PlannedArchive],
+    cache_dir: &Path,
+) -> ArchiveStartupSummary {
+    let mut summary = ArchiveStartupSummary::default();
+
+    for planned in all_downloads {
+        let archive_path = cache_dir.join(&planned.archive.file_name);
+
+        match fs::metadata(&archive_path) {
+            Ok(meta) => {
+                if planned.archive.size > 0 && meta.len() != planned.archive.size {
+                    summary.invalid_size += 1;
+                } else {
+                    summary.reusable += 1;
+                }
+            }
+            Err(_) => {
+                summary.missing += 1;
+            }
+        }
+    }
+
+    summary
 }
 
 impl DownloadProgress {
@@ -1133,6 +1197,134 @@ async fn stream_and_extract(
     Ok(())
 }
 
+async fn process_modular_archive(
+    planned: PlannedArchive,
+    target_dir: &Path,
+    cache_dir: &Path,
+    shared: Option<Arc<SharedProgress>>,
+    resumable: bool,
+) -> Result<()> {
+    let target_dir = target_dir.to_path_buf();
+    let cache_dir = cache_dir.to_path_buf();
+
+    task::spawn_blocking(move || {
+        blocking_process_modular_archive(&planned, &target_dir, &cache_dir, shared, resumable)
+    })
+    .await??;
+
+    Ok(())
+}
+
+fn blocking_process_modular_archive(
+    planned: &PlannedArchive,
+    target_dir: &Path,
+    cache_dir: &Path,
+    shared: Option<Arc<SharedProgress>>,
+    resumable: bool,
+) -> Result<()> {
+    let archive = &planned.archive;
+    let archive_path = cache_dir.join(&archive.file_name);
+    let part_path = cache_dir.join(format!("{}.part", archive.file_name));
+    let expected_blake3 = archive.blake3.as_deref();
+
+    let mut is_valid_local = false;
+    if archive_path.exists() {
+        is_valid_local = verify_local_archive(&archive_path, archive.size, expected_blake3)?;
+        if is_valid_local {
+            if let Some(sp) = &shared {
+                sp.add(archive.size);
+            }
+            info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Using existing verified archive");
+        } else {
+            warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Archive failed integrity checks, redownloading");
+            let _ = fs::remove_file(&archive_path);
+            let _ = fs::remove_file(&part_path);
+        }
+    }
+
+    if !is_valid_local {
+        let mut downloaded_ok = false;
+        for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+            let (downloaded_path, _downloaded_size) = if resumable {
+                resumable_download(&archive.url, cache_dir, shared.as_ref())?
+            } else {
+                // Non-resumable mode still lands the archive in the cache so it can be
+                // verified and reused by future runs.
+                resumable_download(&archive.url, cache_dir, shared.as_ref())?
+            };
+
+            if verify_local_archive(&downloaded_path, archive.size, expected_blake3)? {
+                downloaded_ok = true;
+                break;
+            }
+
+            warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, attempt, "Downloaded archive failed integrity checks, retrying");
+            let _ = fs::remove_file(&downloaded_path);
+            let _ = fs::remove_file(&part_path);
+        }
+
+        if !downloaded_ok {
+            eyre::bail!(
+                "Failed integrity validation after {} attempts for {}",
+                MAX_DOWNLOAD_RETRIES,
+                archive.file_name
+            );
+        }
+    }
+
+    let format = CompressionFormat::from_url(&archive.file_name)?;
+    let file = fs::open(&archive_path)?;
+    let quiet = shared.is_some();
+
+    if quiet {
+        extract_archive_raw(file, format, target_dir)?;
+    } else {
+        let size = fs::metadata(&archive_path)?.len();
+        info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Extracting verified archive");
+        extract_archive(file, size, format, target_dir)?;
+    }
+
+    if let Some(sp) = shared {
+        sp.archive_done();
+    }
+
+    Ok(())
+}
+
+fn verify_local_archive(
+    path: &Path,
+    expected_size: u64,
+    expected_blake3: Option<&str>,
+) -> Result<bool> {
+    let meta = fs::metadata(path)?;
+    if expected_size > 0 && meta.len() != expected_size {
+        return Ok(false);
+    }
+
+    if let Some(expected) = expected_blake3 {
+        let actual = file_blake3_hex(path)?;
+        return Ok(actual.eq_ignore_ascii_case(expected));
+    }
+
+    Ok(true)
+}
+
+fn file_blake3_hex(path: &Path) -> Result<String> {
+    let mut file = fs::open(path)?;
+    let mut hasher = Hasher::new();
+    let mut buf = [0_u8; 64 * 1024];
+
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 /// Builds the base URL for the given chain ID using configured defaults.
 fn get_base_url(chain_id: u64) -> String {
     let defaults = DownloadDefaults::get_global();
@@ -1166,6 +1358,7 @@ async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
 mod tests {
     use super::*;
     use manifest::{ComponentManifest, SingleArchive};
+    use tempfile::tempdir;
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -1174,6 +1367,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "transaction_senders.tar.zst".to_string(),
                 size: 1,
+                blake3: None,
             }),
         );
         components.insert(
@@ -1181,6 +1375,7 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 1,
+                blake3: None,
             }),
         );
         SnapshotManifest {
@@ -1298,5 +1493,50 @@ mod tests {
 
         selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
         assert!(!should_reset_index_stage_checkpoints(&selections));
+    }
+
+    #[test]
+    fn summarize_archive_cache_counts_reusable_missing_and_invalid() {
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path();
+
+        std::fs::write(cache_dir.join("ok.tar.zst"), vec![0_u8; 10]).unwrap();
+        std::fs::write(cache_dir.join("bad-size.tar.zst"), vec![0_u8; 5]).unwrap();
+
+        let planned = vec![
+            PlannedArchive {
+                component: "State".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "https://example.com/ok.tar.zst".to_string(),
+                    file_name: "ok.tar.zst".to_string(),
+                    size: 10,
+                    blake3: None,
+                },
+            },
+            PlannedArchive {
+                component: "Headers".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "https://example.com/missing.tar.zst".to_string(),
+                    file_name: "missing.tar.zst".to_string(),
+                    size: 10,
+                    blake3: None,
+                },
+            },
+            PlannedArchive {
+                component: "Transactions".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "https://example.com/bad-size.tar.zst".to_string(),
+                    file_name: "bad-size.tar.zst".to_string(),
+                    size: 10,
+                    blake3: None,
+                },
+            },
+        ];
+
+        let summary = summarize_archive_cache(&planned, cache_dir);
+        assert_eq!(summary.reusable, 1);
+        assert_eq!(summary.missing, 1);
+        assert_eq!(summary.invalid_size, 1);
+        assert_eq!(summary.needs_download(), 2);
     }
 }
