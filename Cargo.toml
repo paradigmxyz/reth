@@ -448,8 +448,8 @@ revm-inspectors = "0.34.2"
 
 # eth
 alloy-dyn-abi = "1.5.6"
-alloy-primitives = { version = "1.5.6", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.5.6", default-features = false }
+alloy-primitives = { version = "1.5.7", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.5.7", default-features = false }
 
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
@@ -556,7 +556,7 @@ fixed-cache = { version = "0.1.7", features = ["stats"] }
 moka = "0.12"
 tar-no-std = { version = "0.4.2", default-features = false }
 miniz_oxide = { version = "0.9.0", default-features = false }
-chrono = "0.4.41"
+chrono = "0.4.44"
 
 # metrics
 metrics = "0.24.0"
@@ -678,7 +678,7 @@ hickory-resolver = "0.25.0"
 hmac = "0.12.1"
 human_bytes = "0.4.1"
 indexmap = "2"
-interprocess = "2.2.0"
+interprocess = "2.4.0"
 lz4_flex = { version = "0.12", default-features = false }
 memmap2 = "0.9.4"
 mev-share-sse = { version = "0.5.0", default-features = false }
@@ -697,7 +697,7 @@ snap = "1.1.1"
 socket2 = { version = "0.6", default-features = false }
 sysinfo = { version = "0.38", default-features = false }
 tracing-journald = "0.3"
-tracing-logfmt = "=0.3.5"
+tracing-logfmt = "=0.3.7"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
