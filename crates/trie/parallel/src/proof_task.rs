@@ -31,7 +31,6 @@
 
 use crate::{
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -49,7 +48,8 @@ use reth_trie::{
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
     trie_cursor::TrieCursorFactory,
-    DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
+    ProofV2Target,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{

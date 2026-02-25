@@ -33,8 +33,9 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
-mod target;
-pub use target::ProofV2Target;
+/// V2 proof targets and chunking.
+pub mod target_v2;
+pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
