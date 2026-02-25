@@ -156,9 +156,7 @@ where
         };
 
         if start_block == 0 {
-            return Err(EthApiError::InvalidParams(
-                "cannot re-execute genesis block".into(),
-            ));
+            return Ok(Some(ExecutionOutcome::default()))
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
