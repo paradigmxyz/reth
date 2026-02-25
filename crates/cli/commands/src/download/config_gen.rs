@@ -143,31 +143,27 @@ pub fn write_prune_checkpoints(
     Ok(())
 }
 
-/// Stage IDs for index stages whose output (rocksdb indices / sender static
-/// files) is never distributed in snapshots and must always be reset.
-const INDEX_STAGE_IDS: [&str; 4] =
-    ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory", "SenderRecovery"];
+/// Stage IDs for index stages whose output is stored in RocksDB and is never
+/// distributed in snapshots.
+const INDEX_STAGE_IDS: [&str; 3] =
+    ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory"];
 
 /// Prune segments that correspond to the index stages.
-const INDEX_PRUNE_SEGMENTS: [PruneSegment; 4] = [
-    PruneSegment::TransactionLookup,
-    PruneSegment::AccountHistory,
-    PruneSegment::StorageHistory,
-    PruneSegment::SenderRecovery,
-];
+const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
+    [PruneSegment::TransactionLookup, PruneSegment::AccountHistory, PruneSegment::StorageHistory];
 
 /// Resets stage and prune checkpoints for stages whose output is not included
 /// in the snapshot.
 ///
 /// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
-/// at the tip for `TransactionLookup`, `IndexAccountHistory`,
-/// `IndexStorageHistory`, and `SenderRecovery`. Since we don't distribute the
-/// data those stages produced (rocksdb indices and sender static files), we must
-/// reset their checkpoints to block 0. Otherwise the pipeline would see "already
-/// done" and skip rebuilding entirely.
+/// at the tip for `TransactionLookup`, `IndexAccountHistory`, and
+/// `IndexStorageHistory`. Since we don't distribute the rocksdb indices those
+/// stages produced, we must reset their checkpoints to block 0. Otherwise the
+/// pipeline would see "already done" and skip rebuilding entirely.
 ///
-/// For archive nodes that download `TransactionSenders`, the sender recovery
-/// checkpoint is restored after extraction based on the downloaded data.
+/// We intentionally do not reset `SenderRecovery`: sender static files are
+/// distributed for archive downloads, and non-archive downloads rely on the
+/// configured prune checkpoints for this segment.
 pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
     let tx = db.tx_mut()?;
 
@@ -654,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_index_stage_checkpoints_clears_stages() {
+    fn reset_index_stage_checkpoints_clears_only_rocksdb_index_stages() {
         let dir = tempfile::tempdir().unwrap();
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
@@ -676,6 +672,19 @@ mod tests {
                 )
                 .unwrap();
             }
+
+            // Sender recovery checkpoints should be preserved by reset.
+            tx.put::<tables::StageCheckpoints>("SenderRecovery".to_string(), tip_checkpoint)
+                .unwrap();
+            tx.put::<tables::PruneCheckpoints>(
+                PruneSegment::SenderRecovery,
+                PruneCheckpoint {
+                    block_number: Some(24_500_000),
+                    tx_number: None,
+                    prune_mode: PruneMode::Full,
+                },
+            )
+            .unwrap();
             tx.commit().unwrap();
         }
 
@@ -699,5 +708,18 @@ mod tests {
                 "prune checkpoint for {segment} should be deleted"
             );
         }
+
+        // Verify sender checkpoints are left untouched.
+        let sender_stage_checkpoint = tx
+            .get::<tables::StageCheckpoints>("SenderRecovery".to_string())
+            .unwrap()
+            .expect("sender checkpoint should exist");
+        assert_eq!(sender_stage_checkpoint.block_number, tip_checkpoint.block_number);
+
+        let sender_prune_checkpoint = tx
+            .get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)
+            .unwrap()
+            .expect("sender prune checkpoint should exist");
+        assert_eq!(sender_prune_checkpoint.block_number, Some(tip_checkpoint.block_number));
     }
 }
