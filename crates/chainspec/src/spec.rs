@@ -1263,6 +1263,7 @@ impl ChainSpecBuilder {
             })
         };
         let genesis = self.genesis.expect("The genesis is required");
+        tracing::debug!("Line 2266 : {:?}, {:?}", genesis.config, genesis.base_fee_per_gas);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
