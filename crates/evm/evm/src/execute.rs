@@ -20,7 +20,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, HashedPostStateSorted};
 use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
@@ -298,8 +298,8 @@ pub trait BlockAssembler<F: BlockExecutorFactory> {
 pub struct BlockBuilderOutcome<N: NodePrimitives> {
     /// Result of block execution.
     pub execution_result: BlockExecutionResult<N::Receipt>,
-    /// Hashed state after execution.
-    pub hashed_state: HashedPostState,
+    /// Sorted hashed state after execution.
+    pub hashed_state: HashedPostStateSorted,
     /// Trie updates collected during state root calculation.
     pub trie_updates: TrieUpdates,
     /// The built block.
@@ -485,9 +485,9 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state = state.hashed_post_state(&db.bundle_state).into_sorted();
         let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
+            .state_root_with_updates_sorted(&hashed_state)
             .map_err(BlockExecutionError::other)?;
 
         let (transactions, senders) =
