@@ -3550,21 +3550,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
+        // Prune static-file headers above `block`, if the segment exists. During live sync via
+        // the Engine API, headers may only exist in MDBX and not yet in static files, so this
+        // being `None` is a legitimate state — there is simply nothing to prune.
+        if let Some(highest_static_file_block) = self
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
-        //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
-        self.static_file_provider()
-            .get_writer(block, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        {
+            // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
+            // sure we remove only what is ABOVE the block.
+            //
+            // i.e., if the highest static file block is 8, we want to remove above block 5 only,
+            // we will have three blocks to remove, which will be block 8, 7, and 6.
+            debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
+            self.static_file_provider()
+                .get_writer(block, StaticFileSegment::Headers)?
+                .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        }
 
         // First transaction to be removed
         let unwind_tx_from = self
