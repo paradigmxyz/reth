@@ -10,7 +10,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Classifies all local and remote git branches as merged, pr, expired, or unmerged.
+Classifies all local and remote git branches as merged, pr, expired, or active.
 Detects both true merges and squash merges into main.
 
 Output (one line per branch):
@@ -20,7 +20,7 @@ Output (one line per branch):
   active    <branch>   Not merged, no PR, has recent activity
 
 Options:
-  --expire-days N   Days of inactivity before an unmerged branch is
+  --expire-days N   Days of inactivity before an active branch is
                     considered expired (default: 90)
   -h, --help        Show this help message
 EOF
@@ -72,7 +72,7 @@ lookup_pr() {
     fi
 }
 
-classify_unmerged() {
+classify_active() {
     local branch="$1"
     local pr
     pr=$(lookup_pr "$branch")
@@ -98,12 +98,12 @@ git branch -a --merged "$main_ref" --format='%(refname:short)' \
 git branch -a --no-merged "$main_ref" --format='%(refname:short)' \
   | grep -v -E '^(main|origin/main|origin/HEAD)$' \
   | while read -r branch; do
-    merge_base=$(git merge-base "$main_ref" "$branch" 2>/dev/null) || { classify_unmerged "$branch"; continue; }
-    tree=$(git rev-parse "$branch^{tree}" 2>/dev/null) || { classify_unmerged "$branch"; continue; }
-    dangling=$(git commit-tree "$tree" -p "$merge_base" -m temp 2>/dev/null) || { classify_unmerged "$branch"; continue; }
+    merge_base=$(git merge-base "$main_ref" "$branch" 2>/dev/null) || { classify_active "$branch"; continue; }
+    tree=$(git rev-parse "$branch^{tree}" 2>/dev/null) || { classify_active "$branch"; continue; }
+    dangling=$(git commit-tree "$tree" -p "$merge_base" -m temp 2>/dev/null) || { classify_active "$branch"; continue; }
     if git cherry "$main_ref" "$dangling" 2>/dev/null | grep -q '^-'; then
         echo "merged $branch"
     else
-        classify_unmerged "$branch"
+        classify_active "$branch"
     fi
 done
