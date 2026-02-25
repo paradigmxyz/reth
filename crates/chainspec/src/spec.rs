@@ -123,8 +123,9 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
-    let genesis = serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
+    let genesis: Genesis = serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
         .expect("Can't deserialize Mainnet genesis json");
+    tracing::info!("Deserialized mainnet genesis config: {:?}", genesis.base_fee_per_gas);
     let hardforks = EthereumHardfork::mainnet().into();
     let mut spec = ChainSpec {
         chain: Chain::mainnet(),
@@ -148,6 +149,11 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
     };
+    tracing::info!("Mainnet genesis config base fee per gas: {:?}", spec.genesis.base_fee_per_gas);
+    tracing::info!(
+        "Mainnet genesis header base fee per gas: {:?}",
+        spec.genesis_header.base_fee_per_gas
+    );
     spec.genesis.config.dao_fork_support = true;
     spec.into()
 });
