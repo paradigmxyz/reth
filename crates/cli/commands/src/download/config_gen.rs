@@ -20,12 +20,13 @@ const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
 /// Otherwise, missing components get `--minimal` style pruning.
 pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let has_txs = selected.contains(&SnapshotComponentType::Transactions);
+    let has_senders = selected.contains(&SnapshotComponentType::TransactionSenders);
     let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
     let has_changesets = selected.contains(&SnapshotComponentType::AccountChangesets) ||
         selected.contains(&SnapshotComponentType::StorageChangesets);
 
     // Archive node — no pruning
-    if has_txs && has_receipts && has_changesets {
+    if has_txs && has_senders && has_receipts && has_changesets {
         return Config::default();
     }
 
@@ -33,7 +34,10 @@ pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let mut prune = PruneConfig::default();
 
     prune.segments.transaction_lookup = Some(PruneMode::Full);
-    prune.segments.sender_recovery = Some(PruneMode::Full);
+
+    if !has_senders {
+        prune.segments.sender_recovery = Some(PruneMode::Full);
+    }
 
     if !has_txs {
         prune.segments.bodies_history = Some(PruneMode::Full);
@@ -137,25 +141,34 @@ pub fn write_prune_checkpoints(
     Ok(())
 }
 
-/// Stage IDs for history indexing stages whose data lives in rocksdb.
+/// Stage IDs for stages whose output is not included in the snapshot.
 ///
-/// When downloading a snapshot without rocksdb indices, these stage checkpoints
-/// must be reset so the node knows to rebuild the indices.
-const INDEX_STAGE_IDS: [&str; 3] =
-    ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory"];
+/// When downloading a snapshot, these stage checkpoints must be reset so the
+/// node knows to rebuild the data. Includes history indexing stages (rocksdb
+/// indices) and sender recovery (transaction senders static files).
+const INDEX_STAGE_IDS: [&str; 4] =
+    ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory", "SenderRecovery"];
 
-/// Prune segments that correspond to the history indexing stages.
-const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
-    [PruneSegment::TransactionLookup, PruneSegment::AccountHistory, PruneSegment::StorageHistory];
+/// Prune segments that correspond to the reset stages.
+const INDEX_PRUNE_SEGMENTS: [PruneSegment; 4] = [
+    PruneSegment::TransactionLookup,
+    PruneSegment::AccountHistory,
+    PruneSegment::StorageHistory,
+    PruneSegment::SenderRecovery,
+];
 
-/// Resets stage and prune checkpoints for history indexing stages.
+/// Resets stage and prune checkpoints for stages whose output is not included
+/// in the snapshot.
 ///
 /// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
-/// at the tip for `TransactionLookup`, `IndexAccountHistory`, and
-/// `IndexStorageHistory`. Since we don't distribute the rocksdb indices those
-/// stages produced, we must reset their checkpoints to block 0. Otherwise the
-/// pipeline (or background indexer) would see "already done" and skip rebuilding
-/// the indices entirely.
+/// at the tip for `TransactionLookup`, `IndexAccountHistory`,
+/// `IndexStorageHistory`, and `SenderRecovery`. Since we don't distribute the
+/// data those stages produced (rocksdb indices and sender static files), we must
+/// reset their checkpoints to block 0. Otherwise the pipeline would see "already
+/// done" and skip rebuilding entirely.
+///
+/// For archive nodes that download `TransactionSenders`, the sender recovery
+/// checkpoint is restored after extraction based on the downloaded data.
 pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
     let tx = db.tx_mut()?;
 
@@ -181,22 +194,26 @@ pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
 /// Returns a human-readable summary of what the prune config does.
 pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> {
     let has_txs = selected.contains(&SnapshotComponentType::Transactions);
+    let has_senders = selected.contains(&SnapshotComponentType::TransactionSenders);
     let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
     let has_changesets = selected.contains(&SnapshotComponentType::AccountChangesets) ||
         selected.contains(&SnapshotComponentType::StorageChangesets);
 
     let mut lines = Vec::new();
 
-    if has_txs && has_receipts && has_changesets {
+    if has_txs && has_senders && has_receipts && has_changesets {
         lines.push("Full archive node — no pruning configured".to_string());
         return lines;
     }
 
     lines.push("[prune.segments]".to_string());
 
-    if !has_txs {
-        lines.push("transaction_lookup = \"full\"".to_string());
+    lines.push("transaction_lookup = \"full\"".to_string());
+    if !has_senders {
         lines.push("sender_recovery = \"full\"".to_string());
+    }
+
+    if !has_txs {
         lines.push(format!("bodies_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
     }
 
@@ -223,6 +240,10 @@ pub fn config_for_selections(
         .get(&SnapshotComponentType::Transactions)
         .copied()
         .unwrap_or(ComponentSelection::None);
+    let senders_sel = selections
+        .get(&SnapshotComponentType::TransactionSenders)
+        .copied()
+        .unwrap_or(ComponentSelection::None);
     let receipt_sel = selections
         .get(&SnapshotComponentType::Receipts)
         .copied()
@@ -238,6 +259,7 @@ pub fn config_for_selections(
 
     // Archive node — all data components present, no pruning
     let is_archive = tx_sel == ComponentSelection::All &&
+        senders_sel == ComponentSelection::All &&
         receipt_sel == ComponentSelection::All &&
         account_cs_sel == ComponentSelection::All &&
         storage_cs_sel == ComponentSelection::All;
@@ -249,7 +271,9 @@ pub fn config_for_selections(
     let mut config = Config::default();
     let mut prune = PruneConfig::default();
 
-    prune.segments.sender_recovery = Some(PruneMode::Full);
+    if senders_sel != ComponentSelection::All {
+        prune.segments.sender_recovery = Some(PruneMode::Full);
+    }
     prune.segments.transaction_lookup = Some(PruneMode::Full);
 
     if let Some(mode) = selection_to_prune_mode(tx_sel) {

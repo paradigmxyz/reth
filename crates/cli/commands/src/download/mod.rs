@@ -406,18 +406,41 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         // Interactive TUI
-        match run_selector(manifest.clone())? {
+        let mut selections = match run_selector(manifest.clone())? {
             SelectionResult::Selected(selections) => {
                 // Filter out None selections
-                Ok(selections
-                    .into_iter()
-                    .filter(|(_, sel)| *sel != ComponentSelection::None)
-                    .collect())
+                selections.into_iter().filter(|(_, sel)| *sel != ComponentSelection::None).collect()
             }
             SelectionResult::Cancelled => {
                 eyre::bail!("Download cancelled by user");
             }
-        }
+        };
+
+        // Auto-include transaction senders when all data components are selected
+        // as All (archive node). Senders are not shown in the TUI but are
+        // required for a complete archive.
+        inject_senders_for_archive(&mut selections, manifest);
+
+        Ok(selections)
+    }
+}
+
+/// If all data components (txs, receipts, changesets) are `All`, automatically
+/// include `TransactionSenders` when available in the manifest.
+fn inject_senders_for_archive(
+    selections: &mut BTreeMap<SnapshotComponentType, ComponentSelection>,
+    manifest: &SnapshotManifest,
+) {
+    let is_all =
+        |ty: SnapshotComponentType| selections.get(&ty).copied() == Some(ComponentSelection::All);
+
+    let is_archive = is_all(SnapshotComponentType::Transactions) &&
+        is_all(SnapshotComponentType::Receipts) &&
+        is_all(SnapshotComponentType::AccountChangesets) &&
+        is_all(SnapshotComponentType::StorageChangesets);
+
+    if is_archive && manifest.component(SnapshotComponentType::TransactionSenders).is_some() {
+        selections.insert(SnapshotComponentType::TransactionSenders, ComponentSelection::All);
     }
 }
 

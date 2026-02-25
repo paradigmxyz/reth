@@ -97,6 +97,8 @@ pub enum SnapshotComponentType {
     Headers,
     /// Transaction static files. Chunked.
     Transactions,
+    /// Transaction sender static files. Chunked. Only downloaded for archive nodes.
+    TransactionSenders,
     /// Receipt static files. Chunked.
     Receipts,
     /// Account changeset static files. Chunked.
@@ -107,10 +109,11 @@ pub enum SnapshotComponentType {
 
 impl SnapshotComponentType {
     /// All component types in display order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::State,
         Self::Headers,
         Self::Transactions,
+        Self::TransactionSenders,
         Self::Receipts,
         Self::AccountChangesets,
         Self::StorageChangesets,
@@ -122,6 +125,7 @@ impl SnapshotComponentType {
             Self::State => "state",
             Self::Headers => "headers",
             Self::Transactions => "transactions",
+            Self::TransactionSenders => "transaction_senders",
             Self::Receipts => "receipts",
             Self::AccountChangesets => "account_changesets",
             Self::StorageChangesets => "storage_changesets",
@@ -134,6 +138,7 @@ impl SnapshotComponentType {
             Self::State => "State (mdbx)",
             Self::Headers => "Headers",
             Self::Transactions => "Transactions",
+            Self::TransactionSenders => "Transaction Senders",
             Self::Receipts => "Receipts",
             Self::AccountChangesets => "Account Changesets",
             Self::StorageChangesets => "Storage Changesets",
@@ -153,6 +158,7 @@ impl SnapshotComponentType {
     /// - State/Headers: always All (required)
     /// - Transactions/Changesets: Distance(10_064) (`MINIMUM_UNWIND_SAFE_DISTANCE`)
     /// - Receipts: Distance(64) (`MINIMUM_DISTANCE`)
+    /// - TransactionSenders: None (only downloaded for archive nodes)
     ///
     /// `tx_lookup` and `sender_recovery` are always pruned full regardless.
     pub const fn minimal_selection(&self) -> ComponentSelection {
@@ -162,6 +168,7 @@ impl SnapshotComponentType {
                 ComponentSelection::Distance(10_064)
             }
             Self::Receipts => ComponentSelection::Distance(64),
+            Self::TransactionSenders => ComponentSelection::None,
         }
     }
 
@@ -343,6 +350,7 @@ pub fn generate_manifest(
     for ty in &[
         SnapshotComponentType::Headers,
         SnapshotComponentType::Transactions,
+        SnapshotComponentType::TransactionSenders,
         SnapshotComponentType::Receipts,
         SnapshotComponentType::AccountChangesets,
         SnapshotComponentType::StorageChangesets,
