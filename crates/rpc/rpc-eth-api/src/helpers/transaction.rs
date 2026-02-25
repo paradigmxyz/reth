@@ -24,7 +24,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
-    utils::recover_raw_transaction,
+    utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     FillTransaction, SignError, TransactionSource,
 };
@@ -335,58 +335,45 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             // Note: we can't optimize for contracts (account with code) and cannot shortcircuit if
             // the address has code, because with 7702 EOAs can also have code
 
-            // Perform the binary search entirely inside a single blocking IO task to avoid
-            // spawning O(log N) separate blocking tasks.
-            let block_num = self
+            let (highest, high) = self
                 .spawn_blocking_io(move |this| {
                     let provider = this.provider();
-
                     let highest = provider
                         .latest()
                         .map_err(Self::Error::from_eth_err)?
                         .account_nonce(&sender)
                         .map_err(Self::Error::from_eth_err)?
                         .unwrap_or_default();
-
-                    // If the nonce is higher or equal to the highest nonce, the transaction is
-                    // pending or does not exist.
-                    if nonce >= highest {
-                        return Ok(None);
-                    }
-
                     let high = provider.best_block_number().map_err(Self::Error::from_eth_err)?;
-
-                    // Binary search: find the block where the sender's nonce first exceeds
-                    // the requested nonce, reading account nonce directly from historical
-                    // state providers.
-                    let mut low = 1u64;
-                    let mut hi = high;
-                    let mut num = high;
-
-                    while low <= hi {
-                        let mid = (low + hi) / 2;
-                        let mid_nonce = provider
-                            .history_by_block_number(mid)
-                            .map_err(Self::Error::from_eth_err)?
-                            .account_nonce(&sender)
-                            .map_err(Self::Error::from_eth_err)?
-                            .unwrap_or_default();
-
-                        if mid_nonce > nonce {
-                            hi = mid - 1;
-                            num = mid;
-                        } else {
-                            low = mid + 1;
-                        }
-                    }
-
-                    Ok(Some(num))
+                    Ok((highest, high))
                 })
                 .await?;
 
-            let Some(num) = block_num else {
+            // If the nonce is higher or equal to the highest nonce, the transaction is
+            // pending or does not exist.
+            if nonce >= highest {
                 return Ok(None);
-            };
+            }
+
+            // Binary search: find the first block where the sender's nonce exceeds the
+            // requested nonce, reading account nonce directly from historical state providers.
+            let num = binary_search(1, high, |mid| {
+                let this = self.clone();
+                async move {
+                    let mid_nonce = this
+                        .spawn_blocking_io(move |this| {
+                            this.provider()
+                                .history_by_block_number(mid)
+                                .map_err(Self::Error::from_eth_err)?
+                                .account_nonce(&sender)
+                                .map_err(Self::Error::from_eth_err)
+                        })
+                        .await?
+                        .unwrap_or_default();
+                    Ok::<bool, Self::Error>(mid_nonce > nonce)
+                }
+            })
+            .await?;
 
             let block_id = num.into();
             self.recovered_block(block_id)
