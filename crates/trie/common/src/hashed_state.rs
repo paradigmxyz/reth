@@ -6,7 +6,7 @@ use crate::{
     utils::{extend_sorted_vec, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
@@ -479,7 +479,7 @@ impl HashedStorage {
             return Self::new(status.was_destroyed());
         }
         let keys: Vec<[u8; 32]> = entries.iter().map(|(key, _)| B256::from(**key).0).collect();
-        let mut hashes = vec![B256::ZERO; keys.len()];
+        let mut hashes = alloc::vec![B256::ZERO; keys.len()];
         reth_keccak_simd::keccak256_batch_32(&keys, &mut hashes);
         Self::from_iter(
             status.was_destroyed(),
