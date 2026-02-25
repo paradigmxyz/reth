@@ -1,8 +1,5 @@
 use crate::proof_v2::increment_and_strip_trailing_zeros;
-use reth_trie_common::Nibbles;
-
-/// Type alias for backward compatibility.
-pub type Target = reth_trie_common::ProofTarget;
+use reth_trie_common::{Nibbles, ProofV2Target};
 
 // A helper function for getting the largest prefix of the sub-trie which contains a particular
 // target, based on its `min_len`.
@@ -23,8 +20,8 @@ pub type Target = reth_trie_common::ProofTarget;
 // `min_len` of both 0 and 1 will therefore construct the root node, but only those with
 // `min_len` of 0 will retain it.
 #[inline]
-pub(crate) fn sub_trie_prefix(target: &Target) -> Nibbles {
-    let mut sub_trie_prefix = target.key;
+pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
+    let mut sub_trie_prefix = target.key_nibbles;
     sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
     sub_trie_prefix
 }
@@ -43,7 +40,7 @@ pub(crate) struct SubTrieTargets<'a> {
     pub(crate) prefix: Nibbles,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
-    pub(crate) targets: &'a [Target],
+    pub(crate) targets: &'a [ProofV2Target],
     /// Will be true if at least one target in the set has a zero `min_len`.
     ///
     /// If this is true then `prefix.is_empty()`, though not necessarily vice-versa.
@@ -58,10 +55,10 @@ impl<'a> SubTrieTargets<'a> {
     }
 }
 
-/// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
-/// sub-tries they apply to within the overall trie.
+/// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
+/// chunked by the sub-tries they apply to within the overall trie.
 pub(crate) fn iter_sub_trie_targets(
-    targets: &mut [Target],
+    targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
     // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
@@ -107,7 +104,7 @@ pub(crate) fn iter_sub_trie_targets(
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
         let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key);
+        targets.sort_unstable_by_key(|target| target.key_nibbles);
         SubTrieTargets { prefix, targets, retain_root }
     })
 }
@@ -134,7 +131,7 @@ mod tests {
             (vec![], vec![]),
             // Case 2: Single target without min_len
             (
-                vec![Target::new(B256::repeat_byte(0x20))],
+                vec![ProofV2Target::new(B256::repeat_byte(0x20))],
                 vec![(
                     "",
                     vec!["2020202020202020202020202020202020202020202020202020202020202020"],
@@ -142,7 +139,10 @@ mod tests {
             ),
             // Case 3: Multiple targets in same sub-trie (no min_len)
             (
-                vec![Target::new(B256::repeat_byte(0x20)), Target::new(B256::repeat_byte(0x21))],
+                vec![
+                    ProofV2Target::new(B256::repeat_byte(0x20)),
+                    ProofV2Target::new(B256::repeat_byte(0x21)),
+                ],
                 vec![(
                     "",
                     vec![
@@ -154,8 +154,8 @@ mod tests {
             // Case 4: Multiple targets in different sub-tries
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
                 ],
                 vec![
                     ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
@@ -165,9 +165,9 @@ mod tests {
             // Case 5: Three targets, two in same sub-trie, one separate
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
                 ],
                 vec![
                     (
@@ -183,8 +183,8 @@ mod tests {
             // Case 6: Targets with different min_len values in same sub-trie
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
                 ],
                 vec![(
                     "2",
@@ -197,11 +197,11 @@ mod tests {
             // Case 7: More complex chunking with multiple sub-tries
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
-                    Target::new(B256::repeat_byte(0x4c)).with_min_len(3),
-                    Target::new(B256::repeat_byte(0x4c)).with_min_len(4),
-                    Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
+                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(4),
+                    ProofV2Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
                 ],
                 vec![
                     (
@@ -227,8 +227,8 @@ mod tests {
             // Case 8: Min-len 1 should result in zero-length sub-trie prefix
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
                 ],
                 vec![(
                     "",
@@ -241,8 +241,8 @@ mod tests {
             // Case 9: Second target's sub-trie prefix is root
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
                 ],
                 vec![(
                     "",
@@ -292,7 +292,7 @@ mod tests {
                 {
                     let exp_key = nibbles(exp_key_hex);
                     assert_eq!(
-                        target.key, exp_key,
+                        target.key_nibbles, exp_key,
                         "Test case {} sub-trie {} target {}: key mismatch",
                         test_case, j, k
                     );

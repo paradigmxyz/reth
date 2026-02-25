@@ -34,7 +34,7 @@ mod account;
 pub use account::TrieAccount;
 
 mod target;
-pub use target::ProofTarget;
+pub use target::ProofV2Target;
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
