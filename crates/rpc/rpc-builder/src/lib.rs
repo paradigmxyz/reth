@@ -847,8 +847,13 @@ where
     }
 
     /// Instantiates `RethApi`
-    pub fn reth_api(&self) -> RethApi<Provider> {
-        RethApi::new(self.provider.clone(), self.executor.clone())
+    pub fn reth_api(&self) -> RethApi<Provider, EvmConfig> {
+        RethApi::new(
+            self.provider.clone(),
+            self.evm_config.clone(),
+            self.blocking_pool_guard.clone(),
+            self.executor.clone(),
+        )
     }
 }
 
@@ -1001,11 +1006,14 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Reth => RethApi::new(
+                            self.provider.clone(),
+                            self.evm_config.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.executor.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())

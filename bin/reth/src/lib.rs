@@ -124,9 +124,11 @@ pub mod providers {
     pub use reth_provider::*;
 }
 
-/// Re-exported from `reth_primitives`.
+/// Re-exported primitives.
+#[allow(ambiguous_glob_reexports)]
 pub mod primitives {
-    pub use reth_primitives::*;
+    pub use reth_ethereum_primitives::*;
+    pub use reth_primitives_traits::*;
 }
 
 /// Re-exported from `reth_ethereum_consensus`.
