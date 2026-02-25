@@ -1219,7 +1219,7 @@ where
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &[proof_v2::Target],
+    account_targets: &Vec<proof_v2::Target>,
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
