@@ -550,6 +550,8 @@ impl<H: BlockHeader> ChainSpec<H> {
         let h = &self.genesis_header;
         tracing::debug!("Genesis header from spec {:?}", h);
         tracing::debug!("Genesis base fee {:?}", self.genesis.base_fee_per_gas);
+        tracing::debug!("Genesis config here is : {:?}", self.genesis.config);
+
         h
     }
 
