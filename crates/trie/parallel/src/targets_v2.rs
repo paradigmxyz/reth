@@ -1,16 +1,16 @@
 //! V2 multiproof targets and chunking.
 
 use alloy_primitives::{map::B256Map, B256};
-use reth_trie::proof_v2;
+use reth_trie::ProofV2Target;
 
 /// A set of account and storage V2 proof targets. The account and storage targets do not need to
 /// necessarily overlap.
 #[derive(Debug, Default)]
 pub struct MultiProofTargetsV2 {
     /// The set of account proof targets to generate proofs for.
-    pub account_targets: Vec<proof_v2::Target>,
+    pub account_targets: Vec<ProofV2Target>,
     /// The sets of storage proof targets to generate proofs for.
-    pub storage_targets: B256Map<Vec<proof_v2::Target>>,
+    pub storage_targets: B256Map<Vec<ProofV2Target>>,
 }
 
 impl MultiProofTargetsV2 {
@@ -41,11 +41,11 @@ impl MultiProofTargetsV2 {
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargetsV2 {
     /// Remaining account targets to process
-    account_targets: std::vec::IntoIter<proof_v2::Target>,
+    account_targets: std::vec::IntoIter<ProofV2Target>,
     /// Storage targets by account address
-    storage_targets: B256Map<Vec<proof_v2::Target>>,
+    storage_targets: B256Map<Vec<ProofV2Target>>,
     /// Current account being processed (if any storage slots remain)
-    current_account_storage: Option<(B256, std::vec::IntoIter<proof_v2::Target>)>,
+    current_account_storage: Option<(B256, std::vec::IntoIter<ProofV2Target>)>,
     /// Chunk size
     size: usize,
 }
