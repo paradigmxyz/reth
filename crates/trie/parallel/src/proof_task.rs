@@ -347,21 +347,6 @@ impl ProofWorkerHandle {
             })
     }
 
-    /// Dispatch a storage proof that sends its result directly as a [`ProofResultMessage`].
-    ///
-    /// Used for storage-only targets (no accompanying account proof). The storage worker
-    /// wraps the result in a [`ProofResultMessage`] and sends it via the provided
-    /// [`ProofResultContext`], so results go straight back to the `SparseTrieCacheTask`.
-    pub fn dispatch_direct_storage_proof(
-        &self,
-        input: StorageProofInput,
-        proof_result_sender: ProofResultContext,
-    ) -> Result<(), ProviderError> {
-        self.storage_work_tx
-            .send(StorageWorkerJob::DirectStorageProof { input, proof_result_sender })
-            .map_err(|_| ProviderError::other(std::io::Error::other("storage workers unavailable")))
-    }
-
     /// Dispatch blinded storage node request to storage worker pool
     pub(crate) fn dispatch_blinded_storage_node(
         &self,
@@ -613,16 +598,6 @@ pub(crate) enum StorageWorkerJob {
         /// Context for sending the proof result.
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     },
-    /// Storage proof computation that sends results directly as a [`ProofResultMessage`].
-    ///
-    /// Used for storage-only targets (no accompanying account proof) so results go
-    /// straight back to the `SparseTrieCacheTask`.
-    DirectStorageProof {
-        /// Storage proof input parameters
-        input: StorageProofInput,
-        /// Context for sending the proof result directly to the task.
-        proof_result_sender: ProofResultContext,
-    },
     /// Blinded storage node retrieval request
     BlindedStorageNode {
         /// Target account
@@ -743,16 +718,6 @@ where
                     );
                 }
 
-                StorageWorkerJob::DirectStorageProof { input, proof_result_sender } => {
-                    self.process_direct_storage_proof(
-                        &proof_tx,
-                        &mut v2_calculator,
-                        input,
-                        proof_result_sender,
-                        &mut storage_proofs_processed,
-                    );
-                }
-
                 StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
                     Self::process_blinded_node(
                         self.worker_id,
@@ -845,42 +810,6 @@ where
             ?root,
             "Storage proof completed"
         );
-    }
-
-    /// Processes a storage proof and sends the result directly as a [`ProofResultMessage`].
-    fn process_direct_storage_proof<Provider>(
-        &self,
-        proof_tx: &ProofTaskTx<Provider>,
-        v2_calculator: &mut proof_v2::StorageProofCalculator<
-            <Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-            <Provider as HashedCursorFactory>::StorageCursor<'_>,
-        >,
-        input: StorageProofInput,
-        proof_result_sender: ProofResultContext,
-        storage_proofs_processed: &mut u64,
-    ) where
-        Provider: TrieCursorFactory + HashedCursorFactory,
-    {
-        let hashed_address = input.hashed_address;
-        let result = proof_tx.compute_v2_storage_proof(input, v2_calculator);
-        *storage_proofs_processed += 1;
-
-        if let Some(root) = result.as_ref().ok().and_then(|r| r.root()) {
-            self.cached_storage_roots.insert(hashed_address, root);
-        }
-
-        let ProofResultContext { sender, state, start_time } = proof_result_sender;
-
-        let result = match result {
-            Ok(storage_result) => {
-                let mut storage_proofs = B256Map::default();
-                storage_proofs.insert(hashed_address, storage_result.proof);
-                Ok(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs })
-            }
-            Err(e) => Err(e.into()),
-        };
-
-        let _ = sender.send(ProofResultMessage { result, elapsed: start_time.elapsed(), state });
     }
 
     /// Processes a blinded storage node lookup request.
