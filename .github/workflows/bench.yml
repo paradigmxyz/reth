@@ -1,4 +1,4 @@
-# Runs benchmarks.
+# Runs benchmarks
 #
 # The reth-bench job replays real blocks via the Engine API against a reth node
 # backed by a local snapshot managed with schelk.
