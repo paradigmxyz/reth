@@ -541,6 +541,7 @@ impl<H: BlockHeader> ChainSpec<H> {
     pub fn genesis_header(&self) -> &H {
         let h = &self.genesis_header;
         tracing::debug!("Genesis header from spec {:?}", h);
+        tracing::debug!("Genesis base fee {:?}", self.genesis.base_fee_per_gas);
         h
     }
 
@@ -1263,7 +1264,7 @@ impl ChainSpecBuilder {
             })
         };
         let genesis = self.genesis.expect("The genesis is required");
-    
+
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
