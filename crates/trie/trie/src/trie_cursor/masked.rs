@@ -92,7 +92,7 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         }
 
         let mut new_hash_mask = original_hash_mask;
-        let mut child_path = key.clone();
+        let mut child_path = *key;
         let key_len = key.len();
 
         for nibble in original_hash_mask.iter() {
