@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::B256;
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -188,9 +188,16 @@ where
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    for (address, account) in chunk {
-                        let address = address.key().unwrap();
-                        let _ = tx.send((RawKey::new(keccak256(address)), account));
+                    let entries: Vec<_> = chunk
+                        .into_iter()
+                        .map(|(raw_addr, account)| (raw_addr.key().unwrap(), account))
+                        .collect();
+                    let addr_bytes: Vec<[u8; 20]> =
+                        entries.iter().map(|(addr, _)| addr.0 .0).collect();
+                    let mut hashes = vec![alloy_primitives::B256::ZERO; addr_bytes.len()];
+                    reth_keccak_simd::keccak256_batch_20(&addr_bytes, &mut hashes);
+                    for ((_, account), hash) in entries.into_iter().zip(hashes) {
+                        let _ = tx.send((RawKey::new(hash), account));
                     }
                 });
 
@@ -373,7 +380,7 @@ mod tests {
     mod test_utils {
         use super::*;
         use crate::test_utils::TestStageDB;
-        use alloy_primitives::Address;
+        use alloy_primitives::{keccak256, Address};
         use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {

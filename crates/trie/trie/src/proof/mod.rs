@@ -130,10 +130,12 @@ where
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
+        let slot_bytes: Vec<[u8; 32]> = slots.iter().map(|s| s.0).collect();
+        let hashed_slots = reth_keccak_simd::keccak256_batch_32_vec(&slot_bytes);
         Ok(self
             .multiproof(MultiProofTargets::from_iter([(
                 keccak256(address),
-                slots.iter().map(keccak256).collect(),
+                hashed_slots.into_iter().collect(),
             )]))?
             .account_proof(address, slots)?)
     }

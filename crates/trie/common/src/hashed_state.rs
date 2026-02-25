@@ -8,7 +8,6 @@ use crate::{
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -475,9 +474,16 @@ impl HashedStorage {
         status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
+        let entries: Vec<_> = storage.into_iter().collect();
+        if entries.is_empty() {
+            return Self::new(status.was_destroyed());
+        }
+        let keys: Vec<[u8; 32]> = entries.iter().map(|(key, _)| B256::from(**key).0).collect();
+        let mut hashes = vec![B256::ZERO; keys.len()];
+        reth_keccak_simd::keccak256_batch_32(&keys, &mut hashes);
         Self::from_iter(
             status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+            hashes.into_iter().zip(entries.into_iter().map(|(_, value)| *value)),
         )
     }
 
@@ -919,7 +925,7 @@ impl Iterator for ChunkedHashedPostState {
 mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
-    use alloy_primitives::Bytes;
+    use alloy_primitives::{keccak256, Bytes};
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
     use revm_state::{AccountInfo, Bytecode};
 

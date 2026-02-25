@@ -139,7 +139,8 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         storage: HashedStorage,
     ) -> Result<StorageMultiProof, StateProofError> {
         let hashed_address = keccak256(address);
-        let targets = slots.iter().map(keccak256).collect();
+        let slot_bytes: Vec<[u8; 32]> = slots.iter().map(|s| s.0).collect();
+        let targets = reth_keccak_simd::keccak256_batch_32_vec(&slot_bytes).into_iter().collect();
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
             Default::default(),
