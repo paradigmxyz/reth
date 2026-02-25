@@ -6,7 +6,7 @@ use reth_trie_common::{prefix_set::PrefixSet, BranchNodeCompact, Nibbles};
 /// A [`TrieCursorFactory`] wrapper that creates cursors which skip trie nodes whose paths match a
 /// given [`PrefixSet`].
 #[derive(Debug, Clone)]
-pub struct PrefixSetSkippingTrieCursorFactory<CF> {
+pub struct MaskedTrieCursorFactory<CF> {
     /// Underlying trie cursor factory.
     cursor_factory: CF,
     /// Account prefix set.
@@ -15,7 +15,7 @@ pub struct PrefixSetSkippingTrieCursorFactory<CF> {
     storage_prefix_sets: alloy_primitives::map::B256Map<PrefixSet>,
 }
 
-impl<CF> PrefixSetSkippingTrieCursorFactory<CF> {
+impl<CF> MaskedTrieCursorFactory<CF> {
     /// Create a new factory from an inner cursor factory and frozen prefix sets.
     pub const fn new(
         cursor_factory: CF,
@@ -26,20 +26,20 @@ impl<CF> PrefixSetSkippingTrieCursorFactory<CF> {
     }
 }
 
-impl<CF: TrieCursorFactory> TrieCursorFactory for PrefixSetSkippingTrieCursorFactory<CF> {
+impl<CF: TrieCursorFactory> TrieCursorFactory for MaskedTrieCursorFactory<CF> {
     type AccountTrieCursor<'a>
-        = PrefixSetSkippingTrieCursor<CF::AccountTrieCursor<'a>>
+        = MaskedTrieCursor<CF::AccountTrieCursor<'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = PrefixSetSkippingTrieCursor<CF::StorageTrieCursor<'a>>
+        = MaskedTrieCursor<CF::StorageTrieCursor<'a>>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(PrefixSetSkippingTrieCursor::new(cursor, self.account_prefix_set.clone()))
+        Ok(MaskedTrieCursor::new(cursor, self.account_prefix_set.clone()))
     }
 
     fn storage_trie_cursor(
@@ -48,7 +48,7 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for PrefixSetSkippingTrieCursorFac
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         let prefix_set = self.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
-        Ok(PrefixSetSkippingTrieCursor::new(cursor, prefix_set))
+        Ok(MaskedTrieCursor::new(cursor, prefix_set))
     }
 }
 
@@ -58,21 +58,21 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for PrefixSetSkippingTrieCursorFac
 /// the cursor keeps calling `next` on the inner cursor until a non-matching node is found or the
 /// cursor is exhausted.
 #[derive(Debug)]
-pub struct PrefixSetSkippingTrieCursor<C> {
+pub struct MaskedTrieCursor<C> {
     /// The inner cursor.
     cursor: C,
     /// Prefix set used to determine which nodes to skip.
     prefix_set: PrefixSet,
 }
 
-impl<C> PrefixSetSkippingTrieCursor<C> {
+impl<C> MaskedTrieCursor<C> {
     /// Create a new cursor wrapping `cursor`, skipping nodes whose paths match `prefix_set`.
     pub const fn new(cursor: C, prefix_set: PrefixSet) -> Self {
         Self { cursor, prefix_set }
     }
 }
 
-impl<C: TrieCursor> PrefixSetSkippingTrieCursor<C> {
+impl<C: TrieCursor> MaskedTrieCursor<C> {
     /// Advance past entries that match the prefix set, returning the first non-matching entry.
     fn skip_matching(
         &mut self,
@@ -88,7 +88,7 @@ impl<C: TrieCursor> PrefixSetSkippingTrieCursor<C> {
     }
 }
 
-impl<C: TrieCursor> TrieCursor for PrefixSetSkippingTrieCursor<C> {
+impl<C: TrieCursor> TrieCursor for MaskedTrieCursor<C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -122,7 +122,7 @@ impl<C: TrieCursor> TrieCursor for PrefixSetSkippingTrieCursor<C> {
     }
 }
 
-impl<C: TrieStorageCursor> TrieStorageCursor for PrefixSetSkippingTrieCursor<C> {
+impl<C: TrieStorageCursor> TrieStorageCursor for MaskedTrieCursor<C> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address);
     }
@@ -159,7 +159,7 @@ mod tests {
         ps.insert(Nibbles::from_nibbles([0x2]));
 
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         // Seeking from the start should skip [0x1] and [0x2], returning [0x3].
         let result = cursor.seek(Nibbles::default()).unwrap();
@@ -175,7 +175,7 @@ mod tests {
         ps.insert(Nibbles::from_nibbles([0x1]));
 
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         // seek_exact on a matching node returns None.
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap();
@@ -200,7 +200,7 @@ mod tests {
         ps.insert(Nibbles::from_nibbles([0x3]));
 
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         // Seek to [0x1] (not matching).
         let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
@@ -221,7 +221,7 @@ mod tests {
         ps.insert(Nibbles::from_nibbles([0x2]));
 
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let result = cursor.seek(Nibbles::default()).unwrap();
         assert_eq!(result, None);
@@ -237,7 +237,7 @@ mod tests {
 
         let ps = PrefixSetMut::default();
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let r1 = cursor.seek(Nibbles::default()).unwrap();
         assert_eq!(r1, Some((Nibbles::from_nibbles([0x1]), node(1))));
@@ -268,7 +268,7 @@ mod tests {
         ps.insert(Nibbles::from_nibbles([0x1, 0x5]));
 
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         // Seeking from start should skip [0x1, 0x0] and [0x1, 0x5], returning [0x2, 0x0].
         let result = cursor.seek(Nibbles::default()).unwrap();
@@ -280,7 +280,7 @@ mod tests {
         let nodes = vec![];
         let ps = PrefixSetMut::default();
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let result = cursor.seek(Nibbles::default()).unwrap();
         assert_eq!(result, None);
@@ -293,7 +293,7 @@ mod tests {
 
         let ps = PrefixSetMut::default();
         let inner = make_cursor(nodes);
-        let mut cursor = PrefixSetSkippingTrieCursor::new(inner, ps.freeze());
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let _ = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x1])));
