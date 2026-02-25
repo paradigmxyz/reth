@@ -33,6 +33,9 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
+mod target;
+pub use target::ProofTarget;
+
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 
