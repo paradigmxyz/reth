@@ -11,7 +11,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{masked::MaskedTrieCursorFactory, InMemoryTrieCursorFactory},
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
@@ -223,16 +223,18 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
             let nodes_sorted = input.nodes.into_sorted();
             let state_sorted = input.state.into_sorted();
             Ok(TrieWitness::new(
-                InMemoryTrieCursorFactory::new(
-                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    &nodes_sorted,
+                MaskedTrieCursorFactory::new(
+                    InMemoryTrieCursorFactory::new(
+                        reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                        &nodes_sorted,
+                    ),
+                    input.prefix_sets.freeze(),
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
                     &state_sorted,
                 ),
             )
-            .with_prefix_sets_mut(input.prefix_sets)
             .always_include_root_node()
             .compute(target)?
             .into_values()
