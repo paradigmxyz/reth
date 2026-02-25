@@ -5,6 +5,7 @@ use crate::{
     },
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    proof_v2::{self, SyncAccountValueEncoder},
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -18,8 +19,8 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, BranchNodeMasks, BranchNodeMasksMap, MultiProof,
-    MultiProofTargets, StorageMultiProof,
+    proof::ProofRetainer, AccountProof, BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProofV2,
+    MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof,
 };
 
 mod trie_node;
@@ -136,6 +137,47 @@ where
                 slots.iter().map(keccak256).collect(),
             )]))?
             .account_proof(address, slots)?)
+    }
+
+    /// Generate a state multiproof using the V2 proof calculator.
+    ///
+    /// This method uses `ProofCalculator` with `SyncAccountValueEncoder` for account proofs
+    /// and `StorageProofCalculator` for storage proofs.
+    pub fn multiproof_v2(
+        self,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, StateProofError> {
+        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+
+        // Compute account proofs using the V2 proof calculator with sync account encoding.
+        let account_trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
+        let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+        let mut account_value_encoder = SyncAccountValueEncoder::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+        );
+        let mut account_calculator =
+            proof_v2::ProofCalculator::new(account_trie_cursor, hashed_account_cursor);
+        let account_proofs =
+            account_calculator.proof(&mut account_value_encoder, &mut account_targets)?;
+
+        // Compute storage proofs for each targeted account.
+        let mut storage_proofs =
+            B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
+        for (hashed_address, mut targets) in storage_targets {
+            let storage_trie_cursor =
+                self.trie_cursor_factory.storage_trie_cursor(hashed_address)?;
+            let hashed_storage_cursor =
+                self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+            let mut storage_calculator = proof_v2::StorageProofCalculator::new_storage(
+                storage_trie_cursor,
+                hashed_storage_cursor,
+            );
+            let proofs = storage_calculator.storage_proof(hashed_address, &mut targets)?;
+            storage_proofs.insert(hashed_address, proofs);
+        }
+
+        Ok(DecodedMultiProofV2 { account_proofs, storage_proofs })
     }
 
     /// Generate a state multiproof according to specified targets.
