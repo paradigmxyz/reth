@@ -29,10 +29,27 @@ pub enum SelectionResult {
     Cancelled,
 }
 
-/// Ordered presets for cycling through distance options on chunked components.
+/// All distance presets. Groups filter this to only valid options.
 const DISTANCE_PRESETS: [ComponentSelection; 6] = [
     ComponentSelection::None,
     ComponentSelection::Distance(64),
+    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(100_000),
+    ComponentSelection::Distance(1_000_000),
+    ComponentSelection::All,
+];
+
+/// Presets for components that require at least 64 blocks (receipts).
+const RECEIPTS_PRESETS: [ComponentSelection; 5] = [
+    ComponentSelection::Distance(64),
+    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(100_000),
+    ComponentSelection::Distance(1_000_000),
+    ComponentSelection::All,
+];
+
+/// Presets for components that require at least 10064 blocks (account/storage history).
+const HISTORY_PRESETS: [ComponentSelection; 4] = [
     ComponentSelection::Distance(10_064),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
@@ -47,6 +64,9 @@ struct DisplayGroup {
     types: Vec<SnapshotComponentType>,
     /// Whether this group is required and locked to All.
     required: bool,
+    /// Valid presets for this group. Components with minimum distance requirements
+    /// exclude presets that would produce invalid prune configs.
+    presets: &'static [ComponentSelection],
 }
 
 /// Build the display groups from available components in the manifest.
@@ -60,6 +80,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "State (mdbx)",
             types: vec![SnapshotComponentType::State],
             required: true,
+            presets: &DISTANCE_PRESETS,
         });
     }
 
@@ -68,6 +89,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Headers",
             types: vec![SnapshotComponentType::Headers],
             required: true,
+            presets: &DISTANCE_PRESETS,
         });
     }
 
@@ -76,6 +98,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Transactions",
             types: vec![SnapshotComponentType::Transactions],
             required: false,
+            presets: &DISTANCE_PRESETS,
         });
     }
 
@@ -84,6 +107,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Receipts",
             types: vec![SnapshotComponentType::Receipts],
             required: false,
+            presets: &RECEIPTS_PRESETS,
         });
     }
 
@@ -98,7 +122,12 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
         if has_stor {
             types.push(SnapshotComponentType::StorageChangesets);
         }
-        groups.push(DisplayGroup { name: "State History", types, required: false });
+        groups.push(DisplayGroup {
+            name: "State History",
+            types,
+            required: false,
+            presets: &HISTORY_PRESETS,
+        });
     }
 
     groups
@@ -134,9 +163,10 @@ impl SelectorApp {
             if group.required {
                 return;
             }
+            let presets = group.presets;
             let current = self.selections[self.cursor];
-            let idx = DISTANCE_PRESETS.iter().position(|p| *p == current).unwrap_or(0);
-            self.selections[self.cursor] = DISTANCE_PRESETS[(idx + 1) % DISTANCE_PRESETS.len()];
+            let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
+            self.selections[self.cursor] = presets[(idx + 1) % presets.len()];
         }
     }
 
@@ -145,10 +175,10 @@ impl SelectorApp {
             if group.required {
                 return;
             }
+            let presets = group.presets;
             let current = self.selections[self.cursor];
-            let idx = DISTANCE_PRESETS.iter().position(|p| *p == current).unwrap_or(0);
-            self.selections[self.cursor] =
-                DISTANCE_PRESETS[(idx + DISTANCE_PRESETS.len() - 1) % DISTANCE_PRESETS.len()];
+            let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
+            self.selections[self.cursor] = presets[(idx + presets.len() - 1) % presets.len()];
         }
     }
 
@@ -315,11 +345,13 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
 
             let required = if group.required { " (required)" } else { "" };
 
+            let at_max = *sel == *group.presets.last().unwrap_or(&ComponentSelection::All);
+            let at_min = *sel == group.presets[0];
             let arrows = if group.required {
                 "   "
-            } else if matches!(sel, ComponentSelection::All) {
+            } else if at_max {
                 "◂  "
-            } else if matches!(sel, ComponentSelection::None) {
+            } else if at_min {
                 "  ▸"
             } else {
                 "◂ ▸"

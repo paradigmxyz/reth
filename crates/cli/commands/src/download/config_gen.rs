@@ -276,19 +276,19 @@ pub fn config_for_selections(
     }
     prune.segments.transaction_lookup = Some(PruneMode::Full);
 
-    if let Some(mode) = selection_to_prune_mode(tx_sel) {
+    if let Some(mode) = selection_to_prune_mode(tx_sel, None) {
         prune.segments.bodies_history = Some(mode);
     }
 
-    if let Some(mode) = selection_to_prune_mode(receipt_sel) {
+    if let Some(mode) = selection_to_prune_mode(receipt_sel, Some(MINIMUM_RECEIPTS_DISTANCE)) {
         prune.segments.receipts = Some(mode);
     }
 
-    if let Some(mode) = selection_to_prune_mode(account_cs_sel) {
+    if let Some(mode) = selection_to_prune_mode(account_cs_sel, Some(MINIMUM_HISTORY_DISTANCE)) {
         prune.segments.account_history = Some(mode);
     }
 
-    if let Some(mode) = selection_to_prune_mode(storage_cs_sel) {
+    if let Some(mode) = selection_to_prune_mode(storage_cs_sel, Some(MINIMUM_HISTORY_DISTANCE)) {
         prune.segments.storage_history = Some(mode);
     }
 
@@ -297,11 +297,30 @@ pub fn config_for_selections(
 }
 
 /// Converts a [`ComponentSelection`] to an optional [`PruneMode`].
-fn selection_to_prune_mode(sel: ComponentSelection) -> Option<PruneMode> {
+///
+/// `min_distance` enforces the minimum blocks required for this segment.
+/// When set, `None` and distances below the minimum are clamped to it
+/// instead of producing `PruneMode::Full` which reth would reject.
+fn selection_to_prune_mode(
+    sel: ComponentSelection,
+    min_distance: Option<u64>,
+) -> Option<PruneMode> {
     match sel {
         ComponentSelection::All => None,
-        ComponentSelection::Distance(d) => Some(PruneMode::Distance(d)),
-        ComponentSelection::None => Some(PruneMode::Full),
+        ComponentSelection::Distance(d) => {
+            if let Some(min) = min_distance {
+                Some(PruneMode::Distance(d.max(min)))
+            } else {
+                Some(PruneMode::Distance(d))
+            }
+        }
+        ComponentSelection::None => {
+            if let Some(min) = min_distance {
+                Some(PruneMode::Distance(min))
+            } else {
+                Some(PruneMode::Full)
+            }
+        }
     }
 }
 
@@ -522,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn selections_none_prunes_full() {
+    fn selections_none_clamps_to_minimum_distance() {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
@@ -530,9 +549,19 @@ mod tests {
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Full));
+        // Receipts and history segments are clamped to their minimum distances
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.account_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.storage_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
     }
 
     #[test]
@@ -553,7 +582,10 @@ mod tests {
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies follows tx selection
         assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Distance(10_064)));
-        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
         assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
         assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
     }
@@ -581,7 +613,7 @@ mod tests {
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         // Bodies follows tx selection
         assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
-        assert!(desc.contains(&"receipts=\"full\"".to_string()));
+        assert!(desc.contains(&"receipts={ distance = 64 }".to_string()));
     }
 
     #[test]
