@@ -429,12 +429,12 @@ where
         })
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        if self.pending_updates == 0 {
+            return Ok(());
+        }
+
+        let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
