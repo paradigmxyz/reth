@@ -6,7 +6,9 @@ use crate::{
         helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
         output::GasRampPayloadFile,
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload_with_reth, payload_to_new_payload},
+    valid_payload::{
+        call_forkchoice_updated_with_reth, call_new_payload_with_reth, payload_to_new_payload,
+    },
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -147,7 +149,7 @@ impl Command {
             }
         }
         if self.reth_new_payload {
-            info!("Using reth_newPayload endpoint");
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
         }
 
         let mut blocks_processed = 0u64;
@@ -203,7 +205,13 @@ impl Command {
                 safe_block_hash: block_hash,
                 finalized_block_hash: block_hash,
             };
-            call_forkchoice_updated(&provider, version, forkchoice_state, None).await?;
+            call_forkchoice_updated_with_reth(
+                &provider,
+                version,
+                forkchoice_state,
+                self.reth_new_payload,
+            )
+            .await?;
 
             parent_header = block.header;
             parent_hash = block_hash;
