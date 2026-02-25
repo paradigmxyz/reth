@@ -33,7 +33,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -620,8 +620,6 @@ where
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    use reth_trie::proof_v2;
-
     let mut targets = MultiProofTargetsV2::default();
     let mut storage_target_count = 0;
     for (addr, account) in state {
@@ -647,7 +645,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(proof_v2::Target::from(hashed_slot));
+            storage_slots.push(ProofV2Target::from(hashed_slot));
         }
 
         storage_target_count += storage_slots.len();
