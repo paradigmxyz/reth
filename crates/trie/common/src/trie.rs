@@ -29,6 +29,11 @@ impl BranchNodeMasks {
             (None, None) => None,
         }
     }
+
+    /// Returns true if both interior masks are empty.
+    pub fn is_empty(&self) -> bool {
+        self.hash_mask.is_empty() && self.tree_mask.is_empty()
+    }
 }
 
 /// Map from nibble path to branch node masks.

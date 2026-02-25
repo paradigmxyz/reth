@@ -7,8 +7,8 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
-    RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    rlp_node, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
+    ProofTrieNodeV2, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
@@ -82,6 +82,14 @@ impl ArenaSparseNodeState {
             _ => 0,
         }
     }
+
+    /// Returns the [`RlpNode`] cached on the state, if there is one.
+    const fn cached_rlp_node(&self) -> Option<&RlpNode> {
+        match self {
+            Self::Cached { rlp_node, .. } => Some(rlp_node),
+            _ => None,
+        }
+    }
 }
 
 /// Represents a reference from a branch node to one of its children.
@@ -115,11 +123,6 @@ struct ArenaSparseNodeBranch {
     short_key: Nibbles,
     /// Tree mask and hash mask for database persistence (`TrieUpdates`).
     branch_masks: BranchNodeMasks,
-    /// The branch masks as they were when the node was first revealed from the database.
-    /// `Some` if the node existed in the DB trie, `None` if it was created locally
-    /// (e.g. by `split_and_insert_leaf`). Used to determine whether removing or
-    /// collapsing this branch requires an `InsertRemoved` update action.
-    db_branch_masks: Option<BranchNodeMasks>,
 }
 
 impl ArenaSparseNodeBranch {
@@ -135,6 +138,35 @@ impl ArenaSparseNodeBranch {
         } else {
             self.branch_masks.tree_mask.unset_bit(nibble);
         }
+    }
+
+    /// Populates the given [`BranchNodeCompact`] from this branch's masks and children hashes.
+    fn set_branch_node_compact(
+        &self,
+        arena: &Arena<ArenaSparseNode>,
+        compact: &mut BranchNodeCompact,
+    ) {
+        let mut hashes = Vec::new();
+        for (dense_idx, nibble) in self.state_mask.iter().enumerate() {
+            if self.branch_masks.hash_mask.is_bit_set(nibble) {
+                let hash = match &self.children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                        rlp_node.as_hash().expect("blinded child must be a hash")
+                    }
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                        arena[*child_idx].cached_hash()
+                    }
+                };
+                hashes.push(hash);
+            }
+        }
+        *compact = BranchNodeCompact::new(
+            self.state_mask,
+            self.branch_masks.tree_mask,
+            self.branch_masks.hash_mask,
+            hashes,
+            None,
+        );
     }
 }
 
@@ -224,16 +256,17 @@ impl ArenaSparseNode {
     /// RLP is a hash (>= 32 bytes). Small branches whose RLP is embedded don't get a
     /// hash_mask bit.
     fn hash_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| b.short_key.is_empty())
+        self.as_branch().is_some_and(|b| {
+            b.short_key.is_empty() &&
+                b.state.cached_rlp_node().expect("branch's RlpNode must be cached").is_hash()
+        })
     }
 
     /// Returns `true` if this node should contribute a set bit in its parent's `tree_mask`.
     ///
     /// That is, if the node is a branch with any non-empty `branch_masks`.
     fn tree_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| {
-            !b.branch_masks.hash_mask.is_empty() || !b.branch_masks.tree_mask.is_empty()
-        })
+        self.as_branch().is_some_and(|b| !b.branch_masks.is_empty())
     }
 
     /// Returns the cached hash of this node. Panics if the node's state is not `Cached`.
@@ -243,14 +276,9 @@ impl ArenaSparseNode {
     /// case where a branch's RLP is small enough to be embedded rather than hashed.
     fn cached_hash(&self) -> B256 {
         let rlp_node = match self {
-            Self::Branch(b) => match &b.state {
-                ArenaSparseNodeState::Cached { rlp_node, .. } => rlp_node,
-                _ => panic!("cached_hash called on non-Cached branch"),
-            },
-            Self::Leaf { state, .. } => match state {
-                ArenaSparseNodeState::Cached { rlp_node, .. } => rlp_node,
-                _ => panic!("cached_hash called on non-Cached leaf"),
-            },
+            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
+                .cached_rlp_node()
+                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
@@ -280,7 +308,6 @@ impl From<ProofTrieNodeV2> for ArenaSparseNode {
                     state_mask: branch.state_mask,
                     short_key: branch.key,
                     branch_masks: masks.unwrap_or_default(),
-                    db_branch_masks: masks,
                 })
             }
             TrieNodeV2::Extension(_) => {
@@ -860,10 +887,7 @@ fn update_cached_rlp(
 
         rlp_node_buf.truncate(rlp_node_buf.len() - num_children);
 
-        let has_masks =
-            !new_branch_masks.tree_mask.is_empty() || !new_branch_masks.hash_mask.is_empty();
-
-        // Step 2b-updates: Emit trie update actions for dirty branches only.
+        // Step 2c: Emit trie update actions for dirty branches only.
         // Branches that were merely `Revealed` (never modified) don't need update
         // actions — their DB state is unchanged. Only dirty branches can have
         // changed masks or structure.
@@ -874,51 +898,21 @@ fn update_cached_rlp(
             logical_path.extend(&short_key);
 
             if !logical_path.is_empty() {
-                if has_masks {
-                    // Collect hashes for children where hash_mask is set.
-                    let mut hashes = Vec::new();
-                    let b = arena[head_idx].branch_ref();
-                    for (dense_idx, nibble) in b.state_mask.iter().enumerate() {
-                        if new_branch_masks.hash_mask.is_bit_set(nibble) {
-                            let hash = match &b.children[dense_idx] {
-                                ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                                    rlp_node.as_hash().expect("blinded child must be a hash")
-                                }
-                                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                                    arena[*child_idx].cached_hash()
-                                }
-                            };
-                            hashes.push(hash);
-                        }
-                    }
-                    actions.push(SparseTrieUpdatesAction::InsertUpdated(
-                        logical_path,
-                        BranchNodeCompact::new(
-                            state_mask,
-                            new_branch_masks.tree_mask,
-                            new_branch_masks.hash_mask,
-                            hashes,
-                            None,
-                        ),
-                    ));
+                if new_branch_masks.is_empty() {
+                    actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
                 } else {
-                    let prev_had_masks = arena[head_idx]
-                        .branch_ref()
-                        .db_branch_masks
-                        .is_some_and(|m| !m.tree_mask.is_empty() || !m.hash_mask.is_empty());
-                    if prev_had_masks {
-                        actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
-                    } else {
-                        actions.push(SparseTrieUpdatesAction::RemoveUpdated(logical_path));
-                    }
+                    let mut compact = BranchNodeCompact::default();
+                    arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
+                    actions.push(SparseTrieUpdatesAction::InsertUpdated(logical_path, compact));
                 }
             }
         }
+
         arena[head_idx].branch_mut().state =
             ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
         rlp_node_buf.push(rlp_node);
 
-        // Step 2c: Pop this branch from the stack, propagating leaf-count deltas and
+        // Step 2d: Pop this branch from the stack, propagating leaf-count deltas and
         // branch_masks to the parent. If the stack is now empty, the root is done.
         // Otherwise resume the parent branch from the nibble after the child that was
         // just completed.
@@ -1035,7 +1029,6 @@ fn split_and_insert_leaf(
         state_mask,
         short_key,
         branch_masks: BranchNodeMasks::default(),
-        db_branch_masks: None,
     }))
 }
 
@@ -1436,7 +1429,7 @@ fn collapse_branch(
 
     // Record the collapsed branch's logical path for trie update tracking if it
     // was previously persisted in the DB trie.
-    if branch.db_branch_masks.is_some() {
+    if !branch.branch_masks.is_empty() {
         let mut logical_path = branch_entry.path;
         logical_path.extend(&branch.short_key);
         if !logical_path.is_empty() {
@@ -1900,8 +1893,8 @@ impl ArenaParallelSparseTrie {
                         updates.updated_nodes.remove(&path);
                         updates.removed_nodes.insert(path);
                     }
-                    SparseTrieUpdatesAction::RemoveUpdated(path) => {
-                        updates.updated_nodes.remove(&path);
+                    SparseTrieUpdatesAction::RemoveUpdated(_path) => {
+                        panic!("SparseTrieUpdatesAction::RemoveUpdated is not used by ArenaParallelSparseTrie");
                     }
                     SparseTrieUpdatesAction::InsertUpdated(path, branch_node) => {
                         updates.updated_nodes.insert(path, branch_node);
@@ -1969,7 +1962,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     state_mask: branch.state_mask,
                     short_key: branch.key,
                     branch_masks: masks.unwrap_or_default(),
-                    db_branch_masks: masks,
                 });
             }
             TrieNodeV2::Extension(_) => {
