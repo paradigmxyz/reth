@@ -584,8 +584,6 @@ where
             );
 
             let result = task.run();
-            // Capture the computed state_root before sending the result
-            let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -594,6 +592,7 @@ where
             // block's take() blocks until we've stored the trie for reuse.
             let mut guard = preserved_sparse_trie.lock();
 
+            let task_result = result.as_ref().ok().cloned();
             // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -617,7 +616,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -625,11 +624,12 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
+                    &result.trie_updates,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {
                 debug!(
