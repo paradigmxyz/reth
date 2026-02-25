@@ -544,9 +544,10 @@ mod tests {
             any::<u64>().prop_filter("non-zero", |v| *v != 0).prop_map(U256::from)
         }
 
-        /// Generates a base dataset of 1000 storage slots for account B256::ZERO,
+        /// Generates a base dataset of 1000 storage slots for account `B256::ZERO`,
         /// a 200-entry changeset partially overlapping with the base, and random
         /// proof targets partially overlapping with both.
+        #[allow(clippy::type_complexity)]
         fn test_input_strategy(
         ) -> impl Strategy<Value = (Vec<(B256, U256)>, Account, Vec<(B256, Option<U256>)>, Vec<B256>)>
         {
@@ -645,18 +646,17 @@ mod tests {
                 // Step 1: Create the base hashed post state with a single account
                 // and 1000 storage slots.
                 let base_state = HashedPostState {
-                    accounts: [(hashed_address, Some(account))].into_iter().collect(),
-                    storages: [(
+                    accounts: std::iter::once((hashed_address, Some(account))).collect(),
+                    storages: std::iter::once((
                         hashed_address,
-                        HashedStorage::from_iter(false, base_slots.clone()),
-                    )]
-                    .into_iter()
+                        HashedStorage::from_iter(false, base_slots),
+                    ))
                     .collect(),
                 };
 
                 // Step 2: Compute trie updates from state root over the full base state.
                 let base_hashed_cursor_factory =
-                    MockHashedCursorFactory::from_hashed_post_state(base_state.clone());
+                    MockHashedCursorFactory::from_hashed_post_state(base_state);
                 let (_, trie_updates) = StateRoot::new(
                     NoopTrieCursorFactory,
                     base_hashed_cursor_factory.clone(),
@@ -674,12 +674,11 @@ mod tests {
                     .map(|(k, v)| (*k, v.unwrap_or(U256::ZERO)))
                     .collect();
                 let changeset_state = HashedPostState {
-                    accounts: [(hashed_address, Some(account))].into_iter().collect(),
-                    storages: [(
+                    accounts: std::iter::once((hashed_address, Some(account))).collect(),
+                    storages: std::iter::once((
                         hashed_address,
                         HashedStorage::from_iter(false, changeset_storage),
-                    )]
-                    .into_iter()
+                    ))
                     .collect(),
                 };
 
@@ -695,7 +694,7 @@ mod tests {
                 // on the base.
                 let changeset_sorted = changeset_state.into_sorted();
                 let overlay_cursor_factory = HashedPostStateCursorFactory::new(
-                    base_hashed_cursor_factory.clone(),
+                    base_hashed_cursor_factory,
                     &changeset_sorted,
                 );
 
