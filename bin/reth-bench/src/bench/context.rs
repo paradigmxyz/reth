@@ -31,6 +31,8 @@ pub(crate) struct BenchContext {
     pub(crate) is_optimism: bool,
     /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     pub(crate) use_reth_namespace: bool,
+    /// Whether to fetch and replay RLP-encoded blocks.
+    pub(crate) rlp_blocks: bool,
 }
 
 impl BenchContext {
@@ -142,7 +144,8 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        let use_reth_namespace = bench_args.reth_new_payload;
+        let rlp_blocks = bench_args.rlp_blocks;
+        let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
         Ok(Self {
             auth_provider,
             block_provider,
@@ -150,6 +153,7 @@ impl BenchContext {
             next_block,
             is_optimism,
             use_reth_namespace,
+            rlp_blocks,
         })
     }
 }
