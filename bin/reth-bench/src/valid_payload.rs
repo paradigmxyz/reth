@@ -392,3 +392,47 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
         }
     }
 }
+
+/// Calls either `reth_forkchoiceUpdated` or the standard `engine_forkchoiceUpdated*` depending
+/// on `use_reth`.
+///
+/// When `use_reth` is true, uses the `reth_forkchoiceUpdated` endpoint which sends a regular FCU
+/// with no payload attributes.
+pub(crate) async fn call_forkchoice_updated_with_reth<
+    N: Network,
+    P: Provider<N> + EngineApiValidWaitExt<N>,
+>(
+    provider: P,
+    message_version: EngineApiMessageVersion,
+    forkchoice_state: ForkchoiceState,
+    use_reth: bool,
+) -> TransportResult<ForkchoiceUpdated> {
+    if use_reth {
+        let method = "reth_forkchoiceUpdated";
+        let reth_params = serde_json::to_value((forkchoice_state,))
+            .expect("ForkchoiceState serialization cannot fail");
+
+        debug!(target: "reth-bench", method, "Sending forkchoiceUpdated");
+
+        let mut resp: ForkchoiceUpdated = provider.client().request(method, &reth_params).await?;
+
+        while !resp.is_valid() {
+            if resp.is_invalid() {
+                error!(target: "reth-bench", ?resp, "Invalid {method}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid {method}: {resp:?}")),
+                )))
+            }
+            if resp.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            resp = provider.client().request(method, &reth_params).await?;
+        }
+
+        Ok(resp)
+    } else {
+        call_forkchoice_updated(provider, message_version, forkchoice_state, None).await
+    }
+}
