@@ -23,13 +23,11 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth,
-        call_reth_new_payload_rlp, fetch_raw_block,
+        call_reth_new_payload_rlp, fetch_and_decode_raw_block,
     },
 };
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, B256};
 use alloy_provider::{network::AnyRpcBlock, Provider};
-use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
@@ -37,7 +35,6 @@ use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives_traits::Block;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
@@ -220,6 +217,7 @@ impl Command {
                 finalized_block_hash: prefetched.finalized_hash,
             };
 
+            let start = Instant::now();
             let (block_number, transaction_count, gas_used, gas_limit, server_timings, version) =
                 match prefetched.block {
                     PrefetchedPayload::Rlp {
@@ -237,7 +235,8 @@ impl Command {
                             gas_used,
                             gas_limit,
                             Some(timings),
-                            EngineApiMessageVersion::V4,
+                            // V3 is correct: FCU V3 is used for Cancun+ (there is no FCU V4)
+                            EngineApiMessageVersion::V3,
                         )
                     }
                     PrefetchedPayload::Json(block) => {
@@ -250,27 +249,16 @@ impl Command {
 
                         let (version, params, execution_data) =
                             block_to_new_payload(block, is_optimism)?;
-                        let start = Instant::now();
                         let reth_data = use_reth_namespace.then_some(execution_data);
                         let timings =
                             call_new_payload_with_reth(&auth_provider, version, params, reth_data)
                                 .await?;
-                        let client_latency = start.elapsed();
-                        (
-                            block_number,
-                            transaction_count,
-                            gas_used,
-                            gas_limit,
-                            timings.or(Some(crate::valid_payload::NewPayloadTimingBreakdown {
-                                latency: client_latency,
-                                ..Default::default()
-                            })),
-                            version,
-                        )
+                        (block_number, transaction_count, gas_used, gas_limit, timings, version)
                     }
                 };
+            let client_latency = start.elapsed();
 
-            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_default();
+            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or(client_latency);
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
@@ -404,26 +392,19 @@ async fn fetch_rlp_block_with_fcu_hashes(
     provider: &alloy_provider::RootProvider<alloy_network::AnyNetwork>,
     block_number: u64,
 ) -> eyre::Result<PrefetchedBlockWithFcu> {
-    let rlp = fetch_raw_block(provider, block_number)
-        .await
-        .map_err(|e| eyre::eyre!("Failed to fetch raw block {block_number}: {e}"))?;
+    let decoded = fetch_and_decode_raw_block(provider, block_number).await?;
 
-    let block = reth_ethereum_primitives::Block::decode(&mut rlp.as_ref())
-        .map_err(|e| eyre::eyre!("Failed to decode RLP block {block_number}: {e}"))?;
-
-    let head_hash = block.header().hash_slow();
-    let number = block.header().number();
-    let (safe, finalized) = resolve_fcu_hashes(provider, head_hash, number).await;
+    let (safe, finalized) = resolve_fcu_hashes(provider, decoded.hash, decoded.block_number).await;
 
     Ok(PrefetchedBlockWithFcu {
         block: PrefetchedPayload::Rlp {
-            rlp,
-            block_number: number,
-            transaction_count: block.body().transactions().count() as u64,
-            gas_used: block.header().gas_used(),
-            gas_limit: block.header().gas_limit(),
+            rlp: decoded.rlp,
+            block_number: decoded.block_number,
+            transaction_count: decoded.transaction_count,
+            gas_used: decoded.gas_used,
+            gas_limit: decoded.gas_limit,
         },
-        head_hash,
+        head_hash: decoded.hash,
         safe_hash: safe,
         finalized_hash: finalized,
     })

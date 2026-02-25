@@ -11,19 +11,16 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_new_payload_with_reth, call_reth_new_payload_rlp,
-        fetch_raw_block, NewPayloadTimingBreakdown,
+        fetch_and_decode_raw_block,
     },
 };
-use alloy_consensus::BlockHeader;
 use alloy_primitives::Bytes;
 use alloy_provider::{network::AnyRpcBlock, Provider};
-use alloy_rlp::Decodable;
 use clap::Parser;
 use csv::Writer;
 use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives_traits::Block;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
@@ -86,22 +83,14 @@ impl Command {
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let prefetched = if rlp_blocks {
-                    match fetch_raw_block(&block_provider, next_block).await {
-                        Ok(rlp) => {
-                            match reth_ethereum_primitives::Block::decode(&mut rlp.as_ref()) {
-                                Ok(block) => Ok(PrefetchedBlock::Rlp {
-                                    rlp,
-                                    block_number: block.header().number(),
-                                    transaction_count: block.body().transactions().count() as u64,
-                                    gas_used: block.header().gas_used(),
-                                }),
-                                Err(e) => {
-                                    Err(eyre::eyre!("Failed to decode RLP block {next_block}: {e}"))
-                                }
-                            }
+                    fetch_and_decode_raw_block(&block_provider, next_block).await.map(|decoded| {
+                        PrefetchedBlock::Rlp {
+                            rlp: decoded.rlp,
+                            block_number: decoded.block_number,
+                            transaction_count: decoded.transaction_count,
+                            gas_used: decoded.gas_used,
                         }
-                        Err(e) => Err(eyre::eyre!("Failed to fetch raw block {next_block}: {e}")),
-                    }
+                    })
                 } else {
                     block_provider
                         .get_block_by_number(next_block.into())
@@ -139,6 +128,7 @@ impl Command {
             total_wait_time += wait_start.elapsed();
             result
         } {
+            let start = Instant::now();
             let (block_number, transaction_count, gas_used, server_timings) = match prefetched {
                 PrefetchedBlock::Rlp { rlp, block_number, transaction_count, gas_used } => {
                     debug!(target: "reth-bench", ?block_number, rlp_len = rlp.len(), "Sending RLP payload to engine");
@@ -154,25 +144,16 @@ impl Command {
 
                     let (version, params, execution_data) =
                         block_to_new_payload(block, is_optimism)?;
-                    let start = Instant::now();
                     let reth_data = use_reth_namespace.then_some(execution_data);
                     let timings =
                         call_new_payload_with_reth(&auth_provider, version, params, reth_data)
                             .await?;
-                    let client_latency = start.elapsed();
-                    (
-                        block_number,
-                        transaction_count,
-                        gas_used,
-                        timings.or(Some(NewPayloadTimingBreakdown {
-                            latency: client_latency,
-                            ..Default::default()
-                        })),
-                    )
+                    (block_number, transaction_count, gas_used, timings)
                 }
             };
+            let client_latency = start.elapsed();
 
-            let latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_default();
+            let latency = server_timings.as_ref().map(|t| t.latency).unwrap_or(client_latency);
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency,

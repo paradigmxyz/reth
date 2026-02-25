@@ -417,6 +417,48 @@ pub(crate) async fn fetch_raw_block<N: Network, P: Provider<N>>(
     provider.client().request("debug_getRawBlock", &params).await
 }
 
+/// Decoded metadata from an RLP-encoded block.
+pub(crate) struct DecodedRlpBlock {
+    /// The raw RLP bytes (forwarded to the server as-is).
+    pub(crate) rlp: Bytes,
+    /// Block number.
+    pub(crate) block_number: u64,
+    /// Number of transactions.
+    pub(crate) transaction_count: u64,
+    /// Gas used.
+    pub(crate) gas_used: u64,
+    /// Gas limit.
+    pub(crate) gas_limit: u64,
+    /// Block hash (computed via `hash_slow`).
+    pub(crate) hash: B256,
+}
+
+/// Fetches and decodes an RLP block, extracting header metadata for metrics.
+pub(crate) async fn fetch_and_decode_raw_block<N: Network, P: Provider<N>>(
+    provider: &P,
+    block_number: u64,
+) -> eyre::Result<DecodedRlpBlock> {
+    use alloy_consensus::BlockHeader;
+    use alloy_rlp::Decodable;
+    use reth_primitives_traits::Block;
+
+    let rlp = fetch_raw_block(provider, block_number)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to fetch raw block {block_number}: {e}"))?;
+
+    let block = reth_ethereum_primitives::Block::decode(&mut rlp.as_ref())
+        .map_err(|e| eyre::eyre!("Failed to decode RLP block {block_number}: {e}"))?;
+
+    Ok(DecodedRlpBlock {
+        rlp,
+        block_number: block.header().number(),
+        transaction_count: block.body().transactions().count() as u64,
+        gas_used: block.header().gas_used(),
+        gas_limit: block.header().gas_limit(),
+        hash: block.header().hash_slow(),
+    })
+}
+
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given
 /// `EngineApiMessageVersion`, using the provided forkchoice state and payload attributes for the
 /// actual engine api message call.
