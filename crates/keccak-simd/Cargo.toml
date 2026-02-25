@@ -1,0 +1,27 @@
+[package]
+name = "reth-keccak-simd"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "SIMD-accelerated batched Keccak-256 hashing using AVX2 (4-way parallelism)."
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+criterion.workspace = true
+rand.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+
+[[bench]]
+name = "keccak_batch"
+harness = false

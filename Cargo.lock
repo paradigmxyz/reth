@@ -8941,6 +8941,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-keccak-simd"
+version = "1.11.1"
+dependencies = [
+ "alloy-primitives",
+ "cc",
+ "codspeed-criterion-compat",
+ "rand 0.9.2",
+]
+
+[[package]]
 name = "reth-libmdbx"
 version = "1.11.1"
 dependencies = [
