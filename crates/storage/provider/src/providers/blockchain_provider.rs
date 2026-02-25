@@ -90,7 +90,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .last_finalized_block_number()?
             .map(|num| provider.sealed_header(num))
             .transpose()?
-            .flatten();
+            .flatten()
+            .or(provider.sealed_header(0)?);
         let safe_header = provider
             .last_safe_block_number()?
             .or_else(|| {
@@ -100,7 +101,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             })
             .map(|num| provider.sealed_header(num))
             .transpose()?
-            .flatten();
+            .flatten()
+            .or(provider.sealed_header(0)?);
         Ok(Self {
             database: storage,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(
