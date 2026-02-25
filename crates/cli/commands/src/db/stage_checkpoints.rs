@@ -1,7 +1,6 @@
 //! `reth db stage-checkpoints` command for viewing and setting stage checkpoint values.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use reth_db_api::{tables, transaction::DbTxMut};
 use reth_db_common::DbTool;
 use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
@@ -70,12 +69,6 @@ impl Command {
 
         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-        if args.clear_progress {
-            provider_rw
-                .tx_ref()
-                .delete::<tables::StageCheckpointProgresses>(stage_id.to_string(), None)?;
-        }
-
         provider_rw.commit()?;
 
         println!("Updated checkpoint for {stage_id}: {checkpoint:?}");
@@ -110,10 +103,6 @@ pub struct SetArgs {
     /// Clear stage-specific unit checkpoint payload.
     #[arg(long)]
     clear_stage_unit: bool,
-
-    /// Clear stage checkpoint progress bytes.
-    #[arg(long)]
-    clear_progress: bool,
 }
 
 /// CLI-friendly stage names.
@@ -178,7 +167,6 @@ mod tests {
             "headers",
             "--block-number",
             "123",
-            "--clear-progress",
         ]);
 
         assert!(matches!(
@@ -187,7 +175,6 @@ mod tests {
                 stage: StageArg::Headers,
                 block_number: 123,
                 clear_stage_unit: false,
-                clear_progress: true,
             })
         ));
     }
@@ -210,7 +197,6 @@ mod tests {
                 stage: StageArg::Headers,
                 block_number: 42,
                 clear_stage_unit: false,
-                clear_progress: false,
             }),
         };
 
@@ -244,7 +230,6 @@ mod tests {
                 stage: StageArg::Execution,
                 block_number: 11,
                 clear_stage_unit: false,
-                clear_progress: false,
             }),
         }
         .execute(&tool)
@@ -262,7 +247,6 @@ mod tests {
                 stage: StageArg::Execution,
                 block_number: 12,
                 clear_stage_unit: true,
-                clear_progress: false,
             }),
         }
         .execute(&tool)
@@ -278,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn set_can_clear_progress() {
+    fn set_preserves_checkpoint_progress() {
         let provider_factory = create_test_provider_factory();
         let tool = DbTool::new(provider_factory.clone()).expect("db tool");
 
@@ -298,7 +282,6 @@ mod tests {
                 stage: StageArg::MerkleExecute,
                 block_number: 20,
                 clear_stage_unit: false,
-                clear_progress: true,
             }),
         }
         .execute(&tool)
@@ -309,6 +292,6 @@ mod tests {
             .get_stage_checkpoint_progress(StageId::MerkleExecute)
             .expect("get stage checkpoint progress");
 
-        assert!(progress.is_none());
+        assert_eq!(progress, Some(vec![1, 2, 3]));
     }
 }
