@@ -1,7 +1,9 @@
 use crate::{PruneCheckpoint, PruneMode, PruneSegment};
-use alloc::vec::Vec;
+use alloc::{format, string::ToString, vec::Vec};
 use alloy_primitives::{BlockNumber, TxNumber};
+use core::time::Duration;
 use derive_more::Display;
+use tracing::debug;
 
 /// Pruner run output.
 #[derive(Debug)]
@@ -15,6 +17,49 @@ pub struct PrunerOutput {
 impl From<PruneProgress> for PrunerOutput {
     fn from(progress: PruneProgress) -> Self {
         Self { progress, segments: Vec::new() }
+    }
+}
+
+impl PrunerOutput {
+    /// Logs a human-readable summary of the pruner run at DEBUG level.
+    ///
+    /// Format: `"Pruner finished tip=24328929 deleted=10886 elapsed=148ms
+    /// segments=AccountHistory[24318865, done] ..."`
+    #[inline]
+    pub fn debug_log(
+        &self,
+        tip_block_number: BlockNumber,
+        deleted_entries: usize,
+        elapsed: Duration,
+    ) {
+        let message = match self.progress {
+            PruneProgress::HasMoreData(_) => "Pruner interrupted, has more data",
+            PruneProgress::Finished => "Pruner finished",
+        };
+
+        let segments: Vec<_> = self
+            .segments
+            .iter()
+            .filter(|(_, seg)| seg.pruned > 0)
+            .map(|(segment, seg)| {
+                let block = seg
+                    .checkpoint
+                    .and_then(|c| c.block_number)
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let status = if seg.progress.is_finished() { "done" } else { "in_progress" };
+                format!("{segment}[{block}, {status}]")
+            })
+            .collect();
+
+        debug!(
+            target: "pruner",
+            %tip_block_number,
+            deleted_entries,
+            ?elapsed,
+            segments = %segments.join(" "),
+            "{message}",
+        );
     }
 }
 
@@ -48,7 +93,7 @@ impl SegmentOutput {
         Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
     }
 
-    /// Returns a [`SegmentOutput`] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`SegmentOutput`] with `done = false`, `pruned = 0` and the given checkpoint.
     /// Use when pruning is needed but cannot be done.
     pub const fn not_done(
         reason: PruneInterruptReason,
@@ -97,6 +142,8 @@ pub enum PruneInterruptReason {
     Timeout,
     /// Limit on the number of deleted entries (rows in the database) per prune run was reached.
     DeletedEntriesLimitReached,
+    /// Waiting for another segment to finish pruning before this segment can proceed.
+    WaitingOnSegment(PruneSegment),
     /// Unknown reason for stopping prune run.
     Unknown,
 }
@@ -117,5 +164,44 @@ impl PruneProgress {
     /// Returns `true` if prune run is finished.
     pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
+    }
+
+    /// Combines two progress values, keeping `HasMoreData` if either has it.
+    ///
+    /// Once any segment reports `HasMoreData`, the combined progress remains
+    /// `HasMoreData`. Only returns `Finished` if both are `Finished`.
+    #[must_use]
+    pub const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::HasMoreData(reason), _) => Self::HasMoreData(reason),
+            (Self::Finished, other) => other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prune_progress_combine() {
+        use PruneInterruptReason::*;
+        use PruneProgress::*;
+
+        // HasMoreData dominates Finished
+        assert!(matches!(HasMoreData(Timeout).combine(Finished), HasMoreData(Timeout)));
+
+        // First HasMoreData reason is preserved
+        assert!(matches!(
+            HasMoreData(Timeout).combine(HasMoreData(DeletedEntriesLimitReached)),
+            HasMoreData(Timeout)
+        ));
+
+        // Finished adopts new progress
+        assert!(matches!(Finished.combine(Finished), Finished));
+        assert!(matches!(
+            Finished.combine(HasMoreData(DeletedEntriesLimitReached)),
+            HasMoreData(DeletedEntriesLimitReached)
+        ));
     }
 }

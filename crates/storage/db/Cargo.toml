@@ -18,6 +18,7 @@ reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
+tracing.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum
@@ -30,6 +31,7 @@ eyre = { workspace = true, optional = true }
 # metrics
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
+quanta = { workspace = true, optional = true }
 
 # misc
 page_size = { workspace = true, optional = true }
@@ -69,6 +71,7 @@ mdbx = [
     "dep:reth-libmdbx",
     "dep:eyre",
     "dep:page_size",
+    "dep:quanta",
     "reth-metrics",
     "dep:metrics",
     "dep:strum",

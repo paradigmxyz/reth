@@ -5,7 +5,7 @@ use alloy_primitives::Bytes;
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
 use reth_db_api::{
     table::{Compress, Encode, Table, TableRow},
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     Database,
 };
 use reth_fs_util as fs;
@@ -68,7 +68,7 @@ where
         for (k, _, v, _) in pair.clone() {
             tx.put::<T>(k, v).expect("submit");
         }
-        tx.inner.commit().unwrap();
+        tx.commit().unwrap();
     }
 
     db.into_inner_db()

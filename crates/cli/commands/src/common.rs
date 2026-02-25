@@ -19,7 +19,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, RocksDbArgs, StaticFilesArgs},
+    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs, StorageArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -67,26 +67,34 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     #[command(flatten)]
     pub static_files: StaticFilesArgs,
 
-    /// All `RocksDB` related arguments
+    /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]
-    pub rocksdb: RocksDbArgs,
+    pub storage: StorageArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
-    /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
+    /// Returns the effective storage settings derived from `--storage.v2`.
+    ///
+    /// The base storage mode is determined by `--storage.v2`:
+    /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
+    /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub fn storage_settings(&self) -> StorageSettings {
-        StorageSettings::base()
-            .with_receipts_in_static_files(self.static_files.receipts)
-            .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
-            .with_account_changesets_in_static_files(self.static_files.account_changesets)
-            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
-            .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
-            .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
+        }
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    ///
+    /// The provided `runtime` is used for parallel storage I/O.
+    pub fn init<N: CliNodeTypes>(
+        &self,
+        access: AccessRights,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
@@ -121,14 +129,16 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(init_db(db_path, self.db.database_args())?),
+                init_db(db_path, self.db.database_args())?,
                 StaticFileProviderBuilder::read_write(sf_path)
+                    .with_metrics()
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => {
-                (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
+                (open_db_read_only(&db_path, self.db.database_args())?, {
                     let provider = StaticFileProviderBuilder::read_only(sf_path)
+                        .with_metrics()
                         .with_genesis_block_number(genesis_block_number)
                         .build()?;
                     provider.watch_directory();
@@ -136,14 +146,27 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
-            .with_default_tables()
-            .with_database_log_level(self.db.log_level)
-            .with_read_only(!access.is_read_write())
-            .build()?;
+        let rocksdb_provider = if !access.is_read_write() && !RocksDBProvider::exists(&rocksdb_path)
+        {
+            // RocksDB database doesn't exist yet (e.g. datadir restored from a snapshot
+            // or created before RocksDB storage). Create an empty one so read-only
+            // commands can proceed.
+            debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?
+        } else {
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .with_read_only(!access.is_read_write())
+                .build()?
+        };
 
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
@@ -160,20 +183,22 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
-        db: Arc<DatabaseEnv>,
+        db: DatabaseEnv,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
         access: AccessRights,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let prune_modes = config.prune.segments.clone();
-        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )?
         .with_prune_modes(prune_modes.clone());
 
@@ -200,7 +225,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds and executes an unwind-only pipeline
-            let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder()
+            let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
@@ -229,7 +254,7 @@ pub struct Environment<N: NodeTypes> {
     /// Configuration for reth node
     pub config: Config,
     /// Provider factory.
-    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     /// Datadir path.
     pub data_dir: ChainPath<DataDirPath>,
 }
@@ -261,8 +286,8 @@ impl AccessRights {
 /// Helper alias to satisfy `FullNodeTypes` bound on [`Node`] trait generic.
 type FullTypesAdapter<T> = FullNodeTypesAdapter<
     T,
-    Arc<DatabaseEnv>,
-    BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+    DatabaseEnv,
+    BlockchainProvider<NodeTypesWithDBAdapter<T, DatabaseEnv>>,
 >;
 
 /// Helper trait with a common set of requirements for the

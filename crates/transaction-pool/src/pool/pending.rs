@@ -431,7 +431,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort();
+            worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
@@ -566,6 +566,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
             .map(|(tx_id, _)| tx_id)
+    }
+
+    /// Returns all transactions for the given sender, using a `BTree` range query.
+    pub(crate) fn txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| tx.transaction.clone())
+            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.

@@ -9,6 +9,7 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 reth-ethereum = { workspace = true, features = ["node"] }
 eyre.workspace = true
 

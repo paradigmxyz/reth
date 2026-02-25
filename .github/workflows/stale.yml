@@ -9,6 +9,7 @@ on:
 
 jobs:
   close-issues:
+    if: github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     permissions:
       issues: write

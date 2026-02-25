@@ -3,10 +3,12 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
-        helpers::{build_payload, prepare_payload_request, rpc_block_to_header},
+        helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
         output::GasRampPayloadFile,
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload, payload_to_new_payload},
+    valid_payload::{
+        call_forkchoice_updated_with_reth, call_new_payload_with_reth, payload_to_new_payload,
+    },
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -21,29 +23,6 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK};
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
-
-/// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
-///
-/// Examples: "30000000", "30M", "1G", "2G"
-fn parse_gas_limit(s: &str) -> eyre::Result<u64> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Err(eyre::eyre!("empty value"));
-    }
-
-    let (num_str, multiplier) = if let Some(prefix) = s.strip_suffix(['G', 'g']) {
-        (prefix, 1_000_000_000u64)
-    } else if let Some(prefix) = s.strip_suffix(['M', 'm']) {
-        (prefix, 1_000_000u64)
-    } else if let Some(prefix) = s.strip_suffix(['K', 'k']) {
-        (prefix, 1_000u64)
-    } else {
-        (s, 1u64)
-    };
-
-    let base: u64 = num_str.trim().parse()?;
-    base.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("value overflow"))
-}
 
 /// `reth benchmark gas-limit-ramp` command.
 #[derive(Debug, Parser)]
@@ -70,6 +49,14 @@ pub struct Command {
     /// Output directory for benchmark results and generated payloads.
     #[arg(long, value_name = "OUTPUT")]
     output: PathBuf,
+
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reth_new_payload: bool,
 }
 
 /// Mode for determining when to stop ramping.
@@ -110,7 +97,7 @@ impl Command {
         }
         if !self.output.exists() {
             std::fs::create_dir_all(&self.output)?;
-            info!("Created output directory: {:?}", self.output);
+            info!(target: "reth-bench", "Created output directory: {:?}", self.output);
         }
 
         // Set up authenticated provider (used for both Engine API and eth_ methods)
@@ -118,7 +105,7 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt)?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let provider = RootProvider::<AnyNetwork>::new(client);
@@ -143,6 +130,7 @@ impl Command {
         match mode {
             RampMode::Blocks(blocks) => {
                 info!(
+                    target: "reth-bench",
                     canonical_parent,
                     start_block,
                     end_block = start_block + blocks - 1,
@@ -151,6 +139,7 @@ impl Command {
             }
             RampMode::TargetGasLimit(target) => {
                 info!(
+                    target: "reth-bench",
                     canonical_parent,
                     start_block,
                     current_gas_limit = parent_header.gas_limit,
@@ -158,6 +147,9 @@ impl Command {
                     "Starting gas limit ramp benchmark (target gas limit mode)"
                 );
             }
+        }
+        if self.reth_new_payload {
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
         }
 
         let mut blocks_processed = 0u64;
@@ -184,7 +176,7 @@ impl Command {
             // Regenerate the payload from the modified block, but keep the original sidecar
             // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-            let (version, params) = payload_to_new_payload(
+            let (version, params, execution_data) = payload_to_new_payload(
                 payload,
                 sidecar,
                 false,
@@ -195,28 +187,49 @@ impl Command {
             // Save payload to file with version info for replay
             let payload_path =
                 self.output.join(format!("payload_block_{}.json", block.header.number));
-            let file =
-                GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
+            let file = GasRampPayloadFile {
+                version: version as u8,
+                block_hash,
+                params: params.clone(),
+                execution_data: Some(execution_data.clone()),
+            };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
-            info!(block_number = block.header.number, path = %payload_path.display(), "Saved payload");
+            info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
-            call_new_payload(&provider, version, params).await?;
+            let reth_data = self.reth_new_payload.then_some(execution_data);
+            let _ = call_new_payload_with_reth(&provider, version, params, reth_data).await?;
 
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash: block_hash,
                 finalized_block_hash: block_hash,
             };
-            call_forkchoice_updated(&provider, version, forkchoice_state, None).await?;
+            call_forkchoice_updated_with_reth(
+                &provider,
+                version,
+                forkchoice_state,
+                self.reth_new_payload,
+            )
+            .await?;
 
             parent_header = block.header;
             parent_hash = block_hash;
             blocks_processed += 1;
+
+            let progress = match mode {
+                RampMode::Blocks(total) => format!("{blocks_processed}/{total}"),
+                RampMode::TargetGasLimit(target) => {
+                    let pct = (parent_header.gas_limit as f64 / target as f64 * 100.0).min(100.0);
+                    format!("{pct:.1}%")
+                }
+            };
+            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
         }
 
         let final_gas_limit = parent_header.gas_limit;
         info!(
+            target: "reth-bench",
             total_duration=?total_benchmark_duration.elapsed(),
             blocks_processed,
             final_gas_limit,
@@ -235,52 +248,5 @@ const fn should_stop(mode: RampMode, blocks_processed: u64, current_gas_limit: u
     match mode {
         RampMode::Blocks(target_blocks) => blocks_processed >= target_blocks,
         RampMode::TargetGasLimit(target) => current_gas_limit >= target,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_gas_limit_plain_number() {
-        assert_eq!(parse_gas_limit("30000000").unwrap(), 30_000_000);
-        assert_eq!(parse_gas_limit("1").unwrap(), 1);
-        assert_eq!(parse_gas_limit("0").unwrap(), 0);
-    }
-
-    #[test]
-    fn test_parse_gas_limit_k_suffix() {
-        assert_eq!(parse_gas_limit("1K").unwrap(), 1_000);
-        assert_eq!(parse_gas_limit("30k").unwrap(), 30_000);
-        assert_eq!(parse_gas_limit("100K").unwrap(), 100_000);
-    }
-
-    #[test]
-    fn test_parse_gas_limit_m_suffix() {
-        assert_eq!(parse_gas_limit("1M").unwrap(), 1_000_000);
-        assert_eq!(parse_gas_limit("30m").unwrap(), 30_000_000);
-        assert_eq!(parse_gas_limit("100M").unwrap(), 100_000_000);
-    }
-
-    #[test]
-    fn test_parse_gas_limit_g_suffix() {
-        assert_eq!(parse_gas_limit("1G").unwrap(), 1_000_000_000);
-        assert_eq!(parse_gas_limit("2g").unwrap(), 2_000_000_000);
-        assert_eq!(parse_gas_limit("10G").unwrap(), 10_000_000_000);
-    }
-
-    #[test]
-    fn test_parse_gas_limit_with_whitespace() {
-        assert_eq!(parse_gas_limit(" 1G ").unwrap(), 1_000_000_000);
-        assert_eq!(parse_gas_limit("2 M").unwrap(), 2_000_000);
-    }
-
-    #[test]
-    fn test_parse_gas_limit_errors() {
-        assert!(parse_gas_limit("").is_err());
-        assert!(parse_gas_limit("abc").is_err());
-        assert!(parse_gas_limit("G").is_err());
-        assert!(parse_gas_limit("-1G").is_err());
     }
 }

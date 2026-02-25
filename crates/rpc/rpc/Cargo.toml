@@ -21,7 +21,7 @@ reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
-reth-execution-types.workspace = true
+reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
@@ -71,10 +71,6 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee.workspace = true
-http.workspace = true
-http-body.workspace = true
-hyper.workspace = true
-jsonwebtoken.workspace = true
 serde_json.workspace = true
 jsonrpsee-types.workspace = true
 
@@ -82,7 +78,6 @@ jsonrpsee-types.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
-tower.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
 

@@ -3,12 +3,13 @@
 use crate::{
     bench::{
         context::BenchContext,
+        metrics_scraper::MetricsScraper,
         output::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{block_to_new_payload, call_new_payload},
+    valid_payload::{block_to_new_payload, call_new_payload_with_reth},
 };
 use alloy_provider::Provider;
 use clap::Parser;
@@ -49,8 +50,16 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
-            ..
+            use_reth_namespace,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+
+        let total_blocks = benchmark_mode.total_blocks();
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
+
+        if use_reth_namespace {
+            info!("Using reth_newPayload endpoint");
+        }
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -68,7 +77,7 @@ impl Command {
                 let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
@@ -76,14 +85,14 @@ impl Command {
 
                 next_block += 1;
                 if let Err(e) = sender.send(block).await {
-                    tracing::error!("Failed to send block data: {e}");
+                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
             }
         });
 
-        // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -97,15 +106,36 @@ impl Command {
             let transaction_count = block.transactions.len() as u64;
             let gas_used = block.header.gas_used;
 
-            debug!(number=?block.header.number, "Sending payload to engine");
+            debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
-            let (version, params) = block_to_new_payload(block, is_optimism)?;
+            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
 
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            let reth_data = use_reth_namespace.then_some(execution_data);
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
-            info!(%new_payload_result);
+            let latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
+            };
+            blocks_processed += 1;
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %new_payload_result);
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
@@ -115,6 +145,12 @@ impl Command {
             let row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((row, new_payload_result));
+
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+            }
         }
 
         // Check if the spawned task encountered an error
@@ -129,7 +165,7 @@ impl Command {
         if let Some(path) = self.benchmark.output {
             // first write the new payload results to a file
             let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
-            info!("Writing newPayload call latency output to file: {:?}", output_path);
+            info!(target: "reth-bench", "Writing newPayload call latency output to file: {:?}", output_path);
             let mut writer = Writer::from_path(output_path)?;
             for result in new_payload_results {
                 writer.serialize(result)?;
@@ -138,19 +174,24 @@ impl Command {
 
             // now write the gas output to a file
             let output_path = path.join(GAS_OUTPUT_SUFFIX);
-            info!("Writing total gas output to file: {:?}", output_path);
+            info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
             let mut writer = Writer::from_path(output_path)?;
             for row in &gas_output_results {
                 writer.serialize(row)?;
             }
             writer.flush()?;
 
-            info!("Finished writing benchmark output files to {:?}.", path);
+            if let Some(scraper) = &metrics_scraper {
+                scraper.write_csv(&path)?;
+            }
+
+            info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", path);
         }
 
         // accumulate the results and calculate the overall Ggas/s
         let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
+            target: "reth-bench",
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,
             blocks_processed=?gas_output.blocks_processed,

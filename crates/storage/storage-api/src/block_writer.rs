@@ -39,7 +39,7 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
 }
 
 /// Block Writer
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter {
     /// The body this writer can write.
     type Block: Block;

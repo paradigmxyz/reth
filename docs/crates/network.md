@@ -177,7 +177,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 ```
 The `NetworkConfig` struct is generic over two parameters:
 - `C`: The client type that provides access to blockchain data (headers, blocks, etc.)
-- `N`: The network primitives type that defines block and transaction types for the network. Defaults to `EthNetworkPrimitives` for standard Ethereum networks, but can be customized for other chains (e.g., Optimism).
+- `N`: The network primitives type that defines block and transaction types for the network. Defaults to `EthNetworkPrimitives` for standard Ethereum networks, but can be customized for other chains.
 
 The discovery task progresses as the network management task is polled, handling events regarding peer management through the `Swarm` struct which is stored as a field on the `NetworkManager`:
 
@@ -994,7 +994,7 @@ fn propagate_transactions(
         if !full.is_empty() {
             if idx > max_num_full {
                 for hash in &hashes {
-                    propagated.0.entry(*hash).or_default().push(PropagateKind::Hash(*peer_id));
+                    propagated.record(*hash, PropagateKind::Hash(*peer_id));
                 }
                 // send hashes of transactions
                 self.network.send_transactions_hashes(*peer_id, hashes);
@@ -1003,7 +1003,7 @@ fn propagate_transactions(
                 self.network.send_transactions(*peer_id, full);
 
                 for hash in hashes {
-                    propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
+                    propagated.record(hash, PropagateKind::Full(*peer_id));
                 }
             }
         }

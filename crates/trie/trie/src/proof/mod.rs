@@ -31,7 +31,7 @@ pub use trie_node::*;
 /// on the hash builder and follows the same algorithm as the state root calculator.
 /// See `StateRoot::root` for more info.
 #[derive(Debug)]
-pub struct Proof<T, H> {
+pub struct Proof<T, H, K = AddedRemovedKeys> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -40,6 +40,8 @@ pub struct Proof<T, H> {
     prefix_sets: TriePrefixSetsMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    /// Added and removed keys for proof retention.
+    added_removed_keys: Option<K>,
 }
 
 impl<T, H> Proof<T, H> {
@@ -50,26 +52,31 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
             collect_branch_node_masks: false,
+            added_removed_keys: None,
         }
     }
+}
 
+impl<T, H, K> Proof<T, H, K> {
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H, K> {
         Proof {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            added_removed_keys: self.added_removed_keys,
         }
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF, K> {
         Proof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            added_removed_keys: self.added_removed_keys,
         }
     }
 
@@ -85,6 +92,21 @@ impl<T, H> Proof<T, H> {
         self
     }
 
+    /// Configures the proof to retain certain nodes which would otherwise fall outside the target
+    /// set, when those nodes might be required to calculate the state root when keys have been
+    /// added or removed to the trie.
+    ///
+    /// If None is given then retention of extra proofs is disabled.
+    pub fn with_added_removed_keys<K2>(self, added_removed_keys: Option<K2>) -> Proof<T, H, K2> {
+        Proof {
+            trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+            collect_branch_node_masks: self.collect_branch_node_masks,
+            added_removed_keys,
+        }
+    }
+
     /// Get a reference to the trie cursor factory.
     pub const fn trie_cursor_factory(&self) -> &T {
         &self.trie_cursor_factory
@@ -96,10 +118,11 @@ impl<T, H> Proof<T, H> {
     }
 }
 
-impl<T, H> Proof<T, H>
+impl<T, H, K> Proof<T, H, K>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(
@@ -126,10 +149,13 @@ where
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
         prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
-        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze());
+        let walker =
+            TrieWalker::<_, AddedRemovedKeys>::state_trie(trie_cursor, prefix_set.freeze())
+                .with_added_removed_keys(self.added_removed_keys.as_ref());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer = retainer.with_added_removed_keys(self.added_removed_keys.as_ref());
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
@@ -367,7 +393,7 @@ where
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         let mut prefix_set = self.prefix_set;
-        prefix_set.extend_keys(target_nibbles.clone());
+        prefix_set.extend_keys(target_nibbles.iter().copied());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
 

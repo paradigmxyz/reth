@@ -79,7 +79,7 @@ impl HashedPostStateCursorValue for U256 {
     type NonZero = Self;
 
     fn into_option(self) -> Option<Self::NonZero> {
-        (self != Self::ZERO).then_some(self)
+        (!self.is_zero()).then_some(self)
     }
 }
 
@@ -351,7 +351,7 @@ where
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| value.into_option().is_some()) {
+        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
             return Ok(false);
         }
 
@@ -420,7 +420,7 @@ mod tests {
                     .into_iter()
                     .map(|(byte, value)| (B256::repeat_byte(byte), value))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })
@@ -438,7 +438,7 @@ mod tests {
                             (B256::repeat_byte(byte), effective_value)
                         })
                         .collect();
-                    result.sort_by(|a, b| a.0.cmp(&b.0));
+                    result.sort_by_key(|a| a.0);
                     result.dedup_by(|a, b| a.0 == b.0);
                     result
                 },

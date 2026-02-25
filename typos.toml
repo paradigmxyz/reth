@@ -38,3 +38,5 @@ Iy = "Iy" # Part of base64 encoded ENR
 flate = "flate" # zlib-flate is a valid tool name
 Pn = "Pn" # Part of UPnP (Universal Plug and Play)
 BA = "BA" # Part of BAL - Block Access List (EIP-7928)
+consts = "consts" # std::env::consts is a valid Rust module
+Consts = "Consts" # Valid identifier suffix (e.g., RethCliVersionConsts)

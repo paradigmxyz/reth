@@ -39,6 +39,7 @@ use reth_network::{
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
+use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
@@ -227,6 +228,14 @@ pub struct NetworkArgs {
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
     #[arg(long, value_name = "NETRESTRICT")]
     pub netrestrict: Option<String>,
+
+    /// Enforce EIP-868 ENR fork ID validation for discovered peers.
+    ///
+    /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
+    /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
+    /// networks that pollute the discovery table.
+    #[arg(long)]
+    pub enforce_enr_fork_id: bool,
 }
 
 impl NetworkArgs {
@@ -318,6 +327,7 @@ impl NetworkArgs {
         chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
+        executor: Runtime,
     ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
         let chain_bootnodes = self
@@ -333,10 +343,11 @@ impl NetworkArgs {
             )
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
-            .with_ip_filter(ip_filter);
+            .with_ip_filter(ip_filter)
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
 
         // Configure basic network stack
-        NetworkConfigBuilder::<N>::new(secret_key)
+        NetworkConfigBuilder::<N>::new(secret_key, executor)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -491,6 +502,7 @@ impl Default for NetworkArgs {
             required_block_hashes: vec![],
             network_id: None,
             netrestrict: None,
+            enforce_enr_fork_id: false,
         }
     }
 }
@@ -1087,6 +1099,7 @@ mod tests {
             MAINNET.clone(),
             secret_key,
             peers_file.clone(),
+            Runtime::test(),
         );
 
         let net_cfg = builder.build_with_noop_provider(MAINNET.clone());

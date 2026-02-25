@@ -62,12 +62,12 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
-            executor_builder: evm_builder,
+            executor_builder,
             pool_builder,
             payload_builder,
             network_builder,
@@ -149,15 +149,12 @@ where
     pub fn pool<PB>(
         self,
         pool_builder: PB,
-    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB, ConsB>
-    where
-        PB: PoolBuilder<Node>,
-    {
+    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB, ConsB> {
         let Self {
             pool_builder: _,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
@@ -165,7 +162,7 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         }
@@ -183,72 +180,6 @@ where
             executor_builder: self.executor_builder,
             consensus_builder: self.consensus_builder,
             _marker: self._marker,
-        }
-    }
-}
-
-impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
-where
-    Node: FullNodeTypes,
-    PoolB: PoolBuilder<Node>,
-{
-    /// Configures the network builder.
-    ///
-    /// This accepts a [`NetworkBuilder`] instance that will be used to create the node's network
-    /// stack.
-    pub fn network<NB>(
-        self,
-        network_builder: NB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB, ConsB>
-    where
-        NB: NetworkBuilder<Node, PoolB::Pool>,
-    {
-        let Self {
-            pool_builder,
-            payload_builder,
-            network_builder: _,
-            executor_builder: evm_builder,
-            consensus_builder,
-            _marker,
-        } = self;
-        ComponentsBuilder {
-            pool_builder,
-            payload_builder,
-            network_builder,
-            executor_builder: evm_builder,
-            consensus_builder,
-            _marker,
-        }
-    }
-
-    /// Configures the payload builder.
-    ///
-    /// This accepts a [`PayloadServiceBuilder`] instance that will be used to create the node's
-    /// payload builder service.
-    pub fn payload<PB>(
-        self,
-        payload_builder: PB,
-    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB>
-    where
-        ExecB: ExecutorBuilder<Node>,
-        PB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
-    {
-        let Self {
-            pool_builder,
-            payload_builder: _,
-            network_builder,
-            executor_builder: evm_builder,
-            consensus_builder,
-            _marker,
-        } = self;
-        ComponentsBuilder {
-            pool_builder,
-            payload_builder,
-            network_builder,
-            executor_builder: evm_builder,
-            consensus_builder,
-            _marker,
         }
     }
 
@@ -298,7 +229,72 @@ where
             network_builder,
             executor_builder,
             consensus_builder: _,
+            _marker,
+        } = self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            executor_builder,
+            consensus_builder,
+            _marker,
+        }
+    }
+}
 
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
+where
+    Node: FullNodeTypes,
+    ExecB: ExecutorBuilder<Node>,
+    PoolB: PoolBuilder<Node, ExecB::EVM>,
+{
+    /// Configures the network builder.
+    ///
+    /// This accepts a [`NetworkBuilder`] instance that will be used to create the node's network
+    /// stack.
+    pub fn network<NB>(
+        self,
+        network_builder: NB,
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB, ConsB>
+    where
+        NB: NetworkBuilder<Node, PoolB::Pool>,
+    {
+        let Self {
+            pool_builder,
+            payload_builder,
+            network_builder: _,
+            executor_builder,
+            consensus_builder,
+            _marker,
+        } = self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            executor_builder,
+            consensus_builder,
+            _marker,
+        }
+    }
+
+    /// Configures the payload builder.
+    ///
+    /// This accepts a [`PayloadServiceBuilder`] instance that will be used to create the node's
+    /// payload builder service.
+    pub fn payload<PB>(
+        self,
+        payload_builder: PB,
+    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB>
+    where
+        PB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
+    {
+        let Self {
+            pool_builder,
+            payload_builder: _,
+            network_builder,
+            executor_builder,
+            consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -358,7 +354,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder<Node, Pool: TransactionPool>,
+    PoolB: PoolBuilder<Node, ExecB::EVM, Pool: TransactionPool>,
     NetworkB: NetworkBuilder<
         Node,
         PoolB::Pool,
@@ -384,13 +380,13 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
 
-        let evm_config = evm_builder.build_evm(context).await?;
-        let pool = pool_builder.build_pool(context).await?;
+        let evm_config = executor_builder.build_evm(context).await?;
+        let pool = pool_builder.build_pool(context, evm_config.clone()).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder_handle = payload_builder
             .spawn_payload_builder_service(context, pool.clone(), evm_config.clone())
@@ -471,14 +467,19 @@ where
 #[derive(Debug, Clone)]
 pub struct NoopTransactionPoolBuilder<Tx = EthPooledTransaction>(PhantomData<Tx>);
 
-impl<N, Tx> PoolBuilder<N> for NoopTransactionPoolBuilder<Tx>
+impl<N, Tx, Evm> PoolBuilder<N, Evm> for NoopTransactionPoolBuilder<Tx>
 where
     N: FullNodeTypes,
     Tx: EthPoolTransaction<Consensus = TxTy<N::Types>> + Unpin,
+    Evm: Send,
 {
     type Pool = NoopTransactionPool<Tx>;
 
-    async fn build_pool(self, _ctx: &BuilderContext<N>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        _ctx: &BuilderContext<N>,
+        _evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         Ok(NoopTransactionPool::<Tx>::new())
     }
 }

@@ -29,13 +29,15 @@ pub(crate) struct BenchContext {
     pub(crate) next_block: u64,
     /// Whether the chain is an OP rollup.
     pub(crate) is_optimism: bool,
+    /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    pub(crate) use_reth_namespace: bool,
 }
 
 impl BenchContext {
     /// This is the initialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
     /// returning the providers needed to run a benchmark.
     pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
-        info!("Running benchmark using data from RPC URL: {}", rpc_url);
+        info!(target: "reth-bench", "Running benchmark using data from RPC URL: {}", rpc_url);
 
         // Ensure that output directory exists and is a directory
         if let Some(output) = &bench_args.output {
@@ -45,7 +47,7 @@ impl BenchContext {
             // Create the directory if it doesn't exist
             if !output.exists() {
                 std::fs::create_dir_all(output)?;
-                info!("Created output directory: {:?}", output);
+                info!(target: "reth-bench", "Created output directory: {:?}", output);
             }
         }
 
@@ -77,7 +79,7 @@ impl BenchContext {
         let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
 
         // construct the authed transport
-        info!("Connecting to Engine RPC at {} for replay", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {} for replay", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
@@ -140,6 +142,14 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        Ok(Self { auth_provider, block_provider, benchmark_mode, next_block, is_optimism })
+        let use_reth_namespace = bench_args.reth_new_payload;
+        Ok(Self {
+            auth_provider,
+            block_provider,
+            benchmark_mode,
+            next_block,
+            is_optimism,
+            use_reth_namespace,
+        })
     }
 }

@@ -13,13 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec = { workspace = true, optional = true }
+reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
+reth-libmdbx.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
 reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
@@ -38,6 +39,7 @@ reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
+reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
@@ -58,10 +60,11 @@ tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
+page_size.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
+reqwest.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]
@@ -73,7 +76,7 @@ reth-ethereum-consensus.workspace = true
 reth-evm-ethereum.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
-reth-downloaders.workspace = true
+reth-downloaders = { workspace = true, features = ["file-client"] }
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-storage-api.workspace = true
@@ -82,8 +85,11 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
 
+alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rlp.workspace = true
+reth-db-common.workspace = true
+reth-tracing.workspace = true
 
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
@@ -96,14 +102,13 @@ criterion = { workspace = true, features = ["async_tokio"] }
 
 [features]
 test-utils = [
-    "dep:reth-chainspec",
     "reth-network-p2p/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-stages-api/test-utils",
     "dep:reth-testing-utils",
     "dep:tempfile",
-    "reth-chainspec?/test-utils",
+    "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
     "reth-evm/test-utils",
     "reth-downloaders/test-utils",
@@ -117,8 +122,10 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
-rocksdb = ["reth-provider/rocksdb"]
+rocksdb = ["reth-provider/rocksdb", "reth-db-common/rocksdb"]
+edge = ["rocksdb"]
 
 [[bench]]
 name = "criterion"

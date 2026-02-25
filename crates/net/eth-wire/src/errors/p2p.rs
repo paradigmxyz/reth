@@ -68,7 +68,7 @@ pub enum P2PStreamError {
     SendBufferFull,
 
     /// Disconnected error.
-    #[error("disconnected")]
+    #[error("disconnected: {0}")]
     Disconnected(DisconnectReason),
 
     /// Unknown disconnect reason error.

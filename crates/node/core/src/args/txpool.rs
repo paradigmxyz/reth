@@ -507,7 +507,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
         PoolConfig {
             local_transactions_config: LocalTransactionConfig {
                 no_exemptions: self.no_locals,
-                local_addresses: self.locals.clone().into_iter().collect(),
+                local_addresses: self.locals.iter().copied().collect(),
                 propagate_local_transactions: !self.no_local_transactions_propagation,
             },
             pending_limit: SubPoolLimit {

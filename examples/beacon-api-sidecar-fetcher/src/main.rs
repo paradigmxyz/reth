@@ -42,7 +42,7 @@ fn main() {
 
             let pool = node.pool.clone();
 
-            node.task_executor.spawn(async move {
+            node.task_executor.spawn_task(async move {
                 let mut sidecar_stream = MinedSidecarStream {
                     events: notifications,
                     pool,

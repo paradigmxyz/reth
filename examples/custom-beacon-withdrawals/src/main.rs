@@ -11,8 +11,7 @@ use alloy_evm::{
     revm::context::Block as _,
     EthEvm, EthEvmFactory,
 };
-use alloy_sol_macro::sol;
-use alloy_sol_types::SolCall;
+use alloy_sol_types::{sol, SolCall};
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,

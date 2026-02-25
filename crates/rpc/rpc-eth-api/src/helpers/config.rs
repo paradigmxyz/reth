@@ -79,7 +79,7 @@ where
             blob_schedule: chain_spec
                 .blob_params_at_timestamp(timestamp)
                 // no blob support, so we set this to original cancun values as defined in eip-4844
-                .unwrap_or(BlobParams::cancun()),
+                .unwrap_or_else(BlobParams::cancun),
             chain_id: chain_spec.chain().id(),
             fork_id,
             precompiles,

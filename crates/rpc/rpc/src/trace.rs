@@ -353,6 +353,9 @@ where
             return Err(EthApiError::HeaderNotFound(start.into()).into());
         }
         let end = to_block.unwrap_or(latest_block);
+        if end > latest_block {
+            return Err(EthApiError::HeaderNotFound(end.into()).into());
+        }
 
         if start > end {
             return Err(EthApiError::InvalidParams(
@@ -364,9 +367,10 @@ where
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
         if distance > self.inner.eth_config.max_trace_filter_blocks {
-            return Err(EthApiError::InvalidParams(
-                "Block range too large; currently limited to 100 blocks".to_string(),
-            )
+            return Err(EthApiError::InvalidParams(format!(
+                "Block range too large; currently limited to {} blocks",
+                self.inner.eth_config.max_trace_filter_blocks
+            ))
             .into())
         }
 

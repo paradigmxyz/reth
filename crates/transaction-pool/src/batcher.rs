@@ -15,10 +15,10 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 
 /// A single batch transaction request
-/// All transactions processed through the batcher are considered local
-/// transactions (`TransactionOrigin::Local`) when inserted into the pool.
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
+    /// Origin of the transaction (e.g. Local, External)
+    origin: TransactionOrigin,
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Channel to send result back to caller
@@ -31,10 +31,11 @@ where
 {
     /// Create a new batch transaction request
     pub const fn new(
+        origin: TransactionOrigin,
         pool_tx: T,
         response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
     ) -> Self {
-        Self { pool_tx, response_tx }
+        Self { origin, pool_tx, response_tx }
     }
 }
 
@@ -66,24 +67,24 @@ where
     }
 
     async fn process_request(pool: &Pool, req: BatchTxRequest<Pool::Transaction>) {
-        let BatchTxRequest { pool_tx, response_tx } = req;
-        let pool_result = pool.add_transaction(TransactionOrigin::Local, pool_tx).await;
+        let BatchTxRequest { origin, pool_tx, response_tx } = req;
+        let pool_result = pool.add_transaction(origin, pool_tx).await;
         let _ = response_tx.send(pool_result);
     }
 
-    /// Process a batch of transaction requests, grouped by origin
-    async fn process_batch(pool: &Pool, mut batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+    /// Process a batch of transaction requests with per-transaction origins
+    async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
-            Self::process_request(pool, batch.remove(0)).await;
+            Self::process_request(pool, batch.into_iter().next().expect("batch is not empty"))
+                .await;
             return
         }
 
-        let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =
-            batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
+        let (transactions, response_txs): (Vec<_>, Vec<_>) =
+            batch.into_iter().map(|req| ((req.origin, req.pool_tx), req.response_tx)).unzip();
 
-        let pool_results = pool.add_transactions(TransactionOrigin::Local, pool_transactions).await;
-
-        for (response_tx, pool_result) in response_tx.into_iter().zip(pool_results) {
+        let pool_results = pool.add_transactions_with_origins(transactions).await;
+        for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
             let _ = response_tx.send(pool_result);
         }
     }
@@ -138,7 +139,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            batch_requests.push(BatchTxRequest::new(tx, response_tx));
+            batch_requests.push(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx));
             responses.push(response_rx);
         }
 
@@ -167,7 +168,9 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("Could not send batch tx");
             responses.push(response_rx);
         }
 
@@ -197,7 +200,7 @@ mod tests {
         for i in 0..10 {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-            let request = BatchTxRequest::new(tx, response_tx);
+            let request = BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx);
             request_tx.send(request).expect("Could not send batch tx");
             results.push(response_rx);
         }
@@ -225,7 +228,7 @@ mod tests {
         for i in 0..max_batch_size {
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-            let request = BatchTxRequest::new(tx, response_tx);
+            let request = BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx);
             let request_tx_clone = request_tx.clone();
 
             let tx_fut = async move {

@@ -2,6 +2,7 @@ use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
 use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
+use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -36,11 +37,11 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
 
@@ -62,7 +63,7 @@ where
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
         evm_config: E,
         config: ValidationApiConfig,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         payload_validator: Arc<
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
@@ -510,12 +511,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -528,12 +529,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -546,12 +547,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v5(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -568,7 +569,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// Block executor factory.
     evm_config: E,
     /// Set of disallowed addresses
-    disallow: HashSet<Address>,
+    disallow: AddressSet,
     /// The maximum block distance - parent to latest - allowed for validation
     validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
@@ -577,7 +578,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
 }
@@ -586,7 +587,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
 ///
 /// This function sorts addresses to ensure deterministic output regardless of
 /// insertion order, then computes a SHA256 hash of the concatenated addresses.
-fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
+fn hash_disallow_list(disallow: &AddressSet) -> String {
     let mut sorted: Vec<_> = disallow.iter().collect();
     sorted.sort(); // sort for deterministic hashing
 
@@ -608,7 +609,7 @@ impl<Provider, E: ConfigureEvm, T: PayloadTypes> fmt::Debug for ValidationApiInn
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValidationApiConfig {
     /// Disallowed addresses.
-    pub disallow: HashSet<Address>,
+    pub disallow: AddressSet,
     /// The maximum block distance - parent to latest - allowed for validation
     pub validation_window: u64,
 }
@@ -700,13 +701,12 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::hash_disallow_list;
+    use super::{hash_disallow_list, AddressSet};
     use revm_primitives::Address;
-    use std::collections::HashSet;
 
     #[test]
     fn test_hash_disallow_list_deterministic() {
-        let mut addresses = HashSet::new();
+        let mut addresses = AddressSet::default();
         addresses.insert(Address::from([1u8; 20]));
         addresses.insert(Address::from([2u8; 20]));
 
@@ -718,10 +718,10 @@ mod tests {
 
     #[test]
     fn test_hash_disallow_list_different_content() {
-        let mut addresses1 = HashSet::new();
+        let mut addresses1 = AddressSet::default();
         addresses1.insert(Address::from([1u8; 20]));
 
-        let mut addresses2 = HashSet::new();
+        let mut addresses2 = AddressSet::default();
         addresses2.insert(Address::from([2u8; 20]));
 
         let hash1 = hash_disallow_list(&addresses1);
@@ -732,11 +732,11 @@ mod tests {
 
     #[test]
     fn test_hash_disallow_list_order_independent() {
-        let mut addresses1 = HashSet::new();
+        let mut addresses1 = AddressSet::default();
         addresses1.insert(Address::from([1u8; 20]));
         addresses1.insert(Address::from([2u8; 20]));
 
-        let mut addresses2 = HashSet::new();
+        let mut addresses2 = AddressSet::default();
         addresses2.insert(Address::from([2u8; 20])); // Different insertion order
         addresses2.insert(Address::from([1u8; 20]));
 
@@ -751,7 +751,7 @@ mod tests {
     fn test_disallow_list_hash_rbuilder_parity() {
         let json = r#"["0x05E0b5B40B7b66098C2161A5EE11C5740A3A7C45","0x01e2919679362dFBC9ee1644Ba9C6da6D6245BB1","0x03893a7c7463AE47D46bc7f091665f1893656003","0x04DBA1194ee10112fE6C3207C0687DEf0e78baCf"]"#;
         let blocklist: Vec<Address> = serde_json::from_str(json).unwrap();
-        let blocklist: HashSet<Address> = blocklist.into_iter().collect();
+        let blocklist: AddressSet = blocklist.into_iter().collect();
         let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
         let hash = hash_disallow_list(&blocklist);
         assert_eq!(expected_hash, hash);

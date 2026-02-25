@@ -4,3 +4,17 @@ updates:
   directory: "/"
   schedule:
     interval: "weekly"
+- package-ecosystem: "cargo"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+  labels:
+    - "A-dependencies"
+  commit-message:
+    prefix: "chore(deps)"
+  open-pull-requests-limit: 1
+  groups:
+    cargo-weekly:
+      applies-to: "version-updates"
+      patterns: ["*"]
+      update-types: ["minor", "patch"]

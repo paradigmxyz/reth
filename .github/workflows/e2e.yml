@@ -20,7 +20,7 @@ concurrency:
 jobs:
   test:
     name: e2e-testsuite
-    runs-on: depot-ubuntu-latest-4
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 90
@@ -35,12 +35,34 @@ jobs:
       - name: Run e2e tests
         run: |
           cargo nextest run \
+            --no-fail-fast \
             --locked --features "asm-keccak" \
             --workspace \
             --exclude 'example-*' \
             --exclude 'exex-subscription' \
             --exclude 'reth-bench' \
             --exclude 'ef-tests' \
-            --exclude 'op-reth' \
             --exclude 'reth' \
             -E 'binary(e2e_testsuite)'
+
+  rocksdb:
+    name: e2e-rocksdb
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Run RocksDB e2e tests
+        run: |
+          cargo nextest run \
+            --no-fail-fast \
+            --locked --features "edge" \
+            -p reth-e2e-test-utils \
+            -E 'binary(rocksdb)'

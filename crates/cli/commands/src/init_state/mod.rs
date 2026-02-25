@@ -65,7 +65,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateCommand<C> {
     /// Execute the `init` command
-    pub async fn execute<N>(self) -> eyre::Result<()>
+    pub async fn execute<N>(self, runtime: reth_tasks::Runtime) -> eyre::Result<()>
     where
         N: CliNodeTypes<
             ChainSpec = C::ChainSpec,
@@ -74,7 +74,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } =
+            self.env.init::<N>(AccessRights::RW, runtime)?;
 
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.database_provider_rw()?;

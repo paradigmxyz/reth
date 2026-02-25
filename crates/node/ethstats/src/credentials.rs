@@ -13,15 +13,23 @@ pub(crate) struct EthstatsCredentials {
     pub secret: String,
     /// Host address of the `EthStats` server
     pub host: String,
+    /// Whether to use secure `WebSocket` (`WSS`) connection
+    pub use_tls: bool,
 }
 
 impl FromStr for EthstatsCredentials {
     type Err = EthStatsError;
 
-    /// Parse credentials from a string in the format "`node_id:secret@host`"
+    /// Parse credentials from a string in the format "`node_id:secret@host`" or
+    /// "`node_id:secret@wss://host`"
+    ///
+    /// Supports the following formats:
+    /// - `node_id:secret@host` - Uses plain `WebSocket` (`ws://`)
+    /// - `node_id:secret@ws://host` - Explicitly use plain `WebSocket`
+    /// - `node_id:secret@wss://host` - Use secure `WebSocket` (`WSS`)
     ///
     /// # Arguments
-    /// * `s` - String containing credentials in the format "`node_id:secret@host`"
+    /// * `s` - String containing credentials
     ///
     /// # Returns
     /// * `Ok(EthstatsCredentials)` - Successfully parsed credentials
@@ -32,7 +40,7 @@ impl FromStr for EthstatsCredentials {
             return Err(EthStatsError::InvalidUrl("Missing '@' separator".to_string()));
         }
         let creds = parts[0];
-        let host = parts[1].to_string();
+        let mut host = parts[1].to_string();
         let creds_parts: Vec<&str> = creds.split(':').collect();
         if creds_parts.len() != 2 {
             return Err(EthStatsError::InvalidUrl(
@@ -42,6 +50,16 @@ impl FromStr for EthstatsCredentials {
         let node_id = creds_parts[0].to_string();
         let secret = creds_parts[1].to_string();
 
-        Ok(Self { node_id, secret, host })
+        // Detect and strip protocol prefix if present
+        let mut use_tls = false;
+        if let Some(stripped) = host.strip_prefix("wss://") {
+            use_tls = true;
+            host = stripped.to_string();
+        } else if let Some(stripped) = host.strip_prefix("ws://") {
+            use_tls = false;
+            host = stripped.to_string();
+        }
+
+        Ok(Self { node_id, secret, host, use_tls })
     }
 }

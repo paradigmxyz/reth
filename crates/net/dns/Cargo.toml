@@ -30,12 +30,12 @@ tokio-stream.workspace = true
 hickory-resolver = { workspace = true, features = ["tokio"] }
 
 # misc
+dashmap = { workspace = true, features = ["inline"] }
 data-encoding.workspace = true
 linked_hash_set.workspace = true
 schnellru.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-parking_lot.workspace = true
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
@@ -56,9 +56,9 @@ serde = [
     "alloy-primitives/serde",
     "enr/serde",
     "linked_hash_set/serde",
-    "parking_lot/serde",
     "rand/serde",
     "secp256k1/serde",
     "hickory-resolver/serde",
     "reth-ethereum-forks/serde",
+    "dashmap/serde",
 ]

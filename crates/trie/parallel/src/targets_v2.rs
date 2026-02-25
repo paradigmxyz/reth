@@ -18,6 +18,17 @@ impl MultiProofTargetsV2 {
     pub fn is_empty(&self) -> bool {
         self.account_targets.is_empty() && self.storage_targets.is_empty()
     }
+
+    /// Returns the number of items that will be considered during chunking.
+    pub fn chunking_length(&self) -> usize {
+        self.account_targets.len() +
+            self.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
+    }
+
+    /// Returns an iterator that yields chunks of the specified size.
+    pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
+        ChunkedMultiProofTargetsV2::new(self, chunk_size)
+    }
 }
 
 /// An iterator that yields chunks of V2 proof targets of at most `size` account and storage

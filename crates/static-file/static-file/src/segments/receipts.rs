@@ -30,6 +30,10 @@ where
         let mut static_file_writer =
             provider.get_static_file_writer(*block_range.start(), StaticFileSegment::Receipts)?;
 
+        let mut receipts_cursor = provider
+            .tx_ref()
+            .cursor_read::<tables::Receipts<<Provider::Primitives as NodePrimitives>::Receipt>>()?;
+
         for block in block_range {
             static_file_writer.increment_block(block)?;
 
@@ -37,10 +41,6 @@ where
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
-            let mut receipts_cursor = provider
-                .tx_ref()
-                .cursor_read::<tables::Receipts<<Provider::Primitives as NodePrimitives>::Receipt>>(
-                )?;
             let receipts_walker = receipts_cursor.walk_range(block_body_indices.tx_num_range())?;
 
             static_file_writer.append_receipts(

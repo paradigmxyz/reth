@@ -227,8 +227,9 @@ where
 
         // Handle errors
         if let Err(err) = res {
-            error!("{:?}", err)
+            error!("{err}");
         }
+
         Ok(())
     }
 }
@@ -241,6 +242,7 @@ fn event_loop<B: Backend, F, T: Table>(
 ) -> io::Result<()>
 where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    io::Error: From<B::Error>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;

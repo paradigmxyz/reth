@@ -8,8 +8,11 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives_traits::{Block, SealedBlock};
-use reth_tasks::TaskSpawner;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
+use reth_primitives_traits::{HeaderTy, SealedBlock};
+use reth_storage_api::BlockReaderIdExt;
+use reth_tasks::Runtime;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
     sync,
@@ -116,8 +119,16 @@ impl<V> Clone for TransactionValidationTaskExecutor<V> {
 
 impl TransactionValidationTaskExecutor<()> {
     /// Convenience method to create a [`EthTransactionValidatorBuilder`]
-    pub fn eth_builder<Client>(client: Client) -> EthTransactionValidatorBuilder<Client> {
-        EthTransactionValidatorBuilder::new(client)
+    pub fn eth_builder<Client, Evm>(
+        client: Client,
+        evm_config: Evm,
+    ) -> EthTransactionValidatorBuilder<Client, Evm>
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
+    {
+        EthTransactionValidatorBuilder::new(client, evm_config)
     }
 }
 
@@ -139,16 +150,18 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
-impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
+impl<Client, Tx, Evm> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>> {
     /// Creates a new instance for the given client
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
     /// See [`TransactionValidationTaskExecutor::eth_with_additional_tasks`]
-    pub fn eth<T, S: BlobStore>(client: Client, blob_store: S, tasks: T) -> Self
+    pub fn eth<S: BlobStore>(client: Client, evm_config: Evm, blob_store: S, tasks: Runtime) -> Self
     where
-        T: TaskSpawner,
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
     {
-        Self::eth_with_additional_tasks(client, blob_store, tasks, 0)
+        Self::eth_with_additional_tasks(client, evm_config, blob_store, tasks, 0)
     }
 
     /// Creates a new instance for the given client
@@ -160,18 +173,21 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     ///
     /// This will always spawn a validation task that performs the actual validation. It will spawn
     /// `num_additional_tasks` additional tasks.
-    pub fn eth_with_additional_tasks<T, S: BlobStore>(
+    pub fn eth_with_additional_tasks<S: BlobStore>(
         client: Client,
+        evm_config: Evm,
         blob_store: S,
-        tasks: T,
+        tasks: Runtime,
         num_additional_tasks: usize,
     ) -> Self
     where
-        T: TaskSpawner,
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
     {
-        EthTransactionValidatorBuilder::new(client)
+        EthTransactionValidatorBuilder::new(client, evm_config)
             .with_additional_tasks(num_additional_tasks)
-            .build_with_tasks::<Tx, T, S>(tasks, blob_store)
+            .build_with_tasks(tasks, blob_store)
     }
 }
 
@@ -197,6 +213,7 @@ where
     V: TransactionValidator + 'static,
 {
     type Transaction = <V as TransactionValidator>::Transaction;
+    type Block = V::Block;
 
     async fn validate_transaction(
         &self,
@@ -235,8 +252,10 @@ where
 
     async fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
         let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
         let (tx, rx) = oneshot::channel();
         {
@@ -276,18 +295,7 @@ where
         }
     }
 
-    async fn validate_transactions_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
-    }
-
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
     }
 }
@@ -307,6 +315,7 @@ mod tests {
 
     impl TransactionValidator for NoopValidator {
         type Transaction = MockTransaction;
+        type Block = reth_ethereum_primitives::Block;
 
         async fn validate_transaction(
             &self,

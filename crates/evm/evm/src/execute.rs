@@ -75,9 +75,11 @@ pub trait Executor<DB: Database>: Sized {
     where
         I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     {
-        let mut results = Vec::new();
+        let blocks_iter = blocks.into_iter();
+        let capacity = blocks_iter.size_hint().0;
+        let mut results = Vec::with_capacity(capacity);
         let mut first_block = None;
-        for block in blocks {
+        for block in blocks_iter {
             if first_block.is_none() {
                 first_block = Some(block.header().number());
             }

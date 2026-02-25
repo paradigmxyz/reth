@@ -38,7 +38,6 @@ reth-ethereum-primitives.workspace = true
 reth-cli-commands.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
-reth-primitives.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
 
@@ -72,3 +71,12 @@ derive_more.workspace = true
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+
+[[test]]
+name = "rocksdb"
+path = "tests/rocksdb/main.rs"
+required-features = ["rocksdb"]
+
+[features]
+rocksdb = ["reth-node-core/rocksdb", "reth-provider/rocksdb", "reth-cli-commands/rocksdb"]
+edge = ["rocksdb"]

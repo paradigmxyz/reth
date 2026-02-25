@@ -22,7 +22,6 @@ Generally, reth is composed of a few components, with supporting crates. The mai
     - [Utilities Crates](#utilities-crates)
   - [Payloads](#payloads)
   - [Primitives](#primitives)
-  - [Optimism](#optimism)
   - [Ethereum](#ethereum-specific-crates)
   - [Misc](#misc)
 
@@ -177,10 +176,6 @@ These crates define primitive types or algorithms.
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
 - [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
-
-### Optimism
-
-Crates related to the Optimism rollup live in [optimism](../../crates/optimism/).
 
 ### Ethereum-Specific Crates
 
