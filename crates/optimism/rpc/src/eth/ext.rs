@@ -24,6 +24,7 @@ const MAX_CONCURRENT_CONDITIONAL_VALIDATIONS: usize = 3;
 /// OP-Reth `Eth` API extensions implementation.
 ///
 /// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
+/// Mantle methods are in [`super::mantle_ext::MantleEthApiExt`].
 #[derive(Clone, Debug)]
 pub struct OpEthExtApi<Pool, Provider> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -107,8 +108,8 @@ where
 #[async_trait::async_trait]
 impl<Pool, Provider> L2EthApiExtServer for OpEthExtApi<Pool, Provider>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + Clone + 'static,
-    Pool: TransactionPool<Transaction: MaybeConditionalTransaction> + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + Clone + Send + Sync + 'static,
+    Pool: TransactionPool<Transaction: MaybeConditionalTransaction> + Send + Sync + 'static,
 {
     async fn send_raw_transaction_conditional(
         &self,

@@ -326,7 +326,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: OpPayloadBuilderCtx<Evm, ChainSpec, Attrs>,
-        provider: impl DBProvider,
+        _provider: impl DBProvider,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         Evm: ConfigureEvm<
@@ -387,16 +387,23 @@ impl<Txs> OpBuilder<'_, Txs> {
             Vec::new(),
         );
 
-        // use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
-        // if block.number() == 108 || block.number() == 109 {
-        //     export_full_state_with_bundle(
-        //         &provider,
-        //         &execution_outcome.bundle,
-        //         &format!("full_state_{}.json", block.number()),
-        //         Some(block.state_root()),
-        //         true,
-        //     ).map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-        // }
+        #[cfg(feature = "state-export")]
+        {
+            let block_number = block.number();
+            if block_number == 108 || block_number == 109 {
+                use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
+                use std::io;
+                let filename = format!("full_state_{}.json", block_number);
+                export_full_state_with_bundle(
+                    &_provider,
+                    &execution_outcome.bundle,
+                    &filename,
+                    Some(block.state_root()),
+                    true,
+                )
+                .map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+            }
+        }
 
         // create the executed block data
         let executed: ExecutedBlock<N> = ExecutedBlock {

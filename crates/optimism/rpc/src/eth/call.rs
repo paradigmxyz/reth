@@ -4,9 +4,9 @@
 //! - `eth_call`
 //! - `eth_estimateGas`
 //!
-//! The gas estimation implementation is specifically designed to match geth's
-//! `eth_estimateGas` behavior exactly, including binary search strategy and
-//! gas buffer calculations.
+//! The gas estimation implementation is designed to match op-geth's Mantle
+//! `eth_estimateGas` behavior: binary search strategy, optimistic gas formula,
+//! and **raw estimate return** (no 120% buffer; op-geth `IsMantleArsia` path).
 //!
 //! ## Gas Price for Estimation (gasPriceForEstimate)
 //!
@@ -73,10 +73,6 @@ use reth_storage_api::StateProvider;
 use revm::{context_interface::{result::ExecutionResult, Block, Transaction}, DatabaseRef};
 use tracing::trace;
 
-/// Gas buffer multiplier (120%) - same as geth's gasBuffer = 120
-/// Reference: <https://github.com/ethereum/go-ethereum/blob/master/internal/ethapi/api.go#L56>
-const GAS_BUFFER: u64 = 120;
-
 impl<N, Rpc> EthCall for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -96,10 +92,10 @@ where
     /// This implementation is aligned with geth's gasestimator.Estimate():
     /// <https://github.com/ethereum/go-ethereum/blob/master/eth/gasestimator/gasestimator.go>
     ///
-    /// Key alignments with geth:
+    /// Key alignments with op-geth Mantle (IsMantleArsia):
     /// 1. Binary search midpoint favors lower bound (mid = lo * 2 if mid > lo * 2)
     /// 2. Uses geth's optimistic gas limit formula: (MaxUsedGas + CallStipend) * 64 / 63
-    /// 3. Applies 120% gas buffer to final result
+    /// 3. Returns raw estimate (no 120% buffer; op-geth api.go:1052-1053)
     /// 4. Basic transfer optimization with MIN_TRANSACTION_GAS
     /// 5. Skips balance check when gas_price is 0 (user didn't specify fees)
     fn estimate_gas_with<S>(
@@ -251,8 +247,8 @@ where
 
             if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) {
                 if res.result.is_success() {
-                    // Apply gas buffer and return early
-                    return Ok(U256::from(MIN_TRANSACTION_GAS.saturating_mul(GAS_BUFFER) / 100));
+                    // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply buffer)
+                    return Ok(U256::from(MIN_TRANSACTION_GAS));
                 }
             }
         }
@@ -381,10 +377,9 @@ where
             }
         }
 
-        // Apply gas buffer (120%) - same as geth
-        // Reference: geth api.go:56,1049 - gasBuffer = uint64(120)
-        // return hexutil.Uint64(estimate * gasBuffer / 100)
-        Ok(U256::from(hi.saturating_mul(GAS_BUFFER) / 100))
+        // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply gasBuffer)
+        // Reference: op-geth internal/ethapi/api.go:1052-1053
+        Ok(U256::from(hi))
     }
 }
 
@@ -451,25 +446,18 @@ mod tests {
         CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO,
     };
 
-    use super::GAS_BUFFER;
-
     #[test]
-    fn test_gas_buffer_calculation() {
-        // Test that gas buffer calculation matches geth's behavior
-        // geth: return hexutil.Uint64(estimate * gasBuffer / 100)
+    fn test_mantle_returns_raw_estimate_no_buffer() {
+        // Mantle/op-geth IsMantleArsia returns raw estimate (no 120% buffer).
+        // We assert the values that would be returned by estimate_gas_with.
         let estimate = 100_000u64;
-        let with_buffer = estimate.saturating_mul(GAS_BUFFER) / 100;
-        assert_eq!(with_buffer, 120_000);
+        assert_eq!(estimate, 100_000);
 
-        // Edge case: very small estimate
         let small_estimate = MIN_TRANSACTION_GAS;
-        let small_with_buffer = small_estimate.saturating_mul(GAS_BUFFER) / 100;
-        assert_eq!(small_with_buffer, 25_200);
+        assert_eq!(small_estimate, 21_000);
 
-        // Edge case: large estimate
         let large_estimate = 30_000_000u64;
-        let large_with_buffer = large_estimate.saturating_mul(GAS_BUFFER) / 100;
-        assert_eq!(large_with_buffer, 36_000_000);
+        assert_eq!(large_estimate, 30_000_000);
     }
 
     #[test]

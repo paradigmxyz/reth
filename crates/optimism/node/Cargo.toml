@@ -31,6 +31,8 @@ reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-engine-local = { workspace = true, features = ["op"] }
 reth-rpc-api.workspace = true
+reth-rpc-eth-api = { workspace = true, features = ["op"] }
+reth-rpc-convert = { workspace = true, features = ["op"] }
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
@@ -94,6 +96,8 @@ op-alloy-network.workspace = true
 
 [features]
 default = ["reth-codec"]
+# Debug: export full state on state root mismatch (dev/troubleshooting only)
+state-export = ["reth-node-builder/state-export"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-optimism-node/asm-keccak",

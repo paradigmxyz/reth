@@ -312,6 +312,17 @@ pub trait RethL1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
 
+    /// Like [`RethL1BlockInfo::l1_tx_data_fee`] but for RPC estimate: no cache, and adds
+    /// `fastlz_delta` to compressed size (e.g. 80 to align with geth).
+    fn l1_tx_data_fee_for_estimate(
+        &self,
+        chain_spec: impl MantleHardforks,
+        timestamp: u64,
+        input: &[u8],
+        is_deposit: bool,
+        fastlz_delta: u64,
+    ) -> Result<U256, BlockExecutionError>;
+
     /// Computes the data gas cost for an L2 transaction.
     ///
     /// ### Takes
@@ -340,6 +351,21 @@ impl RethL1BlockInfo for L1BlockInfo {
 
         let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
         Ok(self.calculate_tx_l1_cost(input, spec_id))
+    }
+
+    fn l1_tx_data_fee_for_estimate(
+        &self,
+        chain_spec: impl MantleHardforks,
+        timestamp: u64,
+        input: &[u8],
+        is_deposit: bool,
+        fastlz_delta: u64,
+    ) -> Result<U256, BlockExecutionError> {
+        if is_deposit {
+            return Ok(U256::ZERO);
+        }
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
+        Ok(self.calculate_tx_l1_cost_for_estimate(input, spec_id, fastlz_delta))
     }
 
     fn l1_data_gas(

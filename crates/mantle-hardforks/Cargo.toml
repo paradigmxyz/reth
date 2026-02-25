@@ -19,29 +19,41 @@ workspace = true
 alloy-chains = { workspace = true }
 alloy-hardforks = { workspace = true }
 alloy-op-evm = { workspace = true }
-alloy-primitives = { workspace = true }
+alloy-primitives = { workspace = true, optional = true }
 
 # Reth dependencies
-# reth-chainspec = { workspace = true }
-# reth-ethereum-forks = { workspace = true }
 reth-optimism-forks = { workspace = true }
-reth-db = { workspace = true }
-reth-db-api = { workspace = true }
-reth-provider = { workspace = true }
-reth-trie = { workspace = true }
-reth-trie-db = { workspace = true }
-reth-primitives-traits = { workspace = true }
+reth-db = { workspace = true, optional = true }
+reth-db-api = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
+reth-trie = { workspace = true, optional = true }
+reth-trie-db = { workspace = true, optional = true }
+reth-primitives-traits = { workspace = true, optional = true }
 
 op-revm = { workspace = true }
-revm = { workspace = true }
+revm = { workspace = true, optional = true }
 auto_impl.workspace = true
-serde = { workspace = true }
-eyre = { workspace = true }
-tracing = { workspace = true }
+serde = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = ["std", "serde"]
 std = []
 serde = [
-	"alloy-hardforks/serde"
+	"alloy-hardforks/serde",
+	"dep:serde",
+]
+# Debug: export full state on state root mismatch (dev/troubleshooting only, not for production)
+state-export = [
+	"dep:alloy-primitives",
+	"dep:eyre",
+	"dep:reth-db",
+	"dep:reth-db-api",
+	"dep:reth-provider",
+	"dep:reth-primitives-traits",
+	"dep:reth-trie",
+	"dep:reth-trie-db",
+	"dep:revm",
+	"dep:tracing",
 ]

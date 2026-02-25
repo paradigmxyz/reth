@@ -505,22 +505,23 @@ where
 
         // ensure state root matches
         if state_root != block.header().state_root() {
-            // ===== Mantle Hardfork: Export full state on mismatch for debugging =====
-            warn!(target: "engine::tree::payload_validator", 
-                  "State root mismatch detected, exporting full state for debugging");
-            
-            if let Err(e) = self.export_state_on_mismatch(
-                &block,
-                state_root,
-                block.header().state_root(),
-                &hashed_state,
-                &output,
-            ) {
+            #[cfg(feature = "state-export")]
+            {
                 warn!(target: "engine::tree::payload_validator", 
-                      error = ?e, "Failed to export state on mismatch");
+                      "State root mismatch detected, exporting full state for debugging");
+
+                if let Err(e) = self.export_state_on_mismatch(
+                    &block,
+                    state_root,
+                    block.header().state_root(),
+                    &hashed_state,
+                    &output,
+                ) {
+                    warn!(target: "engine::tree::payload_validator", 
+                          error = ?e, "Failed to export state on mismatch");
+                }
             }
-            // ===== Mantle Hardfork: End of addition =====
-            
+
             // call post-block hook
             self.on_invalid_block(
                 &parent_block,
@@ -884,38 +885,40 @@ where
         strategy
     }
 
-    /// Export full state (parent state + current changes) on state root mismatch for debugging
+    /// Export full state (parent state + current changes) on state root mismatch for debugging.
+    /// Only compiled when the `state-export` feature is enabled.
+    #[cfg(feature = "state-export")]
     fn export_state_on_mismatch(
         &self,
         block: &RecoveredBlock<N::Block>,
         computed_root: B256,
-        expected_root: B256,
+        _expected_root: B256,
         _hashed_state: &HashedPostState,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> eyre::Result<()> {
         use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
-        
+
         let block_number = block.number();
         let filename = format!("full_state_{}.json", block_number);
-        
+
         info!(target: "engine::tree::payload_validator", 
               block_number = block_number,
               computed_root = ?computed_root,
-              expected_root = ?expected_root,
+              expected_root = ?block.header().state_root(),
               filename = %filename,
               "Exporting state (parent + changes) with original keys from bundle_state, only bundle account storage exported");
-        
+
         // Get database provider
         let provider = self.provider.database_provider_ro()?;
-        
+
         // Call export function (using bundle_state), pass computed state root
         // Only export storage details for accounts in bundle_state to avoid OOM
         export_full_state_with_bundle(&provider, &output.state, &filename, Some(computed_root), true)?;
-        
+
         info!(target: "engine::tree::payload_validator", 
               filename = %filename,
               "State exported successfully with original storage keys from bundle_state");
-        
+
         Ok(())
     }
 

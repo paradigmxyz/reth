@@ -446,10 +446,13 @@ where
             "Computed state root does not match state root in state dump"
         );
 
-        // Export computed state for debugging purposes
-        info!(target: "reth::cli", "Exporting computed state for debugging...");
-        if let Err(e) = export_state_on_mismatch(provider_rw, "computed_state_mismatch.json", Some(computed_state_root)) {
-            tracing::warn!(target: "reth::cli", error = ?e, "Failed to export computed state for debugging");
+        #[cfg(feature = "state-export")]
+        {
+            // Export computed state for debugging purposes
+            info!(target: "reth::cli", "Exporting computed state for debugging...");
+            if let Err(e) = export_state_on_mismatch(provider_rw, "computed_state_mismatch.json", Some(computed_state_root)) {
+                tracing::warn!(target: "reth::cli", error = ?e, "Failed to export computed state for debugging");
+            }
         }
 
         return Err(InitStorageError::StateRootMismatch(GotExpected {
@@ -674,6 +677,9 @@ struct GenesisAccountWithAddress {
 ///
 /// In the init stage, all state has been written to the database, so `bundle_state` is empty.
 /// We pass `false` to export all account storage details from the database.
+///
+/// Only compiled when the `state-export` feature is enabled.
+#[cfg(feature = "state-export")]
 fn export_state_on_mismatch<Provider>(
     provider: &Provider,
     filename: &str,
@@ -689,7 +695,7 @@ where
 
     // In init stage, all state is in the database, bundle_state is empty
     let empty_bundle = BundleState::default();
-    
+
     // Export with false to include all account storage (init scenario)
     export_full_state_with_bundle(provider, &empty_bundle, filename, state_root, false)?;
 

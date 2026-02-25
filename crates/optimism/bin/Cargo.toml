@@ -28,6 +28,8 @@ workspace = true
 
 [features]
 default = ["jemalloc", "otlp", "reth-optimism-evm/portable", "js-tracer"]
+# Debug: export full state on state root mismatch (dev/troubleshooting only)
+state-export = ["reth-optimism-cli/state-export", "reth-optimism-node/state-export"]
 
 otlp = ["reth-optimism-cli/otlp"]
 

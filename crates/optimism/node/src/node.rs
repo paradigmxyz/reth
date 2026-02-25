@@ -500,7 +500,7 @@ impl<N, EthB, PVB, EB, EVB, Attrs, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: OpHardforks,
+            ChainSpec: OpHardforks + MantleHardforks,
             Primitives: OpPayloadPrimitives,
             Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
         >,
@@ -514,6 +514,8 @@ where
         Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
     EthB: EthApiBuilder<N>,
+    reth_rpc_eth_api::RpcTxReq<<EthB::EthApi as reth_rpc_eth_api::EthApiTypes>::NetworkTypes>:
+        reth_rpc_convert::TryIntoSimTx<op_alloy_consensus::OpTxEnvelope> + Clone,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -578,14 +580,7 @@ where
             None
         };
 
-        let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
-            sequencer_client.clone(),
-            ctx.node.pool().clone(),
-            ctx.node.provider().clone(),
-        );
-
-        // We need to create mantle_ext inside the closure since it requires access to registry.eth_api()
-        // Here we just define a placeholder; it will be actually created inside the closure.
+        let pool = ctx.node.pool().clone();
         let provider = ctx.node.provider().clone();
 
         rpc_add_ons
@@ -614,22 +609,26 @@ where
                     auth_module.merge_auth_methods(registry.debug_api().into_rpc())?;
                 }
 
-                if enable_tx_conditional {
-                    // extend the eth namespace if configured in the regular http server
-                    modules.merge_if_module_configured(
-                        RethRpcModule::Eth,
-                        tx_conditional_ext.into_rpc(),
-                    )?;
-                }
-
-                // extend the eth namespace with mantle methods
-                info!(target: "reth::cli", "Installing Mantle RPC extension endpoints");
+                // Mantle extension (getBlockRange, sendRawTransactionWithPreconf) always installed
                 let mantle_ext = MantleEthApiExt::new(
                     provider.clone(),
                     Arc::new(registry.eth_api().clone()),
-                    sequencer_client,
+                    sequencer_client.clone(),
                 );
-                modules.merge_if_module_configured(RethRpcModule::Eth, mantle_ext.into_rpc())?;
+                let mut mantle_ext_module = MantleEthApiExtServer::into_rpc(mantle_ext);
+                if enable_tx_conditional {
+                    let op_eth_ext =
+                        OpEthExtApi::new(sequencer_client.clone(), pool.clone(), provider.clone());
+                    mantle_ext_module
+                        .merge(L2EthApiExtServer::into_rpc(op_eth_ext))
+                        .expect("L2 and Mantle eth ext methods do not conflict");
+                }
+                info!(
+                    target: "reth::cli",
+                    "Installing Mantle RPC extension{}",
+                    if enable_tx_conditional { " + L2 conditional tx" } else { "" }
+                );
+                modules.merge_if_module_configured(RethRpcModule::Eth, mantle_ext_module)?;
 
                 Ok(())
             })
@@ -642,7 +641,7 @@ impl<N, EthB, PVB, EB, EVB, Attrs, RpcMiddleware> RethRpcAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: OpHardforks,
+            ChainSpec: OpHardforks + MantleHardforks,
             Primitives: OpPayloadPrimitives,
             Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
         >,
@@ -656,6 +655,8 @@ where
     >,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EthB: EthApiBuilder<N>,
+    reth_rpc_eth_api::RpcTxReq<<EthB::EthApi as reth_rpc_eth_api::EthApiTypes>::NetworkTypes>:
+        reth_rpc_convert::TryIntoSimTx<op_alloy_consensus::OpTxEnvelope> + Clone,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

@@ -22,6 +22,8 @@ pub mod debug;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(feature = "serde")]
+use serde as _;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{hardfork, EthereumHardfork};
 pub use alloy_hardforks::{EthereumHardforks, ForkCondition};
@@ -86,14 +88,14 @@ impl MantleHardfork {
 
         match named {
             NamedChain::Mantle => Some(match timestamp {
-                _i if timestamp < MANTLE_MAINNET_SKADI_TIMESTAMP => Self::Skadi,
-                _i if timestamp < MANTLE_MAINNET_LIMB_TIMESTAMP => Self::Limb,
-                _ => Self::Arsia,
+                t if t < MANTLE_MAINNET_SKADI_TIMESTAMP => return None,
+                t if t < MANTLE_MAINNET_LIMB_TIMESTAMP => Self::Skadi,
+                _ => Self::Limb,
             }),
             NamedChain::MantleSepolia => Some(match timestamp {
-                _i if timestamp < MANTLE_SEPOLIA_SKADI_TIMESTAMP => Self::Skadi,
-                _i if timestamp < MANTLE_SEPOLIA_LIMB_TIMESTAMP => Self::Limb,
-                _ => Self::Arsia,
+                t if t < MANTLE_SEPOLIA_SKADI_TIMESTAMP => return None,
+                t if t < MANTLE_SEPOLIA_LIMB_TIMESTAMP => Self::Skadi,
+                _ => Self::Limb,
             }),
             _ => None,
         }
@@ -222,8 +224,25 @@ impl EthereumHardforks for MantleChainHardforks {
 impl OpHardforks for MantleChainHardforks {
     #[doc = " Retrieves [`ForkCondition`] by an [`OpHardfork`]. If `fork` is not present, returns"]
     #[doc = " [`ForkCondition::Never`]."]
-    fn op_fork_activation(&self, _fork: OpHardfork) -> ForkCondition {
-        todo!()
+    fn op_fork_activation(&self, fork: OpHardfork) -> ForkCondition {
+        use reth_optimism_forks::OpHardfork;
+        match fork {
+            OpHardfork::Bedrock => ForkCondition::Block(0),
+            OpHardfork::Regolith => ForkCondition::Timestamp(0),
+            OpHardfork::Canyon
+            | OpHardfork::Ecotone
+            | OpHardfork::Fjord
+            | OpHardfork::Granite
+            | OpHardfork::Holocene
+            | OpHardfork::Isthmus
+            | OpHardfork::Jovian => self
+                .forks
+                .last()
+                .map(|(_, c)| c.clone())
+                .unwrap_or(ForkCondition::Timestamp(0)),
+            OpHardfork::Interop => ForkCondition::Timestamp(0),
+            _ => ForkCondition::Timestamp(0),
+        }
     }
 }
 

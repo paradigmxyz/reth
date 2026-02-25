@@ -1,8 +1,10 @@
 //! `eth_` Extension traits.
 
+use alloy_eips::BlockId;
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
+use alloy_rpc_types_eth::TransactionRequest;
 use alloy_eips::BlockNumberOrTag;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
@@ -128,4 +130,14 @@ pub trait MantleEthApiExt<B: RpcObject> {
         &self,
         bytes: Bytes,
     ) -> RpcResult<PreconfTxEvent>;
+
+    /// Estimates the total transaction cost (L2 execution + L1 data + operator fee) in wei.
+    ///
+    /// Aligned with geth's `eth_estimateTotalFee`. Only supported for Arsia+ blocks.
+    #[method(name = "estimateTotalFee")]
+    async fn estimate_total_fee(
+        &self,
+        request: TransactionRequest,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<U256>;
 }

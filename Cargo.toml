@@ -481,18 +481,18 @@ reth-ress-provider = { path = "crates/ress/provider" }
 # revm-database-interface = { version = "8.0.5", default-features = false }
 # op-revm = { version = "12.0.2", default-features = false }
 # revm-inspectors = "0.32.0"
-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-bytecode = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-state = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-primitives = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-interpreter = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-inspector = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-context = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-context-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-database = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-database-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-op-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.1", default-features = false }
-revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.2.0-beta.1", default-features = false }
+revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-bytecode = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-state = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-primitives = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-interpreter = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-inspector = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-context = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-context-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-database = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-database-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+op-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.0-beta.3", default-features = false }
+revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.2.0-beta.3", default-features = false }
 
 
 # eth
@@ -500,7 +500,7 @@ alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 # alloy-evm = { version = "0.23.0", default-features = false }
-alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0-beta.1", default-features = false }
+alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0-beta.3", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = [
     "map-foldhash",
 ] }
@@ -513,48 +513,48 @@ alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.4.4"
 
-alloy-consensus = { version = "1.0.41", default-features = false }
-alloy-contract = { version = "1.0.41", default-features = false }
-alloy-eips = { version = "1.0.41", default-features = false }
-alloy-genesis = { version = "1.0.41", default-features = false }
-alloy-json-rpc = { version = "1.0.41", default-features = false }
-alloy-network = { version = "1.0.41", default-features = false }
-alloy-network-primitives = { version = "1.0.41", default-features = false }
-alloy-provider = { version = "1.0.41", features = [
+alloy-consensus = { version = "1.4.3", default-features = false }
+alloy-contract = { version = "1.4.3", default-features = false }
+alloy-eips = { version = "1.4.3", default-features = false }
+alloy-genesis = { version = "1.4.3", default-features = false }
+alloy-json-rpc = { version = "1.4.3", default-features = false }
+alloy-network = { version = "1.4.3", default-features = false }
+alloy-network-primitives = { version = "1.4.3", default-features = false }
+alloy-provider = { version = "1.4.3", features = [
     "reqwest",
 ], default-features = false }
-alloy-pubsub = { version = "1.0.41", default-features = false }
-alloy-rpc-client = { version = "1.0.41", default-features = false }
-alloy-rpc-types = { version = "1.0.41", features = [
+alloy-pubsub = { version = "1.4.3", default-features = false }
+alloy-rpc-client = { version = "1.4.3", default-features = false }
+alloy-rpc-types = { version = "1.4.3", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-admin = { version = "1.0.41", default-features = false }
-alloy-rpc-types-anvil = { version = "1.0.41", default-features = false }
-alloy-rpc-types-beacon = { version = "1.0.41", default-features = false }
-alloy-rpc-types-debug = { version = "1.0.41", default-features = false }
-alloy-rpc-types-engine = { version = "1.0.41", default-features = false }
-alloy-rpc-types-eth = { version = "1.0.41", default-features = false }
-alloy-rpc-types-mev = { version = "1.0.41", default-features = false }
-alloy-rpc-types-trace = { version = "1.0.41", default-features = false }
-alloy-rpc-types-txpool = { version = "1.0.41", default-features = false }
-alloy-serde = { version = "1.0.41", default-features = false }
-alloy-signer = { version = "1.0.41", default-features = false }
-alloy-signer-local = { version = "1.0.41", default-features = false }
-alloy-transport = { version = "1.0.41" }
-alloy-transport-http = { version = "1.0.41", features = [
+alloy-rpc-types-admin = { version = "1.4.3", default-features = false }
+alloy-rpc-types-anvil = { version = "1.4.3", default-features = false }
+alloy-rpc-types-beacon = { version = "1.4.3", default-features = false }
+alloy-rpc-types-debug = { version = "1.4.3", default-features = false }
+alloy-rpc-types-engine = { version = "1.4.3", default-features = false }
+alloy-rpc-types-eth = { version = "1.4.3", default-features = false }
+alloy-rpc-types-mev = { version = "1.4.3", default-features = false }
+alloy-rpc-types-trace = { version = "1.4.3", default-features = false }
+alloy-rpc-types-txpool = { version = "1.4.3", default-features = false }
+alloy-serde = { version = "1.4.3", default-features = false }
+alloy-signer = { version = "1.4.3", default-features = false }
+alloy-signer-local = { version = "1.4.3", default-features = false }
+alloy-transport = { version = "1.4.3" }
+alloy-transport-http = { version = "1.4.3", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ipc = { version = "1.0.41", default-features = false }
-alloy-transport-ws = { version = "1.0.41", default-features = false }
+alloy-transport-ipc = { version = "1.4.3", default-features = false }
+alloy-transport-ws = { version = "1.4.3", default-features = false }
 
 # op
-alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0-beta.1", default-features = false }
+alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0-beta.3", default-features = false }
 alloy-op-hardforks = "0.4.4"
-op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
+op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", branch = "v230", default-features = false }
+op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", branch = "v230", default-features = false }
+op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", branch = "v230", default-features = false }
+op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", branch = "v230", default-features = false }
+op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", branch = "v230", default-features = false }
 # alloy-op-evm = { version = "0.23.0", default-features = false }
 # op-alloy-rpc-types = { version = "0.22.0", default-features = false }
 # op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
@@ -774,20 +774,20 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 # [patch.crates-io]
-# alloy-evm = { path = "/Users/sh001/Documents/codes/op-reth/evm/crates/evm", default-features = false }
-# alloy-op-evm = { path = "/Users/sh001/Documents/codes/op-reth/evm/crates/op-evm", default-features = false }
-# revm = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/revm", default-features = false }
-# revm-bytecode = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/bytecode", default-features = false }
-# revm-state = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/state", default-features = false }
-# revm-primitives = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/primitives", default-features = false }
-# revm-interpreter = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/interpreter", default-features = false }
-# revm-inspector = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/inspector", default-features = false }
-# revm-context = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/context", default-features = false }
-# revm-context-interface = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/context/interface", default-features = false }
-# revm-database = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database", default-features = false }
-# revm-database-interface = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database/interface", default-features = false }
-# op-revm = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/op-revm", default-features = false }
-# revm-inspectors = { path = "/Users/sh001/Documents/codes/op-reth/revm-inspectors", default-features = false }
+# revm = { path = "../revm/crates/revm", default-features = false }
+# revm-bytecode = { path = "../revm/crates/bytecode", default-features = false }
+# revm-state = { path = "../revm/crates/state", default-features = false }
+# revm-primitives = { path = "../revm/crates/primitives", default-features = false }
+# revm-interpreter = { path = "../revm/crates/interpreter", default-features = false }
+# revm-inspector = { path = "../revm/crates/inspector", default-features = false }
+# revm-context = { path = "../revm/crates/context", default-features = false }
+# revm-context-interface = { path = "../revm/crates/context/interface", default-features = false }
+# revm-database = { path = "../revm/crates/database", default-features = false }
+# revm-database-interface = { path = "../revm/crates/database/interface", default-features = false }
+# op-revm = { path = "../revm/crates/op-revm", default-features = false }
+# revm-inspectors = { path = "../revm-inspectors", default-features = false }
+# alloy-evm = { path = "../evm/crates/evm", default-features = false }
+# alloy-op-evm = { path = "../evm/crates/op-evm", default-features = false }
 # op-alloy-rpc-types = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/rpc-types", default-features = false }
 # op-alloy-rpc-types-engine = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/rpc-types-engine", default-features = false }
 # op-alloy-network = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/network", default-features = false }
