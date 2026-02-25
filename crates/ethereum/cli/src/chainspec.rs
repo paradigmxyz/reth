@@ -99,7 +99,7 @@ mod tests {
 }"#;
 
         let spec = <EthereumChainSpecParser as ChainSpecParser>::parse(s).unwrap();
-        println!("{:?}", spec.genesis_header);
+        println!("{:?}", spec.genesis_header());
         assert!(spec.is_shanghai_active_at_timestamp(0));
         assert!(spec.is_cancun_active_at_timestamp(0));
         assert!(spec.is_prague_active_at_timestamp(0));

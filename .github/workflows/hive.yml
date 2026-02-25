@@ -1,4 +1,4 @@
-# Runs `Soubhik-10/hive` tests.
+# Runs `ethereum/hive` tests.
 
 name: hive
 
@@ -27,12 +27,12 @@ jobs:
       artifact_name: "reth-stable"
 
   # prepare-reth-edge:
-    # uses: ./.github/workflows/prepare-reth.yml
-    # with:
-      # image_tag: ghcr.io/paradigmxyz/reth:latest
-      # binary_name: reth
-      # cargo_features: "asm-keccak edge"
-      # artifact_name: "reth-edge"
+  # uses: ./.github/workflows/prepare-reth.yml
+  # with:
+  # image_tag: ghcr.io/paradigmxyz/reth:latest
+  # binary_name: reth
+  # cargo_features: "asm-keccak edge"
+  # artifact_name: "reth-edge"
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
