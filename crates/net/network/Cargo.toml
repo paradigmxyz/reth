@@ -33,7 +33,7 @@ reth-storage-api.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
-reth-network-types.workspace = true
+reth-network-types = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -105,7 +105,6 @@ serde = [
     "dep:serde",
     "secp256k1/serde",
     "enr/serde",
-    "reth-network-types/serde",
     "reth-dns-discovery/serde",
     "reth-eth-wire/serde",
     "reth-eth-wire-types/serde",
@@ -125,6 +124,7 @@ serde = [
     "reth-network-api/serde",
     "rand_08/serde",
     "reth-storage-api/serde",
+    "reth-network-types/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",
