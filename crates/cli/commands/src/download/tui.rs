@@ -98,7 +98,7 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             name: "Transactions",
             types: vec![SnapshotComponentType::Transactions],
             required: false,
-            presets: &DISTANCE_PRESETS,
+            presets: &HISTORY_PRESETS,
         });
     }
 
