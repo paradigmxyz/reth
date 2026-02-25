@@ -737,7 +737,11 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             WithTxEnv { tx_env, tx: Arc::new(tx) }
         });
         if let Ok(tx) = &tx {
-            let _ = prewarm_tx.send((idx, tx.clone()));
+            // Skip the first transaction since it's already being executed and prewarming
+            // overhead outweighs the benefit for a single transaction ahead.
+            if idx > 0 {
+                let _ = prewarm_tx.send((idx, tx.clone()));
+            }
         }
         let _ = execute_tx.send(tx);
     }
