@@ -118,9 +118,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
 
   const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
-  const countsLine = warmup
-    ? `*Warmup:* ${warmup} | *Blocks:* ${summary.blocks}`
-    : `*Blocks:* ${summary.blocks}`;
+  const cores = process.env.BENCH_CORES || '0';
+  const countsParts = [];
+  if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
+  countsParts.push(`*Blocks:* ${summary.blocks}`);
+  if (cores !== '0') countsParts.push(`*Cores:* ${cores}`);
+  const countsLine = countsParts.join(' | ');
 
   const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, countsLine].join('\n');
 
