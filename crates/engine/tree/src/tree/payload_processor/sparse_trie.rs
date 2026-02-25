@@ -351,6 +351,12 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
+                if self.finished_state_updates {
+                    if let Some(trie) = self.trie.trie_mut().as_revealed_mut() {
+                        trie.update_subtrie_hashes();
+                    }
+                }
+
                 if self.finished_state_updates &&
                     self.pending_storage_roots.is_empty() &&
                     self.account_updates.is_empty() &&
