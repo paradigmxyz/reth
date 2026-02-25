@@ -167,7 +167,7 @@ impl PersistedPeerInfo {
     }
 
     /// Converts a legacy [`NodeRecord`] into a [`PersistedPeerInfo`] with default metadata.
-    pub fn from_node_record(record: NodeRecord) -> Self {
+    pub const fn from_node_record(record: NodeRecord) -> Self {
         Self { record, kind: PeerKind::Basic, fork_id: None, reputation: DEFAULT_REPUTATION }
     }
 }
