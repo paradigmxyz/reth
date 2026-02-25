@@ -11,8 +11,8 @@ pub mod subnode;
 /// Noop trie cursor implementations.
 pub mod noop;
 
-/// Prefix-set-skipping trie cursor wrapper.
-pub mod prefix_set_skipping;
+/// Masked trie cursor wrapper that skips nodes matching a prefix set.
+pub mod masked;
 
 /// Depth-first trie iterator.
 pub mod depth_first;
