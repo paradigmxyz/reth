@@ -677,7 +677,6 @@ where
                         targets: proof_targets,
                         proof_result_sender: ProofResultContext::new(
                             self.proof_result_tx.clone(),
-                            0,
                             HashedPostState::default(),
                             Instant::now(),
                         ),
