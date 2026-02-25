@@ -197,7 +197,7 @@ pub(crate) struct MultiProofTaskMetrics {
 pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
-    chunk_size: Option<usize>,
+    chunk_size: usize,
     max_targets_for_chunking: usize,
     available_account_workers: usize,
     available_storage_workers: usize,
@@ -211,10 +211,7 @@ where
         available_account_workers > 1 ||
         available_storage_workers > 1;
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
+    if should_chunk && chunking_len > chunk_size {
         let mut num_chunks = 0usize;
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
