@@ -112,7 +112,7 @@ impl RocksDBProvider {
             .get_highest_static_file_block(StaticFileSegment::Transactions)
             .unwrap_or(0);
 
-        // Fast path: nothing has been indexed yet — clear any stale data and return.
+        // Fast path: clear any stale data and return.
         if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
@@ -264,7 +264,7 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: nothing has been indexed yet — clear any stale data and return.
+        // Fast path: clear any stale data and return.
         if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
@@ -358,7 +358,7 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: nothing has been indexed yet — clear any stale data and return.
+        // Fast path: clear any stale data and return.
         if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
