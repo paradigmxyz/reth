@@ -323,9 +323,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         // Generate reth.toml and set prune checkpoints
-        let config = config_for_selections(&selections);
+        let config = config_for_selections(&selections, &manifest);
         if !self.no_config && write_config(&config, target_dir)? {
-            let desc = config_gen::describe_prune_config_from_selections(&selections);
+            let desc = config_gen::describe_prune_config_from_selections(&selections, &manifest);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
 

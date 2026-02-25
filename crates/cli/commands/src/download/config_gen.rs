@@ -1,5 +1,7 @@
-use crate::download::manifest::{ComponentSelection, SnapshotComponentType};
-use reth_config::config::{Config, PruneConfig};
+use crate::download::manifest::{
+    ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest,
+};
+use reth_config::config::{BlocksPerFileConfig, Config, PruneConfig, StaticFilesConfig};
 use reth_db::{tables, Database, DatabaseEnv};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
@@ -232,6 +234,7 @@ pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> 
 /// Otherwise, `--minimal` style pruning is applied for missing/partial components.
 pub fn config_for_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+    manifest: &SnapshotManifest,
 ) -> Config {
     let tx_sel = selections
         .get(&SnapshotComponentType::Transactions)
@@ -261,8 +264,28 @@ pub fn config_for_selections(
         account_cs_sel == ComponentSelection::All &&
         storage_cs_sel == ComponentSelection::All;
 
+    // Extract blocks_per_file from manifest for all component types
+    let bpf = |ty: SnapshotComponentType| -> Option<u64> {
+        match manifest.component(ty)? {
+            ComponentManifest::Chunked(c) => Some(c.blocks_per_file),
+            ComponentManifest::Single(_) => None,
+        }
+    };
+    let static_files = StaticFilesConfig {
+        blocks_per_file: BlocksPerFileConfig {
+            headers: bpf(SnapshotComponentType::Headers),
+            transactions: bpf(SnapshotComponentType::Transactions),
+            receipts: bpf(SnapshotComponentType::Receipts),
+            transaction_senders: bpf(SnapshotComponentType::TransactionSenders),
+            account_change_sets: bpf(SnapshotComponentType::AccountChangesets),
+            storage_change_sets: bpf(SnapshotComponentType::StorageChangesets),
+        },
+    };
+
     if is_archive {
-        return Config::default();
+        let mut config = Config::default();
+        config.static_files = static_files;
+        return config;
     }
 
     let mut config = Config::default();
@@ -290,6 +313,7 @@ pub fn config_for_selections(
     }
 
     config.prune = prune;
+    config.static_files = static_files;
     config
 }
 
@@ -324,8 +348,9 @@ fn selection_to_prune_mode(
 /// Human-readable prune config summary from per-component selections.
 pub fn describe_prune_config_from_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+    manifest: &SnapshotManifest,
 ) -> Vec<String> {
-    let config = config_for_selections(selections);
+    let config = config_for_selections(selections, manifest);
     let segments = &config.prune.segments;
     let mut lines = Vec::new();
 
@@ -362,6 +387,18 @@ fn format_mode(mode: &PruneMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Empty manifest for tests that only care about prune config.
+    fn empty_manifest() -> SnapshotManifest {
+        SnapshotManifest {
+            block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: String::new(),
+            components: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn state_only_prunes_everything() {
@@ -527,7 +564,7 @@ mod tests {
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
-        let config = config_for_selections(&selections);
+        let config = config_for_selections(&selections, &empty_manifest());
         // Archive node — nothing pruned
         assert_eq!(config.prune.segments.transaction_lookup, None);
         assert_eq!(config.prune.segments.sender_recovery, None);
@@ -542,7 +579,7 @@ mod tests {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
-        let config = config_for_selections(&selections);
+        let config = config_for_selections(&selections, &empty_manifest());
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // All segments clamped to their minimum distances
@@ -576,7 +613,7 @@ mod tests {
             .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(10_064));
         selections
             .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(10_064));
-        let config = config_for_selections(&selections);
+        let config = config_for_selections(&selections, &empty_manifest());
 
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
@@ -596,7 +633,7 @@ mod tests {
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
-        let desc = describe_prune_config_from_selections(&selections);
+        let desc = describe_prune_config_from_selections(&selections, &empty_manifest());
         // Archive node — no prune segments described
         assert!(desc.is_empty());
     }
@@ -609,7 +646,7 @@ mod tests {
         selections
             .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
-        let desc = describe_prune_config_from_selections(&selections);
+        let desc = describe_prune_config_from_selections(&selections, &empty_manifest());
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         // Bodies follows tx selection
         assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
