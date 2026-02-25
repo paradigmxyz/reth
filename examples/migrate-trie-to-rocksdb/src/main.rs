@@ -56,8 +56,10 @@ fn main() -> Result<()> {
 
     // Check if RocksDB already has trie data
     if rocksdb.first::<PackedAccountsTrie>()?.is_some() {
-        println!("RocksDB already has AccountsTrie data — nothing to do.");
-        return Ok(());
+        println!("RocksDB already has AccountsTrie data — clearing for re-migration...");
+        rocksdb.clear::<PackedAccountsTrie>()?;
+        rocksdb.clear::<tables::StoragesTrie>()?;
+        println!("Cleared existing trie data.");
     }
 
     // Open MDBX (read-only unless --clear-mdbx)

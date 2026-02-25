@@ -17,7 +17,7 @@ use reth_db_api::{
         StorageSettings,
     },
     table::{Compress, Decode, Decompress, Encode, Table},
-    tables::{self, PackedAccountsTrie},
+    tables::{self, PackedAccountsTrie, PackedStoragesTrie},
     transaction::DbTx,
     BlockNumberList, DatabaseError,
 };
@@ -29,12 +29,11 @@ use reth_storage_errors::{
 };
 use reth_trie::{
     updates::TrieUpdatesSorted, BranchNodeCompact, PackedStoredNibbles, PackedStoredNibblesSubKey,
-    StoredNibblesSubKey,
 };
 use rocksdb::{
-    BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, ReadOptions, SliceTransform, Transaction,
+    BlockBasedOptions, Cache, ChecksumType, ColumnFamilyDescriptor, CompactionPri,
+    DBCompressionType, DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    OptimisticTransactionOptions, Options, ReadOptions, Transaction,
     WriteBatchWithTransaction, WriteOptions, DB,
 };
 use std::{
@@ -105,8 +104,13 @@ impl fmt::Debug for RocksDBWriteCtx {
     }
 }
 
-/// Default cache size for `RocksDB` block cache (128 MB).
-const DEFAULT_CACHE_SIZE: usize = 128 << 20;
+/// Default cache size for `RocksDB` block cache (2 GB).
+///
+/// Large cache is critical for trie workloads where 64 proof workers concurrently
+/// seek/iterate over ~158M trie entries. With a small cache, SST blocks are evicted
+/// before reuse, forcing repeated disk I/O. MDBX uses the OS page cache (GBs),
+/// so RocksDB needs a proportionally large block cache to compete.
+const DEFAULT_CACHE_SIZE: usize = 4 << 30;
 
 /// Default block size for `RocksDB` tables (16 KB).
 const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
@@ -260,13 +264,18 @@ impl RocksDBBuilder {
         table_options.set_cache_index_and_filter_blocks(true);
         table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
         table_options.set_block_cache(cache);
+        // Disable block checksums: trie data integrity is verified by state root
+        // computation, making per-block CRC32 redundant CPU work.
+        table_options.set_checksum_type(ChecksumType::NoChecksum);
 
         let mut cf_options = Options::default();
         cf_options.set_block_based_table_factory(&table_options);
         cf_options.set_level_compaction_dynamic_level_bytes(true);
         cf_options.set_compression_type(DBCompressionType::None);
         cf_options.set_bottommost_compression_type(DBCompressionType::None);
-        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
+        // Small write buffer: trie CFs receive small incremental writes per block,
+        // so 128MB is wasteful. 16MB frees memory for the block cache.
+        cf_options.set_write_buffer_size(16 << 20);
 
         cf_options
     }
@@ -276,22 +285,25 @@ impl RocksDBBuilder {
     /// Keys are fixed 65-byte compound keys (`B256 || PackedStoredNibblesSubKey`).
     /// Every read is scoped to a 32-byte `hashed_address` prefix.
     /// 4KB blocks and no compression minimize read amplification and CPU overhead.
-    /// Prefix extractor enables RocksDB to scope seeks to the address prefix.
     fn storage_trie_column_family_options(cache: &Cache) -> Options {
         let mut table_options = BlockBasedOptions::default();
         table_options.set_block_size(4 * 1024);
         table_options.set_cache_index_and_filter_blocks(true);
         table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
         table_options.set_block_cache(cache);
+        // Disable block checksums: trie data integrity is verified by state root
+        // computation, making per-block CRC32 redundant CPU work.
+        table_options.set_checksum_type(ChecksumType::NoChecksum);
 
         let mut cf_options = Options::default();
         cf_options.set_block_based_table_factory(&table_options);
         cf_options.set_level_compaction_dynamic_level_bytes(true);
         cf_options.set_compression_type(DBCompressionType::None);
         cf_options.set_bottommost_compression_type(DBCompressionType::None);
-        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
-        // 32-byte fixed prefix extractor: all reads are scoped to a hashed_address.
-        cf_options.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
+        // Small write buffer: trie CFs receive small incremental writes per block.
+        cf_options.set_write_buffer_size(16 << 20);
+        // No prefix extractor: bounded iterators already scope reads to the
+        // hashed_address range, making prefix bloom filters redundant overhead.
 
         cf_options
     }
@@ -1114,15 +1126,15 @@ impl RocksDBProvider {
             "Migrated AccountsTrie entries to RocksDB"
         );
 
-        // Migrate StoragesTrie: read DupSort entries, convert to compound keys
-        let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>()?;
+        // Migrate StoragesTrie: read packed DupSort entries, convert to compound keys.
+        // Uses PackedStoragesTrie (same underlying MDBX table as StoragesTrie but with
+        // packed 33-byte subkey encoding) to correctly decode entries written in v2 format.
+        let mut storage_cursor = tx.cursor_dup_read::<PackedStoragesTrie>()?;
         let mut storage_count = 0usize;
         let mut walk = storage_cursor.walk_range(..)?;
         while let Some(entry) = walk.next() {
             let (hashed_address, storage_entry) = entry?;
-            let packed_subkey =
-                PackedStoredNibblesSubKey::from(StoredNibblesSubKey::from(storage_entry.nibbles));
-            batch.put_storage_trie(hashed_address, packed_subkey, &storage_entry.node)?;
+            batch.put_storage_trie(hashed_address, storage_entry.nibbles, &storage_entry.node)?;
             storage_count += 1;
         }
 
@@ -1152,15 +1164,40 @@ impl RocksDBProvider {
                 .cf_handle(name)
                 .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
         };
-        Ok(self.0.raw_iterator_cf(cf))
+        let mut readopts = ReadOptions::default();
+        // Skip checksum verification: trie integrity is guaranteed by state root.
+        readopts.set_verify_checksums(false);
+        Ok(self.0.raw_iterator_cf_opt(cf, readopts))
+    }
+
+    /// Creates a raw iterator with `total_order_seek` enabled.
+    ///
+    /// This bypasses the prefix extractor, ensuring full lexicographic iteration
+    /// across all entries in the column family. Needed for CFs with a prefix
+    /// extractor when the caller manages prefix filtering manually.
+    pub fn raw_iterator_for_cf_total_order(
+        &self,
+        name: &str,
+    ) -> Result<RocksDBRawIterEnum<'_>, DatabaseError> {
+        let cf = match &*self.0 {
+            RocksDBProviderInner::ReadWrite { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+            RocksDBProviderInner::ReadOnly { db, .. } => db
+                .cf_handle(name)
+                .ok_or_else(|| DatabaseError::Other(format!("CF '{}' not found", name)))?,
+        };
+        let mut readopts = ReadOptions::default();
+        readopts.set_total_order_seek(true);
+        // Skip checksum verification: trie integrity is guaranteed by state root.
+        readopts.set_verify_checksums(false);
+        Ok(self.0.raw_iterator_cf_opt(cf, readopts))
     }
 
     /// Creates a raw iterator for the given column family with bounded prefix.
     ///
     /// Sets `iterate_lower_bound` and `iterate_upper_bound` so RocksDB can skip
-    /// SSTs and blocks outside the prefix range. Also enables `total_order_seek`
-    /// to ensure correct iteration when a prefix extractor is configured on the CF
-    /// but we need full-range seeks within the bounded window.
+    /// SSTs and blocks outside the prefix range.
     pub(super) fn raw_iterator_for_cf_bounded(
         &self,
         name: &str,
@@ -1178,6 +1215,8 @@ impl RocksDBProvider {
         let mut readopts = ReadOptions::default();
         readopts.set_iterate_lower_bound(lower);
         readopts.set_iterate_upper_bound(upper);
+        // Skip checksum verification: trie integrity is guaranteed by state root.
+        readopts.set_verify_checksums(false);
         Ok(self.0.raw_iterator_cf_opt(cf, readopts))
     }
 
@@ -1373,7 +1412,7 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
+        self.0.db_rw().write(batch).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,

@@ -23,6 +23,11 @@ use reth_trie_db::{
     DatabaseStorageTrieCursor, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
+use crate::{providers::rocksdb::RocksDBProvider, RocksDBProviderFactory};
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::providers::rocksdb::{
+    RocksDBAccountTrieCursor, RocksDBStorageTrieCursor,
+};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -451,11 +456,14 @@ where
         + BlockNumReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
+    ///
+    /// When `storage_v2` is enabled, trie reads use RocksDB column families instead of MDBX.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         let overall_start = Instant::now();
@@ -471,8 +479,19 @@ where
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
+        let rocksdb_provider = if is_v2 {
+            Some(provider.rocksdb_provider())
+        } else {
+            None
+        };
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(
+            provider,
+            trie_updates,
+            hashed_post_state,
+            is_v2,
+            rocksdb_provider,
+        ))
     }
 }
 
@@ -487,6 +506,7 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
     is_v2: bool,
+    rocksdb_provider: Option<RocksDBProvider>,
 }
 
 impl<Provider> OverlayStateProvider<Provider>
@@ -495,13 +515,14 @@ where
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub const fn new(
+    pub fn new(
         provider: Provider,
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
         is_v2: bool,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+        Self { provider, trie_updates, hashed_post_state, is_v2, rocksdb_provider }
     }
 }
 
@@ -521,13 +542,26 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_read::<PackedAccountsTrie>()?,
-            ))
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(rocksdb) = &self.rocksdb_provider {
+                Box::new(RocksDBAccountTrieCursor::new(rocksdb)?)
+            } else {
+                let tx = self.provider.tx_ref();
+                Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_read::<PackedAccountsTrie>()?,
+                ))
+            }
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            {
+                let tx = self.provider.tx_ref();
+                Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_read::<PackedAccountsTrie>()?,
+                ))
+            }
         } else {
+            let tx = self.provider.tx_ref();
             Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
@@ -539,14 +573,28 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            ))
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(rocksdb) = &self.rocksdb_provider {
+                Box::new(RocksDBStorageTrieCursor::new(rocksdb, hashed_address)?)
+            } else {
+                let tx = self.provider.tx_ref();
+                Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                    hashed_address,
+                ))
+            }
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            {
+                let tx = self.provider.tx_ref();
+                Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                    hashed_address,
+                ))
+            }
         } else {
+            let tx = self.provider.tx_ref();
             Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
                 tx.cursor_dup_read::<tables::StoragesTrie>()?,
                 hashed_address,

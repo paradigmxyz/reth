@@ -3099,6 +3099,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         num_entries +=
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
 
+        // Keep RocksDB trie data in sync with MDBX.
+        // Commit eagerly so subsequent trie cursor reads within the same provider
+        // session see the updates (read-your-writes), matching MDBX semantics.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.cached_storage_settings().is_v2() {
+            let rocksdb = self.rocksdb_provider();
+            let mut batch = rocksdb.batch();
+            batch.write_trie_updates_sorted(trie_updates)?;
+            rocksdb.commit_batch(batch.into_inner())?;
+        }
+
         Ok(num_entries)
     }
 }

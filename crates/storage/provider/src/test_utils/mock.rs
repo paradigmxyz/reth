@@ -1,9 +1,11 @@
 use crate::{
+    providers::RocksDBProvider,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, TransactionsProvider,
+    ReceiptProviderIdExt, RocksDBProviderFactory, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -262,6 +264,22 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> RocksDBProviderFactory
+    for MockEthProvider<T, ChainSpec>
+{
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        RocksDBProvider::builder(std::path::PathBuf::default()).build().unwrap()
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {}
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        Ok(())
     }
 }
 

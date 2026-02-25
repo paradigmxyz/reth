@@ -64,7 +64,7 @@ impl<'db> TrieCursorFactory for RocksDBTrieCursorFactory<'db> {
             lower.to_vec(),
             upper,
         )?;
-        Ok(RocksDBStorageTrieCursor { provider: self.provider, iter, hashed_address })
+        Ok(RocksDBStorageTrieCursor { iter, hashed_address })
     }
 }
 
@@ -74,6 +74,14 @@ impl<'db> TrieCursorFactory for RocksDBTrieCursorFactory<'db> {
 /// and `BranchNodeCompact` values.
 pub struct RocksDBAccountTrieCursor<'db> {
     iter: RocksDBRawIterEnum<'db>,
+}
+
+impl<'db> RocksDBAccountTrieCursor<'db> {
+    /// Creates a new account trie cursor from a `RocksDBProvider`.
+    pub fn new(provider: &'db RocksDBProvider) -> Result<Self, DatabaseError> {
+        let iter = provider.raw_iterator_for_cf(tables::AccountsTrie::NAME)?;
+        Ok(Self { iter })
+    }
 }
 
 impl TrieCursor for RocksDBAccountTrieCursor<'_> {
@@ -146,7 +154,6 @@ impl TrieCursor for RocksDBAccountTrieCursor<'_> {
 /// current `hashed_address` prefix. Uses bounded iterators to constrain
 /// RocksDB to the address prefix range, skipping irrelevant SSTs.
 pub struct RocksDBStorageTrieCursor<'db> {
-    provider: &'db RocksDBProvider,
     iter: RocksDBRawIterEnum<'db>,
     hashed_address: B256,
 }
@@ -158,7 +165,20 @@ const STORAGE_TRIE_SUBKEY_LEN: usize = 33;
 /// Total length of a StoragesTrie compound key.
 const STORAGE_TRIE_KEY_LEN: usize = STORAGE_TRIE_ADDRESS_LEN + STORAGE_TRIE_SUBKEY_LEN;
 
-impl RocksDBStorageTrieCursor<'_> {
+impl<'db> RocksDBStorageTrieCursor<'db> {
+    /// Creates a new storage trie cursor from a `RocksDBProvider` scoped to an address.
+    ///
+    /// Uses an unbounded iterator with `total_order_seek` to avoid issues with
+    /// the prefix extractor configured on the StoragesTrie CF. The address prefix
+    /// is checked manually via `is_current_address()`.
+    pub fn new(
+        provider: &'db RocksDBProvider,
+        hashed_address: B256,
+    ) -> Result<Self, DatabaseError> {
+        let iter = provider.raw_iterator_for_cf_total_order(tables::StoragesTrie::NAME)?;
+        Ok(Self { iter, hashed_address })
+    }
+
     /// Builds a compound key from the current hashed address and a nibbles subkey.
     fn compound_key(&self, nibbles: PackedStoredNibblesSubKey) -> [u8; STORAGE_TRIE_KEY_LEN] {
         let mut key = [0u8; STORAGE_TRIE_KEY_LEN];
@@ -260,17 +280,9 @@ impl TrieCursor for RocksDBStorageTrieCursor<'_> {
 impl TrieStorageCursor for RocksDBStorageTrieCursor<'_> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
-        // Recreate the bounded iterator for the new address prefix.
-        let mut lower = [0u8; STORAGE_TRIE_ADDRESS_LEN];
-        lower.copy_from_slice(hashed_address.as_ref());
-        let upper = next_prefix(&lower);
-        if let Ok(iter) = self.provider.raw_iterator_for_cf_bounded(
-            tables::StoragesTrie::NAME,
-            lower.to_vec(),
-            upper,
-        ) {
-            self.iter = iter;
-        }
+        // No need to recreate the iterator — the seek in `cursor_seek` will
+        // reposition it to the new address, and `is_current_address()` filters
+        // entries that don't match.
     }
 }
 
@@ -316,3 +328,4 @@ fn next_prefix(prefix: &[u8]) -> Vec<u8> {
     upper.push(0x00);
     upper
 }
+

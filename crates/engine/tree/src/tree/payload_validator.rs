@@ -39,8 +39,9 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    ProviderError, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
+    StateProvider, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -151,7 +152,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + RocksDBProviderFactory,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -1721,7 +1723,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + RocksDBProviderFactory,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

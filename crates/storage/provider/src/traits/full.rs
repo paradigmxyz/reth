@@ -22,7 +22,8 @@ pub trait FullProvider<N: NodeTypesWithDB>:
                       + PruneCheckpointReader
                       + ChangeSetReader
                       + StorageChangeSetReader
-                      + StorageSettingsCache,
+                      + StorageSettingsCache
+                      + RocksDBProviderFactory,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + RocksDBProviderFactory
@@ -57,7 +58,8 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + RocksDBProviderFactory,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + RocksDBProviderFactory
