@@ -1,28 +1,28 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::{prefix_set::PrefixSet, BranchNodeCompact, Nibbles};
+use reth_trie_common::{
+    prefix_set::{PrefixSet, TriePrefixSets},
+    BranchNodeCompact, Nibbles,
+};
 
-/// A [`TrieCursorFactory`] wrapper that creates cursors which skip trie nodes whose paths match a
-/// given [`PrefixSet`].
+/// A [`TrieCursorFactory`] wrapper that creates cursors which skip trie nodes whose paths match the
+/// prefix sets in a [`TriePrefixSets`].
+///
+/// The `destroyed_accounts` field of the prefix sets is not used by the cursor — it is only
+/// relevant during trie update finalization, not during cursor traversal.
 #[derive(Debug, Clone)]
 pub struct MaskedTrieCursorFactory<CF> {
     /// Underlying trie cursor factory.
     cursor_factory: CF,
-    /// Account prefix set.
-    account_prefix_set: PrefixSet,
-    /// Storage prefix sets keyed by hashed address.
-    storage_prefix_sets: alloy_primitives::map::B256Map<PrefixSet>,
+    /// Frozen prefix sets used for masking.
+    prefix_sets: TriePrefixSets,
 }
 
 impl<CF> MaskedTrieCursorFactory<CF> {
     /// Create a new factory from an inner cursor factory and frozen prefix sets.
-    pub const fn new(
-        cursor_factory: CF,
-        account_prefix_set: PrefixSet,
-        storage_prefix_sets: alloy_primitives::map::B256Map<PrefixSet>,
-    ) -> Self {
-        Self { cursor_factory, account_prefix_set, storage_prefix_sets }
+    pub const fn new(cursor_factory: CF, prefix_sets: TriePrefixSets) -> Self {
+        Self { cursor_factory, prefix_sets }
     }
 }
 
@@ -39,7 +39,7 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for MaskedTrieCursorFactory<CF> {
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(MaskedTrieCursor::new(cursor, self.account_prefix_set.clone()))
+        Ok(MaskedTrieCursor::new(cursor, self.prefix_sets.account_prefix_set.clone()))
     }
 
     fn storage_trie_cursor(
@@ -47,7 +47,8 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for MaskedTrieCursorFactory<CF> {
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
-        let prefix_set = self.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
+        let prefix_set =
+            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
         Ok(MaskedTrieCursor::new(cursor, prefix_set))
     }
 }
