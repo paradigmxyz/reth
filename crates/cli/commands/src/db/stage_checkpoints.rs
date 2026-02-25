@@ -7,7 +7,7 @@ use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
     StageCheckpointWriter,
 };
-use reth_stages_types::StageId;
+use reth_stages::StageId;
 
 use crate::common::AccessRights;
 
@@ -167,7 +167,7 @@ mod tests {
         test_utils::create_test_provider_factory, DBProvider, DatabaseProviderFactory,
         StageCheckpointReader, StageCheckpointWriter,
     };
-    use reth_stages_types::StageCheckpoint;
+    use reth_stages::StageCheckpoint;
 
     #[test]
     fn parse_set_args() {
