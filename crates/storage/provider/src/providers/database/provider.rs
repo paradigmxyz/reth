@@ -3553,9 +3553,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Prune static-file headers above `block`, if the segment exists. During live sync via
         // the Engine API, headers may only exist in MDBX and not yet in static files, so this
         // being `None` is a legitimate state — there is simply nothing to prune.
-        if let Some(highest_static_file_block) = self
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
+        if let Some(highest_static_file_block) =
+            self.static_file_provider().get_highest_static_file_block(StaticFileSegment::Headers)
         {
             // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
             // sure we remove only what is ABOVE the block.
@@ -5446,7 +5445,10 @@ mod tests {
         // panicking on the old `.expect("todo: error handling")`.
         let provider_rw = factory.provider_rw().unwrap();
         let result = provider_rw.remove_blocks_above(0);
-        assert!(result.is_ok(), "remove_blocks_above must not panic when static file headers are absent: {result:?}");
+        assert!(
+            result.is_ok(),
+            "remove_blocks_above must not panic when static file headers are absent: {result:?}"
+        );
     }
 
     #[test]
