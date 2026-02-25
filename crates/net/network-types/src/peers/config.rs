@@ -147,7 +147,7 @@ pub struct PeersConfig {
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
-    /// Persisted peers loaded from disk, containing richer metadata than basic nodes.
+    /// Peers restored from a previous run, containing richer metadata than basic nodes.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub persisted_peers: Vec<PersistedPeerInfo>,
     /// How long to ban bad peers.
