@@ -4,9 +4,14 @@
 //! KeccakP-1600-times4 permutation. Falls back to scalar hashing on
 //! other architectures or when AVX2 is unavailable at runtime.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
 mod avx2 {
     unsafe extern "C" {
         /// Hash 4 inputs of `inlen` bytes each, producing 4 × 32-byte outputs.
@@ -38,7 +43,7 @@ fn keccak256_4x(inputs: [&[u8]; 4]) -> [B256; 4] {
     debug_assert!(inputs.iter().all(|i| i.len() == len));
     assert!(len <= 135, "input length must be <= 135 bytes");
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     {
         if std::is_x86_feature_detected!("avx2") {
             let mut out = [B256::ZERO; 4];
@@ -189,7 +194,6 @@ mod tests {
 
     #[test]
     fn test_known_address_hash() {
-        // Keccak256 of the zero address (20 zero bytes)
         let zero_addr = [0u8; 20];
         let expected = keccak256(zero_addr);
         let results = keccak256_batch_20_vec(&[zero_addr]);
@@ -198,7 +202,6 @@ mod tests {
 
     #[test]
     fn test_known_slot_hash() {
-        // Keccak256 of slot 0 (32 zero bytes)
         let zero_slot = [0u8; 32];
         let expected = keccak256(zero_slot);
         let results = keccak256_batch_32_vec(&[zero_slot]);

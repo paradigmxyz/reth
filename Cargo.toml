@@ -429,7 +429,7 @@ reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing", default-features = false }
 reth-tracing-otlp = { path = "crates/tracing-otlp" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-keccak-simd = { path = "crates/keccak-simd" }
+reth-keccak-simd = { path = "crates/keccak-simd", default-features = false }
 reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }

@@ -19,7 +19,7 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie-common = { workspace = true, features = ["rayon"] }
-reth-keccak-simd.workspace = true
+reth-keccak-simd = { workspace = true, features = ["std"] }
 
 revm-database.workspace = true
 

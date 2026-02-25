@@ -22,6 +22,10 @@ rand.workspace = true
 [build-dependencies]
 cc.workspace = true
 
+[features]
+default = ["std"]
+std = ["alloy-primitives/std"]
+
 [[bench]]
 name = "keccak_batch"
 harness = false
