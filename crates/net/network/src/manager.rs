@@ -448,10 +448,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Collect the peers from the [`NetworkManager`] and write them to the given
     /// `persistent_peers_file`.
+    ///
+    /// Only persists peers that are not currently backed off or banned. Includes metadata like
+    /// peer kind, fork ID, and reputation.
     pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
-        let known_peers = self.all_peers().collect::<Vec<_>>();
+        let peers = self.swarm.state().peers().persistable_peers().collect::<Vec<_>>();
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
-        reth_fs_util::write_json_file(persistent_peers_file, &known_peers)?;
+        reth_fs_util::write_json_file(persistent_peers_file, &peers)?;
         Ok(())
     }
 

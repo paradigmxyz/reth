@@ -881,6 +881,20 @@ where
             },
         );
     }
+
+    /// Commits the [`TrieUpdates`] to the sparse trie.
+    pub fn commit_updates(&mut self, updates: &TrieUpdates) {
+        if let Some(trie) = self.state.as_revealed_mut() {
+            trie.commit_updates(&updates.account_nodes, &updates.removed_nodes);
+        }
+        for (address, updates) in &updates.storage_tries {
+            if let Some(trie) =
+                self.storage.tries.get_mut(address).and_then(|t| t.as_revealed_mut())
+            {
+                trie.commit_updates(&updates.storage_nodes, &updates.removed_nodes);
+            }
+        }
+    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
