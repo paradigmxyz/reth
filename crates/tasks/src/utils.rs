@@ -12,8 +12,7 @@ pub fn increase_thread_priority() {
         tracing::debug!(?err, "failed to set max thread priority, trying moderate bump");
         // Crossplatform value 62/99 ≈ nice -5 on unix.
         let fallback = ThreadPriority::Crossplatform(
-            ThreadPriorityValue::try_from(62u8)
-                .expect("62 is within the valid 0..100 range"),
+            ThreadPriorityValue::try_from(62u8).expect("62 is within the valid 0..100 range"),
         );
         if let Err(err) = fallback.set_for_current() {
             tracing::debug!(?err, "failed to set moderate thread priority");

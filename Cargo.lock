@@ -10307,7 +10307,6 @@ dependencies = [
  "metrics",
  "parking_lot",
  "pin-project",
- "quanta",
  "rayon",
  "reth-metrics",
  "thiserror 2.0.18",
