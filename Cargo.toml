@@ -729,7 +729,7 @@ revm-state = { git = "https://github.com/bluealloy/revm", rev = "6ef10066478605c
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "0d3bcdacba2494e51786e4bbfe49c4b9521177fd" }
 
 # alloy-evm staging patches
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "001a0f029df929ce9dbe9f84e4f650d15478ec2f" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "e7ee0fc97f1d4eda632287b7af4f2a2798383ccc" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
