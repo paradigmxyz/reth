@@ -20,7 +20,7 @@ use reth_network_types::{
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
     },
     ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
-    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
+    PersistedPeerInfo, ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -111,6 +111,7 @@ impl PeersManager {
             trusted_nodes_only,
             trusted_nodes_resolution_interval,
             basic_nodes,
+            persisted_peers,
             max_backoff_count,
             incoming_ip_throttle_duration,
             ip_filter,
@@ -122,7 +123,8 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
-        let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
+        let mut peers =
+            HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len() + persisted_peers.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
         for trusted_peer in &trusted_nodes {
@@ -137,6 +139,19 @@ impl PeersManager {
                     warn!(target: "net::peers", ?err, "Failed to resolve trusted peer");
                 }
             }
+        }
+
+        for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
+            let NodeRecord { address, tcp_port, udp_port, id } = record;
+            peers.entry(id).or_insert_with(|| {
+                let mut peer = Peer::with_kind(
+                    PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)),
+                    kind,
+                );
+                peer.fork_id = fork_id.map(Box::new);
+                peer.reputation = reputation;
+                peer
+            });
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
@@ -191,7 +206,7 @@ impl PeersManager {
         self.peers.len()
     }
 
-    /// Returns an iterator over all peers
+    /// Returns an iterator over all peers as [`NodeRecord`]s.
     pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
         self.peers.iter().map(|(peer_id, v)| {
             NodeRecord::new_with_ports(
@@ -201,6 +216,26 @@ impl PeersManager {
                 *peer_id,
             )
         })
+    }
+
+    /// Returns an iterator over peers suitable for persisting to disk.
+    ///
+    /// Filters out backed-off and banned peers, and includes metadata like kind, fork ID, and
+    /// reputation.
+    pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
+        self.peers.iter().filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned()).map(
+            |(peer_id, peer)| PersistedPeerInfo {
+                record: NodeRecord::new_with_ports(
+                    peer.addr.tcp().ip(),
+                    peer.addr.tcp().port(),
+                    peer.addr.udp().map(|addr| addr.port()),
+                    *peer_id,
+                ),
+                kind: peer.kind,
+                fork_id: peer.fork_id.as_deref().copied(),
+                reputation: peer.reputation,
+            },
+        )
     }
 
     /// Returns the `NodeRecord` and `PeerKind` for the given peer id

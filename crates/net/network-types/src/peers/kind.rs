@@ -2,6 +2,8 @@
 
 /// Represents the kind of peer
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum PeerKind {
     /// Basic peer kind.
     #[default]

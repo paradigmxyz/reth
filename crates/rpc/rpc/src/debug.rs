@@ -437,6 +437,8 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
+                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
                     let transactions = block.transactions_recovered().take(num_txs);
 
                     // Execute all transactions until index
