@@ -10,10 +10,11 @@ use alloy_primitives::{
     Bytes, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
-use alloy_trie::EMPTY_ROOT_HASH;
+use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieAccount,
+    TrieNodeV2,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
 
@@ -250,16 +251,29 @@ where
     fn record_decoded_multiproof_v2(&mut self, multiproof: &DecodedMultiProofV2) {
         let mut encoded = Vec::new();
         for proof_node in &multiproof.account_proofs {
-            encoded.clear();
-            proof_node.node.encode(&mut encoded);
-            let bytes = Bytes::from(encoded.clone());
-            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+            self.record_witness_node(&proof_node.node, &mut encoded);
         }
         for proof_node in multiproof.storage_proofs.values().flatten() {
-            encoded.clear();
-            proof_node.node.encode(&mut encoded);
-            let bytes = Bytes::from(encoded.clone());
-            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+            self.record_witness_node(&proof_node.node, &mut encoded);
+        }
+    }
+
+    /// Record a single [`TrieNodeV2`] in the witness. If the node is a branch with a non-empty
+    /// extension key, both the extension encoding and the child branch encoding are recorded as
+    /// separate entries.
+    fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
+        encoded.clear();
+        node.encode(encoded);
+        let bytes = Bytes::from(encoded.clone());
+        self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+
+        if let TrieNodeV2::Branch(branch) = node {
+            if !branch.key.is_empty() {
+                encoded.clear();
+                BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
+                let bytes = Bytes::from(encoded.clone());
+                self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+            }
         }
     }
 
