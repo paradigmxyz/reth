@@ -347,6 +347,23 @@ impl ProofWorkerHandle {
             })
     }
 
+    /// Pre-dispatch storage proofs for a set of V2 multiproof targets.
+    ///
+    /// This dispatches storage proof work to the storage worker pool immediately and returns
+    /// receivers that can be passed to [`AccountMultiproofInput::storage_proof_receivers`].
+    /// This allows storage workers to start processing before an account worker picks up the
+    /// corresponding account multiproof job.
+    pub fn dispatch_v2_storage_proofs(
+        &self,
+        targets: &MultiProofTargetsV2,
+    ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+        dispatch_v2_storage_proofs(
+            &self.storage_work_tx,
+            &targets.account_targets,
+            targets.storage_targets.clone(),
+        )
+    }
+
     /// Dispatch blinded storage node request to storage worker pool
     pub(crate) fn dispatch_blinded_storage_node(
         &self,
@@ -1035,6 +1052,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
+        pre_dispatched_receivers: Option<B256Map<CrossbeamReceiver<StorageProofResultMessage>>>,
     ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
@@ -1051,8 +1069,11 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+        let storage_proof_receivers = if let Some(receivers) = pre_dispatched_receivers {
+            receivers
+        } else {
+            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?
+        };
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1087,11 +1108,13 @@ where
         let proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let AccountMultiproofInput { targets, proof_result_sender, storage_proof_receivers } =
+            input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
             targets,
+            storage_proof_receivers,
         ) {
             Ok((proof, stats)) => (Ok(proof), stats),
             Err(e) => (Err(e), ValueEncoderStats::default()),
@@ -1196,7 +1219,7 @@ where
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &Vec<proof_v2::Target>,
+    account_targets: &[proof_v2::Target],
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
@@ -1264,6 +1287,12 @@ pub struct AccountMultiproofInput {
     pub targets: MultiProofTargetsV2,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
+    /// Pre-dispatched storage proof receivers from the caller.
+    ///
+    /// When set, the account worker skips dispatching storage proofs itself and uses these
+    /// receivers directly. This allows storage workers to start immediately when the caller
+    /// dispatches, rather than waiting for an account worker to pick up the job first.
+    pub storage_proof_receivers: Option<B256Map<CrossbeamReceiver<StorageProofResultMessage>>>,
 }
 
 impl AccountMultiproofInput {

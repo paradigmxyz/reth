@@ -672,6 +672,13 @@ where
             self.proof_worker_handle.available_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
+                let storage_proof_receivers = self
+                    .proof_worker_handle
+                    .dispatch_v2_storage_proofs(&proof_targets)
+                    .map_err(|e| {
+                        error!("failed to dispatch storage proofs: {e:?}");
+                    })
+                    .ok();
                 if let Err(e) =
                     self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
@@ -680,6 +687,7 @@ where
                             HashedPostState::default(),
                             Instant::now(),
                         ),
+                        storage_proof_receivers,
                     })
                 {
                     error!("failed to dispatch account multiproof: {e:?}");
