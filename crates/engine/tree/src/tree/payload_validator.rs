@@ -788,6 +788,23 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = input.block_access_list().is_some();
+        if has_bal {
+            let bal = alloy_eip7928::bal::Bal::from(
+                input
+                    .block_access_list()
+                    .transpose()
+                    .map_err(BlockExecutionError::other)?
+                    .unwrap_or_default(),
+            );
+            let bal_items = bal.total_storage_reads() as u64 + bal.account_count() as u64;
+            let item_cost = 2000;
+            if bal_items > input.gas_limit() / item_cost {
+                debug!(target: "engine::tree::payload_validator", bal_items, "{} {}", input.gas_limit(), "BAL is invalid since it contains more items than the gas limit allows");
+                return Err(InsertBlockErrorKind::Consensus(
+                    ConsensusError::BlockAccessListCostMoreThanGasLimit,
+                ));
+            }
+        }
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1870,6 +1887,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_used(),
             Self::Block(block) => block.gas_used(),
+        }
+    }
+
+    /// Returns the gas limit used by the block.
+    pub fn gas_limit(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_limit(),
+            Self::Block(block) => block.gas_limit(),
         }
     }
 }

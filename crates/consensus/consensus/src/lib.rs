@@ -317,6 +317,10 @@ pub enum ConsensusError {
     #[error("unexpected block access list hash")]
     BlockAccessListHashUnexpected,
 
+    /// Error when an unexpected block access list cost is encountered.
+    #[error("block access list cost exceeds gas limit")]
+    BlockAccessListCostMoreThanGasLimit,
+
     /// Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
