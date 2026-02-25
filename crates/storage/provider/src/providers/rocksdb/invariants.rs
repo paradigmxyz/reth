@@ -506,8 +506,8 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    /// Tests that checkpoint=0 with empty RocksDB returns early without attempting
-    /// an expensive healing loop. Previously, when sf_tip > checkpoint=0, the healer
+    /// Tests that `checkpoint=0` with empty `RocksDB` returns early without attempting
+    /// an expensive healing loop. Previously, when `sf_tip` > `checkpoint=0`, the healer
     /// would iterate billions of transactions from static files for no effect, causing
     /// the node to hang on startup with MDBX read transaction timeouts.
     #[test]
