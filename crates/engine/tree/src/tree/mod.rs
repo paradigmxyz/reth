@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError};
+use parking_lot::RwLock;
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
     NewCanonicalChain,
@@ -39,7 +40,8 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
-use reth_trie_db::ChangesetCache;
+use reth_trie::StorageAccountFilter;
+use reth_trie_db::{ChangesetCache, StorageFilterFactoryBuilder};
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -276,6 +278,9 @@ where
     /// Whether the node uses hashed state as canonical storage (v2 mode).
     /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
     use_hashed_state: bool,
+    /// Cuckoo filter for tracking accounts with storage.
+    /// Used to skip storage proof calculations for accounts without storage.
+    storage_filter: Arc<RwLock<StorageAccountFilter>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -302,6 +307,7 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("use_hashed_state", &self.use_hashed_state)
+            .field("storage_filter", &self.storage_filter)
             .finish()
     }
 }
@@ -342,6 +348,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
+        storage_filter: Arc<RwLock<StorageAccountFilter>>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -364,6 +371,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            storage_filter,
         }
     }
 
@@ -403,6 +411,17 @@ where
             kind,
         );
 
+        // Build the storage filter from the database in parallel
+        let num_threads = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+        let filter = provider
+            .build_storage_filter_parallel(num_threads)
+            .expect("failed to build storage filter");
+        let storage_filter = Arc::new(RwLock::new(filter));
+
+        // Set the storage filter on the payload validator for use in proof calculation
+        let mut payload_validator = payload_validator;
+        payload_validator.set_storage_filter(storage_filter.clone());
+
         let task = Self::new(
             provider,
             consensus,
@@ -418,6 +437,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            storage_filter,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || task.run());

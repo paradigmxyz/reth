@@ -39,6 +39,7 @@ use alloy_primitives::{
     B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::RwLock;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -51,6 +52,7 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory,
     DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
 };
+use reth_trie_common::{StorageAccountFilter, EMPTY_ROOT_HASH};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     cell::RefCell,
@@ -120,6 +122,7 @@ impl ProofWorkerHandle {
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `storage_filter`: Optional filter to skip storage proofs for accounts without storage
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -130,6 +133,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -205,6 +209,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
         let account_parent_span = tracing::Span::current();
+        let account_storage_filter = storage_filter;
         runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
@@ -224,6 +229,7 @@ impl ProofWorkerHandle {
                     account_tx.clone(),
                     account_avail.clone(),
                     cached_storage_roots.clone(),
+                    account_storage_filter.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -888,6 +894,8 @@ struct AccountProofWorker<Factory> {
     available_workers: Arc<AtomicUsize>,
     /// Cached storage roots
     cached_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Optional storage filter for skipping storage proofs of accounts without storage
+    storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -909,6 +917,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -919,6 +928,7 @@ where
             storage_work_tx,
             available_workers,
             cached_storage_roots,
+            storage_filter,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -1062,8 +1072,19 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+        // Use the storage filter to skip storage proofs for accounts without storage
+        let storage_filter_guard = self.storage_filter.as_ref().map(|f| f.read());
+        let storage_filter_ref = storage_filter_guard.as_deref();
+        let storage_proof_receivers = dispatch_v2_storage_proofs(
+            &self.storage_work_tx,
+            &account_targets,
+            storage_targets,
+            storage_filter_ref,
+            &self.cached_storage_roots,
+            #[cfg(feature = "metrics")]
+            &self.metrics,
+        )?;
+        drop(storage_filter_guard);
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1216,11 +1237,17 @@ where
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
+/// If a storage filter is provided, accounts that are definitely known to have no storage
+/// will be skipped and their storage root will be cached as `EMPTY_ROOT_HASH`.
+///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
     mut storage_targets: B256Map<Vec<proof_v2::Target>>,
+    storage_filter: Option<&StorageAccountFilter>,
+    cached_storage_roots: &DashMap<B256, B256>,
+    #[cfg(feature = "metrics")] metrics: &ProofTaskTrieMetrics,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1235,6 +1262,27 @@ fn dispatch_v2_storage_proofs(
             let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
+        }
+    }
+
+    // If a storage filter is available, skip storage proofs for accounts known to have no
+    // storage and cache EMPTY_ROOT_HASH for them directly.
+    if let Some(filter) = storage_filter {
+        let mut skipped = 0u64;
+
+        storage_targets.retain(|hashed_address, _| {
+            if filter.may_have_storage(*hashed_address) {
+                true
+            } else {
+                cached_storage_roots.insert(*hashed_address, EMPTY_ROOT_HASH);
+                skipped += 1;
+                false
+            }
+        });
+
+        #[cfg(feature = "metrics")]
+        if skipped > 0 {
+            metrics.increment_empty_storage_proofs(skipped);
         }
     }
 
@@ -1266,6 +1314,14 @@ fn dispatch_v2_storage_proofs(
     for target in account_targets {
         let hashed_address = target.key();
         if storage_proof_receivers.contains_key(&hashed_address) {
+            continue
+        }
+
+        // Skip dispatch if the filter says this account has no storage
+        if let Some(filter) = storage_filter &&
+            !filter.may_have_storage(hashed_address)
+        {
+            cached_storage_roots.insert(hashed_address, EMPTY_ROOT_HASH);
             continue
         }
 
@@ -1356,7 +1412,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, None);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
