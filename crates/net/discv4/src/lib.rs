@@ -1632,8 +1632,7 @@ impl Discv4Service {
             .map(|n| n.node.value)
             .collect::<Vec<_>>();
         nodes.sort_by_key(|a| a.last_seen);
-        let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
-        for node in to_ping {
+        for node in nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING) {
             self.try_ping(node, PingReason::RePing)
         }
     }
