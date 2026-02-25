@@ -32,7 +32,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::{ForEachOrdered, Runtime};
+use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -424,15 +424,17 @@ where
                     .map(|(i, tx)| {
                         let idx = i + prefetch;
                         let tx = convert.convert(tx);
-                        tx.map(|tx| {
+                        let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
-                        })
+                        });
+                        (idx, tx)
                     })
-                    .for_each_ordered(|tx| {
+                    .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
+                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
             });
         }
@@ -539,6 +541,8 @@ where
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
+            increase_thread_priority();
+
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
@@ -717,6 +721,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
+        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 

@@ -363,11 +363,12 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. replay the required number of transactions
-                for tx in block.transactions_recovered().take(tx_index) {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit(res.state);
-                }
+                eth_api.replay_transactions_until(
+                    &mut db,
+                    evm_env.clone(),
+                    block.transactions_recovered(),
+                    *block.body().transactions()[tx_index].tx_hash(),
+                )?;
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
