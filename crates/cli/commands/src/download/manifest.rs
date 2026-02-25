@@ -105,11 +105,13 @@ pub enum SnapshotComponentType {
     AccountChangesets,
     /// Storage changeset static files. Chunked.
     StorageChangesets,
+    /// RocksDB index files. Single archive. Optional and archive-only.
+    RocksdbIndices,
 }
 
 impl SnapshotComponentType {
     /// All component types in display order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::State,
         Self::Headers,
         Self::Transactions,
@@ -117,6 +119,7 @@ impl SnapshotComponentType {
         Self::Receipts,
         Self::AccountChangesets,
         Self::StorageChangesets,
+        Self::RocksdbIndices,
     ];
 
     /// The string key used in the manifest JSON.
@@ -129,6 +132,7 @@ impl SnapshotComponentType {
             Self::Receipts => "receipts",
             Self::AccountChangesets => "account_changesets",
             Self::StorageChangesets => "storage_changesets",
+            Self::RocksdbIndices => "rocksdb_indices",
         }
     }
 
@@ -142,6 +146,7 @@ impl SnapshotComponentType {
             Self::Receipts => "Receipts",
             Self::AccountChangesets => "Account Changesets",
             Self::StorageChangesets => "Storage Changesets",
+            Self::RocksdbIndices => "RocksDB Indices",
         }
     }
 
@@ -159,6 +164,7 @@ impl SnapshotComponentType {
     /// - Transactions/Changesets: Distance(10_064) (`MINIMUM_UNWIND_SAFE_DISTANCE`)
     /// - Receipts: Distance(64) (`MINIMUM_DISTANCE`)
     /// - TransactionSenders: None (only downloaded for archive nodes)
+    /// - RocksdbIndices: None (only downloaded for archive nodes)
     ///
     /// `tx_lookup` and `sender_recovery` are always pruned full regardless.
     pub const fn minimal_selection(&self) -> ComponentSelection {
@@ -169,6 +175,7 @@ impl SnapshotComponentType {
             }
             Self::Receipts => ComponentSelection::Distance(64),
             Self::TransactionSenders => ComponentSelection::None,
+            Self::RocksdbIndices => ComponentSelection::None,
         }
     }
 
@@ -346,6 +353,20 @@ pub fn generate_manifest(
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found state archive");
     }
 
+    // Optional archive-only RocksDB indices: single archive
+    let rocksdb_indices_path = archive_dir.join("rocksdb_indices.tar.zst");
+    if rocksdb_indices_path.exists() {
+        let size = std::fs::metadata(&rocksdb_indices_path)?.len();
+        components.insert(
+            SnapshotComponentType::RocksdbIndices.key().to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "rocksdb_indices.tar.zst".to_string(),
+                size,
+            }),
+        );
+        info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found RocksDB indices archive");
+    }
+
     // Chunked components — record blocks_per_file, total_blocks, and sum chunk sizes.
     for ty in &[
         SnapshotComponentType::Headers,
@@ -472,6 +493,31 @@ mod tests {
         let urls = m.archive_urls_for_distance(SnapshotComponentType::State, Some(100));
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0], "https://example.com/state.tar.zst");
+    }
+
+    #[test]
+    fn archive_urls_for_distance_rocksdb_indices_single_component() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "rocksdb_indices".to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "rocksdb_indices.tar.zst".to_string(),
+                size: 777,
+            }),
+        );
+        let m = SnapshotManifest {
+            block: 1,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: "https://example.com".to_string(),
+            components,
+        };
+
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::RocksdbIndices, Some(10));
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0], "https://example.com/rocksdb_indices.tar.zst");
+        assert_eq!(m.size_for_distance(SnapshotComponentType::RocksdbIndices, Some(10)), 777);
     }
 
     #[test]

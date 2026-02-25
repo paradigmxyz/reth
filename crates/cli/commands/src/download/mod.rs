@@ -339,11 +339,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             write_prune_checkpoints(&db, &config, manifest.block)?;
         }
 
-        // Reset stage checkpoints for history indexing stages. The snapshot mdbx
-        // comes from a fully synced node with these at the tip, but we don't
-        // distribute the rocksdb indices. Resetting to block 0 ensures the
-        // pipeline or background indexer rebuilds them.
-        reset_index_stage_checkpoints(&db)?;
+        // Reset stage checkpoints for history indexing stages only if RocksDB
+        // indices weren't downloaded. When archive snapshots include the
+        // optional RocksDB indices component, we preserve source checkpoints.
+        if should_reset_index_stage_checkpoints(&selections) {
+            reset_index_stage_checkpoints(&db)?;
+        }
 
         info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
 
@@ -416,18 +417,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
         };
 
-        // Auto-include transaction senders when all data components are selected
-        // as All (archive node). Senders are not shown in the TUI but are
-        // required for a complete archive.
-        inject_senders_for_archive(&mut selections, manifest);
+        // Auto-include hidden archive-only components when all data components
+        // are selected as All (archive node).
+        inject_archive_only_components(&mut selections, manifest);
 
         Ok(selections)
     }
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
-/// include `TransactionSenders` when available in the manifest.
-fn inject_senders_for_archive(
+/// include hidden archive-only components when available in the manifest.
+fn inject_archive_only_components(
     selections: &mut BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
 ) {
@@ -439,9 +439,23 @@ fn inject_senders_for_archive(
         is_all(SnapshotComponentType::AccountChangesets) &&
         is_all(SnapshotComponentType::StorageChangesets);
 
-    if is_archive && manifest.component(SnapshotComponentType::TransactionSenders).is_some() {
-        selections.insert(SnapshotComponentType::TransactionSenders, ComponentSelection::All);
+    if !is_archive {
+        return;
     }
+
+    for component in
+        [SnapshotComponentType::TransactionSenders, SnapshotComponentType::RocksdbIndices]
+    {
+        if manifest.component(component).is_some() {
+            selections.insert(component, ComponentSelection::All);
+        }
+    }
+}
+
+fn should_reset_index_stage_checkpoints(
+    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> bool {
+    !matches!(selections.get(&SnapshotComponentType::RocksdbIndices), Some(ComponentSelection::All))
 }
 
 impl<C: ChainSpecParser> DownloadCommand<C> {
@@ -1151,6 +1165,33 @@ async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use manifest::{ComponentManifest, SingleArchive};
+
+    fn manifest_with_archive_only_components() -> SnapshotManifest {
+        let mut components = BTreeMap::new();
+        components.insert(
+            SnapshotComponentType::TransactionSenders.key().to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "transaction_senders.tar.zst".to_string(),
+                size: 1,
+            }),
+        );
+        components.insert(
+            SnapshotComponentType::RocksdbIndices.key().to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "rocksdb_indices.tar.zst".to_string(),
+                size: 1,
+            }),
+        );
+        SnapshotManifest {
+            block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: "https://example.com".to_string(),
+            components,
+        }
+    }
 
     #[test]
     fn test_download_defaults_builder() {
@@ -1226,5 +1267,36 @@ mod tests {
             Ok(CompressionFormat::Zstd)
         ));
         assert!(CompressionFormat::from_url("https://example.com/snapshot.tar.gz").is_err());
+    }
+
+    #[test]
+    fn inject_archive_only_components_for_archive_selection() {
+        let manifest = manifest_with_archive_only_components();
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
+
+        inject_archive_only_components(&mut selections, &manifest);
+
+        assert_eq!(
+            selections.get(&SnapshotComponentType::TransactionSenders),
+            Some(&ComponentSelection::All)
+        );
+        assert_eq!(
+            selections.get(&SnapshotComponentType::RocksdbIndices),
+            Some(&ComponentSelection::All)
+        );
+    }
+
+    #[test]
+    fn should_reset_index_stage_checkpoints_without_rocksdb_indices() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+        assert!(should_reset_index_stage_checkpoints(&selections));
+
+        selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
+        assert!(!should_reset_index_stage_checkpoints(&selections));
     }
 }
