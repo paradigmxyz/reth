@@ -91,14 +91,20 @@ mod tests {
     "shanghaiTime": 0,
     "cancunTime": 0,
     "pragueTime": 0,
-    "osakaTime": 0
+    "osakaTime": 0,
+    "bpo1Time":0,
+    "bpo2Time":0,
+    "amsterdamTime":15000
   }
 }"#;
 
         let spec = <EthereumChainSpecParser as ChainSpecParser>::parse(s).unwrap();
+        println!("{:?}", spec.genesis_header);
         assert!(spec.is_shanghai_active_at_timestamp(0));
         assert!(spec.is_cancun_active_at_timestamp(0));
         assert!(spec.is_prague_active_at_timestamp(0));
         assert!(spec.is_osaka_active_at_timestamp(0));
+        assert!(!spec.is_amsterdam_active_at_timestamp(14999));
+        assert!(spec.is_amsterdam_active_at_timestamp(15000));
     }
 }
