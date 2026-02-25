@@ -126,6 +126,13 @@ struct ArenaSparseNodeBranch {
 }
 
 impl ArenaSparseNodeBranch {
+    /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
+    const fn unset_child_bit(&mut self, nibble: u8) {
+        self.state_mask.unset_bit(nibble);
+        self.branch_masks.hash_mask.unset_bit(nibble);
+        self.branch_masks.tree_mask.unset_bit(nibble);
+    }
+
     /// Updates this branch's `branch_masks` for `nibble` based on a child's mask bits.
     const fn set_child_mask_bits(&mut self, nibble: u8, hash_mask_bit: bool, tree_mask_bit: bool) {
         if hash_mask_bit {
@@ -1348,7 +1355,7 @@ fn remove_leaf(
             arena.remove(head_idx);
             let parent_branch = arena[parent_idx].branch_mut();
             parent_branch.children.remove(dense_idx);
-            parent_branch.state_mask.unset_bit(child_nibble);
+            parent_branch.unset_child_bit(child_nibble);
             parent_branch.state = ArenaSparseNodeState::Dirty {
                 num_leaves: old_num_leaves - 1,
                 num_dirty_leaves: old_dirty_leaves.saturating_sub(leaf_dirty_count),
@@ -1799,7 +1806,7 @@ impl ArenaParallelSparseTrie {
             .expect("child nibble not found in parent state_mask");
 
         parent_branch.children.remove(dense_idx);
-        parent_branch.state_mask.unset_bit(child_nibble);
+        parent_branch.unset_child_bit(child_nibble);
         // The branch structure changed (child removed), so any cached RLP is stale.
         parent_branch.state = parent_branch.state.to_dirty();
 
