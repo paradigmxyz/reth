@@ -7,8 +7,8 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
-    rlp_node, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNodeV2, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
+    RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
@@ -254,7 +254,7 @@ impl ArenaSparseNode {
     ///
     /// That is, if the node is a branch with no short key (no extension) whose cached
     /// RLP is a hash (>= 32 bytes). Small branches whose RLP is embedded don't get a
-    /// hash_mask bit.
+    /// `hash_mask` bit.
     fn hash_mask_bit(&self) -> bool {
         self.as_branch().is_some_and(|b| {
             b.short_key.is_empty() &&
@@ -837,9 +837,7 @@ fn update_cached_rlp(
                                 ArenaSparseNode::Branch(ArenaSparseNodeBranch {
                                     state: ArenaSparseNodeState::Cached { rlp_node, .. },
                                     ..
-                                }) => {
-                                    rlp_node_buf.push(rlp_node.clone());
-                                }
+                                }) |
                                 ArenaSparseNode::Leaf {
                                     state: ArenaSparseNodeState::Cached { rlp_node, .. },
                                     ..
@@ -1432,13 +1430,13 @@ fn collapse_branch(
 
     // Record the collapsed branch's logical path for trie update tracking if it
     // was previously persisted in the DB trie.
-    if let Some(actions) = update_actions.as_mut() {
-        if !branch.branch_masks.is_empty() {
-            let mut logical_path = branch_entry.path;
-            logical_path.extend(&branch.short_key);
-            if !logical_path.is_empty() {
-                actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
-            }
+    if let Some(actions) = update_actions.as_mut() &&
+        !branch.branch_masks.is_empty()
+    {
+        let mut logical_path = branch_entry.path;
+        logical_path.extend(&branch.short_key);
+        if !logical_path.is_empty() {
+            actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
         }
     }
 
@@ -1826,6 +1824,7 @@ impl ArenaParallelSparseTrie {
         if let Some(updates) = self.updates.as_mut() {
             updates.updated_nodes.reserve(actions.len());
             updates.removed_nodes.reserve(actions.len());
+            #[allow(clippy::iter_with_drain)]
             for action in actions.drain(..) {
                 match action {
                     SparseTrieUpdatesAction::InsertRemoved(path) => {
@@ -2104,10 +2103,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                 // Drain any update actions recorded during the subtrie's
                 // update_leaves.
-                if let Some(actions) = update_actions.as_mut() {
-                    if let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut() {
-                        actions.extend(subtrie_actions.drain(..));
-                    }
+                if let Some(actions) = update_actions.as_mut() &&
+                    let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
+                {
+                    actions.append(subtrie_actions);
                 }
 
                 // Propagate this subtrie's mask bits to the parent branch so
