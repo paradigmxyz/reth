@@ -503,6 +503,8 @@ pub struct Discv4Service {
     received_pongs: PongTable,
     /// Interval used to expire additionally tracked nodes
     expire_interval: Interval,
+    /// Cached signed `FindNode` packet to avoid redundant ECDSA signing during lookups.
+    cached_find_node: Option<CachedFindNode>,
 }
 
 impl Discv4Service {
@@ -603,6 +605,7 @@ impl Discv4Service {
             queued_events: Default::default(),
             received_pongs: Default::default(),
             expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            cached_find_node: None,
         }
     }
 
@@ -811,9 +814,12 @@ impl Discv4Service {
     fn find_node(&mut self, node: &NodeRecord, ctx: LookupContext) {
         trace!(target: "discv4", ?node, lookup=?ctx.target(), "Sending FindNode");
         ctx.mark_queried(node.id);
-        let id = ctx.target();
-        let msg = Message::FindNode(FindNode { id, expire: self.find_node_expiration() });
-        self.send_packet(msg, node.udp_addr());
+        let (payload, hash) = self.find_node_packet(ctx.target());
+        let to = node.udp_addr();
+        trace!(target: "discv4", ?to, ?hash, "sending FindNode packet");
+        let _ = self.egress.try_send((payload, to)).map_err(|err| {
+            debug!(target: "discv4", %err, "dropped outgoing packet");
+        });
         self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
     }
 
@@ -955,10 +961,8 @@ impl Discv4Service {
 
         // Check if ENR was updated
         match (last_enr_seq, old_enr) {
-            (Some(new), Some(old)) => {
-                if new > old {
-                    self.send_enr_request(record);
-                }
+            (Some(new), Some(old)) if new > old => {
+                self.send_enr_request(record);
             }
             (Some(_), None) => {
                 // got an ENR
@@ -1074,6 +1078,19 @@ impl Discv4Service {
             );
         });
         hash
+    }
+
+    /// Returns a signed `FindNode` packet for `target`, reusing a cached payload when possible.
+    fn find_node_packet(&mut self, target: PeerId) -> (Bytes, B256) {
+        let expire = self.find_node_expiration();
+        let cache_ttl = self.config.request_timeout / 4;
+        CachedFindNode::get_or_sign(
+            &mut self.cached_find_node,
+            target,
+            cache_ttl,
+            &self.secret_key,
+            expire,
+        )
     }
 
     /// Message handler for an incoming `Ping`
@@ -1195,10 +1212,8 @@ impl Discv4Service {
         } else {
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
-                (Some(new), Some(old)) => {
-                    if new > old {
-                        self.send_enr_request(record);
-                    }
+                (Some(new), Some(old)) if new > old => {
+                    self.send_enr_request(record);
                 }
                 (Some(_), None) => {
                     self.send_enr_request(record);
@@ -1355,10 +1370,8 @@ impl Discv4Service {
                     _ => return,
                 };
                 match (fork_id, old_fork_id) {
-                    (Some(new), Some(old)) => {
-                        if new != old {
-                            self.notify(DiscoveryUpdate::EnrForkId(record, new))
-                        }
+                    (Some(new), Some(old)) if new != old => {
+                        self.notify(DiscoveryUpdate::EnrForkId(record, new))
                     }
                     (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
                     _ => {}
@@ -2285,6 +2298,41 @@ struct FindNodeRequest {
 impl FindNodeRequest {
     fn new(resp: LookupContext) -> Self {
         Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
+    }
+}
+
+/// Cached signed `FindNode` packet to avoid redundant ECDSA signing during Kademlia lookups.
+#[derive(Debug)]
+struct CachedFindNode {
+    target: PeerId,
+    payload: Bytes,
+    hash: B256,
+    cached_at: Instant,
+}
+
+impl CachedFindNode {
+    /// Returns the cached `(payload, hash)` if the target matches and the cache is still fresh,
+    /// or signs a new packet, updates the cache, and returns it.
+    fn get_or_sign(
+        cache: &mut Option<Self>,
+        target: PeerId,
+        ttl: Duration,
+        secret_key: &secp256k1::SecretKey,
+        expire: u64,
+    ) -> (Bytes, B256) {
+        if let Some(c) = cache.as_ref() &&
+            c.target == target &&
+            c.cached_at.elapsed() < ttl
+        {
+            return (c.payload.clone(), c.hash);
+        }
+
+        let msg = Message::FindNode(FindNode { id: target, expire });
+        let (payload, hash) = msg.encode(secret_key);
+
+        *cache = Some(Self { target, payload: payload.clone(), hash, cached_at: Instant::now() });
+
+        (payload, hash)
     }
 }
 
