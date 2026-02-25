@@ -48,6 +48,14 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
     tracing::info!("Making genesis header with genesis: {:?}", genesis.base_fee_per_gas);
 
     // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+    tracing::info!(
+        "Is London {:?}, Is Cancun {:?}, Is Amsterdam {:?}",
+        hardforks.fork(EthereumHardfork::London).active_at_block(0),
+        hardforks.fork(EthereumHardfork::Cancun).active_at_timestamp(genesis.timestamp),
+        hardforks.fork(EthereumHardfork::Amsterdam).active_at_timestamp(genesis.timestamp)
+    );
+
+    tracing::info!("Hardforks {:#?}", hardforks);
     let base_fee_per_gas = hardforks
         .fork(EthereumHardfork::London)
         .active_at_block(0)
