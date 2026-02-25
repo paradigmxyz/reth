@@ -403,7 +403,7 @@ fn find_ancestor(
 ) -> FindAncestorResult {
     // Pop stack until head is ancestor of full_path.
     while stack.len() > 1 && !full_path.starts_with(&stack.last().unwrap().path) {
-        pop_and_propagate(arena, stack);
+        pop_and_propagate(arena, stack, false);
     }
 
     loop {
@@ -509,10 +509,16 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
 /// Pops the top entry from the stack and propagates `num_leaves` and dirty state/count
 /// deltas to the new top (its parent). Returns the popped entry's path, or `None` if
 /// the stack was empty.
+///
+/// When `propagate_masks` is `true`, the popped child's `hash_mask_bit` and `tree_mask_bit`
+/// are propagated to the parent branch's `branch_masks`. If the masks change, the parent is
+/// marked dirty. This should only be set after a child has been hashed (i.e. is in `Cached`
+/// state).
 #[instrument(level = "trace", target = "trie::arena", skip(arena, stack), ret)]
 fn pop_and_propagate(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
+    propagate_masks: bool,
 ) -> Option<Nibbles> {
     let entry = stack.pop()?;
     trace!(target: TRACE_TARGET, path = ?entry.path, "Popped entry");
@@ -523,6 +529,21 @@ fn pop_and_propagate(
     if let Some(parent) = stack.last() {
         let cur_num_leaves = arena[entry.index].num_leaves();
         let cur_dirty_leaves = arena[entry.index].num_dirty_leaves();
+
+        // Propagate branch_masks from the popped child to the parent. This must happen
+        // before the dirty-delta propagation below, because setting masks may mark the
+        // parent dirty (via `to_dirty`), which affects the parent's `num_dirty_leaves`.
+        if propagate_masks {
+            let child_nibble = entry.path.last().unwrap();
+            let hash_bit = arena[entry.index].hash_mask_bit();
+            let tree_bit = arena[entry.index].tree_mask_bit();
+            let parent_branch = arena[parent.index].branch_mut();
+            parent_branch.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
+            debug_assert!(
+                matches!(parent_branch.state, ArenaSparseNodeState::Dirty { .. }),
+                "parent must already be dirty when propagating masks",
+            );
+        }
 
         let parent_state = arena[parent.index].state_mut();
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
@@ -549,7 +570,7 @@ fn pop_and_propagate(
 fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEntry>) {
     trace!(target: TRACE_TARGET, "Draining stack");
     while stack.len() > 1 {
-        pop_and_propagate(arena, stack);
+        pop_and_propagate(arena, stack, false);
     }
 }
 
@@ -913,18 +934,11 @@ fn update_cached_rlp(
         // branch_masks to the parent. If the stack is now empty, the root is done.
         // Otherwise resume the parent branch from the nibble after the child that was
         // just completed.
-        let popped_path = pop_and_propagate(arena, stack).unwrap();
+        let popped_path = pop_and_propagate(arena, stack, true).unwrap();
         if stack.is_empty() {
             break;
         }
-        // This branch was on the stack (dirty or revealed). Update the parent's
-        // branch_masks for the nibble that points to this child.
-        let child_nibble = popped_path.last().unwrap();
-        let hash_bit = arena[head_idx].hash_mask_bit();
-        let tree_bit = arena[head_idx].tree_mask_bit();
-        let parent_idx = stack.last().unwrap().index;
-        arena[parent_idx].branch_mut().set_child_mask_bits(child_nibble, hash_bit, tree_bit);
-        start_nibble = child_nibble + 1;
+        start_nibble = popped_path.last().unwrap() + 1;
     }
 
     rlp_node_buf.pop().expect("root RlpNode must be on rlp_node_buf after update_cached_rlp")
@@ -1302,7 +1316,7 @@ fn remove_leaf(
             // Pop the leaf entry, propagating any pending num_leaves delta to the
             // parent. This is important when collapse_branch has replaced the stack
             // entry's node (changing num_leaves) without updating prev_num_leaves.
-            pop_and_propagate(arena, stack);
+            pop_and_propagate(arena, stack, false);
 
             if stack.is_empty() {
                 // The leaf is the root — replace with EmptyRoot and push it back onto
@@ -1769,7 +1783,7 @@ impl ArenaParallelSparseTrie {
 
         // Pop the subtrie entry before mutating, so collapse_branch sees the parent at
         // stack.last().
-        pop_and_propagate(&mut self.upper_arena, stack);
+        pop_and_propagate(&mut self.upper_arena, stack, false);
 
         // Extract the subtrie and recycle it.
         let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(subtrie_idx).unwrap()
@@ -2109,25 +2123,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     actions.append(subtrie_actions);
                 }
 
-                // Propagate this subtrie's mask bits to the parent branch so
-                // that the parent's branch_masks reflect the subtrie's current
-                // state. Without this, a subtrie child that changed structure
-                // (e.g. was a branch in the DB but is now a leaf) would leave
-                // stale mask bits on the parent.
-                let hash_bit = self.upper_arena[head_idx].hash_mask_bit();
-                let tree_bit = self.upper_arena[head_idx].tree_mask_bit();
-                let child_nibble = head_path.last().unwrap();
-                let parent_idx = self.buffers.stack[self.buffers.stack.len() - 2].index;
-                let parent = self.upper_arena[parent_idx].branch_mut();
-                let old_masks = parent.branch_masks;
-                parent.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
-                if parent.branch_masks != old_masks {
-                    parent.state = parent.state.to_dirty();
-                }
-
-                // Pop subtrie; pop_and_propagate handles the dirty delta to parent.
-                let popped_path = pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack)
-                    .expect("stack should not be empty");
+                // Pop subtrie; pop_and_propagate handles the dirty delta and
+                // branch_masks propagation to the parent.
+                let popped_path =
+                    pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack, true)
+                        .expect("stack should not be empty");
                 if self.buffers.stack.is_empty() {
                     break;
                 }
@@ -2173,8 +2173,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             // All children processed; pop and propagate dirty/leaf deltas to parent.
-            let popped_path = pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack)
-                .expect("stack should not be empty");
+            let popped_path =
+                pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack, false)
+                    .expect("stack should not be empty");
             if self.buffers.stack.is_empty() {
                 break;
             }
