@@ -527,10 +527,10 @@ fn pop_and_propagate(
         let parent_state = arena[parent.index].state_mut();
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
 
-        // If a child has any dirty leaves, the parent must become Dirty too. It's sufficient to
-        // check the latest dirty leaf count; if the previous count was >0, but this went to zero,
-        // it would indicate the branch was deleted, and so wouldn't be on the stack.
-        if cur_dirty_leaves > 0 {
+        // If the child's dirty leaf count changed (increased or decreased), propagate the
+        // delta to the parent. This covers both dirtying (cur > prev) and cleaning
+        // (cur < prev, e.g. after a subtrie is hashed).
+        if cur_dirty_leaves > 0 || entry.prev_dirty_leaves > 0 {
             let dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
             trace!(target: TRACE_TARGET, path = ?entry.path, leaves_delta, dirty_delta, "Propagating dirty state to parent");
             *parent_state = ArenaSparseNodeState::Dirty {
@@ -1297,6 +1297,10 @@ fn remove_leaf(
                 }
             }
 
+            // Capture the leaf's dirty count before popping/removing, so we only
+            // decrement the parent's num_dirty_leaves if the leaf was actually dirty.
+            let leaf_dirty_count = arena[head_idx].num_dirty_leaves();
+
             // Pop the leaf entry, propagating any pending num_leaves delta to the
             // parent. This is important when collapse_branch has replaced the stack
             // entry's node (changing num_leaves) without updating prev_num_leaves.
@@ -1335,7 +1339,7 @@ fn remove_leaf(
             parent_branch.state_mask.unset_bit(child_nibble);
             parent_branch.state = ArenaSparseNodeState::Dirty {
                 num_leaves: old_num_leaves - 1,
-                num_dirty_leaves: if old_dirty_leaves > 0 { old_dirty_leaves - 1 } else { 0 },
+                num_dirty_leaves: old_dirty_leaves.saturating_sub(leaf_dirty_count),
             };
 
             // If the branch now has only one child, collapse it. The blinded sibling
@@ -1672,36 +1676,6 @@ impl ArenaParallelSparseTrie {
             .iter()
             .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
             .collect()
-    }
-
-    /// Returns all subtrie indices with their paths, parent branch index, and child nibble.
-    fn all_subtries_with_paths_and_parents(&self) -> SmallVec<[(Index, Nibbles, Index, u8); 16]> {
-        let mut result = SmallVec::new();
-        // (node_idx, path, parent_idx, nibble_in_parent)
-        let mut worklist: SmallVec<[(Index, Nibbles, Index, u8); 16]> = SmallVec::new();
-        worklist.push((self.root, Nibbles::default(), self.root, 0));
-        while let Some((idx, path, parent_idx, nibble)) = worklist.pop() {
-            match &self.upper_arena[idx] {
-                ArenaSparseNode::Subtrie(_) => {
-                    result.push((idx, path, parent_idx, nibble));
-                }
-                ArenaSparseNode::Branch(b) => {
-                    let mut logical_path = path;
-                    logical_path.extend(&b.short_key);
-                    for (dense_idx, child_nibble) in b.state_mask.iter().enumerate() {
-                        if let ArenaSparseNodeBranchChild::Revealed(child_idx) =
-                            &b.children[dense_idx]
-                        {
-                            let mut child_path = logical_path;
-                            child_path.push_unchecked(child_nibble);
-                            worklist.push((*child_idx, child_path, idx, child_nibble));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        result
     }
 
     /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
@@ -2098,36 +2072,114 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn update_subtrie_hashes(&mut self) {
-        let subtries = self.all_subtries_with_paths_and_parents();
-        trace!(target: TRACE_TARGET, num_subtries = subtries.len(), "Updating subtrie hashes");
+        trace!(target: TRACE_TARGET, "Updating subtrie hashes");
+
+        // Only descend if the root is a branch; otherwise there are no subtries.
+        self.buffers.stack.clear();
+        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            return;
+        }
+        let root_node = &self.upper_arena[self.root];
+        self.buffers.stack.push(ArenaStackEntry {
+            index: self.root,
+            path: Nibbles::default(),
+            prev_num_leaves: root_node.num_leaves(),
+            prev_dirty_leaves: root_node.num_dirty_leaves(),
+        });
 
         let mut update_actions = self.buffers.update_actions.take();
+        let mut start_nibble: u8 = 0;
 
-        for (idx, path, parent_idx, nibble) in subtries {
-            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[idx] else {
-                unreachable!()
-            };
-            subtrie.update_cached_rlp(path, &mut update_actions);
+        loop {
+            let head_idx = self.buffers.stack.last().unwrap().index;
 
-            // Drain any update actions recorded during the subtrie's update_leaves.
-            if let Some(actions) = update_actions.as_mut() {
-                if let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut() {
-                    actions.extend(subtrie_actions.drain(..));
+            // If the current head is a subtrie, hash it and pop back to the parent.
+            if let ArenaSparseNode::Subtrie(_) = &self.upper_arena[head_idx] {
+                let head_path = self.buffers.stack.last().unwrap().path;
+
+                let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
+                    unreachable!()
+                };
+                subtrie.update_cached_rlp(head_path, &mut update_actions);
+
+                // Drain any update actions recorded during the subtrie's
+                // update_leaves.
+                if let Some(actions) = update_actions.as_mut() {
+                    if let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut() {
+                        actions.extend(subtrie_actions.drain(..));
+                    }
+                }
+
+                // Propagate this subtrie's mask bits to the parent branch so
+                // that the parent's branch_masks reflect the subtrie's current
+                // state. Without this, a subtrie child that changed structure
+                // (e.g. was a branch in the DB but is now a leaf) would leave
+                // stale mask bits on the parent.
+                let hash_bit = self.upper_arena[head_idx].hash_mask_bit();
+                let tree_bit = self.upper_arena[head_idx].tree_mask_bit();
+                let child_nibble = head_path.last().unwrap();
+                let parent_idx = self.buffers.stack[self.buffers.stack.len() - 2].index;
+                let parent = self.upper_arena[parent_idx].branch_mut();
+                let old_masks = parent.branch_masks;
+                parent.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
+                if parent.branch_masks != old_masks {
+                    parent.state = parent.state.to_dirty();
+                }
+
+                // Pop subtrie; pop_and_propagate handles the dirty delta to parent.
+                let popped_path = pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack)
+                    .expect("stack should not be empty");
+                if self.buffers.stack.is_empty() {
+                    break;
+                }
+                start_nibble = popped_path.last().unwrap() + 1;
+                continue;
+            }
+
+            // Head is a branch — iterate its children looking for branches/subtries
+            // to descend into.
+            let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
+
+            let mut descended = false;
+            for (dense_idx, nibble) in state_mask.iter().enumerate() {
+                if nibble < start_nibble {
+                    continue;
+                }
+
+                let child_idx = match &self.upper_arena[head_idx].branch_ref().children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                match &self.upper_arena[child_idx] {
+                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => {
+                        let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
+                        let child_node = &self.upper_arena[child_idx];
+                        self.buffers.stack.push(ArenaStackEntry {
+                            index: child_idx,
+                            path,
+                            prev_num_leaves: child_node.num_leaves(),
+                            prev_dirty_leaves: child_node.num_dirty_leaves(),
+                        });
+                        start_nibble = 0;
+                        descended = true;
+                        break;
+                    }
+                    _ => {}
                 }
             }
 
-            // Propagate this subtrie's mask bits to the parent branch so that the
-            // parent's branch_masks reflect the subtrie's current state. Without
-            // this, a subtrie child that changed structure (e.g. was a branch in the
-            // DB but is now a leaf) would leave stale mask bits on the parent.
-            let hash_bit = self.upper_arena[idx].hash_mask_bit();
-            let tree_bit = self.upper_arena[idx].tree_mask_bit();
-            let parent = self.upper_arena[parent_idx].branch_mut();
-            let old_masks = parent.branch_masks;
-            parent.set_child_mask_bits(nibble, hash_bit, tree_bit);
-            if parent.branch_masks != old_masks {
-                parent.state = parent.state.to_dirty();
+            if descended {
+                continue;
             }
+
+            // All children processed; pop and propagate dirty/leaf deltas to parent.
+            let popped_path = pop_and_propagate(&mut self.upper_arena, &mut self.buffers.stack)
+                .expect("stack should not be empty");
+            if self.buffers.stack.is_empty() {
+                break;
+            }
+            start_nibble = popped_path.last().unwrap() + 1;
         }
 
         self.buffers.update_actions = update_actions;
