@@ -24,7 +24,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
@@ -41,7 +41,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
-use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
+use reth_primitives_traits::{Account, Bytecode, RecoveredBlock, SealedHeader};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -1218,14 +1218,14 @@ where
     fn plain_state_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageKey>)>,
-    ) -> Result<Vec<(Address, Vec<reth_primitives::StorageEntry>)>, ProviderError> {
+    ) -> Result<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>, ProviderError> {
         let mut results = Vec::new();
 
         for (address, keys) in addresses_with_keys {
             let mut values = Vec::new();
             for key in keys {
                 let value = self.storage(address, key)?.unwrap_or_default();
-                values.push(reth_primitives::StorageEntry::new(key, value));
+                values.push(reth_primitives_traits::StorageEntry::new(key, value));
             }
             results.push((address, values));
         }

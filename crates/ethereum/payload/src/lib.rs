@@ -260,8 +260,8 @@ where
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
         let mut blob_tx_sidecar = None;
-        if let Some(blob_tx) = tx.as_eip4844() {
-            let tx_blob_count = blob_tx.tx().blob_versioned_hashes.len() as u64;
+        if let Some(blob_hashes) = tx.blob_versioned_hashes() {
+            let tx_blob_count = blob_hashes.len() as u64;
 
             if block_blob_count + tx_blob_count > max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -331,13 +331,32 @@ where
                 }
                 continue
             }
+            // EIP-7778: the executor tracks gas_before_refund while the payload builder's
+            // pre-check uses gas_after_refund. Near-full blocks can pass the pre-check but
+            // fail the executor's check. Skip the tx and continue building.
+            Err(BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit,
+                    block_available_gas,
+                },
+            )) => {
+                trace!(target: "payload_builder", %transaction_gas_limit, %block_available_gas, ?tx, "skipping transaction exceeding block gas limit");
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    &InvalidPoolTransactionError::ExceedsGasLimit(
+                        transaction_gas_limit,
+                        block_available_gas,
+                    ),
+                );
+                continue
+            }
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
 
         // add to the total blob gas used if the transaction successfully executed
-        if let Some(blob_tx) = tx.as_eip4844() {
-            block_blob_count += blob_tx.tx().blob_versioned_hashes.len() as u64;
+        if let Some(blob_hashes) = tx.blob_versioned_hashes() {
+            block_blob_count += blob_hashes.len() as u64;
 
             // if we've reached the max blob count, we can skip blob txs entirely
             if block_blob_count == max_blob_count {
