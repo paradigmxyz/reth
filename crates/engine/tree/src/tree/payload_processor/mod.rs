@@ -43,11 +43,7 @@ use reth_trie_sparse::{
 };
 use std::{
     ops::Not,
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{self, channel},
-        Arc,
-    },
+    sync::{atomic::AtomicBool, mpsc, Arc},
     time::Duration,
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
@@ -301,7 +297,7 @@ where
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         // wire the sparse trie to the state root response receiver
-        let (state_root_tx, state_root_rx) = channel();
+        let (state_root_tx, state_root_rx) = crossbeam_channel::bounded(1);
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(
@@ -525,7 +521,7 @@ where
     fn spawn_sparse_trie_task(
         &self,
         proof_worker_handle: ProofWorkerHandle,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        state_root_tx: CrossbeamSender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -733,7 +729,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    state_root: Option<CrossbeamReceiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Span for tracing
     _span: Span,
 }
@@ -766,7 +762,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// If payload processing was started without background tasks.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+    ) -> CrossbeamReceiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         self.state_root.take().expect("state_root is None")
     }
 
