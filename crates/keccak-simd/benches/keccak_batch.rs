@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::{keccak256, B256};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use reth_keccak_simd::{keccak256_batch_20, keccak256_batch_32};
