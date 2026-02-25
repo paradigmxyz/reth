@@ -13972,8 +13972,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "alloy-op-evm"
-version = "0.27.2"
-source = "git+https://github.com/alloy-rs/evm?rev=417bed0b409f233ca594b4e44deade881da2788e#417bed0b409f233ca594b4e44deade881da2788e"
