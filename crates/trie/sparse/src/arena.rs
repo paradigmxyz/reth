@@ -1800,6 +1800,8 @@ impl ArenaParallelSparseTrie {
 
         parent_branch.children.remove(dense_idx);
         parent_branch.state_mask.unset_bit(child_nibble);
+        // The branch structure changed (child removed), so any cached RLP is stale.
+        parent_branch.state = parent_branch.state.to_dirty();
 
         if parent_branch.state_mask.count_bits() == 1 && !parent_branch.children[0].is_blinded() {
             collapse_branch(
@@ -2652,8 +2654,7 @@ mod tests {
                 expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
                 "removed nodes mismatch"
             );
-            // TODO re-enable
-            //assert_eq!(expected_root, actual_root, "storage root mismatch");
+            assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
 
         /// Obtains the root node of the storage trie via `StorageProofCalculator`.
