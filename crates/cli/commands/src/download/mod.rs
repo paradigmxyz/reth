@@ -339,10 +339,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             write_prune_checkpoints(&db, &config, manifest.block)?;
         }
 
-        // Reset stage checkpoints for index stages (always) and data stages
-        // whose static files were not fully downloaded. The snapshot mdbx comes
-        // from a fully synced node with all stages at the tip.
-        reset_index_stage_checkpoints(&db, &selections)?;
+        // Reset stage checkpoints for history indexing stages. The snapshot mdbx
+        // comes from a fully synced node with these at the tip, but we don't
+        // distribute the rocksdb indices. Resetting to block 0 ensures the
+        // pipeline or background indexer rebuilds them.
+        reset_index_stage_checkpoints(&db)?;
 
         info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
 

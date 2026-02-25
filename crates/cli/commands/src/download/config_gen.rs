@@ -154,31 +154,27 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 4] = [
     PruneSegment::SenderRecovery,
 ];
 
-/// Resets stage and prune checkpoints based on what was actually downloaded.
+/// Resets stage and prune checkpoints for stages whose output is not included
+/// in the snapshot.
 ///
-/// The mdbx comes from a fully synced node with all stage checkpoints at the
-/// tip. We must reset checkpoints for:
-///
-/// 1. **Index stages** (always reset): `TransactionLookup`, `IndexAccountHistory`,
-///    `IndexStorageHistory`, `SenderRecovery` — their output (rocksdb indices and sender static
-///    files) is never distributed.
-///
-/// 2. **Data stages** (conditionally reset): `Bodies` and `Execution` — reset when their
-///    corresponding static file data (transactions / receipts) was not downloaded. Without this,
-///    the consistency check sees stage checkpoints at the tip but no static files and panics.
+/// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
+/// at the tip for `TransactionLookup`, `IndexAccountHistory`,
+/// `IndexStorageHistory`, and `SenderRecovery`. Since we don't distribute the
+/// data those stages produced (rocksdb indices and sender static files), we must
+/// reset their checkpoints to block 0. Otherwise the pipeline would see "already
+/// done" and skip rebuilding entirely.
 ///
 /// For archive nodes that download `TransactionSenders`, the sender recovery
 /// checkpoint is restored after extraction based on the downloaded data.
-pub fn reset_index_stage_checkpoints(
-    db: &DatabaseEnv,
-    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
-) -> eyre::Result<()> {
+pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
     let tx = db.tx_mut()?;
 
-    // Always reset index stages
     for stage_id in INDEX_STAGE_IDS {
         tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::default())?;
+
+        // Also clear any stage-specific progress data
         tx.delete::<tables::StageCheckpointProgresses>(stage_id.to_string(), None)?;
+
         info!(target: "reth::cli", stage = stage_id, "Reset stage checkpoint to block 0");
     }
 
@@ -186,32 +182,6 @@ pub fn reset_index_stage_checkpoints(
     // state from the source node
     for segment in INDEX_PRUNE_SEGMENTS {
         tx.delete::<tables::PruneCheckpoints>(segment, None)?;
-    }
-
-    // Reset Bodies stage if transactions were not fully downloaded.
-    // The consistency check requires transaction static files to match the
-    // Bodies stage checkpoint.
-    let tx_sel = selections
-        .get(&SnapshotComponentType::Transactions)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    if tx_sel != ComponentSelection::All {
-        let stage_id = "Bodies";
-        tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::default())?;
-        tx.delete::<tables::StageCheckpointProgresses>(stage_id.to_string(), None)?;
-        info!(target: "reth::cli", stage = stage_id, "Reset stage checkpoint to block 0 (transactions not fully downloaded)");
-    }
-
-    // Reset Execution stage if receipts were not fully downloaded.
-    let receipt_sel = selections
-        .get(&SnapshotComponentType::Receipts)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    if receipt_sel != ComponentSelection::All {
-        let stage_id = "Execution";
-        tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::default())?;
-        tx.delete::<tables::StageCheckpointProgresses>(stage_id.to_string(), None)?;
-        info!(target: "reth::cli", stage = stage_id, "Reset stage checkpoint to block 0 (receipts not fully downloaded)");
     }
 
     tx.commit()?;
@@ -672,14 +642,10 @@ mod tests {
             tx.commit().unwrap();
         }
 
-        // Reset with archive selections (all components = All)
-        let mut selections = BTreeMap::new();
-        for ty in SnapshotComponentType::ALL {
-            selections.insert(ty, ComponentSelection::All);
-        }
-        reset_index_stage_checkpoints(&db, &selections).unwrap();
+        // Reset
+        reset_index_stage_checkpoints(&db).unwrap();
 
-        // Verify index stage checkpoints are at block 0
+        // Verify stage checkpoints are at block 0
         let tx = db.tx().unwrap();
         for stage_id in INDEX_STAGE_IDS {
             let checkpoint = tx
