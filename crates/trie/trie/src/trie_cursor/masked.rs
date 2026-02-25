@@ -5,6 +5,7 @@ use reth_trie_common::{
     prefix_set::{PrefixSet, TriePrefixSets},
     BranchNodeCompact, Nibbles,
 };
+use std::sync::Arc;
 
 /// A [`TrieCursorFactory`] wrapper that creates cursors which invalidate cached trie hash data
 /// for children whose paths match the prefix sets in a [`TriePrefixSets`].
@@ -91,8 +92,6 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         }
 
         let mut new_hash_mask = original_hash_mask;
-        let mut new_hashes = Vec::with_capacity(node.hashes.len());
-        let mut hash_idx = 0;
         let mut child_path = key.clone();
         let key_len = key.len();
 
@@ -102,15 +101,22 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
 
             if self.prefix_set.contains(&child_path) {
                 new_hash_mask.unset_bit(nibble);
-            } else {
-                new_hashes.push(node.hashes[hash_idx]);
             }
-            hash_idx += 1;
         }
 
         if new_hash_mask != original_hash_mask {
+            // Remove hashes for unset bits in-place.
+            let hashes = Arc::make_mut(&mut node.hashes);
+            let mut write = 0;
+            for (read, nibble) in original_hash_mask.iter().enumerate() {
+                if new_hash_mask.is_bit_set(nibble) {
+                    hashes[write] = hashes[read];
+                    write += 1;
+                }
+            }
+            hashes.truncate(write);
+
             node.hash_mask = new_hash_mask;
-            node.hashes = new_hashes.into();
             node.root_hash = None;
 
             if node.hash_mask.is_empty() && node.tree_mask.is_empty() {
