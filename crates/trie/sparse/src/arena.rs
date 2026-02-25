@@ -353,24 +353,23 @@ struct ArenaStackEntry {
 struct ArenaTrieBuffers {
     /// Reusable stack buffer for trie traversals.
     stack: Vec<ArenaStackEntry>,
-    /// Reusable buffer for collecting update actions.
-    update_actions: Vec<SparseTrieUpdatesAction>,
+    /// Reusable buffer for collecting update actions. `Some` when tracking updates, `None`
+    /// otherwise. Initialized alongside `updates` in `set_updates`.
+    update_actions: Option<Vec<SparseTrieUpdatesAction>>,
     /// Reusable buffer for RLP encoding.
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
     rlp_node_buf: Vec<RlpNode>,
-    /// Paths of branch nodes that were removed during structural changes (collapse)
-    /// and had non-empty `branch_masks`. These need `InsertRemoved` actions.
-    removed_branch_paths: Vec<Nibbles>,
 }
 
 impl ArenaTrieBuffers {
     fn clear(&mut self) {
         self.stack.clear();
-        self.update_actions.clear();
+        if let Some(actions) = self.update_actions.as_mut() {
+            actions.clear();
+        }
         self.rlp_buf.clear();
         self.rlp_node_buf.clear();
-        self.removed_branch_paths.clear();
     }
 }
 
@@ -654,7 +653,7 @@ impl ArenaSparseSubtrie {
                         key,
                         full_path,
                         find_result,
-                        &mut self.buffers.removed_branch_paths,
+                        &mut self.buffers.update_actions,
                     );
                     if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
                         self.required_proofs
@@ -1241,7 +1240,7 @@ fn remove_leaf(
     key: B256,
     full_path: &Nibbles,
     find_result: FindAncestorResult,
-    removed_branch_paths: &mut Vec<Nibbles>,
+    update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
 ) -> RemoveLeafResult {
     trace!(target: TRACE_TARGET, ?full_path, ?find_result, "Removing leaf");
     match find_result {
@@ -1342,7 +1341,7 @@ fn remove_leaf(
             // If the branch now has only one child, collapse it. The blinded sibling
             // case was already handled above before any mutations.
             if parent_branch.state_mask.count_bits() == 1 {
-                collapse_branch(arena, stack, root, removed_branch_paths);
+                collapse_branch(arena, stack, root, update_actions);
             }
             RemoveLeafResult::None
         }
@@ -1415,7 +1414,7 @@ fn collapse_branch(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut [ArenaStackEntry],
     root: &mut Index,
-    removed_branch_paths: &mut Vec<Nibbles>,
+    update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
 ) {
     let branch_entry = stack.last().unwrap();
     let branch_idx = branch_entry.index;
@@ -1429,11 +1428,13 @@ fn collapse_branch(
 
     // Record the collapsed branch's logical path for trie update tracking if it
     // was previously persisted in the DB trie.
-    if !branch.branch_masks.is_empty() {
-        let mut logical_path = branch_entry.path;
-        logical_path.extend(&branch.short_key);
-        if !logical_path.is_empty() {
-            removed_branch_paths.push(logical_path);
+    if let Some(actions) = update_actions.as_mut() {
+        if !branch.branch_masks.is_empty() {
+            let mut logical_path = branch_entry.path;
+            logical_path.extend(&branch.short_key);
+            if !logical_path.is_empty() {
+                actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+            }
         }
     }
 
@@ -1719,6 +1720,9 @@ impl ArenaParallelSparseTrie {
             }
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
+        if self.updates.is_some() {
+            subtrie.buffers.update_actions.get_or_insert_with(Vec::new).clear();
+        }
         Box::new(subtrie)
     }
 
@@ -1816,7 +1820,7 @@ impl ArenaParallelSparseTrie {
                 &mut self.upper_arena,
                 stack,
                 &mut self.root,
-                &mut self.buffers.removed_branch_paths,
+                &mut self.buffers.update_actions,
             );
 
             // After collapse, the remaining child (now at stack.last().index) may be a Subtrie
@@ -1838,45 +1842,6 @@ impl ArenaParallelSparseTrie {
                 );
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
-            }
-        }
-    }
-
-    /// Hashes all subtries, collecting update actions into the given buffer.
-    /// After each subtrie is hashed, propagates its mask bits to the parent branch
-    /// so the parent's `branch_masks` stay up-to-date.
-    fn update_subtrie_hashes_with_actions(
-        &mut self,
-        update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
-    ) {
-        let subtries = self.all_subtries_with_paths_and_parents();
-        trace!(target: TRACE_TARGET, num_subtries = subtries.len(), "Updating subtrie hashes");
-        for (idx, path, parent_idx, nibble) in subtries {
-            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[idx] else {
-                unreachable!()
-            };
-            subtrie.update_cached_rlp(path, update_actions);
-
-            // Drain any removed branch paths recorded during the subtrie's apply_updates.
-            if let Some(actions) = update_actions.as_mut() {
-                for removed_path in subtrie.buffers.removed_branch_paths.drain(..) {
-                    actions.push(SparseTrieUpdatesAction::InsertRemoved(removed_path));
-                }
-            }
-
-            // Propagate this subtrie's mask bits to the parent branch so that the
-            // parent's branch_masks reflect the subtrie's current state. Without
-            // this, a subtrie child that changed structure (e.g. was a branch in the
-            // DB but is now a leaf) would leave stale mask bits on the parent.
-            let hash_bit = self.upper_arena[idx].hash_mask_bit();
-            let tree_bit = self.upper_arena[idx].tree_mask_bit();
-            let parent = self.upper_arena[parent_idx].branch_mut();
-            let old_masks = parent.branch_masks;
-            parent.set_child_mask_bits(nibble, hash_bit, tree_bit);
-            // If the parent's masks changed, mark it dirty so update_cached_rlp
-            // visits it and emits the correct update actions.
-            if parent.branch_masks != old_masks {
-                parent.state = parent.state.to_dirty();
             }
         }
     }
@@ -1903,7 +1868,7 @@ impl ArenaParallelSparseTrie {
                 }
             }
         }
-        self.buffers.update_actions = actions;
+        self.buffers.update_actions = Some(actions);
     }
 }
 
@@ -1974,6 +1939,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     fn set_updates(&mut self, retain_updates: bool) {
         self.updates = retain_updates.then(Default::default);
+        if retain_updates {
+            self.buffers.update_actions.get_or_insert_with(Vec::new).clear();
+        } else {
+            self.buffers.update_actions = None;
+        }
     }
 
     fn reserve_nodes(&mut self, _additional: usize) {
@@ -2095,10 +2065,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = "trie::arena", skip_all, ret)]
     fn root(&mut self) -> B256 {
-        let mut update_actions =
-            self.updates.is_some().then(|| mem::take(&mut self.buffers.update_actions));
+        self.update_subtrie_hashes();
 
-        self.update_subtrie_hashes_with_actions(&mut update_actions);
+        let mut update_actions = self.buffers.update_actions.take();
         let rlp_node = update_cached_rlp(
             &mut self.upper_arena,
             self.root,
@@ -2108,14 +2077,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             Nibbles::default(),
             &mut update_actions,
         );
-
-        // Emit InsertRemoved actions for branches that were collapsed during leaf removal
-        // and had non-empty branch_masks (were previously persisted to the DB trie).
-        if let Some(actions) = update_actions.as_mut() {
-            for path in self.buffers.removed_branch_paths.drain(..) {
-                actions.push(SparseTrieUpdatesAction::InsertRemoved(path));
-            }
-        }
 
         // Apply collected update actions into self.updates.
         if let Some(actions) = update_actions {
@@ -2137,12 +2098,39 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn update_subtrie_hashes(&mut self) {
-        let mut update_actions =
-            self.updates.is_some().then(|| mem::take(&mut self.buffers.update_actions));
-        self.update_subtrie_hashes_with_actions(&mut update_actions);
-        if let Some(actions) = update_actions {
-            self.apply_update_actions(actions);
+        let subtries = self.all_subtries_with_paths_and_parents();
+        trace!(target: TRACE_TARGET, num_subtries = subtries.len(), "Updating subtrie hashes");
+
+        let mut update_actions = self.buffers.update_actions.take();
+
+        for (idx, path, parent_idx, nibble) in subtries {
+            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[idx] else {
+                unreachable!()
+            };
+            subtrie.update_cached_rlp(path, &mut update_actions);
+
+            // Drain any update actions recorded during the subtrie's update_leaves.
+            if let Some(actions) = update_actions.as_mut() {
+                if let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut() {
+                    actions.extend(subtrie_actions.drain(..));
+                }
+            }
+
+            // Propagate this subtrie's mask bits to the parent branch so that the
+            // parent's branch_masks reflect the subtrie's current state. Without
+            // this, a subtrie child that changed structure (e.g. was a branch in the
+            // DB but is now a leaf) would leave stale mask bits on the parent.
+            let hash_bit = self.upper_arena[idx].hash_mask_bit();
+            let tree_bit = self.upper_arena[idx].tree_mask_bit();
+            let parent = self.upper_arena[parent_idx].branch_mut();
+            let old_masks = parent.branch_masks;
+            parent.set_child_mask_bits(nibble, hash_bit, tree_bit);
+            if parent.branch_masks != old_masks {
+                parent.state = parent.state.to_dirty();
+            }
         }
+
+        self.buffers.update_actions = update_actions;
     }
 
     fn get_leaf_value(&self, _full_path: &Nibbles) -> Option<&Vec<u8>> {
@@ -2344,7 +2332,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             key,
                             full_path,
                             find_result,
-                            &mut self.buffers.removed_branch_paths,
+                            &mut self.buffers.update_actions,
                         );
                         if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
                             proof_required_fn(proof_key, min_len);
