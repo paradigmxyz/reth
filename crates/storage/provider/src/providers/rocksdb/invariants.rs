@@ -114,6 +114,10 @@ impl RocksDBProvider {
 
         // Fast path: nothing has been indexed yet — clear any stale data and return.
         if checkpoint == 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "TransactionHashNumbers: checkpoint is 0, clearing stale data"
+            );
             self.clear::<tables::TransactionHashNumbers>()?;
             return Ok(None);
         }
@@ -262,6 +266,10 @@ impl RocksDBProvider {
 
         // Fast path: nothing has been indexed yet — clear any stale data and return.
         if checkpoint == 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "StoragesHistory: checkpoint is 0, clearing stale data"
+            );
             self.clear::<tables::StoragesHistory>()?;
             return Ok(None);
         }
@@ -352,6 +360,10 @@ impl RocksDBProvider {
 
         // Fast path: nothing has been indexed yet — clear any stale data and return.
         if checkpoint == 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "AccountsHistory: checkpoint is 0, clearing stale data"
+            );
             self.clear::<tables::AccountsHistory>()?;
             return Ok(None);
         }
