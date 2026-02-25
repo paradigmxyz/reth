@@ -653,8 +653,8 @@ where
         }
 
         // Run additional stateless validation if configured
-        if let Some(check) = &self.additional_stateless_validation
-            && let Err(err) = check(origin, &transaction)
+        if let Some(check) = &self.additional_stateless_validation &&
+            let Err(err) = check(origin, &transaction)
         {
             return Err(TransactionValidationOutcome::Invalid(transaction, err))
         }
@@ -709,8 +709,8 @@ where
         };
 
         // Run additional stateful validation if configured
-        if let Some(check) = &self.additional_stateful_validation
-            && let Err(err) = check(origin, &transaction, &state)
+        if let Some(check) = &self.additional_stateful_validation &&
+            let Err(err) = check(origin, &transaction, &state)
         {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
