@@ -281,23 +281,29 @@ async function success({ core, context }) {
     }
   }
 
-  // Always DM the actor
-  if (actorSlackId) {
-    await sendWithThread(actorSlackId);
-  } else {
-    core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
-  }
-
-  // Post to public channel if any metric shows significant improvement
+  // Post to public channel if any metric shows significant improvement or regression
   const channel = process.env.SLACK_BENCH_CHANNEL;
+  let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
       await sendWithThread(channel);
+      postedToChannel = true;
     } else {
       core.info('No significant improvement, skipping public channel notification');
     }
+  }
+
+  // DM the actor only when results were not posted to the public channel
+  if (!postedToChannel) {
+    if (actorSlackId) {
+      await sendWithThread(actorSlackId);
+    } else {
+      core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
+    }
+  } else {
+    core.info(`Results posted to channel, skipping DM to ${actor}`);
   }
 }
 
