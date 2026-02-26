@@ -56,10 +56,6 @@ const HISTORY_PRESETS: [ComponentSelection; 4] = [
     ComponentSelection::All,
 ];
 
-/// Presets for optional single-archive components.
-const OPTIONAL_SINGLE_PRESETS: [ComponentSelection; 2] =
-    [ComponentSelection::None, ComponentSelection::All];
-
 /// A display group bundles one or more component types into a single TUI row.
 struct DisplayGroup {
     /// Display name shown in the TUI.
@@ -131,15 +127,6 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
             types,
             required: false,
             presets: &HISTORY_PRESETS,
-        });
-    }
-
-    if has(SnapshotComponentType::RocksdbIndices) {
-        groups.push(DisplayGroup {
-            name: "RocksDB Indices",
-            types: vec![SnapshotComponentType::RocksdbIndices],
-            required: false,
-            presets: &OPTIONAL_SINGLE_PRESETS,
         });
     }
 
