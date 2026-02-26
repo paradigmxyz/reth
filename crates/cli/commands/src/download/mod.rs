@@ -264,9 +264,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let selections = self.resolve_components(&manifest)?;
 
-        // Collect all archive descriptors across selected chunked components.
-        // Legacy single-archive artifacts are intentionally handled by the
-        // `--url` path and skipped in the modular flow.
+        // Collect all archive descriptors across selected components.
         let target_dir = data_dir.data_dir();
         let mut all_downloads: Vec<PlannedArchive> = Vec::new();
         for (ty, sel) in &selections {
@@ -1399,6 +1397,7 @@ mod tests {
                 file: "transaction_senders.tar.zst".to_string(),
                 size: 1,
                 blake3: None,
+                output_files: vec![],
             }),
         );
         components.insert(
@@ -1407,6 +1406,7 @@ mod tests {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 1,
                 blake3: None,
+                output_files: vec![],
             }),
         );
         SnapshotManifest {

@@ -62,6 +62,11 @@ pub struct SingleArchive {
     /// Optional BLAKE3 checksum of the compressed archive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blake3: Option<String>,
+    /// Expected extracted plain files for this archive.
+    ///
+    /// This is the authoritative integrity source for the modular download path.
+    #[serde(default)]
+    pub output_files: Vec<OutputFileChecksum>,
 }
 
 /// A chunked archive set where each chunk covers a fixed block range.
@@ -219,7 +224,7 @@ impl SnapshotComponentType {
 
     /// Whether this component type uses chunked archives.
     pub const fn is_chunked(&self) -> bool {
-        !matches!(self, Self::State)
+        !matches!(self, Self::State | Self::RocksdbIndices)
     }
 }
 
@@ -320,7 +325,7 @@ impl SnapshotManifest {
                     file_name: single.file.clone(),
                     size: single.size,
                     blake3: single.blake3.clone(),
-                    output_files: Vec::new(),
+                    output_files: single.output_files.clone(),
                 }]
             }
             ComponentManifest::Chunked(chunked) => {
@@ -439,8 +444,7 @@ pub fn generate_manifest(
 
     let mut components = BTreeMap::new();
 
-    // Chunked components only: modular download validates extracted plain files
-    // from chunk metadata and intentionally ignores legacy single archives.
+    // Package chunked static-file components.
     for ty in &[
         SnapshotComponentType::Headers,
         SnapshotComponentType::Transactions,
@@ -511,6 +515,36 @@ pub fn generate_manifest(
         }
     }
 
+    let (state_size, state_output_files) = package_single_component(
+        output_dir,
+        "state.tar.zst",
+        &state_source_files(source_datadir)?,
+    )?;
+    components.insert(
+        SnapshotComponentType::State.key().to_string(),
+        ComponentManifest::Single(SingleArchive {
+            file: "state.tar.zst".to_string(),
+            size: state_size,
+            blake3: None,
+            output_files: state_output_files,
+        }),
+    );
+
+    let rocksdb_files = rocksdb_source_files(source_datadir)?;
+    if !rocksdb_files.is_empty() {
+        let (rocksdb_size, rocksdb_output_files) =
+            package_single_component(output_dir, "rocksdb_indices.tar.zst", &rocksdb_files)?;
+        components.insert(
+            SnapshotComponentType::RocksdbIndices.key().to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "rocksdb_indices.tar.zst".to_string(),
+                size: rocksdb_size,
+                blake3: None,
+                output_files: rocksdb_output_files,
+            }),
+        );
+    }
+
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
 
     Ok(SnapshotManifest {
@@ -540,6 +574,12 @@ struct PackagedChunk {
     chunk_idx: u64,
     size: u64,
     output_files: Vec<OutputFileChecksum>,
+}
+
+#[derive(Debug)]
+struct PlannedFile {
+    source_path: PathBuf,
+    relative_path: PathBuf,
 }
 
 fn source_files_for_chunk(
@@ -584,7 +624,117 @@ fn static_segment_name(component: SnapshotComponentType) -> Option<&'static str>
     }
 }
 
+fn state_source_files(source_datadir: &Path) -> Result<Vec<PlannedFile>> {
+    let db_dir = source_datadir.join("db");
+    if db_dir.exists() {
+        return collect_files_recursive(&db_dir, Path::new("db"));
+    }
+
+    if looks_like_db_dir(source_datadir)? {
+        return collect_files_recursive(source_datadir, Path::new("db"));
+    }
+
+    eyre::bail!("Could not find source state DB directory under {}", source_datadir.display())
+}
+
+fn rocksdb_source_files(source_datadir: &Path) -> Result<Vec<PlannedFile>> {
+    let rocksdb_dir = source_datadir.join("rocksdb");
+    if !rocksdb_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    collect_files_recursive(&rocksdb_dir, Path::new("rocksdb"))
+}
+
+fn looks_like_db_dir(path: &Path) -> Result<bool> {
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(false),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == "mdbx.dat" || name == "lock.mdb" || name == "data.mdb" {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn collect_files_recursive(root: &Path, output_prefix: &Path) -> Result<Vec<PlannedFile>> {
+    let mut files = Vec::new();
+    collect_files_recursive_inner(root, root, output_prefix, &mut files)?;
+    files.sort_unstable_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(files)
+}
+
+fn collect_files_recursive_inner(
+    root: &Path,
+    dir: &Path,
+    output_prefix: &Path,
+    files: &mut Vec<PlannedFile>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_files_recursive_inner(root, &path, output_prefix, files)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative = path.strip_prefix(root)?.to_path_buf();
+        files.push(PlannedFile { source_path: path, relative_path: output_prefix.join(relative) });
+    }
+
+    Ok(())
+}
+
+fn package_single_component(
+    output_dir: &Path,
+    archive_file_name: &str,
+    files: &[PlannedFile],
+) -> Result<(u64, Vec<OutputFileChecksum>)> {
+    if files.is_empty() {
+        eyre::bail!("Cannot package empty single archive: {}", archive_file_name);
+    }
+
+    let archive_path = output_dir.join(archive_file_name);
+    let output_files = write_archive_from_planned_files(&archive_path, files)?;
+    let size = std::fs::metadata(&archive_path)?.len();
+    Ok((size, output_files))
+}
+
 fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
+    let planned_files = source_files
+        .iter()
+        .map(|source_path| {
+            let file_name = source_path.file_name().ok_or_else(|| {
+                eyre::eyre!("Invalid source file path: {}", source_path.display())
+            })?;
+            Ok::<_, eyre::Error>(PlannedFile {
+                source_path: source_path.clone(),
+                relative_path: PathBuf::from("static_files").join(file_name),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    write_archive_from_planned_files(path, &planned_files)
+}
+
+fn write_archive_from_planned_files(
+    path: &Path,
+    files: &[PlannedFile],
+) -> Result<Vec<OutputFileChecksum>> {
     let file = std::fs::File::create(path)?;
     let mut encoder = zstd::Encoder::new(file, 0)?;
     // Emit standard zstd frames with checksums for compatibility with external
@@ -592,24 +742,19 @@ fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<Outp
     encoder.include_checksum(true)?;
     let mut builder = tar::Builder::new(encoder);
 
-    let mut output_files = Vec::with_capacity(source_files.len());
-    for source_path in source_files {
-        let file_name = source_path
-            .file_name()
-            .ok_or_else(|| eyre::eyre!("Invalid source file path: {}", source_path.display()))?;
-        let relative_path = PathBuf::from("static_files").join(file_name);
-
+    let mut output_files = Vec::with_capacity(files.len());
+    for planned in files {
         let mut header = tar::Header::new_gnu();
-        header.set_size(std::fs::metadata(source_path)?.len());
+        header.set_size(std::fs::metadata(&planned.source_path)?.len());
         header.set_mode(0o644);
         header.set_cksum();
 
-        let source_file = std::fs::File::open(source_path)?;
+        let source_file = std::fs::File::open(&planned.source_path)?;
         let mut reader = HashingReader::new(source_file);
-        builder.append_data(&mut header, &relative_path, &mut reader)?;
+        builder.append_data(&mut header, &planned.relative_path, &mut reader)?;
 
         output_files.push(OutputFileChecksum {
-            path: relative_path.to_string_lossy().to_string(),
+            path: planned.relative_path.to_string_lossy().to_string(),
             size: reader.bytes_read,
             blake3: reader.finalize(),
         });
@@ -652,6 +797,7 @@ impl<R: Read> Read for HashingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     fn test_manifest() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -661,6 +807,7 @@ mod tests {
                 file: "state.tar.zst".to_string(),
                 size: 100,
                 blake3: None,
+                output_files: vec![],
             }),
         );
         components.insert(
@@ -728,6 +875,7 @@ mod tests {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 777,
                 blake3: None,
+                output_files: vec![],
             }),
         );
         let m = SnapshotManifest {
@@ -846,6 +994,11 @@ mod tests {
                 file: "state.tar.zst".to_string(),
                 size: 100,
                 blake3: Some("abc123".to_string()),
+                output_files: vec![OutputFileChecksum {
+                    path: "db/mdbx.dat".to_string(),
+                    size: 1000,
+                    blake3: "s0".to_string(),
+                }],
             }),
         );
         components.insert(
@@ -882,12 +1035,57 @@ mod tests {
         assert_eq!(state.len(), 1);
         assert_eq!(state[0].file_name, "state.tar.zst");
         assert_eq!(state[0].blake3.as_deref(), Some("abc123"));
-        assert!(state[0].output_files.is_empty());
+        assert_eq!(state[0].output_files.len(), 1);
 
         let tx = m.archive_descriptors_for_distance(SnapshotComponentType::Transactions, None);
         assert_eq!(tx.len(), 2);
         assert_eq!(tx[0].blake3, None);
         assert_eq!(tx[1].blake3, None);
         assert_eq!(tx[0].output_files[0].size, 111);
+    }
+
+    #[test]
+    fn generate_manifest_includes_state_single_archive() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+
+        let state = manifest.component(SnapshotComponentType::State).unwrap();
+        let ComponentManifest::Single(state) = state else {
+            panic!("state should be a single archive")
+        };
+        assert_eq!(state.file, "state.tar.zst");
+        assert!(!state.output_files.is_empty());
+        assert_eq!(state.output_files[0].path, "db/mdbx.dat");
+        assert!(output.path().join("state.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_includes_rocksdb_single_archive_when_present() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+
+        let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
+        let ComponentManifest::Single(rocksdb) = rocksdb else {
+            panic!("rocksdb indices should be a single archive")
+        };
+        assert_eq!(rocksdb.file, "rocksdb_indices.tar.zst");
+        assert!(!rocksdb.output_files.is_empty());
+        assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
+        assert!(output.path().join("rocksdb_indices.tar.zst").exists());
     }
 }
