@@ -292,9 +292,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         descriptor.file_name
                     );
                 }
-                all_downloads.push(PlannedArchive { component: name.clone(), archive: descriptor });
+                all_downloads.push(PlannedArchive {
+                    ty: *ty,
+                    component: name.clone(),
+                    archive: descriptor,
+                });
             }
         }
+
+        all_downloads.sort_by(|a, b| {
+            archive_priority_rank(a.ty)
+                .cmp(&archive_priority_rank(b.ty))
+                .then_with(|| a.component.cmp(&b.component))
+                .then_with(|| a.archive.file_name.cmp(&b.archive.file_name))
+        });
 
         let download_cache_dir = if self.resumable {
             let dir = target_dir.join(DOWNLOAD_CACHE_DIR);
@@ -521,8 +532,17 @@ pub(crate) struct DownloadProgress {
 
 #[derive(Debug, Clone)]
 struct PlannedArchive {
+    ty: SnapshotComponentType,
     component: String,
     archive: ArchiveDescriptor,
+}
+
+const fn archive_priority_rank(ty: SnapshotComponentType) -> u8 {
+    match ty {
+        SnapshotComponentType::State => 0,
+        SnapshotComponentType::RocksdbIndices => 1,
+        _ => 2,
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -1536,6 +1556,7 @@ mod tests {
 
         let planned = vec![
             PlannedArchive {
+                ty: SnapshotComponentType::State,
                 component: "State".to_string(),
                 archive: ArchiveDescriptor {
                     url: "https://example.com/ok.tar.zst".to_string(),
@@ -1550,6 +1571,7 @@ mod tests {
                 },
             },
             PlannedArchive {
+                ty: SnapshotComponentType::Headers,
                 component: "Headers".to_string(),
                 archive: ArchiveDescriptor {
                     url: "https://example.com/missing.tar.zst".to_string(),
@@ -1564,6 +1586,7 @@ mod tests {
                 },
             },
             PlannedArchive {
+                ty: SnapshotComponentType::Transactions,
                 component: "Transactions".to_string(),
                 archive: ArchiveDescriptor {
                     url: "https://example.com/bad-size.tar.zst".to_string(),
@@ -1578,5 +1601,67 @@ mod tests {
         let summary = summarize_download_startup(&planned, target_dir).unwrap();
         assert_eq!(summary.reusable, 1);
         assert_eq!(summary.needs_download, 2);
+    }
+
+    #[test]
+    fn archive_priority_prefers_state_then_rocksdb() {
+        let mut planned = [
+            PlannedArchive {
+                ty: SnapshotComponentType::Transactions,
+                component: "Transactions".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "u3".to_string(),
+                    file_name: "t.tar.zst".to_string(),
+                    size: 1,
+                    blake3: None,
+                    output_files: vec![OutputFileChecksum {
+                        path: "a".to_string(),
+                        size: 1,
+                        blake3: "x".to_string(),
+                    }],
+                },
+            },
+            PlannedArchive {
+                ty: SnapshotComponentType::RocksdbIndices,
+                component: "RocksDB Indices".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "u2".to_string(),
+                    file_name: "rocksdb_indices.tar.zst".to_string(),
+                    size: 1,
+                    blake3: None,
+                    output_files: vec![OutputFileChecksum {
+                        path: "b".to_string(),
+                        size: 1,
+                        blake3: "y".to_string(),
+                    }],
+                },
+            },
+            PlannedArchive {
+                ty: SnapshotComponentType::State,
+                component: "State (mdbx)".to_string(),
+                archive: ArchiveDescriptor {
+                    url: "u1".to_string(),
+                    file_name: "state.tar.zst".to_string(),
+                    size: 1,
+                    blake3: None,
+                    output_files: vec![OutputFileChecksum {
+                        path: "c".to_string(),
+                        size: 1,
+                        blake3: "z".to_string(),
+                    }],
+                },
+            },
+        ];
+
+        planned.sort_by(|a, b| {
+            archive_priority_rank(a.ty)
+                .cmp(&archive_priority_rank(b.ty))
+                .then_with(|| a.component.cmp(&b.component))
+                .then_with(|| a.archive.file_name.cmp(&b.archive.file_name))
+        });
+
+        assert_eq!(planned[0].ty, SnapshotComponentType::State);
+        assert_eq!(planned[1].ty, SnapshotComponentType::RocksdbIndices);
+        assert_eq!(planned[2].ty, SnapshotComponentType::Transactions);
     }
 }
