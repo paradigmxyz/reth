@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_valid_gas_limit_increase() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
-        let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
+        let child = header_with_gas_limit(parent.gas_limit + 5);
 
         assert!(validate_against_parent_gas_limit(
             &child,
@@ -260,7 +260,7 @@ mod tests {
         assert!(matches!(
             validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
             ConsensusError::GasLimitInvalidMinimum { child_gas_limit }
-                if child_gas_limit == child.gas_limit as u64
+                if child_gas_limit == child.gas_limit
         ));
     }
 
