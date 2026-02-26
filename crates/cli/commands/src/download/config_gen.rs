@@ -16,48 +16,6 @@ const MINIMUM_RECEIPTS_DISTANCE: u64 = 64;
 /// (`MINIMUM_UNWIND_SAFE_DISTANCE`).
 const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
 
-/// Generates an appropriate [`Config`] based on which snapshot components were downloaded.
-///
-/// When all components are present (archive node), no pruning is configured.
-/// Otherwise, missing components get `--minimal` style pruning.
-pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
-    let has_txs = selected.contains(&SnapshotComponentType::Transactions);
-    let has_senders = selected.contains(&SnapshotComponentType::TransactionSenders);
-    let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
-    let has_changesets = selected.contains(&SnapshotComponentType::AccountChangesets) ||
-        selected.contains(&SnapshotComponentType::StorageChangesets);
-
-    // Archive node — no pruning
-    if has_txs && has_senders && has_receipts && has_changesets {
-        return Config::default();
-    }
-
-    let mut config = Config::default();
-    let mut prune = PruneConfig::default();
-
-    prune.segments.transaction_lookup = Some(PruneMode::Full);
-
-    if !has_senders {
-        prune.segments.sender_recovery = Some(PruneMode::Full);
-    }
-
-    if !has_txs {
-        prune.segments.bodies_history = Some(PruneMode::Full);
-    }
-
-    if !has_receipts {
-        prune.segments.receipts = Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE));
-    }
-
-    if !has_changesets {
-        prune.segments.account_history = Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE));
-        prune.segments.storage_history = Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE));
-    }
-
-    config.prune = prune;
-    config
-}
-
 /// Writes a [`Config`] as TOML to `<data_dir>/reth.toml`.
 ///
 /// If the file already exists, it is not overwritten. Returns `true` if the file was written.
@@ -184,44 +142,6 @@ pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
 
     tx.commit()?;
     Ok(())
-}
-
-/// Returns a human-readable summary of what the prune config does.
-pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> {
-    let has_txs = selected.contains(&SnapshotComponentType::Transactions);
-    let has_senders = selected.contains(&SnapshotComponentType::TransactionSenders);
-    let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
-    let has_changesets = selected.contains(&SnapshotComponentType::AccountChangesets) ||
-        selected.contains(&SnapshotComponentType::StorageChangesets);
-
-    let mut lines = Vec::new();
-
-    if has_txs && has_senders && has_receipts && has_changesets {
-        lines.push("Full archive node — no pruning configured".to_string());
-        return lines;
-    }
-
-    lines.push("[prune.segments]".to_string());
-
-    lines.push("transaction_lookup = \"full\"".to_string());
-    if !has_senders {
-        lines.push("sender_recovery = \"full\"".to_string());
-    }
-
-    if !has_txs {
-        lines.push(format!("bodies_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
-    }
-
-    if !has_receipts {
-        lines.push(format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}"));
-    }
-
-    if !has_changesets {
-        lines.push(format!("account_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
-        lines.push(format!("storage_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
-    }
-
-    lines
 }
 
 /// Generates a [`Config`] from per-component range selections.
@@ -397,119 +317,14 @@ mod tests {
     }
 
     #[test]
-    fn state_only_prunes_everything() {
-        let selected = vec![SnapshotComponentType::State];
-        let config = config_for_components(&selected);
-
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // No txs downloaded → bodies pruned full
-        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Full));
-        assert_eq!(
-            config.prune.segments.receipts,
-            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
-        );
-        assert_eq!(
-            config.prune.segments.account_history,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
-        assert_eq!(
-            config.prune.segments.storage_history,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
-    }
-
-    #[test]
-    fn minimal_components_prunes_txs_and_receipts() {
-        // Minimal set: state + headers + txs + changesets (no receipts)
-        let selected = vec![
-            SnapshotComponentType::State,
-            SnapshotComponentType::Headers,
-            SnapshotComponentType::Transactions,
-            SnapshotComponentType::AccountChangesets,
-            SnapshotComponentType::StorageChangesets,
-        ];
-        let config = config_for_components(&selected);
-
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // Minimal includes txs → bodies kept
-        assert_eq!(config.prune.segments.bodies_history, None);
-        assert_eq!(
-            config.prune.segments.receipts,
-            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
-        );
-        assert_eq!(config.prune.segments.account_history, None);
-        assert_eq!(config.prune.segments.storage_history, None);
-    }
-
-    #[test]
-    fn all_components_no_pruning() {
-        let selected = SnapshotComponentType::ALL.to_vec();
-        let config = config_for_components(&selected);
-
-        // Archive node — nothing pruned
-        assert_eq!(config.prune.segments.transaction_lookup, None);
-        assert_eq!(config.prune.segments.sender_recovery, None);
-        assert_eq!(config.prune.segments.bodies_history, None);
-        assert_eq!(config.prune.segments.receipts, None);
-        assert_eq!(config.prune.segments.account_history, None);
-        assert_eq!(config.prune.segments.storage_history, None);
-    }
-
-    #[test]
-    fn txs_downloaded_keeps_bodies() {
-        let selected = vec![SnapshotComponentType::State, SnapshotComponentType::Transactions];
-        let config = config_for_components(&selected);
-
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // Bodies kept since txs downloaded
-        assert_eq!(config.prune.segments.bodies_history, None);
-        assert_eq!(
-            config.prune.segments.receipts,
-            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
-        );
-        assert_eq!(
-            config.prune.segments.account_history,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
-    }
-
-    #[test]
-    fn receipts_only_keeps_receipts() {
-        let selected = vec![SnapshotComponentType::State, SnapshotComponentType::Receipts];
-        let config = config_for_components(&selected);
-
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.receipts, None);
-    }
-
-    #[test]
-    fn describe_state_only() {
-        let selected = vec![SnapshotComponentType::State];
-        let desc = describe_prune_config(&selected);
-        assert!(desc.contains(&"transaction_lookup = \"full\"".to_string()));
-        assert!(desc.contains(&format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}")));
-    }
-
-    #[test]
-    fn describe_all() {
-        let selected = SnapshotComponentType::ALL.to_vec();
-        let desc = describe_prune_config(&selected);
-        assert_eq!(desc.len(), 1);
-        assert!(desc[0].contains("no pruning"));
-    }
-
-    #[test]
     fn write_prune_checkpoints_sets_all_segments() {
         let dir = tempfile::tempdir().unwrap();
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
-        let selected = vec![SnapshotComponentType::State];
-        let config = config_for_components(&selected);
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        let config = config_for_selections(&selections, &empty_manifest());
         let snapshot_block = 21_000_000;
 
         write_prune_checkpoints(&db, &config, snapshot_block).unwrap();
@@ -540,8 +355,11 @@ mod tests {
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
         // Archive node — no pruning configured, so no checkpoints written
-        let selected = SnapshotComponentType::ALL.to_vec();
-        let config = config_for_components(&selected);
+        let mut selections = BTreeMap::new();
+        for ty in SnapshotComponentType::ALL {
+            selections.insert(ty, ComponentSelection::All);
+        }
+        let config = config_for_selections(&selections, &empty_manifest());
 
         write_prune_checkpoints(&db, &config, 21_000_000).unwrap();
 
