@@ -17,6 +17,8 @@ pub mod download;
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
+pub mod bals;
+
 /// A downloader that combines two different downloaders/client implementations.
 pub mod either;
 
