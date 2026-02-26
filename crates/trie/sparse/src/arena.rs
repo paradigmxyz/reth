@@ -1792,11 +1792,18 @@ impl ArenaParallelSparseTrie {
         // stack.last().
         pop_and_propagate(&mut self.upper_arena, stack, false);
 
-        // Extract the subtrie and recycle it.
+        // Extract the subtrie and recycle it. Before clearing, drain any update actions
+        // that were recorded during the subtrie's update_leaves (e.g. InsertRemoved from
+        // collapse_branch). Without this, those actions are lost when the subtrie is recycled.
         let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(subtrie_idx).unwrap()
         else {
             unreachable!()
         };
+        if let Some(actions) = self.buffers.update_actions.as_mut() {
+            let subtrie_actions =
+                subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
+            actions.append(subtrie_actions);
+        }
         subtrie.clear();
         self.cleared_subtries.push(*subtrie);
 
@@ -1835,6 +1842,11 @@ impl ArenaParallelSparseTrie {
                     subtrie.root,
                     Some(child_idx),
                 );
+                if let Some(actions) = self.buffers.update_actions.as_mut() {
+                    let subtrie_actions =
+                        subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
+                    actions.append(subtrie_actions);
+                }
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
             }
@@ -2708,8 +2720,8 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(20))]
         #[test]
         fn arena_trie_proptest(
-            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=10usize),
-            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=3usize),
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
+            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=50usize),
             overlap_pct in 0.0..=0.5f64,
         ) {
             reth_tracing::init_test_tracing();
