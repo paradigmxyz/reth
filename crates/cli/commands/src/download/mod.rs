@@ -43,7 +43,7 @@ const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 
 /// Maximum number of concurrent archive downloads.
-const MAX_CONCURRENT_DOWNLOADS: usize = 4;
+const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
 /// Global static download defaults
 static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
