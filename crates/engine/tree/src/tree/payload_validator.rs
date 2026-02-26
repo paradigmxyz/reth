@@ -27,7 +27,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    OnStateHook, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -864,7 +864,9 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
+        let executor = executor.with_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        );
 
         let execution_start = Instant::now();
 

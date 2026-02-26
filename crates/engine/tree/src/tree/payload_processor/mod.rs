@@ -853,16 +853,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
-    pub fn state_hook(&self) -> impl OnStateHook {
-        // convert the channel into a `StateHookSender` that emits an event on drop
-        let to_multi_proof =
-            self.state_root_handle.as_ref().map(|h| StateHookSender::new(h.to_multi_proof.clone()));
-
-        move |source: StateChangeSource, state: &EvmState| {
-            if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
-            }
-        }
+    pub fn state_hook(&self) -> Option<impl OnStateHook> {
+        self.state_root_handle.as_ref().map(|handle| handle.state_hook())
     }
 
     /// Returns a clone of the caches used by prewarming
@@ -1442,7 +1434,7 @@ mod tests {
             None, // No BAL for test
         );
 
-        let mut state_hook = handle.state_hook();
+        let mut state_hook = handle.state_hook().expect("state hook is None");
 
         for (i, update) in state_updates.into_iter().enumerate() {
             state_hook.on_state(StateChangeSource::Transaction(i), &update);
