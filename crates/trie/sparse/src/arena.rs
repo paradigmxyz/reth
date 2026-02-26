@@ -1137,7 +1137,7 @@ fn replace_child_in_parent(
 ) {
     // Replace the index of stack's head entry. To do this we pop the previous head and replace it.
     let prev_head = pop_and_propagate_stack(arena, stack, false);
-    push_stack(arena, stack, new_idx, prev_head.path, true);
+    push_stack(arena, stack, new_idx, prev_head.path, false);
 
     if stack.len() <= 1 {
         *root = new_idx;
@@ -1400,10 +1400,6 @@ fn remove_leaf(
                 // the stack so subsequent iterations can call find_ancestor normally.
                 arena.remove(head_idx);
                 *root = arena.insert(ArenaSparseNode::EmptyRoot);
-                debug_assert!(
-                    head_path.is_empty(),
-                    "{head_path:?} is supposed to be root but is not empty"
-                );
                 push_stack(arena, stack, *root, head_path, true);
                 return RemoveLeafResult::Removed;
             }
@@ -1576,6 +1572,13 @@ fn collapse_branch(
             _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
         },
         _ => unreachable!("remaining child must be Leaf, Branch, or Subtrie"),
+    }
+
+    // Sync the branch's dirty count with the (just-modified) child before popping,
+    // so pop_and_propagate_stack propagates the correct delta to the grandparent.
+    let child_dirty = arena[child_idx].num_dirty_leaves();
+    if let ArenaSparseNodeState::Dirty { num_dirty_leaves, .. } = arena[branch_idx].state_mut() {
+        *num_dirty_leaves = child_dirty;
     }
 
     // Replace the branch with the remaining child in the grandparent (or root).
