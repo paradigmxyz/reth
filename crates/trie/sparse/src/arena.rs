@@ -226,11 +226,12 @@ impl ArenaSparseNode {
         }
     }
 
-    #[expect(dead_code)]
-    const fn short_key_len(&self) -> usize {
+    /// Returns the short key of the branch or leaf, or None.
+    const fn short_key(&self) -> Option<&Nibbles> {
         match self {
-            Self::Branch(b) => b.short_key.len(),
-            _ => 0,
+            Self::Branch(b) => Some(&b.short_key),
+            Self::Leaf { key, .. } => Some(key),
+            _ => None,
         }
     }
 
@@ -431,8 +432,7 @@ fn find_ancestor(
             _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
         };
 
-        let mut head_branch_logical_path = head.path;
-        head_branch_logical_path.extend(&head_branch.short_key);
+        let head_branch_logical_path = logical_branch_path(arena, head);
 
         // If full_path doesn't extend past the branch's logical path, the target is at or
         // within the branch's short_key — treat as diverged.
@@ -466,6 +466,20 @@ fn find_ancestor(
     }
 }
 
+/// Returns the logical path of a branch stack entry. The logical path is
+/// `entry.path + branch.short_key`.
+fn logical_branch_path(arena: &Arena<ArenaSparseNode>, entry: &ArenaStackEntry) -> Nibbles {
+    let mut path = entry.path;
+    path.extend(&arena[entry.index].branch_ref().short_key);
+    path
+}
+
+/// Returns the length of the logical path of a branch stack entry.
+/// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
+fn logical_branch_path_len(arena: &Arena<ArenaSparseNode>, entry: &ArenaStackEntry) -> usize {
+    entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
 /// Returns the absolute path of a child at `child_nibble` under the branch at the top of the
 /// stack. The result is `stack_head.path + branch.short_key + child_nibble`.
 fn child_path(
@@ -473,9 +487,7 @@ fn child_path(
     stack: &[ArenaStackEntry],
     child_nibble: u8,
 ) -> Nibbles {
-    let parent = stack.last().unwrap();
-    let mut path = parent.path;
-    path.extend(&arena[parent.index].branch_ref().short_key);
+    let mut path = logical_branch_path(arena, stack.last().unwrap());
     path.push_unchecked(child_nibble);
     path
 }
@@ -651,9 +663,8 @@ impl ArenaSparseSubtrie {
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, FindAncestorResult::Blinded) {
-                let head = self.buffers.stack.last().unwrap();
-                let head_branch = self.arena[head.index].branch_ref();
-                let logical_len = head.path.len() + head_branch.short_key.len();
+                let logical_len =
+                    logical_branch_path_len(&self.arena, self.buffers.stack.last().unwrap());
                 self.required_proofs.push((
                     idx,
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
@@ -918,9 +929,7 @@ fn update_cached_rlp(
         // changed masks or structure.
         // Skip the root node (empty logical path) as PST does.
         if let Some(actions) = update_actions.as_mut().filter(|_| was_dirty) {
-            let head_entry = stack.last().unwrap();
-            let mut logical_path = head_entry.path;
-            logical_path.extend(&short_key);
+            let logical_path = logical_branch_path(arena, stack.last().unwrap());
 
             if !logical_path.is_empty() {
                 if new_branch_masks.is_empty() {
@@ -1188,14 +1197,12 @@ fn upsert_leaf(
         }
         FindAncestorResult::NoChild { child_nibble } => {
             let head_idx = head.index;
-            let head_path = head.path;
             let head_branch = arena[head_idx].branch_ref();
             let state_mask = head_branch.state_mask;
             let insert_pos =
                 (state_mask.get() & ((1u16 << child_nibble) - 1)).count_ones() as usize;
 
-            let mut head_branch_logical_path = head_path;
-            head_branch_logical_path.extend(&head_branch.short_key);
+            let head_branch_logical_path = logical_branch_path(arena, head);
             let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
             let new_leaf = arena.insert(ArenaSparseNode::Leaf {
                 state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
@@ -1300,11 +1307,9 @@ fn remove_leaf(
                     // With exactly 2 bits set the dense array has indices 0 and 1.
                     let sibling_dense_idx = 1 - dense_idx;
                     if parent_branch.children[sibling_dense_idx].is_blinded() {
-                        let parent_path = parent_entry.path;
                         let sibling_nibble =
                             parent_branch.state_mask.iter().find(|&n| n != child_nibble).unwrap();
-                        let mut sibling_path = parent_path;
-                        sibling_path.extend(&parent_branch.short_key);
+                        let mut sibling_path = logical_branch_path(arena, &stack[stack.len() - 2]);
                         sibling_path.push_unchecked(sibling_nibble);
                         trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
                         return RemoveLeafResult::NeedsProof {
@@ -1414,8 +1419,7 @@ fn check_subtrie_collapse_needs_proof(
     }
 
     let sibling_nibble = parent_branch.state_mask.iter().find(|&n| n != child_nibble).unwrap();
-    let mut sibling_path = parent_entry.path;
-    sibling_path.extend(&parent_branch.short_key);
+    let mut sibling_path = logical_branch_path(arena, parent_entry);
     sibling_path.push_unchecked(sibling_nibble);
 
     Some(ArenaRequiredProof {
@@ -1454,15 +1458,14 @@ fn collapse_branch(
     if let Some(actions) = update_actions.as_mut() &&
         !branch.branch_masks.is_empty()
     {
-        let mut logical_path = branch_entry.path;
-        logical_path.extend(&branch.short_key);
+        let logical_path = logical_branch_path(arena, branch_entry);
         if !logical_path.is_empty() {
             actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
         }
     }
 
     let remaining_nibble = branch.state_mask.iter().next().unwrap();
-    let branch_short_key = branch.short_key;
+    let branch_short_key = arena[branch_idx].branch_ref().short_key;
 
     // Build the prefix: branch's short_key + remaining child's nibble.
     let mut prefix = branch_short_key;
@@ -1564,10 +1567,7 @@ fn reveal_node(
 
     let head = stack.last().unwrap();
     let head_idx = head.index;
-    let head_branch = arena[head_idx].branch_ref();
-
-    let mut head_branch_logical_path = head.path;
-    head_branch_logical_path.extend(&head_branch.short_key);
+    let head_branch_logical_path = logical_branch_path(arena, head);
 
     debug_assert_eq!(
         node.path.len(),
@@ -1579,6 +1579,7 @@ fn reveal_node(
     );
 
     let child_nibble = node.path.get_unchecked(head_branch_logical_path.len());
+    let head_branch = arena[head_idx].branch_ref();
     let dense_idx = child_dense_index(head_branch.state_mask, child_nibble)
         .expect("Blinded result but child nibble not in state_mask");
 
@@ -1997,11 +1998,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     node_idx += 1;
                 }
                 FindAncestorResult::Blinded => {
-                    let head = stack.last().unwrap();
-                    let head_idx = head.index;
-                    let head_path = head.path;
-                    let head_branch = self.upper_arena[head_idx].branch_ref();
-                    let child_nibble_offset = head_path.len() + head_branch.short_key.len();
+                    let child_nibble_offset =
+                        logical_branch_path_len(&self.upper_arena, stack.last().unwrap());
                     let child_nibble = nodes[node_idx].path.get_unchecked(child_nibble_offset);
 
                     trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, ?child_nibble, "Revealing blinded child in upper trie");
@@ -2313,9 +2311,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             match find_result {
                 // Blinded — request a proof regardless of update type.
                 FindAncestorResult::Blinded => {
-                    let head = stack.last().unwrap();
-                    let head_branch = self.upper_arena[head.index].branch_ref();
-                    let logical_len = head.path.len() + head_branch.short_key.len();
+                    let logical_len =
+                        logical_branch_path_len(&self.upper_arena, stack.last().unwrap());
                     let min_len = (logical_len as u8 + 1).min(64);
                     trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, min_len);
