@@ -292,17 +292,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let genesis = static_file_provider.genesis_block_number();
         let canonical_block_range = static_file_provider.find_fixed_range(segment, block);
 
-        let (jar, path) = match static_file_provider.get_segment_provider_for_block(
-            segment,
-            block,
-            None,
-        ) {
-            Ok(provider) => {
-                (
-                    NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
-                    provider.data_path().into(),
-                )
-            }
+        let (jar, path) = match static_file_provider
+            .get_segment_provider_for_block(segment, block, None)
+        {
+            Ok(provider) => (
+                NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
+                provider.data_path().into(),
+            ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
                 let block_range = if canonical_block_range.start() < genesis {
                     SegmentRangeInclusive::new(genesis, canonical_block_range.end())
