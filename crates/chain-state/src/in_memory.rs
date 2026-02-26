@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, LazyOverlay, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -62,6 +62,11 @@ pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
     pending: watch::Sender<Option<BlockState<N>>>,
+    /// Pre-computed lazy overlay for the canonical head.
+    ///
+    /// Optimistically prepared after the canonical head changes so the next
+    /// payload building on it can reuse it immediately.
+    cached_overlay: RwLock<Option<PreparedCanonicalOverlay>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
@@ -77,6 +82,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
             blocks: RwLock::new(blocks),
             numbers: RwLock::new(numbers),
             pending,
+            cached_overlay: RwLock::new(None),
             metrics: Default::default(),
         };
         this.update_metrics();
@@ -178,6 +184,32 @@ type PendingBlockAndReceipts<N> =
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
+}
+
+/// Pre-computed lazy overlay for the canonical head block.
+///
+/// Prepared optimistically when the canonical head changes, allowing
+/// the next payload (which typically builds on the canonical head) to reuse
+/// the pre-computed overlay immediately without re-traversing in-memory blocks.
+///
+/// # Invalidation
+///
+/// The cached overlay is invalidated when:
+/// - Persistence completes (anchor changes)
+/// - The canonical head changes to a different block
+#[derive(Debug, Clone)]
+pub struct PreparedCanonicalOverlay {
+    /// The block hash for which this overlay is prepared as a parent.
+    pub parent_hash: B256,
+    /// The pre-computed lazy overlay containing deferred trie data handles.
+    pub overlay: LazyOverlay,
+}
+
+impl PreparedCanonicalOverlay {
+    /// Returns the anchor hash this overlay is built on.
+    pub const fn anchor_hash(&self) -> B256 {
+        self.overlay.anchor_hash()
+    }
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryState<N> {
@@ -393,6 +425,57 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Returns the in memory pending state.
     pub fn pending_state(&self) -> Option<BlockState<N>> {
         self.inner.in_memory_state.pending_state()
+    }
+
+    /// Returns a [`LazyOverlay`] for the given parent hash.
+    ///
+    /// Checks the cached canonical overlay first, then constructs a new one
+    /// by walking the in-memory chain and collecting [`DeferredTrieData`] handles.
+    ///
+    /// Returns `(None, parent_hash)` if parent is on disk.
+    pub fn lazy_overlay(&self, parent_hash: B256) -> (Option<LazyOverlay>, B256) {
+        let Some(state) = self.state_by_hash(parent_hash) else {
+            return (None, parent_hash);
+        };
+        let anchor_hash = state.anchor().hash;
+
+        // Check cached overlay
+        if let Some(cached) = self.inner.in_memory_state.cached_overlay.read().as_ref() &&
+            cached.parent_hash == parent_hash &&
+            cached.anchor_hash() == anchor_hash
+        {
+            return (Some(cached.overlay.clone()), cached.anchor_hash());
+        }
+
+        let overlay = self.lazy_overlay_for(state);
+        (Some(overlay), anchor_hash)
+    }
+
+    /// Prepares and caches a [`LazyOverlay`] for the current canonical head.
+    ///
+    /// Returns a clone of the overlay so the caller can spawn a background
+    /// task to trigger computation via [`LazyOverlay::get`].
+    pub fn prepare_canonical_overlay(&self) -> Option<LazyOverlay> {
+        let head = self.head_state()?;
+        let parent_hash = head.hash();
+        let overlay = self.lazy_overlay_for(head);
+        *self.inner.in_memory_state.cached_overlay.write() =
+            Some(PreparedCanonicalOverlay { parent_hash, overlay: overlay.clone() });
+        Some(overlay)
+    }
+
+    /// Returns a lazy overlay for the given head.
+    fn lazy_overlay_for(&self, head: Arc<BlockState<N>>) -> LazyOverlay {
+        let handles: Vec<DeferredTrieData> =
+            head.chain().map(|state| state.block_ref().trie_data_handle()).collect();
+        LazyOverlay::new(head.anchor().hash, handles)
+    }
+
+    /// Invalidates the cached canonical overlay.
+    ///
+    /// Should be called when the anchor changes (e.g., after persistence).
+    pub fn invalidate_cached_overlay(&self) {
+        *self.inner.in_memory_state.cached_overlay.write() = None;
     }
 
     /// Returns the in memory pending `BlockNumHash`.
