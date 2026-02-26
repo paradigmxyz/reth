@@ -54,6 +54,21 @@ pub fn write_prune_checkpoints(
     config: &Config,
     snapshot_block: u64,
 ) -> eyre::Result<()> {
+    let tx = db.tx_mut()?;
+    write_prune_checkpoints_tx(&tx, config, snapshot_block)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Writes prune checkpoints to the provided write transaction.
+pub(crate) fn write_prune_checkpoints_tx<Tx>(
+    tx: &Tx,
+    config: &Config,
+    snapshot_block: u64,
+) -> eyre::Result<()>
+where
+    Tx: DbTx + DbTxMut,
+{
     let segments = &config.prune.segments;
 
     // Collect (segment, mode) pairs for all configured prune segments
@@ -72,8 +87,6 @@ pub fn write_prune_checkpoints(
     if checkpoints.is_empty() {
         return Ok(());
     }
-
-    let tx = db.tx_mut()?;
 
     // Look up the last tx number for the snapshot block from BlockBodyIndices
     let tx_number =
@@ -97,7 +110,6 @@ pub fn write_prune_checkpoints(
         );
     }
 
-    tx.commit()?;
     Ok(())
 }
 
@@ -124,7 +136,16 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
 /// configured prune checkpoints for this segment.
 pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
     let tx = db.tx_mut()?;
+    reset_index_stage_checkpoints_tx(&tx)?;
+    tx.commit()?;
+    Ok(())
+}
 
+/// Resets index stage and prune checkpoints inside an existing write transaction.
+pub(crate) fn reset_index_stage_checkpoints_tx<Tx>(tx: &Tx) -> eyre::Result<()>
+where
+    Tx: DbTx + DbTxMut,
+{
     for stage_id in INDEX_STAGE_IDS {
         tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::default())?;
 
@@ -140,7 +161,6 @@ pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
         tx.delete::<tables::PruneCheckpoints>(segment, None)?;
     }
 
-    tx.commit()?;
     Ok(())
 }
 

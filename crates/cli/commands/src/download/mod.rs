@@ -6,9 +6,7 @@ mod tui;
 use crate::common::EnvironmentArgs;
 use blake3::Hasher;
 use clap::Parser;
-use config_gen::{
-    config_for_selections, reset_index_stage_checkpoints, write_config, write_prune_checkpoints,
-};
+use config_gen::{config_for_selections, write_config};
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
@@ -16,7 +14,8 @@ use manifest::{ArchiveDescriptor, ComponentSelection, SnapshotComponentType, Sna
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::init_db;
+use reth_db::{init_db, Database};
+use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
@@ -354,15 +353,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         // Write prune checkpoints to the DB so the pruner knows data before the
         // snapshot block is already in the expected pruned state
-        if config.prune.segments != Default::default() {
-            write_prune_checkpoints(&db, &config, manifest.block)?;
-        }
+        let should_write_prune = config.prune.segments != Default::default();
+        let should_reset_indices = should_reset_index_stage_checkpoints(&selections);
+        if should_write_prune || should_reset_indices {
+            let tx = db.tx_mut()?;
 
-        // Reset stage checkpoints for history indexing stages only if RocksDB
-        // indices weren't downloaded. When archive snapshots include the
-        // optional RocksDB indices component, we preserve source checkpoints.
-        if should_reset_index_stage_checkpoints(&selections) {
-            reset_index_stage_checkpoints(&db)?;
+            if should_write_prune {
+                config_gen::write_prune_checkpoints_tx(&tx, &config, manifest.block)?;
+            }
+
+            // Reset stage checkpoints for history indexing stages only if RocksDB
+            // indices weren't downloaded. When archive snapshots include the
+            // optional RocksDB indices component, we preserve source checkpoints.
+            if should_reset_indices {
+                config_gen::reset_index_stage_checkpoints_tx(&tx)?;
+            }
+
+            tx.commit()?;
         }
 
         info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
