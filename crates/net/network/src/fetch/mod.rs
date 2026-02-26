@@ -8,13 +8,15 @@ use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
-    Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
+    Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts,
+    NetworkPrimitives,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
+    receipts::client::ReceiptsResponse,
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
@@ -32,6 +34,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
+type InflightReceiptsRequest<R> = Request<(), PeerRequestResult<ReceiptsResponse<R>>>;
 
 /// Manages data fetching operations.
 ///
@@ -45,6 +48,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+    /// Currently active `GetReceipts` requests
+    inflight_receipts_requests: HashMap<PeerId, InflightReceiptsRequest<N::Receipt>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -67,6 +72,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
+            inflight_receipts_requests: Default::default(),
             peers: Default::default(),
             peers_handle,
             num_active_peers,
@@ -112,6 +118,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
         if let Some(req) = self.inflight_bodies_requests.remove(peer) {
+            let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        }
+        if let Some(req) = self.inflight_receipts_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
     }
@@ -256,6 +265,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
+            DownloadRequest::GetReceipts { request, response, .. } => {
+                let inflight = Request { request: (), response };
+                self.inflight_receipts_requests.insert(peer_id, inflight);
+                BlockRequest::GetReceipts(GetReceipts(request))
+            }
         }
     }
 
@@ -321,6 +335,30 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // update the peer's response state
+            peer.last_response_likely_bad = is_likely_bad_response;
+
+            if peer.state.on_request_finished() && !is_likely_bad_response {
+                return self.followup_request(peer_id)
+            }
+        }
+        None
+    }
+
+    /// Called on a `GetReceipts` response from a peer.
+    ///
+    /// All receipt variants (legacy with bloom, eth/69, eth/70) are expected to be normalized
+    /// to [`ReceiptsResponse`] by the caller before invoking this method.
+    pub(crate) fn on_receipts_response(
+        &mut self,
+        peer_id: PeerId,
+        res: RequestResult<ReceiptsResponse<N::Receipt>>,
+    ) -> Option<BlockResponseOutcome> {
+        let is_likely_bad_response = res.as_ref().map_or(true, |resp| resp.receipts.is_empty());
+
+        if let Some(resp) = self.inflight_receipts_requests.remove(&peer_id) {
+            let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
+        }
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.last_response_likely_bad = is_likely_bad_response;
 
             if peer.state.on_request_finished() && !is_likely_bad_response {
@@ -453,6 +491,8 @@ enum PeerState {
     GetBlockHeaders,
     /// Peer is handling a `GetBlockBodies` request.
     GetBlockBodies,
+    /// Peer is handling a `GetReceipts` request.
+    GetReceipts,
     /// Peer session is about to close
     Closing,
 }
@@ -491,6 +531,7 @@ struct Request<Req, Resp> {
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
@@ -498,12 +539,18 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         response: oneshot::Sender<PeerRequestResult<Vec<N::BlockHeader>>>,
         priority: Priority,
     },
-    /// Download the requested headers and send response through channel
+    /// Download the requested bodies and send response through channel
     GetBlockBodies {
         request: Vec<B256>,
         response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
         priority: Priority,
         range_hint: Option<RangeInclusive<u64>>,
+    },
+    /// Download receipts for the given block hashes and send response through channel
+    GetReceipts {
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<ReceiptsResponse<N::Receipt>>>,
+        priority: Priority,
     },
 }
 
@@ -515,15 +562,16 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         match self {
             Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetReceipts { .. } => PeerState::GetReceipts,
         }
     }
 
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
-                priority
-            }
+            Self::GetBlockHeaders { priority, .. } |
+            Self::GetBlockBodies { priority, .. } |
+            Self::GetReceipts { priority, .. } => priority,
         }
     }
 
@@ -543,6 +591,7 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                     BestPeerRequirements::FullBlock
                 }
             }
+            Self::GetReceipts { .. } => BestPeerRequirements::FullBlock,
         }
     }
 }
@@ -1145,5 +1194,204 @@ mod tests {
         assert!(
             !peer_short_end.is_better(&peer_exact, &BestPeerRequirements::FullBlockRange(range))
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_poll_receipts_request_no_peers() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        poll_fn(move |cx| {
+            assert!(fetcher.poll(cx).is_pending());
+
+            // Queue a receipts request
+            let (tx, _rx) = oneshot::channel();
+            fetcher.queued_requests.push_back(DownloadRequest::GetReceipts {
+                request: vec![B256::random()],
+                response: tx,
+                priority: Priority::default(),
+            });
+
+            // No peers available, should stay pending
+            assert!(fetcher.poll(cx).is_pending());
+
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_on_receipts_response_no_inflight() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        // Response without a matching inflight request — should not panic
+        let resp = ReceiptsResponse::new(vec![vec![]]);
+        assert_eq!(fetcher.on_receipts_response(peer_id, Ok(resp)), None);
+    }
+
+    #[tokio::test]
+    async fn test_receipts_response_resolves_inflight() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+
+        // Insert an inflight receipts request
+        let (tx, rx) = oneshot::channel();
+        let inflight = Request { request: (), response: tx };
+        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
+
+        // Simulate that it was in GetReceipts state
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+
+        // Deliver a successful response
+        let resp = ReceiptsResponse::new(vec![vec![]]);
+        let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
+
+        // No queued requests, so no followup
+        assert!(outcome.is_none());
+
+        // Peer should be back to idle
+        assert!(fetcher.peers[&peer_id].state.is_idle());
+
+        // The response should have been forwarded through the oneshot
+        let result = rx.await.unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_receipts_empty_response_marks_peer_bad() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+
+        let (tx, _rx) = oneshot::channel();
+        let inflight = Request { request: (), response: tx };
+        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+
+        // Empty receipts — likely bad
+        let resp = ReceiptsResponse::new(vec![]);
+        let _ = fetcher.on_receipts_response(peer_id, Ok(resp));
+
+        assert!(fetcher.peers[&peer_id].last_response_likely_bad);
+    }
+
+    #[tokio::test]
+    async fn test_receipts_error_response_marks_peer_bad() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+
+        let (tx, _rx) = oneshot::channel();
+        let inflight = Request { request: (), response: tx };
+        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+
+        let _ = fetcher.on_receipts_response(peer_id, Err(RequestError::Timeout));
+
+        assert!(fetcher.peers[&peer_id].last_response_likely_bad);
+    }
+
+    #[tokio::test]
+    async fn test_session_closed_cancels_inflight_receipts() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+
+        let (tx, rx) = oneshot::channel();
+        let inflight = Request { request: (), response: tx };
+        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
+
+        // Close the session
+        fetcher.on_session_closed(&peer_id);
+
+        // Peer should be removed
+        assert!(!fetcher.peers.contains_key(&peer_id));
+
+        // Inflight request should have been cancelled with ConnectionDropped
+        let result = rx.await.unwrap();
+        assert_eq!(result.unwrap_err(), RequestError::ConnectionDropped);
+    }
+
+    #[tokio::test]
+    async fn test_receipts_response_triggers_followup() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+
+        // Queue a bodies request as a followup candidate
+        let (followup_tx, _followup_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockBodies {
+            request: vec![B256::random()],
+            response: followup_tx,
+            priority: Priority::default(),
+            range_hint: None,
+        });
+
+        // Insert an inflight receipts request
+        let (tx, _rx) = oneshot::channel();
+        let inflight = Request { request: (), response: tx };
+        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+
+        // Good response should trigger the queued followup
+        let resp = ReceiptsResponse::new(vec![vec![]]);
+        let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
+
+        assert!(matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer_id));
     }
 }
