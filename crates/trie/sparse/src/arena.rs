@@ -55,6 +55,11 @@ impl ArenaSparseNodeState {
         }
     }
 
+    /// Returns true if self is the [`Self::Dirty`] variant.
+    const fn is_dirty(&self) -> bool {
+        matches!(self, Self::Dirty { .. })
+    }
+
     const fn num_leaves(&self) -> u64 {
         match self {
             Self::Revealed { num_leaves } |
@@ -223,6 +228,17 @@ impl ArenaSparseNode {
             Self::Branch(b) => &mut b.state,
             Self::Leaf { state, .. } => state,
             _ => panic!("state_mut called on non-Branch/Leaf node"),
+        }
+    }
+
+    /// Returns true if the node's state is the `Dirty` variant.
+    fn is_dirty(&self) -> bool {
+        match self {
+            Self::EmptyRoot => false,
+            Self::TakenSubtrie => panic!("is_dirty called on TakenSubtrie"),
+            Self::Branch(b) => b.state.is_dirty(),
+            Self::Leaf { state, .. } => state.is_dirty(),
+            Self::Subtrie(s) => s.arena[s.root].is_dirty(),
         }
     }
 
@@ -551,30 +567,32 @@ fn pop_and_propagate_stack(
             let hash_bit = arena[entry.index].hash_mask_bit();
             let tree_bit = arena[entry.index].tree_mask_bit();
             let parent_branch = arena[parent.index].branch_mut();
-            parent_branch.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
-            debug_assert!(
-                matches!(parent_branch.state, ArenaSparseNodeState::Dirty { .. }),
-                "parent must already be dirty when propagating masks",
-            );
+            if parent_branch.state.is_dirty() {
+                parent_branch.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
+            }
         }
 
-        let parent_state = arena[parent.index].state_mut();
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
+        let leaves_dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
 
-        // If the child's dirty leaf count changed (increased or decreased), propagate the
-        // delta to the parent. This covers both dirtying (cur > prev) and cleaning
-        // (cur < prev, e.g. after a subtrie is hashed).
-        if cur_dirty_leaves > 0 || entry.prev_dirty_leaves > 0 {
-            let dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
+        // If the child's dirty leaf count changed (increased or decreased), or the child
+        // itself is dirty (e.g. structurally modified with 0 dirty leaves), propagate
+        // dirty state to the parent. This covers dirtying, cleaning (e.g. after hashing),
+        // and structural changes like child removal in collapse_branch.
+        let child_is_dirty = arena[entry.index].is_dirty();
+        let parent_state = arena[parent.index].state_mut();
+
+        if leaves_dirty_delta != 0 || child_is_dirty {
             *parent_state = ArenaSparseNodeState::Dirty {
                 num_leaves: (parent_state.num_leaves() as i64 + leaves_delta) as u64,
-                num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + dirty_delta) as u64,
+                num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + leaves_dirty_delta)
+                    as u64,
             };
             trace!(
                 target: TRACE_TARGET,
                 path = ?entry.path,
                 leaves_delta,
-                dirty_delta,
+                leaves_dirty_delta,
                 parent_path = ?parent.path,
                 ?parent_state,
                 "Propagated dirty state to parent",
@@ -2758,11 +2776,11 @@ mod tests {
     use proptest_arbitrary_interop::arb;
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(200))]
+        #![proptest_config(ProptestConfig::with_cases(2000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=1000usize),
-            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=500usize),
+            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=300usize),
             overlap_pct in 0.0..=0.5f64,
         ) {
             reth_tracing::init_test_tracing();
