@@ -10,7 +10,10 @@ use config_gen::{config_for_selections, write_config};
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
-use manifest::{ArchiveDescriptor, ComponentSelection, SnapshotComponentType, SnapshotManifest};
+use manifest::{
+    ArchiveDescriptor, ComponentSelection, OutputFileChecksum, SnapshotComponentType,
+    SnapshotManifest,
+};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -211,6 +214,10 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// restarting. By default, archives stream directly into the extractor.
     #[arg(long)]
     resumable: bool,
+
+    /// Maximum number of concurrent modular archive workers.
+    #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
+    download_concurrency: usize,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -256,9 +263,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let selections = self.resolve_components(&manifest)?;
 
-        // Collect all archive descriptors across all selected components.
-        // Verification is performed lazily per archive task, so downloads can
-        // start immediately without a full pre-scan of the datadir.
+        // Collect all archive descriptors across selected chunked components.
+        // Legacy single-archive artifacts are intentionally handled by the
+        // `--url` path and skipped in the modular flow.
         let target_dir = data_dir.data_dir();
         let mut all_downloads: Vec<PlannedArchive> = Vec::new();
         for (ty, sel) in &selections {
@@ -280,12 +287,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
 
             for descriptor in descriptors {
+                if descriptor.output_files.is_empty() {
+                    warn!(target: "reth::cli", file = %descriptor.file_name, component = %name, "Skipping non-chunked descriptor in modular download path");
+                    continue;
+                }
                 all_downloads.push(PlannedArchive { component: name.clone(), archive: descriptor });
             }
         }
 
-        let download_cache_dir = target_dir.join(DOWNLOAD_CACHE_DIR);
-        fs::create_dir_all(&download_cache_dir)?;
+        let download_cache_dir = if self.resumable {
+            let dir = target_dir.join(DOWNLOAD_CACHE_DIR);
+            fs::create_dir_all(&dir)?;
+            Some(dir)
+        } else {
+            None
+        };
 
         let total_archives = all_downloads.len();
         let total_size: u64 = selections
@@ -297,14 +313,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             })
             .sum();
 
-        let startup_summary = summarize_archive_cache(&all_downloads, &download_cache_dir);
+        let startup_summary = summarize_download_startup(&all_downloads, target_dir)?;
         info!(target: "reth::cli",
             reusable = startup_summary.reusable,
-            needs_download = startup_summary.needs_download(),
-            invalid = startup_summary.invalid_size,
-            "Startup archive cache summary (size-only)"
+            needs_download = startup_summary.needs_download,
+            "Startup integrity summary (plain output files)"
         );
-        info!(target: "reth::cli", "Checksums are verified lazily per archive task; downloads start immediately");
 
         info!(target: "reth::cli",
             archives = total_archives,
@@ -318,17 +332,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let target = target_dir.to_path_buf();
         let cache_dir = download_cache_dir;
         let resumable = self.resumable;
+        let download_concurrency = self.download_concurrency.max(1);
         let results: Vec<Result<()>> = stream::iter(all_downloads)
             .map(|planned| {
                 let dir = target.clone();
                 let cache = cache_dir.clone();
                 let sp = Arc::clone(&shared);
                 async move {
-                    process_modular_archive(planned, &dir, &cache, Some(sp), resumable).await?;
+                    process_modular_archive(planned, &dir, cache.as_deref(), Some(sp), resumable)
+                        .await?;
                     Ok(())
                 }
             })
-            .buffer_unordered(MAX_CONCURRENT_DOWNLOADS)
+            .buffer_unordered(download_concurrency)
             .collect()
             .await;
 
@@ -399,7 +415,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
             // Required components always All
-            selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+            if available(SnapshotComponentType::State) {
+                selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+            }
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
@@ -507,42 +525,26 @@ struct PlannedArchive {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-struct ArchiveStartupSummary {
+struct DownloadStartupSummary {
     reusable: usize,
-    missing: usize,
-    invalid_size: usize,
+    needs_download: usize,
 }
 
-impl ArchiveStartupSummary {
-    const fn needs_download(self) -> usize {
-        self.missing + self.invalid_size
-    }
-}
-
-fn summarize_archive_cache(
+fn summarize_download_startup(
     all_downloads: &[PlannedArchive],
-    cache_dir: &Path,
-) -> ArchiveStartupSummary {
-    let mut summary = ArchiveStartupSummary::default();
+    target_dir: &Path,
+) -> Result<DownloadStartupSummary> {
+    let mut summary = DownloadStartupSummary::default();
 
     for planned in all_downloads {
-        let archive_path = cache_dir.join(&planned.archive.file_name);
-
-        match fs::metadata(&archive_path) {
-            Ok(meta) => {
-                if planned.archive.size > 0 && meta.len() != planned.archive.size {
-                    summary.invalid_size += 1;
-                } else {
-                    summary.reusable += 1;
-                }
-            }
-            Err(_) => {
-                summary.missing += 1;
-            }
+        if verify_output_files(target_dir, &planned.archive.output_files)? {
+            summary.reusable += 1;
+        } else {
+            summary.needs_download += 1;
         }
     }
 
-    summary
+    Ok(summary)
 }
 
 impl DownloadProgress {
@@ -1094,12 +1096,7 @@ fn streaming_download_and_extract(
         };
 
         match result {
-            Ok(()) => {
-                if let Some(sp) = shared {
-                    sp.archive_done();
-                }
-                return Ok(());
-            }
+            Ok(()) => return Ok(()),
             Err(e) => {
                 last_error = Some(e);
                 if attempt < MAX_DOWNLOAD_RETRIES {
@@ -1175,11 +1172,23 @@ fn blocking_download_and_extract(
         let file_path = parsed_url
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
-        extract_from_file(&file_path, format, target_dir)
+        let result = extract_from_file(&file_path, format, target_dir);
+        if result.is_ok() &&
+            let Some(sp) = shared
+        {
+            sp.archive_done();
+        }
+        result
     } else if resumable {
         download_and_extract(url, format, target_dir, shared.as_ref())
     } else {
-        streaming_download_and_extract(url, format, target_dir, shared.as_ref())
+        let result = streaming_download_and_extract(url, format, target_dir, shared.as_ref());
+        if result.is_ok() &&
+            let Some(sp) = shared
+        {
+            sp.archive_done();
+        }
+        result
     }
 }
 
@@ -1207,15 +1216,21 @@ async fn stream_and_extract(
 async fn process_modular_archive(
     planned: PlannedArchive,
     target_dir: &Path,
-    cache_dir: &Path,
+    cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
-    let cache_dir = cache_dir.to_path_buf();
+    let cache_dir = cache_dir.map(Path::to_path_buf);
 
     task::spawn_blocking(move || {
-        blocking_process_modular_archive(&planned, &target_dir, &cache_dir, shared, resumable)
+        blocking_process_modular_archive(
+            &planned,
+            &target_dir,
+            cache_dir.as_deref(),
+            shared,
+            resumable,
+        )
     })
     .await??;
 
@@ -1225,95 +1240,83 @@ async fn process_modular_archive(
 fn blocking_process_modular_archive(
     planned: &PlannedArchive,
     target_dir: &Path,
-    cache_dir: &Path,
+    cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
 ) -> Result<()> {
     let archive = &planned.archive;
-    let archive_path = cache_dir.join(&archive.file_name);
-    let part_path = cache_dir.join(format!("{}.part", archive.file_name));
-    let expected_blake3 = archive.blake3.as_deref();
-
-    let mut is_valid_local = false;
-    if archive_path.exists() {
-        is_valid_local = verify_local_archive(&archive_path, archive.size, expected_blake3)?;
-        if is_valid_local {
-            if let Some(sp) = &shared {
-                sp.add(archive.size);
-            }
-            info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Using existing verified archive");
-        } else {
-            warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Archive failed integrity checks, redownloading");
-            let _ = fs::remove_file(&archive_path);
-            let _ = fs::remove_file(&part_path);
+    if verify_output_files(target_dir, &archive.output_files)? {
+        if let Some(sp) = &shared {
+            sp.add(archive.size);
+            sp.archive_done();
         }
-    }
-
-    if !is_valid_local {
-        let mut downloaded_ok = false;
-        for attempt in 1..=MAX_DOWNLOAD_RETRIES {
-            let (downloaded_path, _downloaded_size) = if resumable {
-                resumable_download(&archive.url, cache_dir, shared.as_ref())?
-            } else {
-                // Non-resumable mode still lands the archive in the cache so it can be
-                // verified and reused by future runs.
-                resumable_download(&archive.url, cache_dir, shared.as_ref())?
-            };
-
-            if verify_local_archive(&downloaded_path, archive.size, expected_blake3)? {
-                downloaded_ok = true;
-                break;
-            }
-
-            warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, attempt, "Downloaded archive failed integrity checks, retrying");
-            let _ = fs::remove_file(&downloaded_path);
-            let _ = fs::remove_file(&part_path);
-        }
-
-        if !downloaded_ok {
-            eyre::bail!(
-                "Failed integrity validation after {} attempts for {}",
-                MAX_DOWNLOAD_RETRIES,
-                archive.file_name
-            );
-        }
+        info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Skipping already verified plain files");
+        return Ok(());
     }
 
     let format = CompressionFormat::from_url(&archive.file_name)?;
-    let file = fs::open(&archive_path)?;
-    let quiet = shared.is_some();
+    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+        cleanup_output_files(target_dir, &archive.output_files);
 
-    if quiet {
-        extract_archive_raw(file, format, target_dir)?;
-    } else {
-        let size = fs::metadata(&archive_path)?.len();
-        info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Extracting verified archive");
-        extract_archive(file, size, format, target_dir)?;
+        if resumable {
+            let cache_dir = cache_dir.ok_or_else(|| eyre::eyre!("Missing cache directory"))?;
+            let archive_path = cache_dir.join(&archive.file_name);
+            let part_path = cache_dir.join(format!("{}.part", archive.file_name));
+            let (downloaded_path, _downloaded_size) =
+                resumable_download(&archive.url, cache_dir, shared.as_ref())?;
+            let file = fs::open(&downloaded_path)?;
+            extract_archive_raw(file, format, target_dir)?;
+            let _ = fs::remove_file(&archive_path);
+            let _ = fs::remove_file(&part_path);
+        } else {
+            streaming_download_and_extract(&archive.url, format, target_dir, shared.as_ref())?;
+        }
+
+        if verify_output_files(target_dir, &archive.output_files)? {
+            if let Some(sp) = &shared {
+                sp.archive_done();
+            }
+            return Ok(());
+        }
+
+        warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, attempt, "Extracted files failed integrity checks, retrying");
     }
 
-    if let Some(sp) = shared {
-        sp.archive_done();
-    }
-
-    Ok(())
+    eyre::bail!(
+        "Failed integrity validation after {} attempts for {}",
+        MAX_DOWNLOAD_RETRIES,
+        archive.file_name
+    )
 }
 
-fn verify_local_archive(
-    path: &Path,
-    expected_size: u64,
-    expected_blake3: Option<&str>,
-) -> Result<bool> {
-    let meta = fs::metadata(path)?;
-    if expected_size > 0 && meta.len() != expected_size {
+fn verify_output_files(target_dir: &Path, output_files: &[OutputFileChecksum]) -> Result<bool> {
+    if output_files.is_empty() {
         return Ok(false);
     }
 
-    if let Some(expected) = expected_blake3 {
-        let actual = file_blake3_hex(path)?;
-        return Ok(actual.eq_ignore_ascii_case(expected));
+    for expected in output_files {
+        let output_path = target_dir.join(&expected.path);
+        let meta = match fs::metadata(&output_path) {
+            Ok(meta) => meta,
+            Err(_) => return Ok(false),
+        };
+        if meta.len() != expected.size {
+            return Ok(false);
+        }
+
+        let actual = file_blake3_hex(&output_path)?;
+        if !actual.eq_ignore_ascii_case(&expected.blake3) {
+            return Ok(false);
+        }
     }
 
     Ok(true)
+}
+
+fn cleanup_output_files(target_dir: &Path, output_files: &[OutputFileChecksum]) {
+    for output in output_files {
+        let _ = fs::remove_file(target_dir.join(&output.path));
+    }
 }
 
 fn file_blake3_hex(path: &Path) -> Result<String> {
@@ -1503,12 +1506,12 @@ mod tests {
     }
 
     #[test]
-    fn summarize_archive_cache_counts_reusable_missing_and_invalid() {
+    fn summarize_download_startup_counts_reusable_and_needs_download() {
         let dir = tempdir().unwrap();
-        let cache_dir = dir.path();
-
-        std::fs::write(cache_dir.join("ok.tar.zst"), vec![0_u8; 10]).unwrap();
-        std::fs::write(cache_dir.join("bad-size.tar.zst"), vec![0_u8; 5]).unwrap();
+        let target_dir = dir.path();
+        let ok_file = target_dir.join("ok.bin");
+        std::fs::write(&ok_file, vec![1_u8; 4]).unwrap();
+        let ok_hash = file_blake3_hex(&ok_file).unwrap();
 
         let planned = vec![
             PlannedArchive {
@@ -1518,6 +1521,11 @@ mod tests {
                     file_name: "ok.tar.zst".to_string(),
                     size: 10,
                     blake3: None,
+                    output_files: vec![OutputFileChecksum {
+                        path: "ok.bin".to_string(),
+                        size: 4,
+                        blake3: ok_hash,
+                    }],
                 },
             },
             PlannedArchive {
@@ -1527,6 +1535,11 @@ mod tests {
                     file_name: "missing.tar.zst".to_string(),
                     size: 10,
                     blake3: None,
+                    output_files: vec![OutputFileChecksum {
+                        path: "missing.bin".to_string(),
+                        size: 1,
+                        blake3: "deadbeef".to_string(),
+                    }],
                 },
             },
             PlannedArchive {
@@ -1536,14 +1549,13 @@ mod tests {
                     file_name: "bad-size.tar.zst".to_string(),
                     size: 10,
                     blake3: None,
+                    output_files: vec![],
                 },
             },
         ];
 
-        let summary = summarize_archive_cache(&planned, cache_dir);
+        let summary = summarize_download_startup(&planned, target_dir).unwrap();
         assert_eq!(summary.reusable, 1);
-        assert_eq!(summary.missing, 1);
-        assert_eq!(summary.invalid_size, 1);
-        assert_eq!(summary.needs_download(), 2);
+        assert_eq!(summary.needs_download, 2);
     }
 }

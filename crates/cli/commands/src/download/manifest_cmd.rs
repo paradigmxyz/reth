@@ -11,8 +11,6 @@ use tracing::info;
 /// and writes a `manifest.json` file.
 ///
 /// Archive naming convention:
-///   - State: `state.tar.zst`
-///   - RocksDB indices (optional, archive-only): `rocksdb_indices.tar.zst`
 ///   - Chunked: `{component}-{start}-{end}.tar.zst` (e.g. `transactions-0-499999.tar.zst`)
 #[derive(Debug, Parser)]
 pub struct SnapshotManifestCommand {
