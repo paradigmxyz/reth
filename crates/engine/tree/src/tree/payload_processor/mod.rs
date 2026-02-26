@@ -50,7 +50,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
