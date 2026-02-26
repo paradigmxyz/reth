@@ -192,9 +192,7 @@ pub fn config_for_selections(
     };
 
     if is_archive {
-        let mut config = Config::default();
-        config.static_files = static_files;
-        return config;
+        return Config { static_files, ..Default::default() };
     }
 
     let mut config = Config::default();
