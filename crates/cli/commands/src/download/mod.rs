@@ -251,7 +251,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         };
 
         info!(target: "reth::cli", url = %manifest_url, "Fetching snapshot manifest");
-        let manifest = manifest::fetch_manifest(&manifest_url).await?;
+        let mut manifest = manifest::fetch_manifest(&manifest_url).await?;
+        manifest.base_url = Some(resolve_manifest_base_url(&manifest, &manifest_url)?);
 
         info!(target: "reth::cli",
             block = manifest.block,
@@ -288,8 +289,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
             for descriptor in descriptors {
                 if descriptor.output_files.is_empty() {
-                    warn!(target: "reth::cli", file = %descriptor.file_name, component = %name, "Skipping non-chunked descriptor in modular download path");
-                    continue;
+                    eyre::bail!(
+                        "Invalid modular manifest: {} is missing plain output checksum metadata",
+                        descriptor.file_name
+                    );
                 }
                 all_downloads.push(PlannedArchive { component: name.clone(), archive: descriptor });
             }
@@ -1344,6 +1347,24 @@ fn get_base_url(chain_id: u64) -> String {
     }
 }
 
+fn resolve_manifest_base_url(manifest: &SnapshotManifest, manifest_url: &str) -> Result<String> {
+    if let Some(base_url) = manifest.base_url.as_deref() &&
+        !base_url.is_empty()
+    {
+        return Ok(base_url.trim_end_matches('/').to_string());
+    }
+
+    let mut url = Url::parse(manifest_url)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| eyre::eyre!("manifest_url must have a hierarchical path"))?;
+        segments.pop_if_empty();
+        segments.pop();
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
 /// Builds default URL for latest mainnet archive snapshot using configured defaults.
 ///
 /// Used by the legacy single-archive download flow when no manifest is available.
@@ -1393,7 +1414,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: "https://example.com".to_string(),
+            base_url: Some("https://example.com".to_string()),
             components,
         }
     }

@@ -1,12 +1,13 @@
 use blake3::Hasher;
 use eyre::Result;
-use lz4::Decoder as Lz4Decoder;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, io::Read, path::Path};
-use tar::Archive;
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    path::{Path, PathBuf},
+};
 use tracing::info;
-use zstd::stream::read::Decoder as ZstdDecoder;
 
 /// A snapshot manifest describes available components for a snapshot at a given block height.
 ///
@@ -32,7 +33,10 @@ pub struct SnapshotManifest {
     /// Timestamp when the snapshot was created (unix seconds).
     pub timestamp: u64,
     /// Base URL for archive downloads. Component archive URLs are relative to this.
-    pub base_url: String,
+    ///
+    /// When omitted, downloaders should derive the base URL from the manifest URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
     /// Available snapshot components.
     pub components: BTreeMap<String, ComponentManifest>,
 }
@@ -70,10 +74,6 @@ pub struct ChunkedArchive {
     /// Computed during manifest generation. Older manifests may omit this.
     #[serde(default)]
     pub chunk_sizes: Vec<u64>,
-    /// BLAKE3 checksums per chunk, ordered from first to last.
-    /// Computed during manifest generation. Older manifests may omit this.
-    #[serde(default)]
-    pub chunk_blake3: Vec<String>,
     /// Expected extracted plain files per chunk, ordered from first to last.
     ///
     /// This is the authoritative integrity source for the modular download path.
@@ -223,6 +223,10 @@ impl SnapshotComponentType {
 }
 
 impl SnapshotManifest {
+    fn base_url_or_empty(&self) -> &str {
+        self.base_url.as_deref().unwrap_or("")
+    }
+
     /// Look up a component by type.
     pub fn component(&self, ty: SnapshotComponentType) -> Option<&ComponentManifest> {
         self.components.get(ty.key())
@@ -241,7 +245,7 @@ impl SnapshotManifest {
 
         match component {
             ComponentManifest::Single(single) => {
-                vec![format!("{}/{}", self.base_url, single.file)]
+                vec![format!("{}/{}", self.base_url_or_empty(), single.file)]
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
@@ -250,7 +254,7 @@ impl SnapshotManifest {
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
                         let end = (i + 1) * chunked.blocks_per_file - 1;
-                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url)
+                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url_or_empty())
                     })
                     .collect()
             }
@@ -270,7 +274,7 @@ impl SnapshotManifest {
 
         match component {
             ComponentManifest::Single(single) => {
-                vec![format!("{}/{}", self.base_url, single.file)]
+                vec![format!("{}/{}", self.base_url_or_empty(), single.file)]
             }
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
@@ -291,7 +295,7 @@ impl SnapshotManifest {
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
                         let end = (i + 1) * chunked.blocks_per_file - 1;
-                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url)
+                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url_or_empty())
                     })
                     .collect()
             }
@@ -311,7 +315,7 @@ impl SnapshotManifest {
         match component {
             ComponentManifest::Single(single) => {
                 vec![ArchiveDescriptor {
-                    url: format!("{}/{}", self.base_url, single.file),
+                    url: format!("{}/{}", self.base_url_or_empty(), single.file),
                     file_name: single.file.clone(),
                     size: single.size,
                     blake3: single.blake3.clone(),
@@ -337,19 +341,14 @@ impl SnapshotManifest {
                         let end = (i + 1) * chunked.blocks_per_file - 1;
                         let file_name = format!("{key}-{start}-{end}.tar.zst");
                         let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
-                        let blake3 = chunked
-                            .chunk_blake3
-                            .get(i as usize)
-                            .cloned()
-                            .filter(|hash| !hash.is_empty());
                         let output_files =
                             chunked.chunk_output_files.get(i as usize).cloned().unwrap_or_default();
 
                         ArchiveDescriptor {
-                            url: format!("{}/{}", self.base_url, file_name),
+                            url: format!("{}/{}", self.base_url_or_empty(), file_name),
                             file_name,
                             size,
-                            blake3,
+                            blake3: None,
                             output_files,
                         }
                     })
@@ -426,17 +425,17 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
     Ok(manifest)
 }
 
-/// Generate a manifest from local archive files on disk.
-///
-/// Scans the given directory for archive files matching the naming convention and computes
-/// sizes and checksums.
+/// Package chunk archives from a source datadir and generate a manifest.
 pub fn generate_manifest(
-    archive_dir: &Path,
-    base_url: &str,
+    source_datadir: &Path,
+    output_dir: &Path,
+    base_url: Option<&str>,
     block: u64,
     chain_id: u64,
     blocks_per_file: u64,
 ) -> Result<SnapshotManifest> {
+    std::fs::create_dir_all(output_dir)?;
+
     let mut components = BTreeMap::new();
 
     // Chunked components only: modular download validates extracted plain files
@@ -450,36 +449,38 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        let first_end = blocks_per_file - 1;
-        let first_chunk = archive_dir.join(format!("{key}-0-{first_end}.tar.zst"));
-        if first_chunk.exists() {
-            let num_chunks = block.div_ceil(blocks_per_file);
+        let num_chunks = block.div_ceil(blocks_per_file);
+        let mut chunk_sizes = Vec::with_capacity(num_chunks as usize);
+        let mut chunk_output_files = Vec::with_capacity(num_chunks as usize);
+        let mut found_any = false;
 
-            // Collect per-chunk sizes
-            let mut chunk_sizes = Vec::with_capacity(num_chunks as usize);
-            let mut chunk_blake3 = Vec::with_capacity(num_chunks as usize);
-            let mut chunk_output_files = Vec::with_capacity(num_chunks as usize);
-            for i in 0..num_chunks {
-                let start = i * blocks_per_file;
-                let end = (i + 1) * blocks_per_file - 1;
-                let chunk_path = archive_dir.join(format!("{key}-{start}-{end}.tar.zst"));
-                let size = std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0);
-                chunk_sizes.push(size);
-                // The modular downloader verifies extracted plain files; compressed
-                // chunk checksums are retained only for backward compatibility.
-                chunk_blake3.push(String::new());
-                let output_files = if chunk_path.exists() {
-                    output_files_for_archive(&chunk_path)?
-                } else {
-                    Vec::new()
-                };
-                chunk_output_files.push(output_files);
+        for i in 0..num_chunks {
+            let start = i * blocks_per_file;
+            let end = (i + 1) * blocks_per_file - 1;
+            let source_files = source_files_for_chunk(source_datadir, *ty, start, end)?;
+
+            if source_files.is_empty() {
+                if found_any {
+                    eyre::bail!("Missing source files for {} chunk {}-{}", key, start, end);
+                }
+                continue;
             }
 
+            found_any = true;
+            let archive_name = chunk_filename(key, start, end);
+            let archive_path = output_dir.join(&archive_name);
+            let output_files = write_chunk_archive(&archive_path, &source_files)?;
+            let size = std::fs::metadata(&archive_path)?.len();
+
+            chunk_sizes.push(size);
+            chunk_output_files.push(output_files);
+        }
+
+        if found_any {
             let total_size: u64 = chunk_sizes.iter().sum();
             info!(target: "reth::cli",
                 component = ty.display_name(),
-                chunks = num_chunks,
+                chunks = chunk_sizes.len(),
                 total_blocks = block,
                 size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
@@ -490,7 +491,6 @@ pub fn generate_manifest(
                     blocks_per_file,
                     total_blocks: block,
                     chunk_sizes,
-                    chunk_blake3,
                     chunk_output_files,
                 }),
             );
@@ -504,7 +504,7 @@ pub fn generate_manifest(
         chain_id,
         storage_version: 2,
         timestamp,
-        base_url: base_url.to_string(),
+        base_url: base_url.map(str::to_owned),
         components,
     })
 }
@@ -514,56 +514,108 @@ pub fn chunk_filename(component_key: &str, start: u64, end: u64) -> String {
     format!("{component_key}-{start}-{end}.tar.zst")
 }
 
-fn output_files_for_archive(path: &Path) -> Result<Vec<OutputFileChecksum>> {
-    let file = std::fs::File::open(path)?;
-    let path_str = path.to_string_lossy();
-
-    let mut output_files = if path_str.ends_with(".tar.lz4") {
-        let decoder = Lz4Decoder::new(file)?;
-        let mut archive = Archive::new(decoder);
-        output_files_from_tar(&mut archive)?
-    } else {
-        let decoder = ZstdDecoder::new(file)?;
-        let mut archive = Archive::new(decoder);
-        output_files_from_tar(&mut archive)?
+fn source_files_for_chunk(
+    source_datadir: &Path,
+    component: SnapshotComponentType,
+    start: u64,
+    end: u64,
+) -> Result<Vec<PathBuf>> {
+    let Some(segment_name) = static_segment_name(component) else {
+        return Ok(Vec::new());
     };
 
-    output_files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    Ok(output_files)
-}
+    let static_files_dir = source_datadir.join("static_files");
+    let static_files_dir =
+        if static_files_dir.exists() { static_files_dir } else { source_datadir.to_path_buf() };
+    let prefix = format!("static_file_{segment_name}_{start}_{end}");
 
-fn output_files_from_tar<R: Read>(archive: &mut Archive<R>) -> Result<Vec<OutputFileChecksum>> {
-    let mut output_files = Vec::new();
-
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        if !entry.header().entry_type().is_file() {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&static_files_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
             continue;
         }
-
-        let path = entry.path()?.to_string_lossy().to_string();
-        let path = path.strip_prefix("./").unwrap_or(&path).to_string();
-
-        let mut hasher = Hasher::new();
-        let mut size = 0_u64;
-        let mut buf = [0_u8; 64 * 1024];
-        loop {
-            let n = entry.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            size += n as u64;
-            hasher.update(&buf[..n]);
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            files.push(entry.path());
         }
+    }
+
+    files.sort_unstable();
+    Ok(files)
+}
+
+fn static_segment_name(component: SnapshotComponentType) -> Option<&'static str> {
+    match component {
+        SnapshotComponentType::Headers => Some("headers"),
+        SnapshotComponentType::Transactions => Some("transactions"),
+        SnapshotComponentType::TransactionSenders => Some("transaction-senders"),
+        SnapshotComponentType::Receipts => Some("receipts"),
+        SnapshotComponentType::AccountChangesets => Some("account-change-sets"),
+        SnapshotComponentType::StorageChangesets => Some("storage-change-sets"),
+        SnapshotComponentType::State | SnapshotComponentType::RocksdbIndices => None,
+    }
+}
+
+fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
+    let file = std::fs::File::create(path)?;
+    let encoder = zstd::Encoder::new(file, 0)?;
+    let mut builder = tar::Builder::new(encoder);
+
+    let mut output_files = Vec::with_capacity(source_files.len());
+    for source_path in source_files {
+        let file_name = source_path
+            .file_name()
+            .ok_or_else(|| eyre::eyre!("Invalid source file path: {}", source_path.display()))?;
+        let relative_path = PathBuf::from("static_files").join(file_name);
+
+        let mut header = tar::Header::new_gnu();
+        header.set_size(std::fs::metadata(source_path)?.len());
+        header.set_mode(0o644);
+        header.set_cksum();
+
+        let source_file = std::fs::File::open(source_path)?;
+        let mut reader = HashingReader::new(source_file);
+        builder.append_data(&mut header, &relative_path, &mut reader)?;
 
         output_files.push(OutputFileChecksum {
-            path,
-            size,
-            blake3: hasher.finalize().to_hex().to_string(),
+            path: relative_path.to_string_lossy().to_string(),
+            size: reader.bytes_read,
+            blake3: reader.finalize(),
         });
     }
 
+    builder.finish()?;
+    let encoder = builder.into_inner()?;
+    encoder.finish()?;
+
     Ok(output_files)
+}
+
+struct HashingReader<R> {
+    inner: R,
+    hasher: Hasher,
+    bytes_read: u64,
+}
+
+impl<R: Read> HashingReader<R> {
+    fn new(inner: R) -> Self {
+        Self { inner, hasher: Hasher::new(), bytes_read: 0 }
+    }
+
+    fn finalize(self) -> String {
+        self.hasher.finalize().to_hex().to_string()
+    }
+}
+
+impl<R: Read> Read for HashingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            self.bytes_read += n as u64;
+            self.hasher.update(&buf[..n]);
+        }
+        Ok(n)
+    }
 }
 
 #[cfg(test)]
@@ -586,7 +638,6 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![80_000, 100_000, 120_000],
-                chunk_blake3: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
             }),
         );
@@ -596,7 +647,6 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
                 chunk_sizes: vec![40_000, 50_000, 60_000],
-                chunk_blake3: vec![],
                 chunk_output_files: vec![vec![], vec![], vec![]],
             }),
         );
@@ -605,7 +655,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: "https://example.com".to_string(),
+            base_url: Some("https://example.com".to_string()),
             components,
         }
     }
@@ -654,7 +704,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: "https://example.com".to_string(),
+            base_url: Some("https://example.com".to_string()),
             components,
         };
 
@@ -715,7 +765,6 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 24_396_822,
                 chunk_sizes: vec![100; 49], // 49 chunks
-                chunk_blake3: vec![],
                 chunk_output_files: vec![vec![]; 49],
             }),
         );
@@ -724,7 +773,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: "https://example.com".to_string(),
+            base_url: Some("https://example.com".to_string()),
             components,
         };
         let urls = m.archive_urls(SnapshotComponentType::StorageChangesets);
@@ -774,8 +823,18 @@ mod tests {
                 blocks_per_file: 500_000,
                 total_blocks: 1_000_000,
                 chunk_sizes: vec![80_000, 120_000],
-                chunk_blake3: vec!["hash0".to_string(), "hash1".to_string()],
-                chunk_output_files: vec![vec![], vec![]],
+                chunk_output_files: vec![
+                    vec![OutputFileChecksum {
+                        path: "static_files/static_file_transactions_0_499999.bin".to_string(),
+                        size: 111,
+                        blake3: "h0".to_string(),
+                    }],
+                    vec![OutputFileChecksum {
+                        path: "static_files/static_file_transactions_500000_999999.bin".to_string(),
+                        size: 222,
+                        blake3: "h1".to_string(),
+                    }],
+                ],
             }),
         );
 
@@ -784,7 +843,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: "https://example.com".to_string(),
+            base_url: Some("https://example.com".to_string()),
             components,
         };
 
@@ -796,8 +855,8 @@ mod tests {
 
         let tx = m.archive_descriptors_for_distance(SnapshotComponentType::Transactions, None);
         assert_eq!(tx.len(), 2);
-        assert_eq!(tx[0].blake3.as_deref(), Some("hash0"));
-        assert_eq!(tx[1].blake3.as_deref(), Some("hash1"));
-        assert!(tx[0].output_files.is_empty());
+        assert_eq!(tx[0].blake3, None);
+        assert_eq!(tx[1].blake3, None);
+        assert_eq!(tx[0].output_files[0].size, 111);
     }
 }

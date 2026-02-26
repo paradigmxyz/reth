@@ -303,7 +303,7 @@ mod tests {
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: String::new(),
+            base_url: None,
             components: BTreeMap::new(),
         }
     }
