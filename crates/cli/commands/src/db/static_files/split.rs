@@ -9,7 +9,7 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_db_api::models::CompactU256;
+use reth_db_api::models::{CompactU256, StoredBlockBodyIndices};
 use reth_db_common::DbTool;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -17,7 +17,7 @@ use reth_provider::{
     DBProvider, StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use tracing::info;
 
 /// Split static files into new files with different blocks-per-file setting
@@ -157,6 +157,51 @@ impl SplitCommand {
             }
         }
 
+        // Pre-load block body indices for segments that need them (transactions, receipts,
+        // transaction senders). This avoids holding a long-lived DB read transaction open and
+        // is much faster than seeking per-block since the entire table is small.
+        let needs_indices = segment_ranges.iter().any(|(seg, _, _)| {
+            matches!(
+                seg,
+                StaticFileSegment::Transactions |
+                    StaticFileSegment::Receipts |
+                    StaticFileSegment::TransactionSenders
+            )
+        });
+        let block_body_indices = if needs_indices {
+            let global_from = segment_ranges
+                .iter()
+                .filter(|(seg, _, _)| {
+                    matches!(
+                        seg,
+                        StaticFileSegment::Transactions |
+                            StaticFileSegment::Receipts |
+                            StaticFileSegment::TransactionSenders
+                    )
+                })
+                .map(|(_, from, _)| *from)
+                .min()
+                .unwrap();
+            let global_to = segment_ranges
+                .iter()
+                .filter(|(seg, _, _)| {
+                    matches!(
+                        seg,
+                        StaticFileSegment::Transactions |
+                            StaticFileSegment::Receipts |
+                            StaticFileSegment::TransactionSenders
+                    )
+                })
+                .map(|(_, _, to)| *to)
+                .max()
+                .unwrap();
+
+            info!(target: "reth::cli", from_block = global_from, to_block = global_to, "Loading block body indices");
+            Self::load_block_body_indices(tool, global_from, global_to)?
+        } else {
+            HashMap::new()
+        };
+
         for (segment, from_block, to_block) in segment_ranges {
             info!(target: "reth::cli", ?segment, from_block, to_block, "Processing segment");
 
@@ -179,7 +224,7 @@ impl SplitCommand {
                 }
                 StaticFileSegment::Transactions => {
                     self.split_transactions::<N>(
-                        tool,
+                        &block_body_indices,
                         &source_provider,
                         &output_provider,
                         from_block,
@@ -188,7 +233,7 @@ impl SplitCommand {
                 }
                 StaticFileSegment::Receipts => {
                     self.split_receipts::<N>(
-                        tool,
+                        &block_body_indices,
                         &source_provider,
                         &output_provider,
                         from_block,
@@ -197,7 +242,7 @@ impl SplitCommand {
                 }
                 StaticFileSegment::TransactionSenders => {
                     self.split_transaction_senders::<N>(
-                        tool,
+                        &block_body_indices,
                         &source_provider,
                         &output_provider,
                         from_block,
@@ -339,9 +384,26 @@ impl SplitCommand {
         Ok(())
     }
 
+    fn load_block_body_indices<N: ProviderNodeTypes>(
+        tool: &DbTool<N>,
+        from_block: u64,
+        to_block: u64,
+    ) -> eyre::Result<HashMap<u64, StoredBlockBodyIndices>> {
+        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let tx = provider.tx_ref();
+        let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut indices = HashMap::with_capacity((to_block - from_block + 1) as usize);
+        for entry in cursor.walk_range(from_block..=to_block)? {
+            let (block, body_indices) = entry?;
+            indices.insert(block, body_indices);
+        }
+        info!(target: "reth::cli", count = indices.len(), "Loaded block body indices");
+        Ok(indices)
+    }
+
     fn split_transactions<N: ProviderNodeTypes>(
         &self,
-        tool: &DbTool<N>,
+        block_body_indices: &HashMap<u64, StoredBlockBodyIndices>,
         source: &StaticFileProvider<N::Primitives>,
         output: &StaticFileProvider<N::Primitives>,
         from_block: u64,
@@ -350,15 +412,12 @@ impl SplitCommand {
     where
         <N::Primitives as NodePrimitives>::SignedTx: Compact,
     {
-        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
-        let tx = provider.tx_ref();
-        let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::Transactions)?;
 
         for block in from_block..=to_block {
             writer.increment_block(block)?;
 
-            if let Some(indices) = indices_cursor.seek_exact(block)?.map(|(_, v)| v) {
+            if let Some(indices) = block_body_indices.get(&block) {
                 let first_tx = indices.first_tx_num;
                 let tx_count = indices.tx_count;
 
@@ -386,7 +445,7 @@ impl SplitCommand {
 
     fn split_receipts<N: ProviderNodeTypes>(
         &self,
-        tool: &DbTool<N>,
+        block_body_indices: &HashMap<u64, StoredBlockBodyIndices>,
         source: &StaticFileProvider<N::Primitives>,
         output: &StaticFileProvider<N::Primitives>,
         from_block: u64,
@@ -395,15 +454,12 @@ impl SplitCommand {
     where
         <N::Primitives as NodePrimitives>::Receipt: Compact,
     {
-        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
-        let tx = provider.tx_ref();
-        let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::Receipts)?;
 
         for block in from_block..=to_block {
             writer.increment_block(block)?;
 
-            if let Some(indices) = indices_cursor.seek_exact(block)?.map(|(_, v)| v) {
+            if let Some(indices) = block_body_indices.get(&block) {
                 let first_tx = indices.first_tx_num;
                 let tx_count = indices.tx_count;
 
@@ -430,21 +486,18 @@ impl SplitCommand {
 
     fn split_transaction_senders<N: ProviderNodeTypes>(
         &self,
-        tool: &DbTool<N>,
+        block_body_indices: &HashMap<u64, StoredBlockBodyIndices>,
         source: &StaticFileProvider<N::Primitives>,
         output: &StaticFileProvider<N::Primitives>,
         from_block: u64,
         to_block: u64,
     ) -> eyre::Result<()> {
-        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
-        let tx = provider.tx_ref();
-        let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::TransactionSenders)?;
 
         for block in from_block..=to_block {
             writer.increment_block(block)?;
 
-            if let Some(indices) = indices_cursor.seek_exact(block)?.map(|(_, v)| v) {
+            if let Some(indices) = block_body_indices.get(&block) {
                 let first_tx = indices.first_tx_num;
                 let tx_count = indices.tx_count;
 
