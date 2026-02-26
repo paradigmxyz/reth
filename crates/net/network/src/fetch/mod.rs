@@ -5,10 +5,11 @@ mod client;
 pub use client::FetchClient;
 
 use crate::{message::BlockRequest, session::BlockRangeInfo};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockAccessLists, Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives
+    BlockAccessLists, Capabilities, EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies,
+    GetBlockHeaders, NetworkPrimitives,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -32,6 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
+type InflightBlockAccessListsRequest = Request<(), PeerRequestResult<BlockAccessLists>>;
 
 /// Manages data fetching operations.
 ///
@@ -45,6 +47,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+    /// Currently active [`GetBlockAccessLists`] requests
+    inflight_bals_requests: HashMap<PeerId, InflightBlockAccessListsRequest>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -67,6 +71,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
+            inflight_bals_requests: Default::default(),
             peers: Default::default(),
             peers_handle,
             num_active_peers,
@@ -255,17 +260,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 let inflight = Request { request: (), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
-            },
+            }
             DownloadRequest::GetBlockAccessLists { request, response, .. } => {
-                let inflight = Request { request: request.clone(), response };
-                self.inflight_headers_requests.insert(peer_id, inflight);
-                let HeadersRequest { start, limit, direction } = request;
-                BlockRequest::GetBlockHeaders(GetBlockHeaders {
-                    start_block: start,
-                    limit,
-                    skip: 0,
-                    direction,
-                })
+                let inflight = Request { request: (), response };
+                self.inflight_bals_requests.insert(peer_id, inflight);
+                BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
             }
         }
     }
@@ -520,10 +519,10 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     },
     /// Download the requested access lists and send response through channel
     GetBlockAccessLists {
-    request: Vec<B256>,
-    response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
-    priority: Priority,
-}
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
+        priority: Priority,
+    },
 }
 
 // === impl DownloadRequest ===
@@ -535,15 +534,15 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
             Self::GetBlockAccessLists { .. } => PeerState::GetBlockAccessLists,
+        }
     }
-}
 
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } | Self::GetBlockAccessLists { priority, .. } => {
-                priority
-            }
+            Self::GetBlockHeaders { priority, .. } |
+            Self::GetBlockBodies { priority, .. } |
+            Self::GetBlockAccessLists { priority, .. } => priority,
         }
     }
 
@@ -555,7 +554,9 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns the best peer requirements for this request.
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
-            Self::GetBlockHeaders { .. }|Self::GetBlockAccessLists { .. } => BestPeerRequirements::None,
+            Self::GetBlockHeaders { .. } | Self::GetBlockAccessLists { .. } => {
+                BestPeerRequirements::None
+            }
             Self::GetBlockBodies { range_hint, .. } => {
                 if let Some(range) = range_hint {
                     BestPeerRequirements::FullBlockRange(range.clone())
