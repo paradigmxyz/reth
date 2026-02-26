@@ -6,7 +6,7 @@ use futures::{future, future::Either};
 use reth_eth_wire::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
-    bals::client::BlockAccessListsClient,
+    block_access_lists::client::BlockAccessListsClient,
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
