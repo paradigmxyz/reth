@@ -1,4 +1,4 @@
-use crate::{find_fixed_range, BlockNumber, Compression};
+use crate::{BlockNumber, Compression};
 use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
 use core::{
