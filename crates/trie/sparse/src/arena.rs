@@ -1092,20 +1092,15 @@ fn split_and_insert_leaf(
 /// Replaces a child index in the parent's children array. The parent is the second-to-last
 /// stack entry. If the stack has only one entry, `old_idx` is the trie root and `root` is
 /// updated instead.
-///
-/// `old_idx` must be on the stack (it is the current stack head), so its nibble within
-/// the parent can be determined from the last nibble of its path.
-///
-/// Returns the (possibly updated) root index.
 fn replace_child_in_parent(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &[ArenaStackEntry],
-    root: Index,
-    old_idx: Index,
+    root: &mut Index,
     new_idx: Index,
-) -> Index {
+) {
     if stack.len() <= 1 {
-        return new_idx;
+        *root = new_idx;
+        return
     }
 
     let child_path = &stack.last().unwrap().path;
@@ -1116,11 +1111,14 @@ fn replace_child_in_parent(
     let dense_idx = child_dense_index(parent.state_mask, child_nibble)
         .expect("child nibble not found in parent state_mask");
     debug_assert!(
-        matches!(parent.children[dense_idx], ArenaSparseNodeBranchChild::Revealed(idx) if idx == old_idx),
+        matches!(
+            parent.children[dense_idx],
+            ArenaSparseNodeBranchChild::Revealed(idx)
+            if idx == stack.last().unwrap().index
+        ),
         "parent child at nibble {child_nibble} does not match old_idx",
     );
     parent.children[dense_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
-    root
 }
 
 /// Result of [`upsert_leaf`] indicating whether a new child was created that the caller
@@ -1197,7 +1195,7 @@ fn upsert_leaf(
                 let new_branch_idx =
                     split_and_insert_leaf(arena, remaining_full, value, &leaf_key, head_idx);
 
-                *root = replace_child_in_parent(arena, stack, *root, head_idx, new_branch_idx);
+                replace_child_in_parent(arena, stack, root, new_branch_idx);
                 stack.last_mut().unwrap().index = new_branch_idx;
 
                 if stack.len() >= 2 {
@@ -1215,7 +1213,7 @@ fn upsert_leaf(
             let new_branch_idx =
                 split_and_insert_leaf(arena, full_path_from_head, value, &short_key, head_idx);
 
-            *root = replace_child_in_parent(arena, stack, *root, head_idx, new_branch_idx);
+            replace_child_in_parent(arena, stack, root, new_branch_idx);
 
             stack.last_mut().unwrap().index = new_branch_idx;
 
@@ -1554,7 +1552,7 @@ fn collapse_branch(
     }
 
     // Replace the branch with the remaining child in the grandparent (or root).
-    *root = replace_child_in_parent(arena, stack, *root, branch_idx, child_idx);
+    replace_child_in_parent(arena, stack, root, child_idx);
     stack.last_mut().unwrap().index = child_idx;
 
     // Free the collapsed branch.
@@ -1878,7 +1876,7 @@ impl ArenaParallelSparseTrie {
         // The branch structure changed (child removed), so any cached RLP is stale.
         parent_branch.state = parent_branch.state.to_dirty();
 
-        if parent_branch.state_mask.count_bits() == 1 && !parent_branch.children[0].is_blinded() {
+        if parent_branch.state_mask.count_bits() == 1 {
             collapse_branch(
                 &mut self.upper_arena,
                 stack,
