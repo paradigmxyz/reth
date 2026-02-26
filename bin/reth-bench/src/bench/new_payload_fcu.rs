@@ -187,19 +187,19 @@ impl Command {
                     }
                 };
 
-                let rlp = if rlp_blocks {
-                    let rlp = match block_provider.debug_get_raw_block(next_block.into()).await {
-                        Ok(rlp) => rlp,
+                let rlp = match rlp_blocks
+                    .then(|| block_provider.debug_get_raw_block(next_block.into()))
+                {
+                    Some(fut) => match fut.await {
+                        Ok(rlp) => Some(rlp),
                         Err(e) => {
                             tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}: {e}");
                             let _ = error_sender
                                 .send(eyre::eyre!("Failed to fetch raw block {next_block}: {e}"));
                             break;
                         }
-                    };
-                    Some(rlp)
-                } else {
-                    None
+                    },
+                    None => None,
                 };
 
                 let head_block_hash = block.header.hash;
