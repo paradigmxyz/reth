@@ -20,7 +20,6 @@ use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_engine_primitives::{SMALL_BLOCK_GAS_THRESHOLD, SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -33,7 +32,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::{ForEachOrdered, Runtime};
+use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -287,7 +286,7 @@ where
 
         let parent_state_root = env.parent_state_root;
         let transaction_count = env.transaction_count;
-        let chunk_size = Self::adaptive_chunk_size(config, env.gas_used);
+        let chunk_size = config.multiproof_chunk_size();
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -369,24 +368,6 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
-    /// Returns the multiproof chunk size adapted to the block's gas usage.
-    ///
-    /// For blocks with ≤20M gas used, a smaller chunk size (30) yields better throughput.
-    /// For larger blocks, the configured default chunk size is used.
-    const fn adaptive_chunk_size(config: &TreeConfig, gas_used: u64) -> Option<usize> {
-        if !config.multiproof_chunking_enabled() {
-            return None;
-        }
-
-        let size = if gas_used > 0 && gas_used <= SMALL_BLOCK_GAS_THRESHOLD {
-            SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE
-        } else {
-            config.multiproof_chunk_size()
-        };
-
-        Some(size)
-    }
-
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -416,9 +397,7 @@ where
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -430,9 +409,7 @@ where
             // few transactions are recovered sequentially and sent immediately before
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
@@ -447,15 +424,17 @@ where
                     .map(|(i, tx)| {
                         let idx = i + prefetch;
                         let tx = convert.convert(tx);
-                        tx.map(|tx| {
+                        let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
-                        })
+                        });
+                        (idx, tx)
                     })
-                    .for_each_ordered(|tx| {
+                    .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
+                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
             });
         }
@@ -551,7 +530,7 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         parent_state_root: B256,
-        chunk_size: Option<usize>,
+        chunk_size: usize,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -562,6 +541,8 @@ where
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
+            increase_thread_priority();
+
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
@@ -603,8 +584,6 @@ where
             );
 
             let result = task.run();
-            // Capture the computed state_root before sending the result
-            let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -613,6 +592,7 @@ where
             // block's take() blocks until we've stored the trie for reuse.
             let mut guard = preserved_sparse_trie.lock();
 
+            let task_result = result.as_ref().ok().cloned();
             // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -636,7 +616,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -644,11 +624,12 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
+                    &result.trie_updates,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {
                 debug!(
@@ -740,6 +721,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
+        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 

@@ -59,7 +59,6 @@ url.workspace = true
 ipnet.workspace = true
 # io
 dirs-next.workspace = true
-shellexpand.workspace = true
 
 # obs
 tracing.workspace = true

@@ -74,7 +74,7 @@ jobs:
             profile: maxperf
             allow_fail: false
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-24.04-arm
             profile: maxperf
             allow_fail: false
           - target: x86_64-apple-darwin

@@ -36,6 +36,7 @@ use reth_tasks::Runtime;
 use revm::context_interface::Cfg;
 use revm_primitives::U256;
 use std::{
+    fmt,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize},
@@ -44,6 +45,23 @@ use std::{
     time::{Instant, SystemTime},
 };
 use tokio::sync::Mutex;
+
+/// Additional stateless validation function signature.
+///
+/// Receives the transaction origin and a reference to the transaction. Returns `Ok(())` if the
+/// transaction passes or `Err` to reject it.
+type StatelessValidationFn<T> =
+    Arc<dyn Fn(TransactionOrigin, &T) -> Result<(), InvalidPoolTransactionError> + Send + Sync>;
+
+/// Additional stateful validation function signature.
+///
+/// Receives the transaction origin, a reference to the transaction, and an account state reader.
+/// Returns `Ok(())` if the transaction passes or `Err` to reject it.
+type StatefulValidationFn<T> = Arc<
+    dyn Fn(TransactionOrigin, &T, &dyn AccountInfoReader) -> Result<(), InvalidPoolTransactionError>
+        + Send
+        + Sync,
+>;
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
 ///
@@ -59,7 +77,6 @@ use tokio::sync::Mutex;
 /// - Maximum gas limit
 ///
 /// And adheres to the configured [`LocalTransactionConfig`].
-#[derive(Debug)]
 pub struct EthTransactionValidator<Client, T, Evm> {
     /// This type fetches account info from the db
     client: Client,
@@ -103,6 +120,39 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
     /// are always accepted, regardless of Osaka fork activation.
     eip7594: bool,
+    /// Optional additional stateless validation check applied at the end of
+    /// [`validate_stateless`](Self::validate_stateless).
+    additional_stateless_validation: Option<StatelessValidationFn<T>>,
+    /// Optional additional stateful validation check applied at the end of
+    /// [`validate_stateful`](Self::validate_stateful).
+    additional_stateful_validation: Option<StatefulValidationFn<T>>,
+}
+
+impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EthTransactionValidator")
+            .field("fork_tracker", &self.fork_tracker)
+            .field("eip2718", &self.eip2718)
+            .field("eip1559", &self.eip1559)
+            .field("eip4844", &self.eip4844)
+            .field("eip7702", &self.eip7702)
+            .field("block_gas_limit", &self.block_gas_limit)
+            .field("tx_fee_cap", &self.tx_fee_cap)
+            .field("minimum_priority_fee", &self.minimum_priority_fee)
+            .field("max_tx_input_bytes", &self.max_tx_input_bytes)
+            .field("max_tx_gas_limit", &self.max_tx_gas_limit)
+            .field("disable_balance_check", &self.disable_balance_check)
+            .field("eip7594", &self.eip7594)
+            .field(
+                "additional_stateless_validation",
+                &self.additional_stateless_validation.as_ref().map(|_| "..."),
+            )
+            .field(
+                "additional_stateful_validation",
+                &self.additional_stateful_validation.as_ref().map(|_| "..."),
+            )
+            .finish()
+    }
 }
 
 impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
@@ -181,6 +231,78 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// Returns whether balance checks are disabled for this validator.
     pub const fn disable_balance_check(&self) -> bool {
         self.disable_balance_check
+    }
+
+    /// Sets an additional stateless validation check that is applied at the end of
+    /// [`validate_stateless`](Self::validate_stateless).
+    ///
+    /// The check receives the transaction origin and a reference to the transaction, and
+    /// should return `Ok(())` if the transaction is valid or
+    /// `Err(InvalidPoolTransactionError)` to reject it.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use reth_transaction_pool::{error::InvalidPoolTransactionError, TransactionOrigin};
+    ///
+    /// let mut validator = builder.build(blob_store);
+    /// // Reject external transactions with input data exceeding 1KB
+    /// validator.set_additional_stateless_validation(|origin, tx| {
+    ///     if origin.is_external() && tx.input().len() > 1024 {
+    ///         return Err(InvalidPoolTransactionError::OversizedData {
+    ///             size: tx.input().len(),
+    ///             limit: 1024,
+    ///         });
+    ///     }
+    ///     Ok(())
+    /// });
+    /// ```
+    pub fn set_additional_stateless_validation<F>(&mut self, f: F)
+    where
+        F: Fn(TransactionOrigin, &Tx) -> Result<(), InvalidPoolTransactionError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.additional_stateless_validation = Some(Arc::new(f));
+    }
+
+    /// Sets an additional stateful validation check that is applied at the end of
+    /// [`validate_stateful`](Self::validate_stateful).
+    ///
+    /// The check receives the transaction origin, a reference to the transaction, and the
+    /// account state reader, and should return `Ok(())` if the transaction is valid or
+    /// `Err(InvalidPoolTransactionError)` to reject it.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use reth_transaction_pool::{error::InvalidPoolTransactionError, TransactionOrigin};
+    ///
+    /// let mut validator = builder.build(blob_store);
+    /// // Reject transactions from accounts with zero balance
+    /// validator.set_additional_stateful_validation(|origin, tx, state| {
+    ///     let account = state.basic_account(tx.sender_ref())?.unwrap_or_default();
+    ///     if account.balance.is_zero() {
+    ///         return Err(InvalidPoolTransactionError::Other(Box::new(
+    ///             std::io::Error::new(std::io::ErrorKind::Other, "zero balance"),
+    ///         )));
+    ///     }
+    ///     Ok(())
+    /// });
+    /// ```
+    pub fn set_additional_stateful_validation<F>(&mut self, f: F)
+    where
+        F: Fn(
+                TransactionOrigin,
+                &Tx,
+                &dyn AccountInfoReader,
+            ) -> Result<(), InvalidPoolTransactionError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.additional_stateful_validation = Some(Arc::new(f));
     }
 }
 
@@ -530,6 +652,13 @@ where
             ))
         }
 
+        // Run additional stateless validation if configured
+        if let Some(check) = &self.additional_stateless_validation &&
+            let Err(err) = check(origin, &transaction)
+        {
+            return Err(TransactionValidationOutcome::Invalid(transaction, err))
+        }
+
         Ok(transaction)
     }
 
@@ -578,6 +707,13 @@ where
             Err(err) => return TransactionValidationOutcome::Invalid(transaction, err),
             Ok(sidecar) => sidecar,
         };
+
+        // Run additional stateful validation if configured
+        if let Some(check) = &self.additional_stateful_validation &&
+            let Err(err) = check(origin, &transaction, &state)
+        {
+            return TransactionValidationOutcome::Invalid(transaction, err)
+        }
 
         let authorities = self.recover_authorities(&transaction);
         // Return the valid transaction
@@ -1243,6 +1379,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             validation_metrics: TxPoolValidationMetrics::default(),
             other_tx_types,
             eip7594,
+            additional_stateless_validation: None,
+            additional_stateful_validation: None,
         }
     }
 

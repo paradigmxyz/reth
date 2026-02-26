@@ -339,6 +339,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
+
+    /// Commits the updated nodes to internal trie state.
+    fn commit_updates(
+        &mut self,
+        updated: &HashMap<Nibbles, BranchNodeCompact>,
+        removed: &HashSet<Nibbles>,
+    );
 }
 
 /// Tracks modifications to the sparse trie structure.
