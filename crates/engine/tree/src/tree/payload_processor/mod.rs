@@ -745,7 +745,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     }
 }
 
-/// Lightweight handle to a background state root computation task.
+/// Handle to a background state root computation task.
 ///
 /// Unlike [`PayloadHandle`], this does not include transaction iteration or cache prewarming.
 /// It only provides access to the state root computation via [`Self::state_hook`] and
