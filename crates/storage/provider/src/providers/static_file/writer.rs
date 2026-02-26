@@ -289,17 +289,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = static_file_provider.find_fixed_range(segment, block);
+        let genesis = static_file_provider.genesis_block_number();
+        let canonical_block_range = static_file_provider.find_fixed_range(segment, block);
+
         let (jar, path) = match static_file_provider.get_segment_provider_for_block(
             segment,
-            block_range.start(),
+            block,
             None,
         ) {
-            Ok(provider) => (
-                NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
-                provider.data_path().into(),
-            ),
+            Ok(provider) => {
+                (
+                    NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
+                    provider.data_path().into(),
+                )
+            }
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
+                let block_range = if canonical_block_range.start() < genesis {
+                    SegmentRangeInclusive::new(genesis, canonical_block_range.end())
+                } else {
+                    canonical_block_range
+                };
                 let path = static_file_provider.directory().join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
             }

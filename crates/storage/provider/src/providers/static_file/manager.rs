@@ -1146,11 +1146,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         match segment_max_block {
             Some(segment_max_block) => {
-                let fixed_range = self.find_fixed_range_with_block_index(
+                let mut fixed_range = self.find_fixed_range_with_block_index(
                     segment,
                     indexes.get(segment).map(|index| &index.expected_block_ranges_by_max_block),
                     segment_max_block,
                 );
+
+                let genesis = self.genesis_block_number();
+                if fixed_range.start() < genesis {
+                    info!(target: "providers::static_file", ?fixed_range, "Adjusting static file range start to genesis block");
+                    fixed_range = SegmentRangeInclusive::new(genesis, fixed_range.end());
+                }
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
