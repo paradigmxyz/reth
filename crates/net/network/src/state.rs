@@ -397,6 +397,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     let response = PeerResponse::BlockBodies { response: rx };
                     (request, response)
                 }
+                BlockRequest::GetBlockAccessLists(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetBlockAccessLists { request, response };
+                    let response = PeerResponse::BlockAccessLists { response: rx };
+                    (request, response)
+                }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
             peer.pending_response = Some(response);
