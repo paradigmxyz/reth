@@ -88,6 +88,7 @@ reqwest.workspace = true
 url.workspace = true
 metrics.workspace = true
 blake3.workspace = true
+rayon.workspace = true
 
 # io
 fdlimit.workspace = true

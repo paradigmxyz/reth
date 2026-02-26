@@ -1,12 +1,12 @@
 use blake3::Hasher;
 use eyre::Result;
+use rayon::prelude::*;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io::Read,
     path::{Path, PathBuf},
-    thread,
 };
 use tracing::info;
 
@@ -475,27 +475,17 @@ pub fn generate_manifest(
         }
 
         if found_any {
-            let mut packaged_chunks: Vec<PackagedChunk> = thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(planned_chunks.len());
-                for planned in planned_chunks {
-                    handles.push(scope.spawn(move || {
-                        let output_files =
-                            write_chunk_archive(&planned.archive_path, &planned.source_files)?;
-                        let size = std::fs::metadata(&planned.archive_path)?.len();
-                        Ok::<_, eyre::Error>(PackagedChunk {
-                            chunk_idx: planned.chunk_idx,
-                            size,
-                            output_files,
-                        })
-                    }));
-                }
-
-                let mut results = Vec::with_capacity(handles.len());
-                for handle in handles {
-                    results.push(handle.join().expect("chunk packaging worker panicked")?);
-                }
-                Ok::<_, eyre::Error>(results)
-            })?;
+            let mut packaged_chunks = planned_chunks
+                .into_par_iter()
+                .map(|planned| -> Result<PackagedChunk> {
+                    let output_files =
+                        write_chunk_archive(&planned.archive_path, &planned.source_files)?;
+                    let size = std::fs::metadata(&planned.archive_path)?.len();
+                    Ok(PackagedChunk { chunk_idx: planned.chunk_idx, size, output_files })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
@@ -596,7 +586,10 @@ fn static_segment_name(component: SnapshotComponentType) -> Option<&'static str>
 
 fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
     let file = std::fs::File::create(path)?;
-    let encoder = zstd::Encoder::new(file, 0)?;
+    let mut encoder = zstd::Encoder::new(file, 0)?;
+    // Emit standard zstd frames with checksums for compatibility with external
+    // tools such as `pzstd -d`.
+    encoder.include_checksum(true)?;
     let mut builder = tar::Builder::new(encoder);
 
     let mut output_files = Vec::with_capacity(source_files.len());
