@@ -3,15 +3,10 @@
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 use alloy_primitives::B256;
 use futures::{future, future::Either};
-use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
-    bodies::client::{BodiesClient, BodiesFut},
-    download::DownloadClient,
-    error::{PeerRequestResult, RequestError},
-    headers::client::{HeadersClient, HeadersRequest},
-    priority::Priority,
-    BlockClient,
+    BlockClient, bals::client::BlockAccessListsClient, bodies::client::{BodiesClient, BodiesFut}, download::DownloadClient, error::{PeerRequestResult, RequestError}, headers::client::{HeadersClient, HeadersRequest}, priority::Priority
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
@@ -54,6 +49,7 @@ impl<N: NetworkPrimitives> DownloadClient for FetchClient<N> {
 // The `Output` future of the [HeadersClient] impl of [FetchClient] that either returns a response
 // or an error.
 type HeadersClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
+type BlockAccessListClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
 
 impl<N: NetworkPrimitives> HeadersClient for FetchClient<N> {
     type Header = N::BlockHeader;
@@ -104,4 +100,50 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
 
 impl<N: NetworkPrimitives> BlockClient for FetchClient<N> {
     type Block = N::Block;
+}
+
+impl<N: NetworkPrimitives> BlockAccessListsClient for FetchClient<N> {
+    type Output = std::pin::Pin<Box<dyn Future<Output = PeerRequestResult<BlockAccessLists>> + Send + Sync>>;
+
+    /// Sends a `GetBlockAccessLists` request to an available peer.
+    fn get_block_access_lists_with_priority(
+        &self,
+        request: Vec<B256>,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockAccessLists { request, response, priority })
+            .is_ok()
+        {
+            Either::Left(FlattenedResponse::from(rx))
+        } else {
+            Either::Right(future::err(RequestError::ChannelClosed))
+        }
+    }
+}
+
+impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
+    type Body = N::BlockBody;
+    type Output = BodiesFut<N::BlockBody>;
+
+    /// Sends a `GetBlockBodies` request to an available peer.
+    fn get_block_bodies_with_priority_and_range_hint(
+        &self,
+        request: Vec<B256>,
+        priority: Priority,
+        range_hint: Option<RangeInclusive<u64>>,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockBodies { request, response, priority, range_hint })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
 }

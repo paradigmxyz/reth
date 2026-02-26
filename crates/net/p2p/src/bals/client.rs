@@ -8,18 +8,18 @@ use reth_eth_wire_types::BlockAccessLists;
 #[auto_impl(&, Arc, Box)]
 pub trait BlockAccessListsClient: DownloadClient {
     /// The bal type this client fetches.
-    type BlockAccessLists: Future<Output = PeerRequestResult<BlockAccessLists>>
+    type Output: Future<Output = PeerRequestResult<BlockAccessLists>>
         + Send
         + Sync
         + Unpin;
 
     ///  Fetches the block access lists for given hashes.
-    fn get_block_access_lists(&self, hashes: Vec<B256>) -> Self::BlockAccessLists;
+    fn get_block_access_lists(&self, hashes: Vec<B256>) -> Self::Output;
 
     ///  Fetches the block access lists for given hashes with priority
     fn get_block_access_lists_with_priority(
         &self,
         hashes: Vec<B256>,
         priority: Priority,
-    ) -> Self::BlockAccessLists;
+    ) -> Self::Output;
 }
