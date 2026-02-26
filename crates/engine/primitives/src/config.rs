@@ -9,26 +9,6 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
-/// Returns the default number of storage worker threads based on available parallelism.
-fn default_storage_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
-}
-
-/// Returns the default number of account worker threads.
-///
-/// Account workers coordinate storage proof collection and account trie traversal.
-/// They are set to the same count as storage workers for simplicity.
-fn default_account_worker_count() -> usize {
-    default_storage_worker_count()
-}
-
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
@@ -147,10 +127,6 @@ pub struct TreeConfig {
     always_process_payload_attributes_on_canonical_head: bool,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of storage proof worker threads.
-    storage_worker_count: usize,
-    /// Number of account proof worker threads.
-    account_worker_count: usize,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
@@ -187,8 +163,6 @@ impl Default for TreeConfig {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
-            storage_worker_count: default_storage_worker_count(),
-            account_worker_count: default_account_worker_count(),
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
@@ -220,8 +194,6 @@ impl TreeConfig {
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
         allow_unwind_canonical_header: bool,
-        storage_worker_count: usize,
-        account_worker_count: usize,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
@@ -246,8 +218,6 @@ impl TreeConfig {
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
-            storage_worker_count,
-            account_worker_count,
             disable_cache_metrics,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
@@ -477,42 +447,6 @@ impl TreeConfig {
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
-    }
-
-    /// Return the number of storage proof worker threads.
-    pub const fn storage_worker_count(&self) -> usize {
-        self.storage_worker_count
-    }
-
-    /// Setter for the number of storage proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_storage_worker_count_opt(
-        mut self,
-        storage_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = storage_worker_count {
-            self.storage_worker_count = count;
-        }
-        self
-    }
-
-    /// Return the number of account proof worker threads.
-    pub const fn account_worker_count(&self) -> usize {
-        self.account_worker_count
-    }
-
-    /// Setter for the number of account proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_account_worker_count_opt(
-        mut self,
-        account_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = account_worker_count {
-            self.account_worker_count = count;
-        }
-        self
     }
 
     /// Returns whether cache metrics recording is disabled.
