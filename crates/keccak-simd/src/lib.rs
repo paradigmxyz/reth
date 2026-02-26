@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn test_batch_32_matches_scalar() {
         let inputs: Vec<[u8; 32]> = (0u8..13).map(|i| [i; 32]).collect();
-        let expected: Vec<B256> = inputs.iter().map(|i| keccak256(i)).collect();
+        let expected: Vec<B256> = inputs.iter().map(keccak256).collect();
         let mut outputs = vec![B256::ZERO; inputs.len()];
         keccak256_batch_32(&inputs, &mut outputs);
         assert_eq!(outputs, expected);
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn test_batch_20_matches_scalar() {
         let inputs: Vec<[u8; 20]> = (0u8..11).map(|i| [i; 20]).collect();
-        let expected: Vec<B256> = inputs.iter().map(|i| keccak256(i)).collect();
+        let expected: Vec<B256> = inputs.iter().map(keccak256).collect();
         let mut outputs = vec![B256::ZERO; inputs.len()];
         keccak256_batch_20(&inputs, &mut outputs);
         assert_eq!(outputs, expected);
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_batch_exact_4() {
         let inputs: [[u8; 32]; 4] = [[1; 32], [2; 32], [3; 32], [4; 32]];
-        let expected: Vec<B256> = inputs.iter().map(|i| keccak256(i)).collect();
+        let expected: Vec<B256> = inputs.iter().map(keccak256).collect();
         let mut outputs = [B256::ZERO; 4];
         keccak256_batch_32(&inputs, &mut outputs);
         assert_eq!(outputs.as_slice(), expected.as_slice());
