@@ -2,7 +2,7 @@ use crate::download::manifest::{
     ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest,
 };
 use reth_config::config::{BlocksPerFileConfig, Config, PruneConfig, StaticFilesConfig};
-use reth_db::{tables, Database, DatabaseEnv};
+use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -39,25 +39,6 @@ pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
     );
 
     Ok(true)
-}
-
-/// Writes prune checkpoints to the database for segments that are configured for pruning.
-///
-/// After a modular download, data that wasn't downloaded doesn't exist in the DB. Without
-/// checkpoints, the pruner would start from block 0 and try to prune non-existent data.
-/// Setting checkpoints to the snapshot block tells the pruner "everything up to this block
-/// is already in the expected pruned state."
-///
-/// The `snapshot_block` should be the block number from the manifest.
-pub fn write_prune_checkpoints(
-    db: &DatabaseEnv,
-    config: &Config,
-    snapshot_block: u64,
-) -> eyre::Result<()> {
-    let tx = db.tx_mut()?;
-    write_prune_checkpoints_tx(&tx, config, snapshot_block)?;
-    tx.commit()?;
-    Ok(())
 }
 
 /// Writes prune checkpoints to the provided write transaction.
@@ -123,7 +104,7 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
     [PruneSegment::TransactionLookup, PruneSegment::AccountHistory, PruneSegment::StorageHistory];
 
 /// Resets stage and prune checkpoints for stages whose output is not included
-/// in the snapshot.
+/// in the snapshot inside an existing write transaction.
 ///
 /// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
 /// at the tip for `TransactionLookup`, `IndexAccountHistory`, and
@@ -134,14 +115,6 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
 /// We intentionally do not reset `SenderRecovery`: sender static files are
 /// distributed for archive downloads, and non-archive downloads rely on the
 /// configured prune checkpoints for this segment.
-pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
-    let tx = db.tx_mut()?;
-    reset_index_stage_checkpoints_tx(&tx)?;
-    tx.commit()?;
-    Ok(())
-}
-
-/// Resets index stage and prune checkpoints inside an existing write transaction.
 pub(crate) fn reset_index_stage_checkpoints_tx<Tx>(tx: &Tx) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
@@ -323,6 +296,7 @@ fn format_mode(mode: &PruneMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_db::Database;
 
     /// Empty manifest for tests that only care about prune config.
     fn empty_manifest() -> SnapshotManifest {
@@ -347,7 +321,11 @@ mod tests {
         let config = config_for_selections(&selections, &empty_manifest());
         let snapshot_block = 21_000_000;
 
-        write_prune_checkpoints(&db, &config, snapshot_block).unwrap();
+        {
+            let tx = db.tx_mut().unwrap();
+            write_prune_checkpoints_tx(&tx, &config, snapshot_block).unwrap();
+            tx.commit().unwrap();
+        }
 
         // Verify all expected segments have checkpoints
         let tx = db.tx().unwrap();
@@ -381,7 +359,11 @@ mod tests {
         }
         let config = config_for_selections(&selections, &empty_manifest());
 
-        write_prune_checkpoints(&db, &config, 21_000_000).unwrap();
+        {
+            let tx = db.tx_mut().unwrap();
+            write_prune_checkpoints_tx(&tx, &config, 21_000_000).unwrap();
+            tx.commit().unwrap();
+        }
 
         let tx = db.tx().unwrap();
         for segment in [PruneSegment::SenderRecovery, PruneSegment::TransactionLookup] {
@@ -527,7 +509,11 @@ mod tests {
         }
 
         // Reset
-        reset_index_stage_checkpoints(&db).unwrap();
+        {
+            let tx = db.tx_mut().unwrap();
+            reset_index_stage_checkpoints_tx(&tx).unwrap();
+            tx.commit().unwrap();
+        }
 
         // Verify stage checkpoints are at block 0
         let tx = db.tx().unwrap();
