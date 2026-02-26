@@ -783,7 +783,7 @@ impl RuntimeBuilder {
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(default_threads)
+                .num_threads(default_threads_half)
                 .thread_name(|i| format!("cpu-{i:02}"))
                 .build()?;
 
@@ -803,7 +803,7 @@ impl RuntimeBuilder {
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads_half);
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
             let proof_storage_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_storage_worker_threads)
@@ -811,7 +811,7 @@ impl RuntimeBuilder {
             )?;
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads_half);
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
             let proof_account_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_account_worker_threads)
