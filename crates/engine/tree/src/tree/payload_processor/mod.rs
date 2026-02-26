@@ -434,9 +434,9 @@ where
                     })
                     .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
-                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                    });
-            });
+                        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        });
+                        });
         }
 
         (prewarm_rx, execute_rx)
@@ -721,7 +721,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
-        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 
