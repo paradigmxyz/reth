@@ -35,7 +35,7 @@ use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
     Arc,
 };
@@ -157,6 +157,11 @@ where
                         break;
                     }
 
+                    // skip transactions already executed by the main loop
+                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                        continue;
+                    }
+
                     tx_count += 1;
                     let parent_span = Span::current();
                     s.spawn(move |_| {
@@ -209,6 +214,11 @@ where
             };
 
             if terminate_execution.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // skip if main execution has already processed this transaction
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                 return;
             }
 
@@ -497,6 +507,10 @@ where
     pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
+    /// Shared counter tracking the next transaction index to be executed by the main execution
+    /// loop. Prewarm workers skip transactions with `index < counter` since those have already
+    /// been executed.
+    pub executed_tx_index: Arc<AtomicUsize>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
