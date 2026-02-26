@@ -924,12 +924,21 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
-        })
-        .await
+        let mut bodies = self
+            .get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: None,
+            })
+            .await?;
+        let bals =
+            self.inner.bal_provider.get_by_range(start, count, &self.inner.metrics.bal_metrics);
+        for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
+            if let Some(body) = body_opt.as_mut() {
+                body.block_access_list = Some(bal);
+            }
+        }
+        return Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_range_v2`
@@ -1012,12 +1021,21 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
-        })
-        .await
+        let mut bodies = self
+            .get_payload_bodies_by_hash_with(hashes.clone(), |block| ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: None,
+            })
+            .await?;
+
+        let bals = self.inner.bal_provider.get_by_hashes(&hashes, &self.inner.metrics.bal_metrics);
+        for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
+            if let Some(body) = body_opt.as_mut() {
+                body.block_access_list = bal;
+            }
+        }
+        return Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_hash_v2`
