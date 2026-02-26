@@ -6,6 +6,7 @@ use std::{
     collections::BTreeMap,
     io::Read,
     path::{Path, PathBuf},
+    thread,
 };
 use tracing::info;
 
@@ -450,8 +451,7 @@ pub fn generate_manifest(
     ] {
         let key = ty.key();
         let num_chunks = block.div_ceil(blocks_per_file);
-        let mut chunk_sizes = Vec::with_capacity(num_chunks as usize);
-        let mut chunk_output_files = Vec::with_capacity(num_chunks as usize);
+        let mut planned_chunks = Vec::with_capacity(num_chunks as usize);
         let mut found_any = false;
 
         for i in 0..num_chunks {
@@ -467,16 +467,40 @@ pub fn generate_manifest(
             }
 
             found_any = true;
-            let archive_name = chunk_filename(key, start, end);
-            let archive_path = output_dir.join(&archive_name);
-            let output_files = write_chunk_archive(&archive_path, &source_files)?;
-            let size = std::fs::metadata(&archive_path)?.len();
-
-            chunk_sizes.push(size);
-            chunk_output_files.push(output_files);
+            planned_chunks.push(PlannedChunk {
+                chunk_idx: i,
+                archive_path: output_dir.join(chunk_filename(key, start, end)),
+                source_files,
+            });
         }
 
         if found_any {
+            let mut packaged_chunks: Vec<PackagedChunk> = thread::scope(|scope| {
+                let mut handles = Vec::with_capacity(planned_chunks.len());
+                for planned in planned_chunks {
+                    handles.push(scope.spawn(move || {
+                        let output_files =
+                            write_chunk_archive(&planned.archive_path, &planned.source_files)?;
+                        let size = std::fs::metadata(&planned.archive_path)?.len();
+                        Ok::<_, eyre::Error>(PackagedChunk {
+                            chunk_idx: planned.chunk_idx,
+                            size,
+                            output_files,
+                        })
+                    }));
+                }
+
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    results.push(handle.join().expect("chunk packaging worker panicked")?);
+                }
+                Ok::<_, eyre::Error>(results)
+            })?;
+
+            packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
+            let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
+            let chunk_output_files =
+                packaged_chunks.into_iter().map(|chunk| chunk.output_files).collect::<Vec<_>>();
             let total_size: u64 = chunk_sizes.iter().sum();
             info!(target: "reth::cli",
                 component = ty.display_name(),
@@ -512,6 +536,20 @@ pub fn generate_manifest(
 /// Resolves an archive file path from a component key and naming convention.
 pub fn chunk_filename(component_key: &str, start: u64, end: u64) -> String {
     format!("{component_key}-{start}-{end}.tar.zst")
+}
+
+#[derive(Debug)]
+struct PlannedChunk {
+    chunk_idx: u64,
+    archive_path: PathBuf,
+    source_files: Vec<PathBuf>,
+}
+
+#[derive(Debug)]
+struct PackagedChunk {
+    chunk_idx: u64,
+    size: u64,
+    output_files: Vec<OutputFileChecksum>,
 }
 
 fn source_files_for_chunk(
