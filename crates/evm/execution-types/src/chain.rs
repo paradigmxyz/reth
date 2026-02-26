@@ -203,9 +203,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all transactions in the chain.
-    pub fn transactions_iter(
-        &self,
-    ) -> impl Iterator<Item = &N::SignedTx> + '_ {
+    pub fn transactions_iter(&self) -> impl Iterator<Item = &N::SignedTx> + '_ {
         self.blocks_iter().flat_map(|block| block.body().transactions())
     }
 
