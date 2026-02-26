@@ -118,7 +118,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         for node in multiproof.account_subtree.values() {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
         }
-        for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
+        for node in multiproof.storages.values().flat_map(|storage| storage.subtree.values()) {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
         }
     });
@@ -172,7 +172,7 @@ fn correctly_decodes_branch_node_values() {
         for node in multiproof.account_subtree.values() {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
         }
-        for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
+        for node in multiproof.storages.values().flat_map(|storage| storage.subtree.values()) {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
         }
     });

@@ -1285,10 +1285,8 @@ impl RocksDBProvider {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
-            let mut tx_num = first_tx_num;
-            for transaction in body.transactions_iter() {
+            for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
                 batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
-                tx_num += 1;
             }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
