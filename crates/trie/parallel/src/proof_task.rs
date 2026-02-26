@@ -443,10 +443,24 @@ where
 
         let root = calculator.compute_root_hash(&proof)?;
 
+        let elapsed = proof_start.elapsed();
+        let n = targets.len().max(1);
+        if elapsed.as_millis() > 5 * n as u128 {
+            debug!(
+                target: "trie::proof_task",
+                ?hashed_address,
+                ?targets,
+                elapsed_ms = elapsed.as_millis(),
+                n,
+                worker_id = self.id,
+                "Slow V2 storage proof calculation"
+            );
+        }
+
         trace!(
             target: "trie::proof_task",
             hashed_address = ?hashed_address,
-            proof_time_us = proof_start.elapsed().as_micros(),
+            proof_time_us = elapsed.as_micros(),
             ?root,
             worker_id = self.id,
             "Completed V2 storage proof calculation"
