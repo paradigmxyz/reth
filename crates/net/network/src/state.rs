@@ -383,8 +383,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ///
     /// Caution: this will replace an already pending response. It's the responsibility of the
     /// caller to select the peer.
-    fn handle_block_request(&mut self, peer: PeerId, request: BlockRequest) {
-        if let Some(ref mut peer) = self.active_peers.get_mut(&peer) {
+    fn handle_block_request(&mut self, peer_id: PeerId, request: BlockRequest) {
+        if let Some(ref mut peer) = self.active_peers.get_mut(&peer_id) {
             let (request, response) = match request {
                 BlockRequest::GetBlockHeaders(request) => {
                     let (response, rx) = oneshot::channel();
@@ -471,10 +471,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 self.state_fetcher.on_receipts_response(peer, normalized)
             }
             PeerResponseResult::Receipts70(res) => {
-                let normalized = res.map(|r70| ReceiptsResponse {
-                    receipts: r70.receipts,
-                    last_block_incomplete: r70.last_block_incomplete,
-                });
+                let normalized = res.map(ReceiptsResponse::from);
                 self.state_fetcher.on_receipts_response(peer, normalized)
             }
             _ => None,

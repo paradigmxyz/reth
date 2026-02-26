@@ -1196,104 +1196,97 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_poll_receipts_request_no_peers() {
+    /// Creates a `StateFetcher` with a single idle peer and returns both.
+    fn fetcher_with_peer() -> (StateFetcher<EthNetworkPrimitives>, PeerId) {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(
+            peer_id,
+            Default::default(),
+            Default::default(),
+            Arc::new(Capabilities::from(vec![])),
+            Default::default(),
+            None,
+        );
+        (fetcher, peer_id)
+    }
+
+    /// Inserts an inflight receipts request into the fetcher and returns the
+    /// `oneshot::Receiver` that the final response will be sent through.
+    fn insert_inflight_receipts(
+        fetcher: &mut StateFetcher<EthNetworkPrimitives>,
+        peer_id: PeerId,
+    ) -> oneshot::Receiver<PeerRequestResult<ReceiptsResponse<reth_ethereum_primitives::Receipt>>>
+    {
+        let (tx, rx) = oneshot::channel();
+        fetcher.inflight_receipts_requests.insert(peer_id, Request { request: (), response: tx });
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+        rx
+    }
+
+    // ---- Receipts: basic dispatch ----
+
+    #[tokio::test]
+    async fn test_poll_dispatches_receipts_to_peer() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
 
         poll_fn(move |cx| {
-            assert!(fetcher.poll(cx).is_pending());
-
-            // Queue a receipts request
             let (tx, _rx) = oneshot::channel();
             fetcher.queued_requests.push_back(DownloadRequest::GetReceipts {
-                request: vec![B256::random()],
+                request: vec![B256::ZERO],
                 response: tx,
                 priority: Priority::default(),
             });
 
-            // No peers available, should stay pending
-            assert!(fetcher.poll(cx).is_pending());
+            let Poll::Ready(FetchAction::BlockRequest { peer_id: dispatched_peer, request }) =
+                fetcher.poll(cx)
+            else {
+                panic!("expected Ready(BlockRequest)");
+            };
+            assert_eq!(dispatched_peer, peer_id);
+            assert!(matches!(request, BlockRequest::GetReceipts(_)));
+
+            // Peer should now be in GetReceipts state
+            assert!(matches!(fetcher.peers[&peer_id].state, PeerState::GetReceipts));
+            // Inflight request should be tracked
+            assert!(fetcher.inflight_receipts_requests.contains_key(&peer_id));
 
             Poll::Ready(())
         })
         .await;
     }
 
-    #[tokio::test]
-    async fn test_on_receipts_response_no_inflight() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
-
-        // Response without a matching inflight request — should not panic
-        let resp = ReceiptsResponse::new(vec![vec![]]);
-        assert_eq!(fetcher.on_receipts_response(peer_id, Ok(resp)), None);
-    }
+    // ---- Receipts: response handling ----
 
     #[tokio::test]
-    async fn test_receipts_response_resolves_inflight() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
+    async fn test_receipts_complete_response_resolves_and_idles_peer() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
 
-        fetcher.new_active_peer(
-            peer_id,
-            Default::default(),
-            Default::default(),
-            Arc::new(Capabilities::from(vec![])),
-            Default::default(),
-            None,
-        );
+        let rx = insert_inflight_receipts(&mut fetcher, peer_id);
 
-        // Insert an inflight receipts request
-        let (tx, rx) = oneshot::channel();
-        let inflight = Request { request: (), response: tx };
-        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
-
-        // Simulate that it was in GetReceipts state
-        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
-
-        // Deliver a successful response
         let resp = ReceiptsResponse::new(vec![vec![]]);
         let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
 
         // No queued requests, so no followup
         assert!(outcome.is_none());
-
-        // Peer should be back to idle
+        // Peer back to idle
         assert!(fetcher.peers[&peer_id].state.is_idle());
+        // Inflight cleaned up
+        assert!(!fetcher.inflight_receipts_requests.contains_key(&peer_id));
 
-        // The response should have been forwarded through the oneshot
-        let result = rx.await.unwrap();
-        assert!(result.is_ok());
+        // Caller receives the response
+        let result = rx.await.unwrap().unwrap();
+        assert_eq!(result.1.receipts.len(), 1);
     }
 
     #[tokio::test]
     async fn test_receipts_empty_response_marks_peer_bad() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+        let _rx = insert_inflight_receipts(&mut fetcher, peer_id);
 
-        fetcher.new_active_peer(
-            peer_id,
-            Default::default(),
-            Default::default(),
-            Arc::new(Capabilities::from(vec![])),
-            Default::default(),
-            None,
-        );
-
-        let (tx, _rx) = oneshot::channel();
-        let inflight = Request { request: (), response: tx };
-        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
-        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
-
-        // Empty receipts — likely bad
         let resp = ReceiptsResponse::new(vec![]);
         let _ = fetcher.on_receipts_response(peer_id, Ok(resp));
 
@@ -1301,77 +1294,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_receipts_error_response_marks_peer_bad() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
-
-        fetcher.new_active_peer(
-            peer_id,
-            Default::default(),
-            Default::default(),
-            Arc::new(Capabilities::from(vec![])),
-            Default::default(),
-            None,
-        );
-
-        let (tx, _rx) = oneshot::channel();
-        let inflight = Request { request: (), response: tx };
-        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
-        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+    async fn test_receipts_error_forwards_and_marks_peer_bad() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+        let rx = insert_inflight_receipts(&mut fetcher, peer_id);
 
         let _ = fetcher.on_receipts_response(peer_id, Err(RequestError::Timeout));
 
         assert!(fetcher.peers[&peer_id].last_response_likely_bad);
+        // Error is forwarded to the caller
+        let result = rx.await.unwrap();
+        assert_eq!(result.unwrap_err(), RequestError::Timeout);
     }
 
     #[tokio::test]
     async fn test_session_closed_cancels_inflight_receipts() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+        let rx = insert_inflight_receipts(&mut fetcher, peer_id);
 
-        fetcher.new_active_peer(
-            peer_id,
-            Default::default(),
-            Default::default(),
-            Arc::new(Capabilities::from(vec![])),
-            Default::default(),
-            None,
-        );
-
-        let (tx, rx) = oneshot::channel();
-        let inflight = Request { request: (), response: tx };
-        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
-
-        // Close the session
         fetcher.on_session_closed(&peer_id);
 
-        // Peer should be removed
         assert!(!fetcher.peers.contains_key(&peer_id));
+        assert!(!fetcher.inflight_receipts_requests.contains_key(&peer_id));
 
-        // Inflight request should have been cancelled with ConnectionDropped
         let result = rx.await.unwrap();
         assert_eq!(result.unwrap_err(), RequestError::ConnectionDropped);
     }
 
     #[tokio::test]
     async fn test_receipts_response_triggers_followup() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-        let peer_id = B512::random();
-
-        fetcher.new_active_peer(
-            peer_id,
-            Default::default(),
-            Default::default(),
-            Arc::new(Capabilities::from(vec![])),
-            Default::default(),
-            None,
-        );
+        let (mut fetcher, peer_id) = fetcher_with_peer();
 
         // Queue a bodies request as a followup candidate
         let (followup_tx, _followup_rx) = oneshot::channel();
@@ -1382,16 +1333,40 @@ mod tests {
             range_hint: None,
         });
 
-        // Insert an inflight receipts request
-        let (tx, _rx) = oneshot::channel();
-        let inflight = Request { request: (), response: tx };
-        fetcher.inflight_receipts_requests.insert(peer_id, inflight);
-        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetReceipts;
+        let _rx = insert_inflight_receipts(&mut fetcher, peer_id);
 
-        // Good response should trigger the queued followup
         let resp = ReceiptsResponse::new(vec![vec![]]);
         let outcome = fetcher.on_receipts_response(peer_id, Ok(resp));
 
         assert!(matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_block_request_creates_inflight_receipts() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+        let hashes = vec![B256::with_last_byte(1), B256::with_last_byte(2)];
+
+        let (tx, _rx) = oneshot::channel();
+        let req = DownloadRequest::GetReceipts {
+            request: hashes.clone(),
+            response: tx,
+            priority: Priority::default(),
+        };
+
+        let block_request = fetcher.prepare_block_request(peer_id, req);
+
+        // Returns a GetReceipts block request with the same hashes
+        match block_request {
+            BlockRequest::GetReceipts(ref get) => {
+                assert_eq!(get.0, hashes);
+            }
+            other => panic!("expected GetReceipts, got {other:?}"),
+        }
+
+        // Peer state transitions to GetReceipts
+        assert!(matches!(fetcher.peers[&peer_id].state, PeerState::GetReceipts));
+
+        // Inflight request is tracked
+        assert!(fetcher.inflight_receipts_requests.contains_key(&peer_id));
     }
 }
