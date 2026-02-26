@@ -1100,8 +1100,8 @@ fn split_and_insert_leaf(
 
     let new_branch_idx = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
         state: ArenaSparseNodeState::Dirty {
-            num_leaves: old_child_num_leaves,
-            num_dirty_leaves: old_child_dirty_leaves,
+            num_leaves: old_child_num_leaves + 1,
+            num_dirty_leaves: old_child_dirty_leaves + 1,
         },
         children,
         state_mask,
@@ -1110,42 +1110,36 @@ fn split_and_insert_leaf(
     }));
 
     replace_child_in_parent(arena, stack, root, new_branch_idx);
-
-    // HACK: `replace_child_in_parent` is going to first `pop_and_propagate_stack` the old child,
-    // and then `push_stack` this new branch. When it pushes the new branch the branch's counters
-    // will be pushed onto the stack as well, and when this branch is later popped the diff with
-    // those previous values will be applied.
-    //
-    // We push the new branch using the same counters as the previous child, without the +1. Then
-    // when this branch is later popped the diff will account for the new leaf which has been
-    // inserted. We couldn't just inlclude the +1 with the original stack entry, because then there
-    // would be no diff to apply.
-    *arena[new_branch_idx].state_mut() = ArenaSparseNodeState::Dirty {
-        num_leaves: old_child_num_leaves + 1,
-        num_dirty_leaves: old_child_dirty_leaves + 1,
-    };
 }
 
-/// Replaces a child index in the parent's children array. The parent is the second-to-last
-/// stack entry. The top stack entry's index is replaced to reflect `new_idx` as well. If the stack
-/// has only one entry, `old_idx` is the trie root and `root` is updated instead.
+/// Replaces a child index in the parent's children array and on the stack.
+///
+/// The stack head's index is swapped to `new_idx` **in place**, preserving the original
+/// `prev_num_leaves` / `prev_dirty_leaves` from when the old node was first pushed. This way
+/// the eventual pop of this entry computes the correct total delta
+/// (`new_node_current − old_node_at_push_time`) in a single step, without needing intermediate
+/// pop+push gymnastics or counter synchronization hacks.
+///
+/// If the stack has only one entry the node is the trie root, so `root` is updated instead of
+/// a parent's children array.
 fn replace_child_in_parent(
     arena: &mut Arena<ArenaSparseNode>,
-    stack: &mut Vec<ArenaStackEntry>,
+    stack: &mut [ArenaStackEntry],
     root: &mut Index,
     new_idx: Index,
 ) {
-    // Replace the index of stack's head entry. To do this we pop the previous head and replace it.
-    let prev_head = pop_and_propagate_stack(arena, stack, false);
-    push_stack(arena, stack, new_idx, prev_head.path, false);
+    let head = stack.last_mut().expect("stack isn't empty");
+    let old_idx = head.index;
+    let child_nibble = head.path.last();
+    head.index = new_idx;
 
-    if stack.len() <= 1 {
+    if stack.len() == 1 {
         *root = new_idx;
         return
     }
 
-    let child_path = &stack.last().unwrap().path;
-    let child_nibble = child_path.last().unwrap();
+    let child_nibble =
+        child_nibble.expect("if stack has two entries then the head path can't be empty");
 
     let parent_entry = &stack[stack.len() - 2];
     let parent = arena[parent_entry.index].branch_mut();
@@ -1156,7 +1150,7 @@ fn replace_child_in_parent(
         matches!(
             parent.children[dense_idx],
             ArenaSparseNodeBranchChild::Revealed(idx)
-            if idx == prev_head.index
+            if idx == old_idx
         ),
         "parent child at nibble {child_nibble} does not match old_idx",
     );
@@ -1572,13 +1566,6 @@ fn collapse_branch(
             _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
         },
         _ => unreachable!("remaining child must be Leaf, Branch, or Subtrie"),
-    }
-
-    // Sync the branch's dirty count with the (just-modified) child before popping,
-    // so pop_and_propagate_stack propagates the correct delta to the grandparent.
-    let child_dirty = arena[child_idx].num_dirty_leaves();
-    if let ArenaSparseNodeState::Dirty { num_dirty_leaves, .. } = arena[branch_idx].state_mut() {
-        *num_dirty_leaves = child_dirty;
     }
 
     // Replace the branch with the remaining child in the grandparent (or root).
