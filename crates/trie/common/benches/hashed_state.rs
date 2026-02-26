@@ -102,5 +102,151 @@ fn bench_from_parallel_iterator(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_from_parallel_iterator);
+/// V1 global sort approach for chunking (baseline for comparison)
+fn chunks_global_sort(state: HashedPostState, chunk_size: usize) -> Vec<HashedPostState> {
+    use itertools::Itertools;
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Order {
+        StorageWipe,
+        StorageUpdate(B256),
+        Account,
+    }
+
+    enum Item {
+        Account(Option<Account>),
+        StorageWipe,
+        StorageUpdate { slot: B256, value: U256 },
+    }
+
+    impl Item {
+        const fn order(&self) -> Order {
+            match self {
+                Self::StorageWipe => Order::StorageWipe,
+                Self::StorageUpdate { slot, .. } => Order::StorageUpdate(*slot),
+                Self::Account(_) => Order::Account,
+            }
+        }
+    }
+
+    let flattened: Vec<_> = state
+        .storages
+        .into_iter()
+        .flat_map(|(address, storage)| {
+            storage.wiped.then_some((address, Item::StorageWipe)).into_iter().chain(
+                storage
+                    .storage
+                    .into_iter()
+                    .map(move |(slot, value)| (address, Item::StorageUpdate { slot, value })),
+            )
+        })
+        .chain(
+            state.accounts.into_iter().map(|(address, account)| (address, Item::Account(account))),
+        )
+        .sorted_unstable_by_key(|(address, item)| (*address, item.order()))
+        .collect();
+
+    let mut chunks = Vec::new();
+    let mut iter = flattened.into_iter();
+    loop {
+        let mut chunk = HashedPostState::default();
+        let mut count = 0;
+        while count < chunk_size {
+            let Some((address, item)) = iter.next() else {
+                break;
+            };
+            match item {
+                Item::Account(account) => {
+                    chunk.accounts.insert(address, account);
+                }
+                Item::StorageWipe => {
+                    chunk.storages.entry(address).or_default().wiped = true;
+                }
+                Item::StorageUpdate { slot, value } => {
+                    chunk.storages.entry(address).or_default().storage.insert(slot, value);
+                }
+            }
+            count += 1;
+        }
+        if chunk.accounts.is_empty() && chunk.storages.is_empty() {
+            break;
+        }
+        chunks.push(chunk);
+    }
+    chunks
+}
+
+fn generate_chunking_test_data(num_accounts: usize, slots_per_account: usize) -> HashedPostState {
+    let mut state = HashedPostState::default();
+    for i in 0..num_accounts {
+        let hashed_address = B256::from(keccak256_u64(i as u64));
+        state.accounts.insert(
+            hashed_address,
+            if i % 10 == 0 {
+                None
+            } else {
+                Some(Account {
+                    nonce: i as u64,
+                    balance: U256::from(i * 1000),
+                    bytecode_hash: None,
+                })
+            },
+        );
+        if slots_per_account > 0 {
+            let mut storage = HashedStorage::new(i % 20 == 0);
+            for j in 0..slots_per_account {
+                storage
+                    .storage
+                    .insert(B256::from(keccak256_u64((i * 1000 + j) as u64)), U256::from(j));
+            }
+            state.storages.insert(hashed_address, storage);
+        }
+    }
+    state
+}
+
+fn bench_chunking(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ChunkedHashedPostState");
+
+    for (num_accounts, slots_per_account) in [(100, 5), (500, 10), (1000, 5), (200, 50)] {
+        let chunk_size = 50;
+        let label = format!("accounts_{num_accounts}/slots_{slots_per_account}/chunk_{chunk_size}");
+
+        group.throughput(Throughput::Elements(
+            (num_accounts + num_accounts * slots_per_account) as u64,
+        ));
+
+        group.bench_with_input(
+            BenchmarkId::new("v1_global_sort", &label),
+            &(num_accounts, slots_per_account, chunk_size),
+            |b, &(na, spa, cs)| {
+                b.iter_with_setup(
+                    || generate_chunking_test_data(na, spa),
+                    |state| {
+                        let chunks = chunks_global_sort(black_box(state), cs);
+                        black_box(chunks);
+                    },
+                );
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("v2_merge_sort", &label),
+            &(num_accounts, slots_per_account, chunk_size),
+            |b, &(na, spa, cs)| {
+                b.iter_with_setup(
+                    || generate_chunking_test_data(na, spa),
+                    |state| {
+                        let chunks: Vec<_> = black_box(state).chunks(cs).collect();
+                        black_box(chunks);
+                    },
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_from_parallel_iterator, bench_chunking);
 criterion_main!(benches);

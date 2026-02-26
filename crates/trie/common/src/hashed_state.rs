@@ -12,7 +12,6 @@ use alloy_primitives::{
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
-use itertools::Itertools;
 #[cfg(feature = "rayon")]
 pub use rayon::*;
 use reth_primitives_traits::Account;
@@ -829,15 +828,6 @@ pub struct ChunkedHashedPostState {
     size: usize,
 }
 
-/// Order discriminant for sorting flattened state items.
-/// Ordering: `StorageWipe` < `StorageUpdate` (by slot) < `Account`
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum FlattenedStateOrder {
-    StorageWipe,
-    StorageUpdate(B256),
-    Account,
-}
-
 #[derive(Debug)]
 enum FlattenedHashedPostStateItem {
     Account(Option<Account>),
@@ -845,40 +835,100 @@ enum FlattenedHashedPostStateItem {
     StorageUpdate { slot: B256, value: U256 },
 }
 
-impl FlattenedHashedPostStateItem {
-    const fn order(&self) -> FlattenedStateOrder {
-        match self {
-            Self::StorageWipe => FlattenedStateOrder::StorageWipe,
-            Self::StorageUpdate { slot, .. } => FlattenedStateOrder::StorageUpdate(*slot),
-            Self::Account(_) => FlattenedStateOrder::Account,
-        }
-    }
-}
-
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
-        let flattened = hashed_post_state
-            .storages
-            .into_iter()
-            .flat_map(|(address, storage)| {
-                storage
-                    .wiped
-                    .then_some((address, FlattenedHashedPostStateItem::StorageWipe))
-                    .into_iter()
-                    .chain(storage.storage.into_iter().map(move |(slot, value)| {
-                        (address, FlattenedHashedPostStateItem::StorageUpdate { slot, value })
-                    }))
-            })
-            .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
-                (address, FlattenedHashedPostStateItem::Account(account))
-            }))
-            // Sort by address, then by item order to ensure correct application sequence:
-            // 1. Storage wipes (must come first to clear storage)
-            // 2. Storage updates (sorted by slot for determinism)
-            // 3. Account updates (can be applied last)
-            .sorted_unstable_by_key(|(address, item)| (*address, item.order()));
+        let HashedPostState { accounts, storages } = hashed_post_state;
 
-        Self { flattened, size }
+        // Sort accounts by address: O(a log a)
+        let mut sorted_accounts: Vec<_> = accounts.into_iter().collect();
+        sorted_accounts.sort_unstable_by_key(|(addr, _)| *addr);
+
+        // Sort each storage entry's slots and collect sorted by address:
+        // O(k log k + Σ s_i log s_i)
+        #[allow(clippy::type_complexity)]
+        let mut sorted_storages: Vec<(B256, bool, Vec<(B256, U256)>)> = storages
+            .into_iter()
+            .map(|(addr, storage)| {
+                let mut slots: Vec<_> = storage.storage.into_iter().collect();
+                slots.sort_unstable_by_key(|(slot, _)| *slot);
+                (addr, storage.wiped, slots)
+            })
+            .collect();
+        sorted_storages.sort_unstable_by_key(|(addr, _, _)| *addr);
+
+        // Pre-allocate the flattened vec
+        let total_items = sorted_accounts.len() +
+            sorted_storages
+                .iter()
+                .map(|(_, wiped, slots)| (*wiped as usize) + slots.len())
+                .sum::<usize>();
+        let mut flattened = Vec::with_capacity(total_items);
+
+        // Merge sorted accounts and storages by address.
+        // Within each address, items appear in order:
+        // StorageWipe < StorageUpdates (by slot) < Account
+        let mut accounts_iter = sorted_accounts.into_iter().peekable();
+        let mut storages_iter = sorted_storages.into_iter().peekable();
+
+        loop {
+            let acc_addr = accounts_iter.peek().map(|(a, _)| *a);
+            let stor_addr = storages_iter.peek().map(|(a, _, _)| *a);
+
+            match (acc_addr, stor_addr) {
+                (None, None) => break,
+                (Some(_), None) => {
+                    let (addr, acc) = accounts_iter.next().unwrap();
+                    flattened.push((addr, FlattenedHashedPostStateItem::Account(acc)));
+                }
+                (None, Some(_)) => {
+                    let (addr, wiped, slots) = storages_iter.next().unwrap();
+                    if wiped {
+                        flattened.push((addr, FlattenedHashedPostStateItem::StorageWipe));
+                    }
+                    for (slot, value) in slots {
+                        flattened.push((
+                            addr,
+                            FlattenedHashedPostStateItem::StorageUpdate { slot, value },
+                        ));
+                    }
+                }
+                (Some(aa), Some(sa)) => match aa.cmp(&sa) {
+                    core::cmp::Ordering::Less => {
+                        let (addr, acc) = accounts_iter.next().unwrap();
+                        flattened.push((addr, FlattenedHashedPostStateItem::Account(acc)));
+                    }
+                    core::cmp::Ordering::Greater => {
+                        let (addr, wiped, slots) = storages_iter.next().unwrap();
+                        if wiped {
+                            flattened.push((addr, FlattenedHashedPostStateItem::StorageWipe));
+                        }
+                        for (slot, value) in slots {
+                            flattened.push((
+                                addr,
+                                FlattenedHashedPostStateItem::StorageUpdate { slot, value },
+                            ));
+                        }
+                    }
+                    core::cmp::Ordering::Equal => {
+                        // Same address: storage items first, then account
+                        let (addr, wiped, slots) = storages_iter.next().unwrap();
+                        if wiped {
+                            flattened.push((addr, FlattenedHashedPostStateItem::StorageWipe));
+                        }
+                        for (slot, value) in slots {
+                            flattened.push((
+                                addr,
+                                FlattenedHashedPostStateItem::StorageUpdate { slot, value },
+                            ));
+                        }
+                        let (addr, acc) = accounts_iter.next().unwrap();
+                        flattened.push((addr, FlattenedHashedPostStateItem::Account(acc)));
+                    }
+                },
+            }
+        }
+
+        Self { flattened: flattened.into_iter(), size }
     }
 }
 
