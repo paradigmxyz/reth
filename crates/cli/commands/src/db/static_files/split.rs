@@ -14,7 +14,7 @@ use reth_db_common::DbTool;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
-    StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileWriter,
+    DBProvider, StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_static_file_types::StaticFileSegment;
 use std::path::PathBuf;
@@ -350,7 +350,8 @@ impl SplitCommand {
     where
         <N::Primitives as NodePrimitives>::SignedTx: Compact,
     {
-        let tx = tool.provider_factory.provider()?.into_tx();
+        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let tx = provider.tx_ref();
         let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::Transactions)?;
 
@@ -394,7 +395,8 @@ impl SplitCommand {
     where
         <N::Primitives as NodePrimitives>::Receipt: Compact,
     {
-        let tx = tool.provider_factory.provider()?.into_tx();
+        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let tx = provider.tx_ref();
         let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::Receipts)?;
 
@@ -434,7 +436,8 @@ impl SplitCommand {
         from_block: u64,
         to_block: u64,
     ) -> eyre::Result<()> {
-        let tx = tool.provider_factory.provider()?.into_tx();
+        let provider = tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let tx = provider.tx_ref();
         let mut indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut writer = output.get_writer(from_block, StaticFileSegment::TransactionSenders)?;
 
