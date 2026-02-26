@@ -413,29 +413,60 @@ impl SplitCommand {
         <N::Primitives as NodePrimitives>::SignedTx: Compact,
     {
         let mut writer = output.get_writer(from_block, StaticFileSegment::Transactions)?;
+        let mut block = from_block;
+        let mut block_incremented = false;
 
-        for block in from_block..=to_block {
-            writer.increment_block(block)?;
-
-            if let Some(indices) = block_body_indices.get(&block) {
-                let first_tx = indices.first_tx_num;
-                let tx_count = indices.tx_count;
-
-                for tx_num in first_tx..first_tx + tx_count {
-                    let jar =
-                        source.get_segment_provider(StaticFileSegment::Transactions, tx_num)?;
-                    let mut cursor = jar.cursor()?;
-
-                    let transaction: <N::Primitives as NodePrimitives>::SignedTx = cursor
-                        .get_one::<TransactionMask<_>>(tx_num.into())?
-                        .ok_or_else(|| eyre::eyre!("Missing transaction {tx_num}"))?;
-
-                    writer.append_transaction(tx_num, &transaction)?;
-                }
+        while block <= to_block {
+            if !block_incremented {
+                writer.increment_block(block)?;
             }
+            block_incremented = false;
 
-            if block % 100_000 == 0 {
-                info!(target: "reth::cli", block, to_block, "Transactions progress");
+            // Skip blocks with no transactions until we find one that needs a jar
+            let Some(indices) =
+                block_body_indices.get(&block).filter(|i| i.tx_count > 0)
+            else {
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Transactions progress");
+                }
+                block += 1;
+                continue;
+            };
+
+            // Open jar + cursor, reuse for all subsequent blocks within this jar's range
+            let jar =
+                source.get_segment_provider(StaticFileSegment::Transactions, indices.first_tx_num)?;
+            let jar_tx_end =
+                jar.user_header().tx_range().map(|r| r.end()).unwrap_or(u64::MAX);
+            let mut cursor = jar.cursor()?;
+
+            loop {
+                if let Some(indices) = block_body_indices.get(&block) {
+                    for tx_num in indices.first_tx_num..indices.first_tx_num + indices.tx_count {
+                        let transaction: <N::Primitives as NodePrimitives>::SignedTx = cursor
+                            .get_one::<TransactionMask<_>>(tx_num.into())?
+                            .ok_or_else(|| eyre::eyre!("Missing transaction {tx_num}"))?;
+                        writer.append_transaction(tx_num, &transaction)?;
+                    }
+                }
+
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Transactions progress");
+                }
+                block += 1;
+                if block > to_block {
+                    break;
+                }
+
+                writer.increment_block(block)?;
+                block_incremented = true;
+
+                // Check if next block's txs need a different jar
+                if let Some(next_indices) = block_body_indices.get(&block) &&
+                    next_indices.tx_count > 0 && next_indices.first_tx_num > jar_tx_end
+                {
+                    break;
+                }
             }
         }
 
@@ -455,28 +486,57 @@ impl SplitCommand {
         <N::Primitives as NodePrimitives>::Receipt: Compact,
     {
         let mut writer = output.get_writer(from_block, StaticFileSegment::Receipts)?;
+        let mut block = from_block;
+        let mut block_incremented = false;
 
-        for block in from_block..=to_block {
-            writer.increment_block(block)?;
-
-            if let Some(indices) = block_body_indices.get(&block) {
-                let first_tx = indices.first_tx_num;
-                let tx_count = indices.tx_count;
-
-                for tx_num in first_tx..first_tx + tx_count {
-                    let jar = source.get_segment_provider(StaticFileSegment::Receipts, tx_num)?;
-                    let mut cursor = jar.cursor()?;
-
-                    let receipt: <N::Primitives as NodePrimitives>::Receipt = cursor
-                        .get_one::<ReceiptMask<_>>(tx_num.into())?
-                        .ok_or_else(|| eyre::eyre!("Missing receipt {tx_num}"))?;
-
-                    writer.append_receipt(tx_num, &receipt)?;
-                }
+        while block <= to_block {
+            if !block_incremented {
+                writer.increment_block(block)?;
             }
+            block_incremented = false;
 
-            if block % 100_000 == 0 {
-                info!(target: "reth::cli", block, to_block, "Receipts progress");
+            let Some(indices) =
+                block_body_indices.get(&block).filter(|i| i.tx_count > 0)
+            else {
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Receipts progress");
+                }
+                block += 1;
+                continue;
+            };
+
+            let jar =
+                source.get_segment_provider(StaticFileSegment::Receipts, indices.first_tx_num)?;
+            let jar_tx_end =
+                jar.user_header().tx_range().map(|r| r.end()).unwrap_or(u64::MAX);
+            let mut cursor = jar.cursor()?;
+
+            loop {
+                if let Some(indices) = block_body_indices.get(&block) {
+                    for tx_num in indices.first_tx_num..indices.first_tx_num + indices.tx_count {
+                        let receipt: <N::Primitives as NodePrimitives>::Receipt = cursor
+                            .get_one::<ReceiptMask<_>>(tx_num.into())?
+                            .ok_or_else(|| eyre::eyre!("Missing receipt {tx_num}"))?;
+                        writer.append_receipt(tx_num, &receipt)?;
+                    }
+                }
+
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Receipts progress");
+                }
+                block += 1;
+                if block > to_block {
+                    break;
+                }
+
+                writer.increment_block(block)?;
+                block_incremented = true;
+
+                if let Some(next_indices) = block_body_indices.get(&block) &&
+                    next_indices.tx_count > 0 && next_indices.first_tx_num > jar_tx_end
+                {
+                    break;
+                }
             }
         }
 
@@ -493,29 +553,57 @@ impl SplitCommand {
         to_block: u64,
     ) -> eyre::Result<()> {
         let mut writer = output.get_writer(from_block, StaticFileSegment::TransactionSenders)?;
+        let mut block = from_block;
+        let mut block_incremented = false;
 
-        for block in from_block..=to_block {
-            writer.increment_block(block)?;
-
-            if let Some(indices) = block_body_indices.get(&block) {
-                let first_tx = indices.first_tx_num;
-                let tx_count = indices.tx_count;
-
-                for tx_num in first_tx..first_tx + tx_count {
-                    let jar = source
-                        .get_segment_provider(StaticFileSegment::TransactionSenders, tx_num)?;
-                    let mut cursor = jar.cursor()?;
-
-                    let sender = cursor
-                        .get_one::<TransactionSenderMask>(tx_num.into())?
-                        .ok_or_else(|| eyre::eyre!("Missing sender {tx_num}"))?;
-
-                    writer.append_transaction_sender(tx_num, &sender)?;
-                }
+        while block <= to_block {
+            if !block_incremented {
+                writer.increment_block(block)?;
             }
+            block_incremented = false;
 
-            if block % 100_000 == 0 {
-                info!(target: "reth::cli", block, to_block, "Transaction senders progress");
+            let Some(indices) =
+                block_body_indices.get(&block).filter(|i| i.tx_count > 0)
+            else {
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Transaction senders progress");
+                }
+                block += 1;
+                continue;
+            };
+
+            let jar = source
+                .get_segment_provider(StaticFileSegment::TransactionSenders, indices.first_tx_num)?;
+            let jar_tx_end =
+                jar.user_header().tx_range().map(|r| r.end()).unwrap_or(u64::MAX);
+            let mut cursor = jar.cursor()?;
+
+            loop {
+                if let Some(indices) = block_body_indices.get(&block) {
+                    for tx_num in indices.first_tx_num..indices.first_tx_num + indices.tx_count {
+                        let sender = cursor
+                            .get_one::<TransactionSenderMask>(tx_num.into())?
+                            .ok_or_else(|| eyre::eyre!("Missing sender {tx_num}"))?;
+                        writer.append_transaction_sender(tx_num, &sender)?;
+                    }
+                }
+
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Transaction senders progress");
+                }
+                block += 1;
+                if block > to_block {
+                    break;
+                }
+
+                writer.increment_block(block)?;
+                block_incremented = true;
+
+                if let Some(next_indices) = block_body_indices.get(&block) &&
+                    next_indices.tx_count > 0 && next_indices.first_tx_num > jar_tx_end
+                {
+                    break;
+                }
             }
         }
 
