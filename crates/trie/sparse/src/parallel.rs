@@ -1184,30 +1184,10 @@ impl SparseTrie for ParallelSparseTrie {
 
             match node {
                 SparseNode::Empty | SparseNode::Leaf { .. } => {}
-                SparseNode::Extension { key, state, .. } => {
-                    // For extension nodes at max depth, collapse both extension and its child
-                    // branch to preserve invariant of all extension nodes children being revealed.
-                    if depth == max_depth {
-                        let Some(hash) = state.cached_hash() else { continue };
-                        subtrie.nodes.remove(&path);
-
-                        let parent_path = path.slice(0..path.len() - 1);
-                        let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
-                            subtrie.nodes.get_mut(&parent_path).unwrap()
-                        else {
-                            panic!("expected branch node at path {parent_path:?}");
-                        };
-
-                        let nibble = path.last().unwrap();
-                        blinded_mask.set_bit(nibble);
-                        blinded_hashes[nibble as usize] = hash;
-
-                        effective_pruned_roots.push(path);
-                    } else {
-                        let mut child = path;
-                        child.extend(key);
-                        stack.push((child, depth + 1));
-                    }
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    stack.push((child, depth));
                 }
                 SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
                     // For branch nodes at max depth, collapse all children onto them,
