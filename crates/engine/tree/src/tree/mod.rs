@@ -1408,14 +1408,14 @@ where
         self.changeset_cache.evict(eviction_threshold);
 
         // Invalidate cached overlay since the anchor has changed
-        self.state.tree_state.invalidate_cached_overlay();
+        self.canonical_in_memory_state.invalidate_cached_overlay();
 
         self.on_new_persisted_block()?;
 
         // Re-prepare overlay for the current canonical head with the new anchor.
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
-        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+        if let Some(overlay) = self.canonical_in_memory_state.prepare_canonical_overlay() {
             tokio::task::spawn_blocking(move || {
                 let _ = overlay.get();
             });

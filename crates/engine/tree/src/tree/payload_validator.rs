@@ -462,7 +462,11 @@ where
 
         // Create lazy overlay from ancestors - this doesn't block, allowing execution to start
         // before the trie data is ready. The overlay will be computed on first access.
-        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, ctx.state());
+        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(
+            parent_hash,
+            ctx.state(),
+            ctx.canonical_in_memory_state(),
+        );
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
@@ -1460,12 +1464,21 @@ where
     ///
     /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
     ///
-    /// Uses a cached overlay if available for the canonical head (the common case).
+    /// Delegates to [`CanonicalInMemoryState::lazy_overlay`] for canonical blocks (which
+    /// also checks the cached overlay), with a fallback to `TreeState` for non-canonical
+    /// fork blocks.
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
+        canonical_in_memory_state: &CanonicalInMemoryState<N>,
     ) -> (Option<LazyOverlay>, B256) {
-        // Get blocks leading to the parent to determine the anchor
+        // Try canonical in-memory state (covers cached overlay + canonical blocks)
+        let (overlay, anchor_hash) = canonical_in_memory_state.lazy_overlay(parent_hash);
+        if overlay.is_some() {
+            return (overlay, anchor_hash);
+        }
+
+        // Fallback for non-canonical blocks (fork blocks in TreeState only)
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
@@ -1474,22 +1487,11 @@ where
             return (None, anchor_hash);
         }
 
-        // Try to use the cached overlay if it matches both parent hash and anchor
-        if let Some(cached) = state.tree_state.get_cached_overlay(parent_hash, anchor_hash) {
-            debug!(
-                target: "engine::tree::payload_validator",
-                %parent_hash,
-                %anchor_hash,
-                "Using cached canonical overlay"
-            );
-            return (Some(cached.overlay.clone()), cached.anchor_hash);
-        }
-
         debug!(
             target: "engine::tree::payload_validator",
             %anchor_hash,
             num_blocks = blocks.len(),
-            "Creating lazy overlay for in-memory blocks"
+            "Creating lazy overlay for non-canonical in-memory blocks"
         );
 
         // Extract deferred trie data handles (non-blocking)
