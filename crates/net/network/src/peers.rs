@@ -862,7 +862,7 @@ impl PeersManager {
             }
         }
 
-        if kind.filter(|kind| kind.is_trusted()).is_some() {
+        if kind.is_some_and(|kind| kind.is_trusted()) {
             // also track the peer in the peer id set
             self.trusted_peer_ids.insert(peer_id);
         }

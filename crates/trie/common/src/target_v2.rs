@@ -1,16 +1,59 @@
-//! V2 multiproof targets and chunking.
+//! V2 proof targets and chunking.
 
+use crate::Nibbles;
+use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
-use reth_trie::proof_v2;
+
+/// Target describes a proof target. For every proof target given, a proof calculator will calculate
+/// and return all nodes whose path is a prefix of the target's `key_nibbles`.
+#[derive(Debug, Copy, Clone)]
+pub struct ProofV2Target {
+    /// The key of the proof target, as nibbles.
+    pub key_nibbles: Nibbles,
+    /// The minimum length of a node's path for it to be retained.
+    pub min_len: u8,
+}
+
+impl ProofV2Target {
+    /// Returns a new [`ProofV2Target`] which matches all trie nodes whose path is a prefix of this
+    /// key.
+    pub fn new(key: B256) -> Self {
+        // SAFETY: key is a B256 and so is exactly 32-bytes.
+        let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
+        Self { key_nibbles, min_len: 0 }
+    }
+
+    /// Returns the key the target was initialized with.
+    pub fn key(&self) -> B256 {
+        B256::from_slice(&self.key_nibbles.pack())
+    }
+
+    /// Only match trie nodes whose path is at least this long.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `min_len` is greater than 64.
+    pub fn with_min_len(mut self, min_len: u8) -> Self {
+        debug_assert!(min_len <= 64);
+        self.min_len = min_len;
+        self
+    }
+}
+
+impl From<B256> for ProofV2Target {
+    fn from(key: B256) -> Self {
+        Self::new(key)
+    }
+}
 
 /// A set of account and storage V2 proof targets. The account and storage targets do not need to
 /// necessarily overlap.
 #[derive(Debug, Default)]
 pub struct MultiProofTargetsV2 {
     /// The set of account proof targets to generate proofs for.
-    pub account_targets: Vec<proof_v2::Target>,
+    pub account_targets: Vec<ProofV2Target>,
     /// The sets of storage proof targets to generate proofs for.
-    pub storage_targets: B256Map<Vec<proof_v2::Target>>,
+    pub storage_targets: B256Map<Vec<ProofV2Target>>,
 }
 
 impl MultiProofTargetsV2 {
@@ -41,11 +84,11 @@ impl MultiProofTargetsV2 {
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargetsV2 {
     /// Remaining account targets to process
-    account_targets: std::vec::IntoIter<proof_v2::Target>,
+    account_targets: alloc::vec::IntoIter<ProofV2Target>,
     /// Storage targets by account address
-    storage_targets: B256Map<Vec<proof_v2::Target>>,
+    storage_targets: B256Map<Vec<ProofV2Target>>,
     /// Current account being processed (if any storage slots remain)
-    current_account_storage: Option<(B256, std::vec::IntoIter<proof_v2::Target>)>,
+    current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofV2Target>)>,
     /// Chunk size
     size: usize,
 }
@@ -123,7 +166,7 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             count < self.size
         {
             let account_addr = *account_addr;
-            let storage_slots = std::mem::take(storage_slots);
+            let storage_slots = core::mem::take(storage_slots);
             let remaining_capacity = self.size - count;
 
             // Always remove from the map - if there are remaining slots they go to
