@@ -874,7 +874,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// The main execution loop should store `index + 1` after executing each transaction so that
     /// prewarm workers can skip transactions that have already been processed.
-    pub fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+    pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
         &self.prewarm_handle.executed_tx_index
     }
 
