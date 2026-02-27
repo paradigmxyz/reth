@@ -74,8 +74,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
         async move {
-            // If no pending block from provider, build the pending block locally.
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
+                // If no pending block from provider, build the pending block locally.
                 if let Some(pending) = self.local_pending_block().await? {
                     return Ok(Some(pending.block.body().transaction_count()));
                 }
@@ -180,6 +184,10 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
                 if let Some((block, receipts)) = self
@@ -284,6 +292,10 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     > + Send {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // Pending block can be fetched directly without need for caching
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?

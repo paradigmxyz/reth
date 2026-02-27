@@ -2,7 +2,11 @@ use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, HashMap, HashSet},
+    B256,
+};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::mem;
 use reth_execution_errors::SparseTrieResult;
@@ -2798,6 +2802,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.stack = stack;
 
         Ok(())
+    }
+
+    fn commit_updates(
+        &mut self,
+        _updated: &HashMap<Nibbles, BranchNodeCompact>,
+        _removed: &HashSet<Nibbles>,
+    ) {
+        // no-op for arena trie
     }
 }
 

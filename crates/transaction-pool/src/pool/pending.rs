@@ -142,9 +142,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
-        let mut submission_id = self.submission_id;
-        for tx in unlocked {
-            submission_id += 1;
+        for (submission_id, tx) in (self.submission_id + 1..).zip(unlocked) {
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
@@ -566,6 +564,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
             .map(|(tx_id, _)| tx_id)
+    }
+
+    /// Returns all transactions for the given sender, using a `BTree` range query.
+    pub(crate) fn txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| tx.transaction.clone())
+            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.

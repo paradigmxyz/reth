@@ -11,7 +11,7 @@ use crate::{
     },
     valid_payload::{block_to_new_payload, call_new_payload_with_reth},
 };
-use alloy_provider::Provider;
+use alloy_provider::{ext::DebugApi, Provider};
 use clap::Parser;
 use csv::Writer;
 use eyre::{Context, OptionExt};
@@ -51,6 +51,7 @@ impl Command {
             mut next_block,
             is_optimism,
             use_reth_namespace,
+            rlp_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -83,8 +84,21 @@ impl Command {
                     }
                 };
 
+                let rlp = if rlp_blocks {
+                    let Ok(rlp) = block_provider.debug_get_raw_block(next_block.into()).await
+                    else {
+                        tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}");
+                        let _ = error_sender
+                            .send(eyre::eyre!("Failed to fetch raw block {next_block}"));
+                        break;
+                    };
+                    Some(rlp)
+                } else {
+                    None
+                };
+
                 next_block += 1;
-                if let Err(e) = sender.send(block).await {
+                if let Err(e) = sender.send((block, rlp)).await {
                     tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
@@ -96,7 +110,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some(block) = {
+        while let Some((block, rlp)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -108,12 +122,12 @@ impl Command {
 
             debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
-            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
+            let (version, params) =
+                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
 
             let start = Instant::now();
-            let reth_data = use_reth_namespace.then_some(execution_data);
             let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
 
             let latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());

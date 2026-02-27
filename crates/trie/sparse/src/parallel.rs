@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
-    map::{Entry, HashMap},
+    map::{Entry, HashMap, HashSet},
     B256, U256,
 };
 use alloy_rlp::Decodable;
@@ -648,8 +648,8 @@ impl SparseTrie for ParallelSparseTrie {
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
-                FindNextToLeafOutcome::BlindedNode { path, hash } => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path, hash }.into())
+                FindNextToLeafOutcome::BlindedNode(path) => {
+                    return Err(SparseTrieErrorKind::BlindedNode(path).into())
                 }
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
@@ -709,10 +709,8 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Before mutating, check if branch collapse would require revealing a blinded node.
         // This ensures remove_leaf is atomic: if it errors, the trie is unchanged.
-        if let (
-            Some(branch_path),
-            Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }),
-        ) = (&branch_parent_path, &branch_parent_node)
+        if let (Some(branch_path), Some(SparseNode::Branch { state_mask, blinded_mask, .. })) =
+            (&branch_parent_path, &branch_parent_node)
         {
             let mut check_mask = *state_mask;
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
@@ -725,11 +723,7 @@ impl SparseTrie for ParallelSparseTrie {
                 if blinded_mask.is_bit_set(remaining_nibble) {
                     let mut path = *branch_path;
                     path.push_unchecked(remaining_nibble);
-                    return Err(SparseTrieErrorKind::BlindedNode {
-                        path,
-                        hash: blinded_hashes[remaining_nibble as usize],
-                    }
-                    .into());
+                    return Err(SparseTrieErrorKind::BlindedNode(path).into());
                 }
             }
         }
@@ -804,11 +798,7 @@ impl SparseTrie for ParallelSparseTrie {
                 // If the remaining child node is not yet revealed then we have to reveal it here,
                 // otherwise it's not possible to know how to collapse the branch.
                 if blinded_mask.is_bit_set(remaining_child_nibble) {
-                    return Err(SparseTrieErrorKind::BlindedNode {
-                        path: remaining_child_path,
-                        hash: blinded_hashes[remaining_child_nibble as usize],
-                    }
-                    .into());
+                    return Err(SparseTrieErrorKind::BlindedNode(remaining_child_path).into());
                 }
 
                 let remaining_child_node = self
@@ -996,20 +986,6 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self.updates.take() {
             Some(updates) => {
-                // Sync branch_node_masks with what's being committed to DB.
-                // This ensures that on subsequent root() calls, the masks reflect the actual
-                // DB state, which is needed for correct removal detection.
-                self.branch_node_masks.reserve(updates.updated_nodes.len());
-                for (path, node) in &updates.updated_nodes {
-                    self.branch_node_masks.insert(
-                        *path,
-                        BranchNodeMasks { tree_mask: node.tree_mask, hash_mask: node.hash_mask },
-                    );
-                }
-                for path in &updates.removed_nodes {
-                    self.branch_node_masks.remove(path);
-                }
-
                 // NOTE: we need to preserve Some case
                 self.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
@@ -1460,6 +1436,26 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
     }
+
+    fn commit_updates(
+        &mut self,
+        updated: &HashMap<Nibbles, BranchNodeCompact>,
+        removed: &HashSet<Nibbles>,
+    ) {
+        // Sync branch_node_masks with what's being committed to DB.
+        // This ensures that on subsequent root() calls, the masks reflect the actual
+        // DB state, which is needed for correct removal detection.
+        self.branch_node_masks.reserve(updated.len());
+        for (path, node) in updated {
+            self.branch_node_masks.insert(
+                *path,
+                BranchNodeMasks { tree_mask: node.tree_mask, hash_mask: node.hash_mask },
+            );
+        }
+        for path in removed {
+            self.branch_node_masks.remove(path);
+        }
+    }
 }
 
 impl ParallelSparseTrie {
@@ -1512,7 +1508,7 @@ impl ParallelSparseTrie {
     /// occurs when `retain_updates` is enabled and an extension node's child needs revealing.
     const fn get_retriable_path(e: &SparseTrieError) -> Option<Nibbles> {
         match e.kind() {
-            SparseTrieErrorKind::BlindedNode { path, .. } |
+            SparseTrieErrorKind::BlindedNode(path) |
             SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
             _ => None,
         }
@@ -1668,7 +1664,7 @@ impl ParallelSparseTrie {
                 }
                 FindNextToLeafOutcome::ContinueFrom(child_path)
             }
-            SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+            SparseNode::Branch { state_mask, blinded_mask, .. } => {
                 if leaf_full_path.len() == from_path.len() {
                     return FindNextToLeafOutcome::NotFound
                 }
@@ -1682,10 +1678,7 @@ impl ParallelSparseTrie {
                 child_path.push_unchecked(nibble);
 
                 if blinded_mask.is_bit_set(nibble) {
-                    return FindNextToLeafOutcome::BlindedNode {
-                        path: child_path,
-                        hash: blinded_hashes[nibble as usize],
-                    };
+                    return FindNextToLeafOutcome::BlindedNode(child_path);
                 }
 
                 FindNextToLeafOutcome::ContinueFrom(child_path)
@@ -2435,7 +2428,7 @@ enum FindNextToLeafOutcome {
     NotFound,
     /// `BlindedNode` indicates that the node is blinded with the contained hash and cannot be
     /// traversed.
-    BlindedNode { path: Nibbles, hash: B256 },
+    BlindedNode(Nibbles),
 }
 
 impl SparseSubtrie {
@@ -2619,7 +2612,7 @@ impl SparseSubtrie {
 
                 Ok(LeafUpdateStep::Continue)
             }
-            SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+            SparseNode::Branch { state_mask, blinded_mask, .. } => {
                 let nibble = path.get_unchecked(current.len());
                 current.push_unchecked(nibble);
 
@@ -2631,11 +2624,7 @@ impl SparseSubtrie {
                 }
 
                 if blinded_mask.is_bit_set(nibble) {
-                    return Err(SparseTrieErrorKind::BlindedNode {
-                        path: *current,
-                        hash: blinded_hashes[nibble as usize],
-                    }
-                    .into());
+                    return Err(SparseTrieErrorKind::BlindedNode(*current).into());
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
@@ -3831,7 +3820,7 @@ mod tests {
         let mut stack = Vec::new();
         let mut state_mask = TrieMask::default();
 
-        for (&idx, hash) in children_indices.iter().zip(child_hashes.into_iter()) {
+        for (&idx, hash) in children_indices.iter().zip(child_hashes) {
             state_mask.set_bit(idx);
             stack.push(hash);
         }
@@ -4889,7 +4878,7 @@ mod tests {
         let Err(err) = trie.remove_leaf(&leaf_full_path, NoRevealProvider) else {
             panic!("expected error");
         };
-        assert_matches!(err.kind(), SparseTrieErrorKind::BlindedNode { path, hash } if *path == Nibbles::from_nibbles([0x1]) && *hash == B256::repeat_byte(0xab));
+        assert_matches!(err.kind(), SparseTrieErrorKind::BlindedNode(path) if *path == Nibbles::from_nibbles([0x1]));
 
         // Now reveal the leaf and try removing it again
         trie.reveal_nodes(&mut [ProofTrieNodeV2 {
@@ -5733,7 +5722,7 @@ mod tests {
         // Removing a blinded leaf should result in an error
         assert_matches!(
             sparse.remove_leaf(&pad_nibbles_right(Nibbles::from_nibbles([0x0])), &provider).map_err(|e| e.into_kind()),
-            Err(SparseTrieErrorKind::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
+            Err(SparseTrieErrorKind::BlindedNode(path)) if path == Nibbles::from_nibbles([0x0])
         );
     }
 
@@ -7530,7 +7519,7 @@ mod tests {
         let Err(err) = trie.remove_leaf(&leaf_nibbles, NoRevealProvider) else {
             panic!("expected blinded node error");
         };
-        assert_matches!(err.kind(), SparseTrieErrorKind::BlindedNode { path, hash } if path == &Nibbles::from_nibbles([0x3, 0x1, 0xc]));
+        assert_matches!(err.kind(), SparseTrieErrorKind::BlindedNode(path) if path == &Nibbles::from_nibbles([0x3, 0x1, 0xc]));
 
         trie.reveal_nodes(&mut [ProofTrieNodeV2 {
             path: Nibbles::from_nibbles([0x3, 0x1, 0xc]),
