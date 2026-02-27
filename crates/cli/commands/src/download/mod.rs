@@ -224,6 +224,12 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "archive", "minimal"])]
     full: bool,
 
+    /// Skip optional RocksDB indices even when archive components are selected.
+    ///
+    /// This affects `--archive`/`--all` and TUI archive preset (`a`).
+    #[arg(long, conflicts_with = "url")]
+    without_rocksdb: bool,
+
     /// Skip interactive component selection. Downloads the minimal set
     /// (state + headers + transactions + changesets) unless explicit --with-* flags narrow it.
     #[arg(long, short = 'y')]
@@ -285,7 +291,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
 
         if matches!(preset, Some(SelectionPreset::Archive)) {
-            inject_archive_only_components(&mut selections, &manifest);
+            inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
         }
 
         // Collect all archive descriptors across selected components.
@@ -446,6 +452,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     .iter()
                     .copied()
                     .filter(|ty| available(*ty))
+                    .filter(|ty| {
+                        !self.without_rocksdb || *ty != SnapshotComponentType::RocksdbIndices
+                    })
                     .map(|ty| (ty, ComponentSelection::All))
                     .collect(),
                 preset: Some(SelectionPreset::Archive),
@@ -636,6 +645,7 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
 fn inject_archive_only_components(
     selections: &mut BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
+    include_rocksdb: bool,
 ) {
     let is_all =
         |ty: SnapshotComponentType| selections.get(&ty).copied() == Some(ComponentSelection::All);
@@ -652,6 +662,10 @@ fn inject_archive_only_components(
     for component in
         [SnapshotComponentType::TransactionSenders, SnapshotComponentType::RocksdbIndices]
     {
+        if component == SnapshotComponentType::RocksdbIndices && !include_rocksdb {
+            continue;
+        }
+
         if manifest.component(component).is_some() {
             selections.insert(component, ComponentSelection::All);
         }
@@ -1725,7 +1739,7 @@ mod tests {
         selections.insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
         selections.insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
 
-        inject_archive_only_components(&mut selections, &manifest);
+        inject_archive_only_components(&mut selections, &manifest, true);
 
         assert_eq!(
             selections.get(&SnapshotComponentType::TransactionSenders),
@@ -1735,6 +1749,24 @@ mod tests {
             selections.get(&SnapshotComponentType::RocksdbIndices),
             Some(&ComponentSelection::All)
         );
+    }
+
+    #[test]
+    fn inject_archive_only_components_without_rocksdb() {
+        let manifest = manifest_with_archive_only_components();
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
+
+        inject_archive_only_components(&mut selections, &manifest, false);
+
+        assert_eq!(
+            selections.get(&SnapshotComponentType::TransactionSenders),
+            Some(&ComponentSelection::All)
+        );
+        assert_eq!(selections.get(&SnapshotComponentType::RocksdbIndices), None);
     }
 
     #[test]
