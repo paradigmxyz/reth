@@ -71,10 +71,9 @@ impl<C: ChainSpecParser> Command<C> {
 
 /// Traces a failed transaction at the given index within a block, producing opcode-level output.
 ///
-/// Uses the [`BlockExecutor`](alloy_evm::block::BlockExecutor) abstraction to apply
-/// pre-execution changes and replay prior transactions in a chain-agnostic way, then
-/// re-executes the failing transaction with a [`TracingInspector`] attached to capture
-/// opcode-level detail.
+/// Creates a [`BlockExecutor`](alloy_evm::block::BlockExecutor) with a [`TracingInspector`]
+/// attached but initially disabled. The inspector is enabled only for the target transaction,
+/// keeping pre-execution changes and prior transaction replay uninstrumented.
 /// The resulting trace is logged as a JSON-serialized geth-style `DefaultFrame` containing
 /// opcode-level `structLogs`.
 fn trace_failed_transaction<C, DB>(
@@ -96,33 +95,39 @@ fn trace_failed_transaction<C, DB>(
 
     let mut state = State::builder().with_database(db).with_bundle_update().build();
 
-    // Use BlockExecutor to apply pre-execution changes and replay prior txs.
-    {
-        let mut executor = match evm_config.executor_for_block(&mut state, block) {
-            Ok(executor) => executor,
-            Err(err) => {
-                error!(%err, "Failed to create block executor for opcode tracing");
-                return;
-            }
-        };
-
-        if let Err(err) = executor.apply_pre_execution_changes() {
-            error!(%err, "Failed to apply pre-execution changes for opcode tracing");
+    let ctx = match evm_config.context_for_block(block) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            error!(%err, "Failed to create execution context for opcode tracing");
             return;
         }
+    };
 
-        for (i, tx) in block.transactions_recovered().enumerate() {
-            if i >= tx_index {
-                break;
-            }
-            if let Err(err) = executor.execute_transaction(tx) {
-                error!(index = i, %err, "Failed to replay transaction before failing tx");
-                return;
-            }
+    let inspector = TracingInspector::new(TracingInspectorConfig::all());
+    let evm = evm_config.evm_with_env_and_inspector(&mut state, evm_env, inspector);
+    let mut executor = evm_config.create_executor(evm, ctx);
+
+    // Disable inspector during pre-execution changes and prior tx replay.
+    executor.evm_mut().disable_inspector();
+
+    if let Err(err) = executor.apply_pre_execution_changes() {
+        error!(%err, "Failed to apply pre-execution changes for opcode tracing");
+        return;
+    }
+
+    for (i, tx) in block.transactions_recovered().enumerate() {
+        if i >= tx_index {
+            break;
+        }
+        if let Err(err) = executor.execute_transaction(tx) {
+            error!(index = i, %err, "Failed to replay transaction before failing tx");
+            return;
         }
     }
 
-    // Execute the failing transaction with a tracing inspector.
+    // Enable inspector for the target transaction.
+    executor.evm_mut().enable_inspector();
+
     let tx = match block.transactions_recovered().nth(tx_index) {
         Some(tx) => tx,
         None => {
@@ -130,21 +135,22 @@ fn trace_failed_transaction<C, DB>(
             return;
         }
     };
-    let tx_env = evm_config.tx_env(tx);
-    let mut inspector = TracingInspector::new(TracingInspectorConfig::all());
-    let result = {
-        let mut evm = evm_config.evm_with_env_and_inspector(&mut state, evm_env, &mut inspector);
-        evm.transact(tx_env)
-    };
+
+    let mut gas_used = 0;
+    let mut return_value = Default::default();
+    let mut execution_result = None;
+    let result = executor.execute_transaction_with_result_closure(tx, |res| {
+        gas_used = res.gas_used();
+        return_value = res.output().cloned().unwrap_or_default();
+        execution_result = Some(format!("{res:?}"));
+    });
 
     // Build geth-style trace with opcode-level structLogs.
-    let (gas_used, return_value) = match &result {
-        Ok(r) => (r.result.gas_used(), r.result.output().cloned().unwrap_or_default()),
-        Err(_) => (0, Default::default()),
-    };
-
-    let frame =
-        inspector.into_geth_builder().geth_traces(gas_used, return_value, Default::default());
+    let frame = executor.evm_mut().inspector_mut().geth_builder().geth_traces(
+        gas_used,
+        return_value,
+        Default::default(),
+    );
 
     match serde_json::to_string(&frame) {
         Ok(json) => {
@@ -153,7 +159,8 @@ fn trace_failed_transaction<C, DB>(
                 block_hash = ?block.hash(),
                 tx_index,
                 tx_hash = ?block.body().transactions()[tx_index].tx_hash(),
-                execution_result = ?result.as_ref().map(|r| &r.result),
+                ?result,
+                execution_result,
                 opcode_trace = %json,
                 "Opcode-level trace for failing transaction"
             );
