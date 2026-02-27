@@ -2497,6 +2497,7 @@ mod tests {
         map::{B256Map, HashSet},
         B256, U256,
     };
+    use rand::{seq::SliceRandom, SeedableRng};
     use reth_trie::{
         hashed_cursor::{
             mock::MockHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
@@ -2774,12 +2775,14 @@ mod tests {
     use proptest_arbitrary_interop::arb;
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2000))]
+        #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
             changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
+            delete_pct in 0.0..=0.33f64,
+            shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();
             trace!(target: TRACE_TARGET, "==== PROPTEST START ====");
@@ -2789,13 +2792,31 @@ mod tests {
                 .filter(|(_, v)| *v != U256::ZERO)
                 .collect();
 
-            // Build changeset: pick some keys from initial (overlap) + some fresh keys.
-            let num_overlap = ((initial.len() as f64 * overlap_pct) as usize).min(200);
-            let overlap_keys: Vec<B256> = initial.keys().take(num_overlap).copied().collect();
+            // Build changeset: pick overlap_pct of existing keys (updates/deletions) +
+            // fresh keys (insertions). delete_pct of overlap keys become deletions (zero),
+            // the rest get random non-zero values (upserts).
+            let num_overlap = (initial.len() as f64 * overlap_pct) as usize;
+            let num_delete = (num_overlap as f64 * delete_pct) as usize;
+
+            // Deterministic shuffle using a seeded RNG so selected keys and
+            // deletion/upsert assignments are scattered throughout the keyspace.
+            let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
+            let mut all_keys: Vec<B256> = initial.keys().copied().collect();
+            all_keys.shuffle(&mut rng);
+            let overlap_keys = &all_keys[..num_overlap];
 
             let mut changeset = changeset_new_keys;
-            for key in overlap_keys {
-                changeset.entry(key).or_insert(U256::ZERO);
+            for (i, &key) in overlap_keys.iter().enumerate() {
+                let value = if i < num_delete {
+                    U256::ZERO
+                } else {
+                    U256::from(rng.random::<u64>() | 1)
+                };
+                changeset.entry(key).or_insert(value);
+            }
+
+            for (i, (k, v)) in changeset.iter().enumerate() {
+                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset entry");
             }
 
             let harness = ArenaTrieTestHarness::new(initial);
