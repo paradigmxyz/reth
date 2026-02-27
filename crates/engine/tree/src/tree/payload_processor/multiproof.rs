@@ -8,7 +8,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::Arc;
 use tracing::trace;
 

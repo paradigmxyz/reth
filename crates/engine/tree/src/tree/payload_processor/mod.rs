@@ -444,15 +444,15 @@ where
                     .map(|(i, tx)| {
                         let idx = i + prefetch;
                         let tx = convert.convert(tx);
+                        (idx, tx)
+                    })
+                    .for_each_ordered(|(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
-                        (idx, tx)
-                    })
-                    .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
                         debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
