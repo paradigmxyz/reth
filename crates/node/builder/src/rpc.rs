@@ -1025,7 +1025,6 @@ where
                 engine_api,
                 eth_api,
                 engine_events.clone(),
-                beacon_engine_handle.clone(),
             );
 
         // in dev mode we generate 20 random dev-signer accounts
