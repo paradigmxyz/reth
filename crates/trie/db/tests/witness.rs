@@ -13,7 +13,7 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
-    proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, MultiProofTargets,
+    proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, LegacyMultiProofTargets,
     StateRoot,
 };
 use reth_trie_db::{
@@ -55,7 +55,7 @@ fn includes_empty_node_preimage() {
         let state_root = DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root().unwrap();
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof
-            .multiproof(MultiProofTargets::from_iter([(
+            .multiproof(LegacyMultiProofTargets::from_iter([(
                 hashed_address,
                 HashSet::from_iter([hashed_slot]),
             )]))
@@ -99,7 +99,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         let state_root = DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root().unwrap();
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof
-            .multiproof(MultiProofTargets::from_iter([(
+            .multiproof(LegacyMultiProofTargets::from_iter([(
                 hashed_address,
                 HashSet::from_iter([hashed_slot]),
             )]))
@@ -149,7 +149,7 @@ fn correctly_decodes_branch_node_values() {
         let state_root = DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root().unwrap();
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof
-            .multiproof(MultiProofTargets::from_iter([(
+            .multiproof(LegacyMultiProofTargets::from_iter([(
                 hashed_address,
                 HashSet::from_iter([hashed_slot1, hashed_slot2]),
             )]))
