@@ -199,6 +199,7 @@ where
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
         if !disable_pruning {
+            // `max_storage_tries` is treated as global LFU hot-slot capacity by SparseStateTrie.
             trie.prune(prune_depth, max_storage_tries);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
         }
@@ -500,6 +501,10 @@ where
                 continue;
             }
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+
+            for slot in updates.keys().copied() {
+                self.trie.record_hot_storage_slot(*address, slot);
+            }
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
