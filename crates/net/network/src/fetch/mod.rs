@@ -626,6 +626,7 @@ mod tests {
     use crate::{peers::PeersManager, PeersConfig};
     use alloy_consensus::Header;
     use alloy_primitives::B512;
+    use reth_eth_wire::Capability;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1186,5 +1187,162 @@ mod tests {
         assert!(
             !peer_short_end.is_better(&peer_exact, &BestPeerRequirements::FullBlockRange(range))
         );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_no_support() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+
+        // Capabilities WITHOUT eth71
+        let capabilities = Arc::new(Capabilities::new(vec![]));
+
+        fetcher.new_active_peer(
+            peer,
+            B256::random(),
+            100,
+            capabilities,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Should return None because peer doesn't support eth71
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_supported() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+
+        // Build capability list that includes Eth71
+        let capabilities = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer,
+            B256::random(),
+            100,
+            capabilities,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            Some(peer)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_filters_correctly() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_no_71 = B512::random();
+        let peer_with_71 = B512::random();
+
+        // Peer without eth71
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+
+        // Peer with eth71
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer_no_71,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(5)),
+            None,
+        );
+
+        fetcher.new_active_peer(
+            peer_with_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(50)),
+            None,
+        );
+
+        // Even though peer_no_71 has lower timeout,
+        // it must NOT be selected.
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            Some(peer_with_71)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wakes_when_eth71_peer_connects() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        // Queue Eth71-required request
+        let (tx, _rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![],
+            response: tx,
+            priority: Priority::Normal,
+        });
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // No peers -> must be Pending
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+
+        // Add peer WITHOUT Eth71 support
+        let peer_old = B512::random();
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+
+        fetcher.new_active_peer(
+            peer_old,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Still Pending
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+
+        // Add peer WITH Eth71 support
+        let peer_71 = B512::random();
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Now we must get Ready(BlockRequest)
+        match fetcher.poll(&mut cx) {
+            Poll::Ready(FetchAction::BlockRequest { peer_id, .. }) => {
+                assert_eq!(peer_id, peer_71);
+            }
+            _ => {
+                assert!(false, "Expected Ready(BlockRequest)");
+            }
+        }
     }
 }
