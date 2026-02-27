@@ -5,7 +5,7 @@ use crate::{
     traits::SparseTrie as SparseTrieTrait,
     ParallelSparseTrie, RevealableSparseTrie,
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, B256Set, HashSet},
     B256,
@@ -56,6 +56,8 @@ pub struct SparseStateTrie<
     account_rlp_buf: Vec<u8>,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
+    /// Global LFU tracker for hot `(address, slot)` storage entries.
+    hot_slots_lfu: HotSlotsLfu,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -75,6 +77,7 @@ where
             skip_proof_node_filtering: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             deferred_drops: DeferredDrops::default(),
+            hot_slots_lfu: HotSlotsLfu::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -214,6 +217,12 @@ where
             .revealed_paths
             .get(&account)
             .is_some_and(|slots| slots.contains(&Nibbles::unpack(slot)))
+    }
+
+    /// Records a storage slot access/update in the global LFU tracker.
+    #[inline]
+    pub fn record_hot_storage_slot(&mut self, account: B256, slot: B256) {
+        self.hot_slots_lfu.touch(account, slot);
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -846,10 +855,14 @@ where
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
-    /// Prunes the account trie and selected storage tries to reduce memory usage.
+    /// Prunes account/storage tries according to global LFU hot-slot retention.
     ///
-    /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
-    /// entirely.
+    /// The `max_storage_tries` argument is interpreted as the LFU hot-slot capacity.
+    ///
+    /// - Top LFU `(address, slot)` entries are retained.
+    /// - Account trie retains only paths needed for retained addresses.
+    /// - Storage tries retain only paths needed for retained slots.
+    /// - All other revealed paths are pruned to hash stubs or fully evicted.
     ///
     /// # Preconditions
     ///
@@ -868,18 +881,26 @@ where
         fields(%max_depth, %max_storage_tries)
     )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        // Prune state and storage tries in parallel
+        let _ = max_depth;
+        self.hot_slots_lfu.set_capacity(max_storage_tries);
+        let retained = self.hot_slots_lfu.retained_slots_by_address();
+        let mut retained_account_paths: Vec<Nibbles> =
+            retained.keys().copied().map(Nibbles::unpack).collect();
+
+        // Prune account and storage tries in parallel using the same LFU-selected set.
         rayon::join(
             || {
                 if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune(max_depth);
+                    trie.prune_by_retained_leaves(&retained_account_paths);
                 }
                 self.revealed_account_paths.clear();
             },
             || {
-                self.storage.prune(max_depth, max_storage_tries);
+                self.storage.prune_by_retained_slots(retained);
             },
         );
+
+        retained_account_paths.clear();
     }
 
     /// Commits the [`TrieUpdates`] to the sparse trie.
@@ -922,6 +943,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     ///
     /// Keeps the top `max_storage_tries` by a score combining size and heat.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
+    #[allow(dead_code)]
     fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         let fn_start = Instant::now();
         let mut stats =
@@ -1025,6 +1047,40 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             ?stats.total_elapsed,
             "StorageTries::prune completed"
         );
+    }
+
+    /// Prunes storage tries using LFU-retained slots.
+    ///
+    /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
+    /// those slots.
+    fn prune_by_retained_slots(&mut self, mut retained_slots: B256Map<Vec<Nibbles>>) {
+        let addresses_to_evict: Vec<B256> = self
+            .tries
+            .keys()
+            .filter(|address| !retained_slots.contains_key(*address))
+            .copied()
+            .collect();
+
+        for address in &addresses_to_evict {
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
+                paths.clear();
+                self.cleared_revealed_paths.push(paths);
+            }
+            self.modifications.remove(address);
+        }
+
+        for (address, slots) in &mut retained_slots {
+            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
+                trie.prune_by_retained_leaves(slots);
+            }
+            if let Some(paths) = self.revealed_paths.get_mut(address) {
+                paths.clear();
+            }
+        }
     }
 }
 
@@ -1136,6 +1192,76 @@ struct StorageTriesPruneStats {
     skipped_recently_pruned: usize,
     prune_elapsed: core::time::Duration,
     total_elapsed: core::time::Duration,
+}
+
+/// Key for identifying a storage slot in the global LFU cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct HotSlotKey {
+    address: B256,
+    slot: B256,
+}
+
+/// Global LFU tracker for hot storage slots across all storage tries.
+#[derive(Debug, Default)]
+struct HotSlotsLfu {
+    capacity: usize,
+    frequencies: BTreeMap<HotSlotKey, u32>,
+}
+
+impl HotSlotsLfu {
+    /// Sets LFU capacity and trims entries if needed.
+    fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        while self.frequencies.len() > self.capacity {
+            let Some(evict_key) = self
+                .frequencies
+                .iter()
+                .min_by_key(|(key, frequency)| (**frequency, **key))
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            self.frequencies.remove(&evict_key);
+        }
+    }
+
+    /// Records a storage slot touch.
+    fn touch(&mut self, address: B256, slot: B256) {
+        let key = HotSlotKey { address, slot };
+        if let Some(frequency) = self.frequencies.get_mut(&key) {
+            *frequency = frequency.saturating_add(1);
+            return;
+        }
+
+        if self.capacity != 0 && self.frequencies.len() >= self.capacity {
+            let Some(evict_key) = self
+                .frequencies
+                .iter()
+                .min_by_key(|(existing_key, frequency)| (**frequency, **existing_key))
+                .map(|(existing_key, _)| *existing_key)
+            else {
+                return;
+            };
+            self.frequencies.remove(&evict_key);
+        }
+
+        self.frequencies.insert(key, 1);
+    }
+
+    /// Returns retained slots grouped by address.
+    fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {
+        let mut grouped = B256Map::<Vec<Nibbles>>::default();
+        for key in self.frequencies.keys() {
+            grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
+        }
+
+        for slots in grouped.values_mut() {
+            slots.sort_unstable();
+            slots.dedup();
+        }
+
+        grouped
+    }
 }
 
 /// Per-trie access tracking and prune state.

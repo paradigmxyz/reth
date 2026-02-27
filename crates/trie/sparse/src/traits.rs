@@ -308,6 +308,22 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
 
+    /// Prunes all subtrees that do not contain retained leaves.
+    ///
+    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
+    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
+    /// hash stubs when hashes are available.
+    ///
+    /// # Preconditions
+    ///
+    /// Must be called after `root()` to ensure all nodes have computed hashes.
+    /// Calling on a trie without computed hashes will result in limited or no pruning.
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes converted to hash stubs.
+    fn prune_by_retained_leaves(&mut self, retained_leaves: &[Nibbles]) -> usize;
+
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///
     /// Returns the recorder containing all recorded mutations since the last reset.
