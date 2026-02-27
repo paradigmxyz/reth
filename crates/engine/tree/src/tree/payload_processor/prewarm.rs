@@ -32,7 +32,7 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_tasks::Runtime;
+use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -112,21 +112,23 @@ where
         )
     }
 
-    /// Streams pending transactions and executes them using sender-affinity routing.
+    /// Streams pending transactions and executes them on the prewarming pool with
+    /// sender-affinity filtering.
     ///
-    /// Transactions from the same sender are routed to the same dedicated worker thread,
-    /// improving DB cache locality for sender account state. Each worker initialises its
-    /// own EVM and processes its assigned transactions sequentially.
+    /// Collects all incoming transactions, then uses `spawn_broadcast` to run on every
+    /// pool thread. Each thread only executes transactions where
+    /// `sender % num_threads == current_thread_index`, ensuring same-sender transactions
+    /// hit the same thread's DB cache.
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
+        let executor = self.executor.clone();
         let ctx = self.ctx.clone();
-        let num_workers = self.executor.prewarming_pool().current_num_threads();
         let span = Span::current();
 
         self.executor.spawn_blocking_named("prewarm-txs", move || {
@@ -137,128 +139,124 @@ where
             )
             .entered();
 
-            // Create per-worker channels for sender-affinity routing
-            let mut worker_txs: Vec<Sender<(usize, Tx)>> = Vec::with_capacity(num_workers);
-            let mut handles = Vec::with_capacity(num_workers);
+            let ctx = &ctx;
+            let pool = executor.prewarming_pool();
 
-            for worker_id in 0..num_workers {
-                let (tx, rx) = channel::<(usize, Tx)>();
-                worker_txs.push(tx);
-
-                let ctx = ctx.clone();
-                let to_multi_proof = to_multi_proof.clone();
-                let parent_span = Span::current();
-
-                let handle = std::thread::Builder::new()
-                    .name(format!("prewarm-worker-{worker_id}"))
-                    .spawn(move || {
-                        let _enter = debug_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_worker",
-                            id = worker_id,
-                        )
-                        .entered();
-
-                        Self::run_sender_worker(&ctx, rx, to_multi_proof.as_ref())
-                    })
-                    .expect("failed to spawn prewarm worker thread");
-
-                handles.push(handle);
-            }
-
-            // Route transactions to workers by sender affinity
-            let mut tx_count = 0usize;
+            // Collect all pending transactions
+            let mut transactions = Vec::new();
             while let Ok((index, tx)) = pending.recv() {
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
-                        "Termination requested, stopping transaction distribution"
+                        "Termination requested, stopping transaction collection"
                     );
                     break;
                 }
-
-                tx_count += 1;
-                let worker_idx = sender_to_worker_index(tx.signer(), num_workers);
-                // If the worker's channel is closed, skip the transaction
-                let _ = worker_txs[worker_idx].send((index, tx));
+                transactions.push((index, tx));
             }
 
-            // Send withdrawal prefetch targets after all transactions dispatched
-            if let Some(ref to_multi_proof) = to_multi_proof &&
-                let Some(withdrawals) = &ctx.env.withdrawals &&
-                !withdrawals.is_empty()
-            {
-                let targets = multiproof_targets_from_withdrawals(withdrawals);
-                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
-            }
+            let tx_count = transactions.len();
+            let num_threads = pool.current_num_threads();
+            let to_multi_proof = to_multi_proof.as_ref();
 
-            // Drop senders to signal workers to exit
-            drop(worker_txs);
+            pool.in_place_scope(|s| {
+                s.spawn(|_| {
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                });
 
-            // Wait for all workers to finish
-            for handle in handles {
-                let _ = handle.join();
-            }
+                s.spawn_broadcast(|_, broadcast_ctx| {
+                    let thread_idx = broadcast_ctx.index();
+                    Self::transact_worker(
+                        ctx,
+                        &transactions,
+                        thread_idx,
+                        num_threads,
+                        to_multi_proof,
+                    );
+                });
+
+                // Send withdrawal prefetch targets
+                if let Some(to_multi_proof) = to_multi_proof &&
+                    let Some(withdrawals) = &ctx.env.withdrawals &&
+                    !withdrawals.is_empty()
+                {
+                    let targets = multiproof_targets_from_withdrawals(withdrawals);
+                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                }
+            });
+
+            // All tasks are done — clear per-thread EVM state for the next block.
+            pool.clear();
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
     }
 
-    /// Runs a single prewarm worker thread that processes transactions sequentially.
+    /// Executes prewarm transactions assigned to this thread by sender affinity.
     ///
-    /// The worker initialises its own EVM once and reuses it for all assigned transactions,
-    /// improving cache locality for same-sender transaction sequences.
-    fn run_sender_worker<Tx>(
+    /// Iterates over all transactions but only executes those where
+    /// `sender % num_threads == thread_idx`, using the per-thread EVM state.
+    fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
-        rx: Receiver<(usize, Tx)>,
+        transactions: &[(usize, Tx)],
+        thread_idx: usize,
+        num_threads: usize,
         to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
     ) where
-        Tx: ExecutableTxFor<Evm>,
+        Tx: ExecutableTxFor<Evm> + Clone,
     {
-        let Some((mut evm, metrics, terminate_execution)) = ctx.evm_for_ctx() else {
-            return;
-        };
-
-        while let Ok((index, tx)) = rx.recv() {
-            if terminate_execution.load(Ordering::Relaxed) {
+        WorkerPool::with_worker_mut(|worker| {
+            let Some((evm, metrics, terminate_execution)) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
+            else {
                 return;
-            }
+            };
 
-            let start = Instant::now();
+            for (index, tx) in transactions {
+                if terminate_execution.load(Ordering::Relaxed) {
+                    return;
+                }
 
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    metrics.transaction_errors.increment(1);
+                // Only process transactions assigned to this thread
+                if sender_to_worker_index(tx.signer(), num_threads) != thread_idx {
                     continue;
                 }
-            };
-            metrics.execution_duration.record(start.elapsed());
 
-            if terminate_execution.load(Ordering::Relaxed) {
-                return;
-            }
+                let start = Instant::now();
 
-            if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-                metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_multi_proof) = to_multi_proof {
-                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                let (tx_env, tx) = tx.clone().into_parts();
+                let res = match evm.transact(tx_env) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        trace!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            %err,
+                            tx_hash=%tx.tx().tx_hash(),
+                            sender=%tx.signer(),
+                            "Error when executing prewarm transaction",
+                        );
+                        metrics.transaction_errors.increment(1);
+                        continue;
+                    }
+                };
+                metrics.execution_duration.record(start.elapsed());
+
+                if terminate_execution.load(Ordering::Relaxed) {
+                    return;
                 }
-            }
 
-            metrics.total_runtime.record(start.elapsed());
-        }
+                if *index > 0 {
+                    let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                    metrics.prefetch_storage_targets.record(storage_targets as f64);
+                    if let Some(to_multi_proof) = to_multi_proof {
+                        let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                    }
+                }
+
+                metrics.total_runtime.record(start.elapsed());
+            }
+        });
     }
 
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
@@ -433,7 +431,7 @@ where
     )]
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
         // Spawn execution tasks based on mode
         match mode {
@@ -517,6 +515,14 @@ where
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
+/// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
+/// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
+type PrewarmEvmState<Evm> = Option<(
+    EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
+    PrewarmMetrics,
+    Arc<AtomicBool>,
+)>;
+
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
@@ -525,13 +531,7 @@ where
 {
     /// Creates a per-thread EVM, metrics handle, and termination flag for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(
-        &self,
-    ) -> Option<(
-        EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
-        PrewarmMetrics,
-        Arc<AtomicBool>,
-    )> {
+    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.build() {
             Ok(provider) => provider,
             Err(err) => {
