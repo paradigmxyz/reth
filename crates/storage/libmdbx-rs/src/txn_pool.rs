@@ -27,7 +27,7 @@ unsafe impl Send for PooledTxn {}
 unsafe impl Sync for PooledTxn {}
 
 impl ReadTxnPool {
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self { queue: SegQueue::new() }
     }
 
@@ -417,6 +417,5 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-
     }
 }
