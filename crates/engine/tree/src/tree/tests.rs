@@ -22,15 +22,12 @@ use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_consensus::ConsensusError;
-use reth_engine_primitives::{
-    EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, PayloadValidator,
-    StateRootValidationOutcome,
-};
+use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_primitives_traits::{Block as _, GotExpected};
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::spawn_os_thread;
 use std::{
@@ -45,15 +42,7 @@ use tokio::sync::oneshot;
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone, Default)]
-struct MockEngineValidator {
-    skip_state_root_validation: bool,
-}
-
-impl MockEngineValidator {
-    const fn skip_state_root_validation() -> Self {
-        Self { skip_state_root_validation: true }
-    }
-}
+struct MockEngineValidator;
 
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
@@ -69,25 +58,6 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         Ok(block.seal_slow())
-    }
-
-    fn validate_computed_state_root(
-        &self,
-        block: &reth_primitives_traits::RecoveredBlock<Self::Block>,
-        computed_state_root: B256,
-    ) -> Result<StateRootValidationOutcome, ConsensusError> {
-        if self.skip_state_root_validation {
-            return Ok(StateRootValidationOutcome::Skipped)
-        }
-
-        let header_state_root = block.header().state_root();
-        if computed_state_root == header_state_root {
-            Ok(StateRootValidationOutcome::Valid)
-        } else {
-            Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: computed_state_root, expected: header_state_root }.into(),
-            ))
-        }
     }
 }
 
@@ -115,6 +85,46 @@ impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct SkipStateRootValidator;
+
+impl StateRootValidator<EthPrimitives> for SkipStateRootValidator {
+    fn should_compute_state_root(
+        &self,
+        _input: &reth_engine_primitives::StateRootDecisionInput,
+    ) -> bool {
+        false
+    }
+
+    fn validate_state_root(
+        &self,
+        _block: &RecoveredBlock<Block>,
+        _computed_state_root: B256,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct NoComputePanicStateRootValidator;
+
+impl StateRootValidator<EthPrimitives> for NoComputePanicStateRootValidator {
+    fn should_compute_state_root(
+        &self,
+        _input: &reth_engine_primitives::StateRootDecisionInput,
+    ) -> bool {
+        false
+    }
+
+    fn validate_state_root(
+        &self,
+        _block: &RecoveredBlock<Block>,
+        _computed_state_root: B256,
+    ) -> Result<(), ConsensusError> {
+        panic!("validate_state_root should not be called when state-root computation is disabled")
+    }
+}
+
 #[test]
 fn test_validate_block_allows_state_root_skip_policy() {
     let sealed = TestBlockBuilder::eth()
@@ -130,17 +140,66 @@ fn test_validate_block_allows_state_root_skip_policy() {
         B256::ZERO
     };
 
-    let strict = MockEngineValidator::default();
-    let err = strict
-        .validate_computed_state_root(&recovered, computed_state_root)
-        .expect_err("strict validator should reject mismatched state root");
+    let strict = StrictStateRootValidator;
+    let err = <StrictStateRootValidator as StateRootValidator<EthPrimitives>>::validate_state_root(
+        &strict,
+        &recovered,
+        computed_state_root,
+    )
+    .expect_err("strict validator should reject mismatched state root");
     assert_matches!(err, ConsensusError::BodyStateRootDiff(_));
 
-    let skip = MockEngineValidator::skip_state_root_validation();
-    let result = skip
-        .validate_computed_state_root(&recovered, computed_state_root)
-        .expect("skip policy should accept mismatched state root");
-    assert_eq!(result, StateRootValidationOutcome::Skipped);
+    let skip = SkipStateRootValidator;
+    <SkipStateRootValidator as StateRootValidator<EthPrimitives>>::validate_state_root(
+        &skip,
+        &recovered,
+        computed_state_root,
+    )
+    .expect("skip policy should accept mismatched state root");
+}
+
+#[test]
+fn test_skip_policy_bypasses_state_root_computation() {
+    let chain_spec = MAINNET.clone();
+    let mut harness = TestHarness::new(chain_spec.clone());
+    let seed_blocks: Vec<_> = harness.block_builder.get_executed_blocks(1..2).collect();
+    let mut harness = harness.with_blocks(seed_blocks);
+    let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
+    let evm_config = MockEvmConfig::default();
+    evm_config.extend([reth_execution_types::ExecutionOutcome::default()]);
+
+    let mut validator = BasicEngineValidator::new(
+        harness.provider.clone(),
+        consensus,
+        evm_config,
+        MockEngineValidator::default(),
+        TreeConfig::default(),
+        Box::new(NoopInvalidBlockHook::default()),
+        ChangesetCache::new(),
+        reth_tasks::Runtime::test(),
+    )
+    .with_state_root_validator(NoComputePanicStateRootValidator);
+
+    let parent = harness.tree.state.tree_state.current_canonical_head;
+    let mut block = loop {
+        let candidate = harness
+            .block_builder
+            .generate_random_block(parent.number + 1, parent.hash)
+            .into_block();
+        if candidate.body.transactions.is_empty() {
+            break candidate
+        }
+    };
+    // force a mismatch with computed state root to ensure strict mode would reject this block
+    block.header.state_root = B256::random();
+    let block = block.seal_slow();
+
+    let ctx = TreeCtx::new(&mut harness.tree.state, &harness.tree.canonical_in_memory_state);
+    let result = validator.validate_block(block, ctx);
+    assert!(
+        result.is_ok(),
+        "skip policy should bypass state-root computation and validation, got: {result:?}"
+    );
 }
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -448,13 +507,6 @@ pub(crate) struct ValidatorTestHarness {
 
 impl ValidatorTestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new_with_payload_validator(chain_spec, MockEngineValidator::default())
-    }
-
-    fn new_with_payload_validator(
-        chain_spec: Arc<ChainSpec>,
-        payload_validator: MockEngineValidator,
-    ) -> Self {
         let harness = TestHarness::new(chain_spec.clone());
 
         // Create validator identical to the one in TestHarness
@@ -467,7 +519,7 @@ impl ValidatorTestHarness {
             provider,
             consensus,
             evm_config,
-            payload_validator,
+            MockEngineValidator::default(),
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,

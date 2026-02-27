@@ -18,7 +18,7 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, GotExpected, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -183,28 +183,6 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 
-    /// Validates the computed state root against the block's header state root.
-    ///
-    /// By default, this enforces strict equality and returns
-    /// [`ConsensusError::BodyStateRootDiff`] on mismatch.
-    ///
-    /// Implementers may override this to support alternate validation policies for specific
-    /// networks or fork phases while still reusing the engine tree's execution pipeline.
-    fn validate_computed_state_root(
-        &self,
-        block: &RecoveredBlock<Self::Block>,
-        computed_state_root: B256,
-    ) -> Result<StateRootValidationOutcome, ConsensusError> {
-        let header_state_root = block.header().state_root();
-        if computed_state_root == header_state_root {
-            Ok(StateRootValidationOutcome::Valid)
-        } else {
-            Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: computed_state_root, expected: header_state_root }.into(),
-            ))
-        }
-    }
-
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
@@ -226,11 +204,48 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     }
 }
 
-/// Outcome of validating a computed state root against a block header.
+/// Lightweight context for deciding whether to compute and validate state roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateRootValidationOutcome {
-    /// The computed state root was accepted by the validator.
-    Valid,
-    /// The validator intentionally skipped state root comparison.
-    Skipped,
+pub struct StateRootDecisionInput {
+    /// Block timestamp.
+    pub timestamp: u64,
+    /// Block number.
+    pub block_number: u64,
+    /// Block hash.
+    pub block_hash: B256,
+    /// Parent block hash.
+    pub parent_hash: B256,
 }
+
+/// Validates a computed state root for a recovered block.
+pub trait StateRootValidator<N: NodePrimitives>: Send + Sync + 'static {
+    /// Whether the validator should compute and validate state root for this block.
+    ///
+    /// Implementers can return `false` to skip the state-root computation path entirely.
+    fn should_compute_state_root(&self, _input: &StateRootDecisionInput) -> bool {
+        true
+    }
+
+    /// Validates the computed state root against the block header.
+    ///
+    /// Default behavior enforces strict equality.
+    fn validate_state_root(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        computed_state_root: B256,
+    ) -> Result<(), ConsensusError> {
+        let expected = block.header().state_root();
+        if computed_state_root != expected {
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: computed_state_root, expected }.into(),
+            ))
+        }
+        Ok(())
+    }
+}
+
+/// Default strict state-root validator.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StrictStateRootValidator;
+
+impl<N: NodePrimitives> StateRootValidator<N> for StrictStateRootValidator {}

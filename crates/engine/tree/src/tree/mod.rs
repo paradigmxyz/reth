@@ -73,7 +73,9 @@ pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
-pub use reth_engine_primitives::TreeConfig;
+pub use reth_engine_primitives::{
+    StateRootDecisionInput, StateRootValidator, StrictStateRootValidator, TreeConfig,
+};
 
 pub mod state;
 
