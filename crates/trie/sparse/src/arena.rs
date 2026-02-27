@@ -1,7 +1,7 @@
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
 };
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{B256Map, HashMap, HashSet},
