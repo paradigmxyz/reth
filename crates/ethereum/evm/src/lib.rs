@@ -37,6 +37,7 @@ use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
+    alloy_eips::eip4895::{Withdrawal, Withdrawals},
     alloy_eips::Decodable2718,
     alloy_primitives::{Bytes, U256},
     alloy_rpc_types_engine::ExecutionData,
@@ -287,7 +288,13 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            withdrawals: payload
+                .payload
+                .withdrawals()
+                // SAFETY: `Withdrawals` is a newtype around `Vec<Withdrawal>`.
+                .map(|w| {
+                    Cow::Borrowed(unsafe { &*(w as *const Vec<Withdrawal> as *const Withdrawals) })
+                }),
             extra_data: payload.payload.as_v1().extra_data.clone(),
         })
     }
