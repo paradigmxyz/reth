@@ -20,12 +20,12 @@ impl<'a> EnumHandler<'a> {
         self.fields_iterator.next()
     }
 
-    pub fn generate_to(mut self, ident: &Ident) -> Vec<TokenStream2> {
+    pub fn generate_to(mut self, ident: &Ident, out: &TokenStream2) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
-                FieldTypes::EnumVariant(name) => self.to(name, ident),
+                FieldTypes::EnumVariant(name) => self.to(name, ident, out),
                 FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
@@ -91,7 +91,7 @@ impl<'a> EnumHandler<'a> {
     ///
     /// `fields_iterator` might look something like [`VariantUnit`, `VariantUnnamedField`, Field,
     /// `VariantUnit`...].
-    pub fn to(&mut self, variant_name: &str, ident: &Ident) {
+    pub fn to(&mut self, variant_name: &str, ident: &Ident, out: &TokenStream2) {
         let variant_name = format_ident!("{variant_name}");
         let current_variant_index = self.current_variant_index;
 
@@ -107,7 +107,7 @@ impl<'a> EnumHandler<'a> {
                     // Unnamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {
-                            field.#to_compact_ident(&mut buffer);
+                            field.#to_compact_ident(#out);
                             #current_variant_index
                         },
                     });

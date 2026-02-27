@@ -281,27 +281,27 @@ mod tests {
                 fn to_compact<B>(&self, buf: &mut B) -> usize where B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_length = 0;
-                    let mut buffer = reth_codecs::__private::bytes::BytesMut::new();
-                    let f_u64_len = self.f_u64.to_compact(&mut buffer);
+                    let __flags_pos = buf.as_mut().len();
+                    buf.put_bytes(0, Self::bitflag_encoded_bytes());
+                    let f_u64_len = self.f_u64.to_compact(&mut *buf);
                     flags.set_f_u64_len(f_u64_len as u8);
-                    let f_u256_len = self.f_u256.to_compact(&mut buffer);
+                    let f_u256_len = self.f_u256.to_compact(&mut *buf);
                     flags.set_f_u256_len(f_u256_len as u8);
-                    let f_bool_t_len = self.f_bool_t.to_compact(&mut buffer);
+                    let f_bool_t_len = self.f_bool_t.to_compact(&mut *buf);
                     flags.set_f_bool_t_len(f_bool_t_len as u8);
-                    let f_bool_f_len = self.f_bool_f.to_compact(&mut buffer);
+                    let f_bool_f_len = self.f_bool_f.to_compact(&mut *buf);
                     flags.set_f_bool_f_len(f_bool_f_len as u8);
-                    let f_option_none_len = self.f_option_none.to_compact(&mut buffer);
+                    let f_option_none_len = self.f_option_none.to_compact(&mut *buf);
                     flags.set_f_option_none_len(f_option_none_len as u8);
-                    let f_option_some_len = self.f_option_some.specialized_to_compact(&mut buffer);
+                    let f_option_some_len = self.f_option_some.specialized_to_compact(&mut *buf);
                     flags.set_f_option_some_len(f_option_some_len as u8);
-                    let f_option_some_u64_len = self.f_option_some_u64.to_compact(&mut buffer);
+                    let f_option_some_u64_len = self.f_option_some_u64.to_compact(&mut *buf);
                     flags.set_f_option_some_u64_len(f_option_some_u64_len as u8);
-                    let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
-                    let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut buffer);
-                    let flags = flags.into_bytes();
-                    total_length += flags.len() + buffer.len();
-                    buf.put_slice(&flags);
-                    buf.put(buffer);
+                    let f_vec_empty_len = self.f_vec_empty.to_compact(&mut *buf);
+                    let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut *buf);
+                    let __flags_bytes = flags.into_bytes();
+                    buf.as_mut()[__flags_pos..__flags_pos + __flags_bytes.len()].copy_from_slice(&__flags_bytes);
+                    total_length = buf.as_mut().len() - __flags_pos;
                     total_length
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
