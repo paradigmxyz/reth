@@ -471,6 +471,24 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> reth_storage_api::CallTraceIndexReader for BlockchainProvider<N> {
+    fn call_trace_from_blocks(
+        &self,
+        address: Address,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockNumber>> {
+        self.consistent_provider()?.call_trace_from_blocks(address, range)
+    }
+
+    fn call_trace_to_blocks(
+        &self,
+        address: Address,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockNumber>> {
+        self.consistent_provider()?.call_trace_to_blocks(address, range)
+    }
+}
+
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.consistent_provider()?.get_stage_checkpoint(id)

@@ -70,6 +70,11 @@ mod history;
 pub use history::*;
 
 #[cfg(feature = "db-api")]
+mod call_trace;
+#[cfg(feature = "db-api")]
+pub use call_trace::*;
+
+#[cfg(feature = "db-api")]
 mod hashing;
 #[cfg(feature = "db-api")]
 pub use hashing::*;
