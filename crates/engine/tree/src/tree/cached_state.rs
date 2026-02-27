@@ -1051,6 +1051,221 @@ mod tests {
         assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
     }
 
+    /// Measures the cost of each step in the `save_cache` MISS path to identify
+    /// what causes the observed 3.689s stall at `prewarm.rs:297`.
+    ///
+    /// **Background:** on cache MISS, `save_cache` allocates a fresh 4GB
+    /// `ExecutionCache`, runs `insert_state` into it, then replaces the old cache
+    /// via `*cached = Some(new_cache)` — all under a write lock. The next block
+    /// is stuck waiting on that lock.
+    ///
+    /// This test independently measures:
+    /// - **alloc**: `ExecutionCache::new()` (alloc_zeroed of ~4GB)
+    /// - **insert_state**: writing bundle state into a fresh cold cache
+    /// - **drop (cold)**: dropping the old cache after L3 eviction
+    /// - **drop (warm)**: dropping a cache whose pages are still in L3
+    /// - **dealloc baseline**: raw `munmap` of same-sized Vec (no iteration)
+    ///
+    /// The cold drop tests whether `Box<[Bucket<T>]>::drop` iterating all buckets
+    /// to call `Bucket::drop` (which checks `is_alive()` via atomic tag read) is
+    /// the bottleneck. `Bucket<T>` has a custom Drop impl even though for Copy
+    /// value types the body is `if false { ... }`. LLVM may or may not eliminate
+    /// the iteration loop in release mode.
+    ///
+    /// Run on a machine with ≥16GB free:
+    /// ```
+    /// cargo test --release -p reth-engine-tree -- --ignored test_save_cache_miss_timing --nocapture
+    /// ```
+    #[test]
+    #[ignore = "allocates 8GB+ of memory, run with --release on a machine with 16GB+ free"]
+    fn test_save_cache_miss_timing() {
+        save_cache_miss_timing(4 * 1024 * 1024 * 1024, "4GB (default)");
+    }
+
+    /// Same test at 2GB — fits on most dev machines.
+    #[test]
+    #[ignore = "allocates 4GB+ of memory, run with --release"]
+    fn test_save_cache_miss_timing_2gb() {
+        save_cache_miss_timing(2 * 1024 * 1024 * 1024, "2GB");
+    }
+
+    /// Same test at 1GB.
+    #[test]
+    #[ignore = "allocates 2GB+ of memory, run with --release"]
+    fn test_save_cache_miss_timing_1gb() {
+        save_cache_miss_timing(1024 * 1024 * 1024, "1GB");
+    }
+
+    fn save_cache_miss_timing(cache_size: usize, label: &str) {
+        use alloy_primitives::U160;
+        use std::hint::black_box;
+
+        let mb = cache_size / (1024 * 1024);
+
+        // ========================================================================
+        // Phase 1: Measure allocation cost
+        // ========================================================================
+        eprintln!("\n[{label}] === Phase 1: Allocation ===");
+        let t = std::time::Instant::now();
+        let old_cache = ExecutionCache::new(cache_size);
+        let alloc_time = t.elapsed();
+        eprintln!("  ExecutionCache::new({mb} MB) = {:?}", alloc_time);
+
+        // Populate old cache (simulates prior block's cache being warm)
+        let num_entries: u64 = 50_000;
+        for i in 0..num_entries {
+            let addr = Address::from(U160::from(i));
+            old_cache.insert_account(addr, Some(Account::default()));
+            old_cache.insert_storage(
+                addr,
+                StorageKey::from(U256::from(i)),
+                Some(U256::from(i)),
+            );
+        }
+
+        // New cache (the fresh one created on MISS)
+        let t = std::time::Instant::now();
+        let new_cache = ExecutionCache::new(cache_size);
+        let new_alloc_time = t.elapsed();
+        eprintln!("  Second ExecutionCache::new({mb} MB) = {:?}", new_alloc_time);
+
+        // ========================================================================
+        // Phase 2: Measure insert_state-equivalent writes on FRESH cache
+        // ========================================================================
+        eprintln!("\n[{label}] === Phase 2: Writes to fresh cache (simulates insert_state) ===");
+
+        // Simulate the insert_state path: ~5K accounts + ~20K storage writes
+        // scattered across the fresh cache. This is what happens after prewarm
+        // when insert_state writes the block's execution outcome.
+        let num_state_accounts: u64 = 5_000;
+        let storage_per_account: u64 = 4;
+        let total_changes =
+            num_state_accounts + (num_state_accounts * storage_per_account);
+
+        let t = std::time::Instant::now();
+        for i in 0..num_state_accounts {
+            let addr = Address::from(U160::from(i + 200_000));
+            new_cache.insert_account(addr, Some(Account::default()));
+            for j in 0..storage_per_account {
+                new_cache.insert_storage(
+                    addr,
+                    StorageKey::from(U256::from(j)),
+                    Some(U256::from(j + 1)),
+                );
+            }
+        }
+        let insert_state_time = t.elapsed();
+        eprintln!(
+            "  {} writes to fresh cache = {:?}",
+            total_changes, insert_state_time
+        );
+
+        // ========================================================================
+        // Phase 3: Measure drop with L3 pressure
+        // ========================================================================
+        eprintln!("\n[{label}] === Phase 3: Drop timing ===");
+
+        // Evict old cache from L3 by scanning a buffer ≥ L3 size
+        let evict_size = 128 * 1024 * 1024; // 128MB > any L3
+        let mut evict_buf: Vec<u8> = vec![0u8; evict_size];
+        for chunk in evict_buf.chunks_mut(64) {
+            chunk[0] = 1;
+        }
+        black_box(&evict_buf);
+        drop(evict_buf);
+
+        // Drop old cache (cold — hasn't been touched since before new_cache alloc)
+        let t = std::time::Instant::now();
+        drop(old_cache);
+        let cold_drop = t.elapsed();
+        eprintln!("  drop(old_cache) [cold]  = {:?}", cold_drop);
+
+        // Drop new cache (warm — just had insert_state write to it)
+        let t = std::time::Instant::now();
+        drop(new_cache);
+        let warm_drop = t.elapsed();
+        eprintln!("  drop(new_cache) [warm]  = {:?}", warm_drop);
+
+        // Baseline: raw dealloc of same-sized Vec<u8> (no Bucket::drop iteration)
+        let raw_buf = vec![0u8; cache_size];
+        black_box(&raw_buf);
+        let t = std::time::Instant::now();
+        drop(raw_buf);
+        let raw_dealloc = t.elapsed();
+        eprintln!("  drop(Vec<u8>[{mb} MB])   = {:?}  (dealloc baseline)", raw_dealloc);
+
+        // ========================================================================
+        // Phase 4: Measure drop with concurrent L3 contention
+        // ========================================================================
+        eprintln!("\n[{label}] === Phase 4: Drop under concurrent L3 contention ===");
+
+        let old_cache2 = ExecutionCache::new(cache_size);
+        for i in 0..num_entries {
+            let addr = Address::from(U160::from(i));
+            old_cache2.insert_account(addr, Some(Account::default()));
+        }
+
+        // Spawn a thread that continuously hammers L3 with a large buffer scan,
+        // simulating the prewarm/execution workload contending for cache lines.
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let contention_thread = std::thread::spawn(move || {
+            let mut buf = vec![0u64; 8 * 1024 * 1024]; // 64MB of u64s
+            let mut sum: u64 = 0;
+            while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                for v in buf.iter_mut() {
+                    *v = v.wrapping_add(1);
+                    sum = sum.wrapping_add(*v);
+                }
+            }
+            black_box(sum);
+            black_box(&buf);
+        });
+
+        // Give contention thread time to warm up and fill L3
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let t = std::time::Instant::now();
+        drop(old_cache2);
+        let contended_drop = t.elapsed();
+        eprintln!("  drop(old_cache) [contended] = {:?}", contended_drop);
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        contention_thread.join().unwrap();
+
+        // ========================================================================
+        // Summary
+        // ========================================================================
+        eprintln!("\n[{label}] ===== SUMMARY =====");
+        eprintln!("  alloc             = {:?}", alloc_time);
+        eprintln!(
+            "  insert_state      = {:?}  ({} changes)",
+            insert_state_time, total_changes
+        );
+        eprintln!("  drop (cold)       = {:?}", cold_drop);
+        eprintln!("  drop (warm)       = {:?}", warm_drop);
+        eprintln!("  drop (contended)  = {:?}", contended_drop);
+        eprintln!("  dealloc baseline  = {:?}", raw_dealloc);
+        eprintln!(
+            "  cold/warm ratio   = {:.1}x",
+            cold_drop.as_secs_f64() / warm_drop.as_secs_f64().max(1e-9)
+        );
+        eprintln!(
+            "  contended/warm    = {:.1}x",
+            contended_drop.as_secs_f64() / warm_drop.as_secs_f64().max(1e-9)
+        );
+
+        let total = alloc_time + insert_state_time + cold_drop;
+        eprintln!(
+            "\n  Total MISS-path overhead (alloc + insert_state + cold_drop) = {:?}",
+            total
+        );
+        eprintln!(
+            "  At 4GB: extrapolated ≈ {:.2}s",
+            total.as_secs_f64() * (4.0 * 1024.0 * 1024.0 * 1024.0) / cache_size as f64,
+        );
+    }
+
     #[test]
     fn test_insert_state_destroyed_account_no_original_info_removes_only_account() {
         let caches = ExecutionCache::new(1000);
