@@ -59,7 +59,6 @@ triehash.workspace = true
 
 # misc
 assert_matches.workspace = true
-criterion.workspace = true
 parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -103,17 +102,3 @@ serde-bincode-compat = [
     "reth-primitives-traits/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",
 ]
-
-[[bench]]
-name = "hash_post_state"
-harness = false
-
-[[bench]]
-name = "trie_root"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "proof_v2"
-required-features = ["test-utils"]
-harness = false
