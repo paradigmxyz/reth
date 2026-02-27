@@ -133,8 +133,10 @@ where
     sparse_state_trie: SharedPreservedSparseTrie,
     /// Sparse trie prune depth.
     sparse_trie_prune_depth: usize,
-    /// Maximum storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// LFU hot-slot capacity: max storage slots retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
@@ -170,7 +172,8 @@ where
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
-            sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
+            sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
+            sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
@@ -559,7 +562,8 @@ where
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let prune_depth = self.sparse_trie_prune_depth;
-        let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let max_hot_slots = self.sparse_trie_max_hot_slots;
+        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
@@ -644,7 +648,8 @@ where
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
-                    max_storage_tries,
+                    max_hot_slots,
+                    max_hot_accounts,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,

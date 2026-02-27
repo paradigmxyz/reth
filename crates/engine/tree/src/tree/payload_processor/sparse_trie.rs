@@ -201,8 +201,8 @@ where
     /// benchmarking purposes.
     pub(super) fn into_trie_for_reuse(
         self,
-        prune_depth: usize,
-        max_storage_tries: usize,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         disable_pruning: bool,
@@ -211,7 +211,7 @@ where
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
         if !disable_pruning {
-            trie.prune(prune_depth, max_storage_tries);
+            trie.prune(max_hot_slots, max_hot_accounts);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
         }
         let deferred = trie.take_deferred_drops();
@@ -408,6 +408,8 @@ where
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
             for (slot, value) in storage.storage {
+                self.trie.record_slot_touch(address, slot);
+
                 let encoded = if value.is_zero() {
                     Vec::new()
                 } else {
@@ -432,6 +434,8 @@ where
         }
 
         for (address, account) in hashed_state_update.accounts {
+            self.trie.record_account_touch(address);
+
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
