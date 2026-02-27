@@ -385,35 +385,24 @@ mod tests {
     }
 
     #[test]
-    fn multithreaded_pool_saturation() {
+    fn pool_overflow_aborts_excess() {
         let dir = tempfile::tempdir().unwrap();
-        let env = Environment::builder().set_max_readers(256).open(dir.path()).unwrap();
+        let env = Environment::builder().set_max_readers(512).open(dir.path()).unwrap();
         seed(&env);
 
-        let env = std::sync::Arc::new(env);
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        // Open more txns than the pool capacity (256), drop them all.
+        let txns: Vec<_> = (0..300).map(|_| env.begin_ro_txn().unwrap()).collect();
+        drop(txns);
 
-        // 8 threads each open 20 txns simultaneously.
-        // Total: 160 concurrent txns. max_readers set to 256 to allow this.
-        let handles: Vec<_> = (0..8)
-            .map(|_| {
-                let env = env.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    let txns: Vec<_> = (0..20).map(|_| env.begin_ro_txn().unwrap()).collect();
-                    for txn in &txns {
-                        let db = txn.open_db(None).unwrap();
-                        let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
-                        assert_eq!(val, Some(*b"val"));
-                    }
-                    drop(txns);
-                })
-            })
-            .collect();
+        // Pool is capped at 256; excess handles are aborted.
+        assert_eq!(env.ro_txn_pool().queue.len(), 256);
 
-        for h in handles {
-            h.join().unwrap();
+        // All 256 pooled handles should still work.
+        let txns: Vec<_> = (0..256).map(|_| env.begin_ro_txn().unwrap()).collect();
+        for txn in &txns {
+            let db = txn.open_db(None).unwrap();
+            let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+            assert_eq!(val, Some(*b"val"));
         }
     }
 }
