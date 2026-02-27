@@ -946,16 +946,20 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // Move to tx index 1 before first tx (index 0 is for pre-execution)
-                db.bump_bal_index();
+                //db.bump_bal_index();
 
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     db.commit(res.state);
                     // Advance to next tx index
-                    db.bump_bal_index();
+                    //db.bump_bal_index();
                 }
 
+                eth_api.apply_post_execution_changes(&block, &mut db)?;
+
+                // Move to tx index 1 before first tx (index 0 is for pre-execution)
+                //db.bump_bal_index();
                 // Current index is now n+1 for post-execution
 
                 let bal = db.take_built_alloy_bal().ok_or_else(|| {
