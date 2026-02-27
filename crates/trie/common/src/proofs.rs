@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -10,7 +10,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
-    nodes::TrieNode,
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
@@ -18,28 +17,28 @@ use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
-/// Proof targets map.
+/// Legacy proof targets map.
 #[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
-pub struct MultiProofTargets(B256Map<B256Set>);
+pub struct LegacyMultiProofTargets(B256Map<B256Set>);
 
-impl FromIterator<(B256, B256Set)> for MultiProofTargets {
+impl FromIterator<(B256, B256Set)> for LegacyMultiProofTargets {
     fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
         Self(B256Map::from_iter(iter))
     }
 }
 
-impl MultiProofTargets {
-    /// Creates an empty `MultiProofTargets` with at least the specified capacity.
+impl LegacyMultiProofTargets {
+    /// Creates an empty `LegacyMultiProofTargets` with at least the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
     }
 
-    /// Create `MultiProofTargets` with a single account as a target.
+    /// Create `LegacyMultiProofTargets` with a single account as a target.
     pub fn account(hashed_address: B256) -> Self {
         Self::accounts([hashed_address])
     }
 
-    /// Create `MultiProofTargets` with a single account and slots as targets.
+    /// Create `LegacyMultiProofTargets` with a single account and slots as targets.
     pub fn account_with_slots<I: IntoIterator<Item = B256>>(
         hashed_address: B256,
         slots_iter: I,
@@ -47,7 +46,7 @@ impl MultiProofTargets {
         Self(B256Map::from_iter([(hashed_address, slots_iter.into_iter().collect())]))
     }
 
-    /// Create `MultiProofTargets` only from accounts.
+    /// Create `LegacyMultiProofTargets` only from accounts.
     pub fn accounts<I: IntoIterator<Item = B256>>(iter: I) -> Self {
         Self(iter.into_iter().map(|hashed_address| (hashed_address, Default::default())).collect())
     }
@@ -85,9 +84,9 @@ impl MultiProofTargets {
 
     /// Returns an iterator that yields chunks of the specified size.
     ///
-    /// See [`ChunkedMultiProofTargets`] for more information.
-    pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
-        ChunkedMultiProofTargets::new(self, size)
+    /// See [`LegacyChunkedMultiProofTargets`] for more information.
+    pub fn chunks(self, size: usize) -> LegacyChunkedMultiProofTargets {
+        LegacyChunkedMultiProofTargets::new(self, size)
     }
 
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
@@ -117,13 +116,13 @@ impl MultiProofTargets {
 /// - If account has associated storage slots, each storage slot is counted towards the chunk size.
 /// - If account has no associated storage slots, the account is counted towards the chunk size.
 #[derive(Debug)]
-pub struct ChunkedMultiProofTargets {
+pub struct LegacyChunkedMultiProofTargets {
     flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
     size: usize,
 }
 
-impl ChunkedMultiProofTargets {
-    fn new(targets: MultiProofTargets, size: usize) -> Self {
+impl LegacyChunkedMultiProofTargets {
+    fn new(targets: LegacyMultiProofTargets, size: usize) -> Self {
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -143,12 +142,12 @@ impl ChunkedMultiProofTargets {
     }
 }
 
-impl Iterator for ChunkedMultiProofTargets {
-    type Item = MultiProofTargets;
+impl Iterator for LegacyChunkedMultiProofTargets {
+    type Item = LegacyMultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
         let chunk = self.flattened_targets.by_ref().take(self.size).fold(
-            MultiProofTargets::default(),
+            LegacyMultiProofTargets::default(),
             |mut acc, (address, slot)| {
                 let entry = acc.entry(address).or_default();
                 if let Some(slot) = slot {
@@ -233,7 +232,8 @@ impl MultiProof {
         // then the node contains the encoded trie account.
         let info = 'info: {
             if let Some(last) = proof.last() &&
-                let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
+                let alloy_trie::nodes::TrieNode::Leaf(leaf) =
+                    alloy_trie::nodes::TrieNode::decode(&mut &last[..])? &&
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
@@ -298,9 +298,9 @@ impl MultiProof {
 }
 
 /// This is a type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
-/// collection of [`TrieNode`]s instead of RLP-encoded bytes.
+/// collection of [`TrieNode`](alloy_trie::nodes::TrieNode)s instead of RLP-encoded bytes.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
-pub struct DecodedMultiProof {
+pub struct LegacyDecodedMultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: DecodedProofNodes,
     /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the account
@@ -310,7 +310,7 @@ pub struct DecodedMultiProof {
     pub storages: B256Map<DecodedStorageMultiProof>,
 }
 
-impl DecodedMultiProof {
+impl LegacyDecodedMultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
         self.account_subtree.is_empty() &&
@@ -319,7 +319,10 @@ impl DecodedMultiProof {
     }
 
     /// Return the account proof nodes for the given account path.
-    pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, TrieNode)> {
+    pub fn account_proof_nodes(
+        &self,
+        path: &Nibbles,
+    ) -> Vec<(Nibbles, alloy_trie::nodes::TrieNode)> {
         self.account_subtree.matching_nodes_sorted(path)
     }
 
@@ -328,7 +331,7 @@ impl DecodedMultiProof {
         &self,
         hashed_address: B256,
         slots: impl IntoIterator<Item = B256>,
-    ) -> Vec<(B256, Vec<(Nibbles, TrieNode)>)> {
+    ) -> Vec<(B256, Vec<(Nibbles, alloy_trie::nodes::TrieNode)>)> {
         self.storages
             .get(&hashed_address)
             .map(|storage_mp| {
@@ -362,7 +365,7 @@ impl DecodedMultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
         let info = 'info: {
-            if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
+            if let Some(alloy_trie::nodes::TrieNode::Leaf(leaf)) = proof.last() &&
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
@@ -417,7 +420,7 @@ impl DecodedMultiProof {
         }
     }
 
-    /// Create a [`DecodedMultiProof`] from a [`DecodedStorageMultiProof`].
+    /// Create a [`LegacyDecodedMultiProof`] from a [`DecodedStorageMultiProof`].
     pub fn from_storage_proof(
         hashed_address: B256,
         storage_proof: DecodedStorageMultiProof,
@@ -429,7 +432,7 @@ impl DecodedMultiProof {
     }
 }
 
-impl TryFrom<MultiProof> for DecodedMultiProof {
+impl TryFrom<MultiProof> for LegacyDecodedMultiProof {
     type Error = alloy_rlp::Error;
 
     fn try_from(multi_proof: MultiProof) -> Result<Self, Self::Error> {
@@ -443,17 +446,17 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
     }
 }
 
-/// V2 decoded multiproof which contains the results of both account and storage V2 proof
+/// Decoded multiproof which contains the results of both account and storage proof
 /// calculations.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct DecodedMultiProofV2 {
+pub struct DecodedMultiProof {
     /// Account trie proof nodes
-    pub account_proofs: Vec<ProofTrieNodeV2>,
+    pub account_proofs: Vec<ProofTrieNode>,
     /// Storage trie proof nodes indexed by account
-    pub storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
+    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
 }
 
-impl DecodedMultiProofV2 {
+impl DecodedMultiProof {
     /// Returns true if there are no proofs
     pub fn is_empty(&self) -> bool {
         self.account_proofs.is_empty() && self.storage_proofs.is_empty()
@@ -477,30 +480,26 @@ impl DecodedMultiProofV2 {
     }
 }
 
-impl From<DecodedMultiProof> for DecodedMultiProofV2 {
-    fn from(proof: DecodedMultiProof) -> Self {
-        let account_proofs =
-            decoded_proof_nodes_to_v2(proof.account_subtree, &proof.branch_node_masks);
+impl From<LegacyDecodedMultiProof> for DecodedMultiProof {
+    fn from(proof: LegacyDecodedMultiProof) -> Self {
+        let account_proofs = decoded_proof_nodes(proof.account_subtree, &proof.branch_node_masks);
         let storage_proofs = proof
             .storages
             .into_iter()
             .map(|(address, storage)| {
-                (address, decoded_proof_nodes_to_v2(storage.subtree, &storage.branch_node_masks))
+                (address, decoded_proof_nodes(storage.subtree, &storage.branch_node_masks))
             })
             .collect();
         Self { account_proofs, storage_proofs }
     }
 }
 
-/// Converts a [`DecodedProofNodes`] (path → [`TrieNode`] map) into a `Vec<ProofTrieNodeV2>`,
-/// merging extension nodes into their child branch nodes.
-fn decoded_proof_nodes_to_v2(
-    nodes: DecodedProofNodes,
-    masks: &BranchNodeMasksMap,
-) -> Vec<ProofTrieNodeV2> {
+/// Converts a [`DecodedProofNodes`] (path → [`alloy_trie::nodes::TrieNode`] map) into a
+/// `Vec<ProofTrieNode>`, merging extension nodes into their child branch nodes.
+fn decoded_proof_nodes(nodes: DecodedProofNodes, masks: &BranchNodeMasksMap) -> Vec<ProofTrieNode> {
     let mut sorted: Vec<_> = nodes.into_inner().into_iter().collect();
     sorted.sort_unstable_by(|a, b| crate::depth_first_cmp(&a.0, &b.0));
-    ProofTrieNodeV2::from_sorted_trie_nodes(
+    ProofTrieNode::from_sorted_trie_nodes(
         sorted.into_iter().map(|(path, node)| (path, node, masks.get(&path).copied())),
     )
 }
@@ -546,7 +545,8 @@ impl StorageMultiProof {
         // then the node contains the encoded slot value.
         let value = 'value: {
             if let Some(last) = proof.last() &&
-                let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
+                let alloy_trie::nodes::TrieNode::Leaf(leaf) =
+                    alloy_trie::nodes::TrieNode::decode(&mut &last[..])? &&
                 nibbles.ends_with(&leaf.key)
             {
                 break 'value U256::decode(&mut &leaf.value[..])?
@@ -575,7 +575,10 @@ impl DecodedStorageMultiProof {
     pub fn empty() -> Self {
         Self {
             root: EMPTY_ROOT_HASH,
-            subtree: DecodedProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]),
+            subtree: DecodedProofNodes::from_iter([(
+                Nibbles::default(),
+                alloy_trie::nodes::TrieNode::EmptyRoot,
+            )]),
             branch_node_masks: BranchNodeMasksMap::default(),
         }
     }
@@ -595,7 +598,7 @@ impl DecodedStorageMultiProof {
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded slot value.
         let value = 'value: {
-            if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
+            if let Some(alloy_trie::nodes::TrieNode::Leaf(leaf)) = proof.last() &&
                 nibbles.ends_with(&leaf.key)
             {
                 break 'value U256::decode(&mut &leaf.value[..])?
@@ -752,7 +755,7 @@ pub struct DecodedAccountProof {
     pub info: Option<Account>,
     /// Array of merkle trie nodes which starting from the root node and following the path of the
     /// hashed address as key.
-    pub proof: Vec<TrieNode>,
+    pub proof: Vec<alloy_trie::nodes::TrieNode>,
     /// The storage trie root.
     pub storage_root: B256,
     /// Array of storage proofs as requested.
@@ -865,7 +868,7 @@ pub struct DecodedStorageProof {
     pub value: U256,
     /// Array of merkle trie nodes which starting from the storage root node and following the path
     /// of the hashed storage slot as key.
-    pub proof: Vec<TrieNode>,
+    pub proof: Vec<alloy_trie::nodes::TrieNode>,
 }
 
 impl DecodedStorageProof {
@@ -886,7 +889,7 @@ impl DecodedStorageProof {
     }
 
     /// Set proof nodes on storage proof.
-    pub fn with_proof(mut self, proof: Vec<TrieNode>) -> Self {
+    pub fn with_proof(mut self, proof: Vec<alloy_trie::nodes::TrieNode>) -> Self {
         self.proof = proof;
         self
     }
@@ -992,23 +995,25 @@ mod tests {
 
     #[test]
     fn test_multi_proof_retain_difference() {
-        let mut empty = MultiProofTargets::default();
+        let mut empty = LegacyMultiProofTargets::default();
         empty.retain_difference(&Default::default());
         assert!(empty.is_empty());
 
-        let targets = MultiProofTargets::accounts((0..10).map(B256::with_last_byte));
+        let targets = LegacyMultiProofTargets::accounts((0..10).map(B256::with_last_byte));
 
         let mut diffed = targets.clone();
-        diffed.retain_difference(&MultiProofTargets::account(B256::with_last_byte(11)));
+        diffed.retain_difference(&LegacyMultiProofTargets::account(B256::with_last_byte(11)));
         assert_eq!(diffed, targets);
 
-        diffed.retain_difference(&MultiProofTargets::accounts((0..5).map(B256::with_last_byte)));
-        assert_eq!(diffed, MultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
+        diffed.retain_difference(&LegacyMultiProofTargets::accounts(
+            (0..5).map(B256::with_last_byte),
+        ));
+        assert_eq!(diffed, LegacyMultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
 
         diffed.retain_difference(&targets);
         assert!(diffed.is_empty());
 
-        let mut targets = MultiProofTargets::default();
+        let mut targets = LegacyMultiProofTargets::default();
         let (account1, account2, account3) =
             (1..=3).map(B256::with_last_byte).collect_tuple().unwrap();
         let account2_slots = (1..5).map(B256::with_last_byte).collect::<B256Set>();
@@ -1017,13 +1022,16 @@ mod tests {
         targets.insert(account3, B256Set::from_iter([B256::with_last_byte(1)]));
 
         let mut diffed = targets.clone();
-        diffed.retain_difference(&MultiProofTargets::accounts((1..=3).map(B256::with_last_byte)));
+        diffed.retain_difference(&LegacyMultiProofTargets::accounts(
+            (1..=3).map(B256::with_last_byte),
+        ));
         assert_eq!(diffed, targets);
 
         // remove last 3 slots for account 2
         let mut account2_slots_expected_len = account2_slots.len();
         for slot in account2_slots.iter().skip(1) {
-            diffed.retain_difference(&MultiProofTargets::account_with_slots(account2, [*slot]));
+            diffed
+                .retain_difference(&LegacyMultiProofTargets::account_with_slots(account2, [*slot]));
             account2_slots_expected_len -= 1;
             assert_eq!(
                 diffed.get(&account2).map(|slots| slots.len()),
@@ -1037,7 +1045,7 @@ mod tests {
 
     #[test]
     fn test_multi_proof_retain_difference_no_overlap() {
-        let mut targets = MultiProofTargets::default();
+        let mut targets = LegacyMultiProofTargets::default();
 
         // populate some targets
         let (addr1, addr2) = (B256::random(), B256::random());
@@ -1050,7 +1058,7 @@ mod tests {
         assert_eq!(retained, targets);
 
         // add a different addr and slot to fetched proof targets
-        let mut other_targets = MultiProofTargets::default();
+        let mut other_targets = LegacyMultiProofTargets::default();
         let addr3 = B256::random();
         let slot3 = B256::random();
         other_targets.insert(addr3, B256Set::from_iter([slot3]));
@@ -1065,14 +1073,14 @@ mod tests {
     #[test]
     fn test_get_prefetch_proof_targets_remove_subset() {
         // populate some targets
-        let mut targets = MultiProofTargets::default();
+        let mut targets = LegacyMultiProofTargets::default();
         let (addr1, addr2) = (B256::random(), B256::random());
         let (slot1, slot2) = (B256::random(), B256::random());
         targets.insert(addr1, B256Set::from_iter([slot1]));
         targets.insert(addr2, B256Set::from_iter([slot2]));
 
         // add a subset of the first target to other proof targets
-        let other_targets = MultiProofTargets::account_with_slots(addr1, [slot1]);
+        let other_targets = LegacyMultiProofTargets::account_with_slots(addr1, [slot1]);
 
         let mut retained = targets.clone();
         retained.retain_difference(&other_targets);
@@ -1127,7 +1135,7 @@ mod tests {
 
     #[test]
     fn test_multiproof_targets_chunking_length() {
-        let mut targets = MultiProofTargets::default();
+        let mut targets = LegacyMultiProofTargets::default();
         targets.insert(B256::with_last_byte(1), B256Set::default());
         targets.insert(
             B256::with_last_byte(2),

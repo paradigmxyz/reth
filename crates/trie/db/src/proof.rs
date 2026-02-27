@@ -6,7 +6,7 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    AccountProof, HashedPostStateSorted, HashedStorage, LegacyMultiProofTargets, MultiProof,
     StorageMultiProof, TrieInput,
 };
 
@@ -30,7 +30,7 @@ pub trait DatabaseProof<'a> {
     fn overlay_multiproof(
         &self,
         input: TrieInput,
-        targets: MultiProofTargets,
+        targets: LegacyMultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
 }
 
@@ -61,7 +61,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
     fn overlay_multiproof(
         &self,
         input: TrieInput,
-        targets: MultiProofTargets,
+        targets: LegacyMultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();

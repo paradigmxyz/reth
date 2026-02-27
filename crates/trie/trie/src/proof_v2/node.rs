@@ -2,8 +2,8 @@ use crate::proof_v2::DeferredValueEncoder;
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNodeV2, RlpNode,
-    TrieMask, TrieNodeV2,
+    BranchNode, BranchNodeMasks, LeafNode, LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask,
+    TrieNode,
 };
 
 /// A trie node which is the child of a branch in the trie.
@@ -19,7 +19,7 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     /// A branch node whose children have already been flattened into [`RlpNode`]s.
     Branch {
         /// The node itself, for use during RLP encoding.
-        node: BranchNodeV2,
+        node: BranchNode,
         /// Bitmasks carried over from cached `BranchNodeCompact` values, if any.
         masks: Option<BranchNodeMasks>,
     },
@@ -67,7 +67,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
-    /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
+    /// Converts this child into a [`ProofTrieNode`] having the given path.
     ///
     /// # Panics
     ///
@@ -76,7 +76,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         self,
         path: Nibbles,
         buf: &mut Vec<u8>,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<ProofTrieNode, StateProofError> {
         let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
@@ -88,13 +88,13 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 // this value, and the passed in buffer can remain with whatever large capacity it
                 // already has.
                 let rlp_val = buf.clone();
-                (TrieNodeV2::Leaf(LeafNode::new(short_key, rlp_val)), None)
+                (TrieNode::Leaf(LeafNode::new(short_key, rlp_val)), None)
             }
-            Self::Branch { node, masks } => (TrieNodeV2::Branch(node), masks),
+            Self::Branch { node, masks } => (TrieNode::Branch(node), masks),
             Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
         };
 
-        Ok(ProofTrieNodeV2 { node, path, masks })
+        Ok(ProofTrieNode { node, path, masks })
     }
 
     /// Returns the short key of the child, if it is a leaf or branch, or empty if its a
@@ -102,7 +102,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     pub(crate) fn short_key(&self) -> &Nibbles {
         match self {
             Self::Leaf { short_key, .. } |
-            Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } => short_key,
+            Self::Branch { node: BranchNode { key: short_key, .. }, .. } => short_key,
             Self::RlpNode(_) => {
                 static EMPTY_NIBBLES: Nibbles = Nibbles::new();
                 &EMPTY_NIBBLES
@@ -125,7 +125,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Leaf { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
-            Self::Branch { node: BranchNodeV2 { key, branch_rlp_node, .. }, .. } => {
+            Self::Branch { node: BranchNode { key, branch_rlp_node, .. }, .. } => {
                 *key = trim_nibbles_prefix(key, len);
                 if key.is_empty() {
                     *branch_rlp_node = None;

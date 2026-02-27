@@ -3,7 +3,7 @@ use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{map::HashSet, B256};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_primitives_traits::FastInstant as Instant;
-use reth_trie_common::{MultiProofTargets, Nibbles};
+use reth_trie_common::{LegacyMultiProofTargets, Nibbles};
 use reth_trie_sparse::provider::{
     pad_path_to_key, RevealedNode, TrieNodeProvider, TrieNodeProviderFactory,
 };
@@ -73,7 +73,8 @@ where
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
-        let targets = MultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
+        let targets =
+            LegacyMultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
         let mut proof = Proof::new(&self.trie_cursor_factory, &self.hashed_cursor_factory)
             .with_branch_node_masks(true)
             .multiproof(targets)

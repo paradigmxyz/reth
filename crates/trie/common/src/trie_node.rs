@@ -1,51 +1,51 @@
-//! Version 2 types related to representing nodes in an MPT.
+//! Types related to representing nodes in an MPT.
 
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
 use alloy_primitives::hex;
 use alloy_rlp::{bytes, Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
-    nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
+    nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode},
     Nibbles, TrieMask,
 };
 use core::fmt;
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProofTrieNodeV2 {
+pub struct ProofTrieNode {
     /// Path of the node.
     pub path: Nibbles,
     /// The node itself.
-    pub node: TrieNodeV2,
+    pub node: TrieNode,
     /// Tree and hash masks for the node, if known.
     /// Both masks are always set together (from database branch nodes).
     pub masks: Option<BranchNodeMasks>,
 }
 
-impl ProofTrieNodeV2 {
-    /// Converts an iterator of `(path, TrieNode, masks)` tuples into `Vec<ProofTrieNodeV2>`,
+impl ProofTrieNode {
+    /// Converts an iterator of `(path, alloy TrieNode, masks)` tuples into `Vec<ProofTrieNode>`,
     /// merging extension nodes into their child branch nodes.
     ///
     /// The input **must** be sorted in depth-first order (children before parents) for extension
     /// merging to work correctly.
     pub fn from_sorted_trie_nodes(
-        iter: impl IntoIterator<Item = (Nibbles, TrieNode, Option<BranchNodeMasks>)>,
+        iter: impl IntoIterator<Item = (Nibbles, alloy_trie::nodes::TrieNode, Option<BranchNodeMasks>)>,
     ) -> Vec<Self> {
         let iter = iter.into_iter();
         let mut result = Vec::with_capacity(iter.size_hint().0);
 
         for (path, node, masks) in iter {
             match node {
-                TrieNode::EmptyRoot => {
-                    result.push(Self { path, node: TrieNodeV2::EmptyRoot, masks });
+                alloy_trie::nodes::TrieNode::EmptyRoot => {
+                    result.push(Self { path, node: TrieNode::EmptyRoot, masks });
                 }
-                TrieNode::Leaf(leaf) => {
-                    result.push(Self { path, node: TrieNodeV2::Leaf(leaf), masks });
+                alloy_trie::nodes::TrieNode::Leaf(leaf) => {
+                    result.push(Self { path, node: TrieNode::Leaf(leaf), masks });
                 }
-                TrieNode::Branch(branch) => {
+                alloy_trie::nodes::TrieNode::Branch(branch) => {
                     result.push(Self {
                         path,
-                        node: TrieNodeV2::Branch(BranchNodeV2 {
+                        node: TrieNode::Branch(BranchNode {
                             key: Nibbles::new(),
                             branch_rlp_node: None,
                             stack: branch.stack,
@@ -54,7 +54,7 @@ impl ProofTrieNodeV2 {
                         masks,
                     });
                 }
-                TrieNode::Extension(ext) => {
+                alloy_trie::nodes::TrieNode::Extension(ext) => {
                     // In depth-first order, the child branch comes BEFORE the parent
                     // extension. The child branch should be the last item we added to
                     // result, at path extension.path + extension.key.
@@ -63,24 +63,23 @@ impl ProofTrieNodeV2 {
                     // Check if the last item in result is the child branch
                     if let Some(last) = result.last_mut() &&
                         last.path == expected_branch_path &&
-                        let TrieNodeV2::Branch(branch_v2) = &mut last.node
+                        let TrieNode::Branch(branch) = &mut last.node
                     {
                         debug_assert!(
-                            branch_v2.key.is_empty(),
+                            branch.key.is_empty(),
                             "Branch at {:?} already has extension key {:?}",
                             last.path,
-                            branch_v2.key
+                            branch.key
                         );
-                        branch_v2.key = ext.key;
-                        branch_v2.branch_rlp_node = Some(ext.child);
+                        branch.key = ext.key;
+                        branch.branch_rlp_node = Some(ext.child);
                         last.path = path;
                     }
 
                     // If we reach here, the extension's child is not a branch in the
                     // result. This happens when the child branch is hashed (not revealed
-                    // in the proof). In V2 format, extension nodes are always combined
-                    // with their child branch, so we skip extension nodes whose child
-                    // isn't revealed.
+                    // in the proof). Extension nodes are always combined with their child
+                    // branch, so we skip extension nodes whose child isn't revealed.
                 }
             }
         }
@@ -91,15 +90,14 @@ impl ProofTrieNodeV2 {
 
 /// Enum representing an MPT trie node.
 ///
-/// This is a V2 representiation, differing from [`TrieNode`] in that branch and extension nodes are
-/// compressed into a single node.
+/// Branch and extension nodes are compressed into a single node.
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TrieNodeV2 {
+pub enum TrieNode {
     /// Variant representing empty root node.
     EmptyRoot,
-    /// Variant representing a [`BranchNodeV2`].
-    Branch(BranchNodeV2),
+    /// Variant representing a [`BranchNode`].
+    Branch(BranchNode),
     /// Variant representing a [`LeafNode`].
     Leaf(LeafNode),
     /// Variant representing an [`ExtensionNode`].
@@ -110,7 +108,7 @@ pub enum TrieNodeV2 {
     Extension(ExtensionNode),
 }
 
-impl Encodable for TrieNodeV2 {
+impl Encodable for TrieNode {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::EmptyRoot => {
@@ -127,18 +125,18 @@ impl Encodable for TrieNodeV2 {
     }
 }
 
-impl Decodable for TrieNodeV2 {
+impl Decodable for TrieNode {
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        match TrieNode::decode(buf)? {
-            TrieNode::EmptyRoot => Ok(Self::EmptyRoot),
-            TrieNode::Leaf(leaf) => Ok(Self::Leaf(leaf)),
-            TrieNode::Branch(branch) => Ok(Self::Branch(BranchNodeV2::new(
+        match alloy_trie::nodes::TrieNode::decode(buf)? {
+            alloy_trie::nodes::TrieNode::EmptyRoot => Ok(Self::EmptyRoot),
+            alloy_trie::nodes::TrieNode::Leaf(leaf) => Ok(Self::Leaf(leaf)),
+            alloy_trie::nodes::TrieNode::Branch(branch) => Ok(Self::Branch(BranchNode::new(
                 Default::default(),
                 branch.stack,
                 branch.state_mask,
                 None,
             ))),
-            TrieNode::Extension(ext) => {
+            alloy_trie::nodes::TrieNode::Extension(ext) => {
                 if ext.child.is_hash() {
                     Ok(Self::Extension(ext))
                 } else {
@@ -166,7 +164,7 @@ impl Decodable for TrieNodeV2 {
 /// This node also encompasses the possible parent extension node of a branch via the `key` field.
 #[derive(PartialEq, Eq, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BranchNodeV2 {
+pub struct BranchNode {
     /// The key for the branch's parent extension. if key is empty then the branch does not have a
     /// parent extension.
     pub key: Nibbles,
@@ -179,7 +177,7 @@ pub struct BranchNodeV2 {
     pub branch_rlp_node: Option<RlpNode>,
 }
 
-impl fmt::Debug for BranchNodeV2 {
+impl fmt::Debug for BranchNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BranchNode")
             .field("key", &self.key)
@@ -190,7 +188,7 @@ impl fmt::Debug for BranchNodeV2 {
     }
 }
 
-impl BranchNodeV2 {
+impl BranchNode {
     /// Creates a new branch node with the given short key, stack, and state mask.
     pub const fn new(
         key: Nibbles,
@@ -202,7 +200,7 @@ impl BranchNodeV2 {
     }
 }
 
-impl Encodable for BranchNodeV2 {
+impl Encodable for BranchNode {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         if self.key.is_empty() {
             BranchNodeRef::new(&self.stack, self.state_mask).encode(out);

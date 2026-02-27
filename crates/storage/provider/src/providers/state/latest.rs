@@ -220,7 +220,8 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+            let legacy_targets = targets.into_legacy();
+            proof.overlay_multiproof(input, legacy_targets).map_err(ProviderError::from)
         })
     }
 

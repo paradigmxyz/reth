@@ -19,7 +19,7 @@ use reth_execution_errors::{
     SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
     TrieWitnessError,
 };
-use reth_trie_common::{MultiProofTargets, Nibbles};
+use reth_trie_common::{LegacyMultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SparseStateTrie,
@@ -111,7 +111,7 @@ where
         }
 
         let proof_targets = if is_state_empty {
-            MultiProofTargets::account(B256::ZERO)
+            LegacyMultiProofTargets::account(B256::ZERO)
         } else {
             self.get_proof_targets(&state)?
         };
@@ -210,8 +210,8 @@ where
     fn get_proof_targets(
         &self,
         state: &HashedPostState,
-    ) -> Result<MultiProofTargets, StateProofError> {
-        let mut proof_targets = MultiProofTargets::default();
+    ) -> Result<LegacyMultiProofTargets, StateProofError> {
+        let mut proof_targets = LegacyMultiProofTargets::default();
         for hashed_address in state.accounts.keys() {
             proof_targets.insert(*hashed_address, B256Set::default());
         }

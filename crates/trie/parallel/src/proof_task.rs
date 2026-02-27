@@ -47,8 +47,7 @@ use reth_trie::{
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
     trie_cursor::TrieCursorFactory,
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target,
+    DecodedMultiProof, HashedPostState, MultiProofTargets, Nibbles, ProofTarget, ProofTrieNode,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -70,8 +69,8 @@ use crate::proof_task_metrics::{
 
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// Type alias for the V2 account proof calculator.
-type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
+/// Type alias for the account proof calculator.
+type AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
     <Provider as HashedCursorFactory>::AccountCursor<'a>,
     AsyncAccountValueEncoder<
@@ -80,8 +79,8 @@ type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     >,
 >;
 
-/// Type alias for the V2 storage proof calculator.
-type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
+/// Type alias for the storage proof calculator.
+type StorageProofCalc<'a, Provider> = proof_v2::StorageProofCalculator<
     <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
     <Provider as HashedCursorFactory>::StorageCursor<'a>,
 >;
@@ -414,7 +413,7 @@ impl<Provider> ProofTaskTx<Provider>
 where
     Provider: TrieCursorFactory + HashedCursorFactory,
 {
-    fn compute_v2_storage_proof(
+    fn compute_storage_proof(
         &self,
         input: StorageProofInput,
         calculator: &mut proof_v2::StorageProofCalculator<
@@ -426,7 +425,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "V2 Storage proof calculation",
+            "Storage proof calculation",
             n = %targets.len(),
         );
         let _span_guard = span.enter();
@@ -449,7 +448,7 @@ where
             proof_time_us = proof_start.elapsed().as_micros(),
             ?root,
             worker_id = self.id,
-            "Completed V2 storage proof calculation"
+            "Completed storage proof calculation"
         );
 
         Ok(StorageProofResult { proof, root })
@@ -530,7 +529,7 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 #[derive(Debug)]
 pub struct ProofResultMessage {
     /// The proof calculation result
-    pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
+    pub result: Result<DecodedMultiProof, ParallelStateRootError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
     /// Original state update that triggered this proof
@@ -565,9 +564,9 @@ impl ProofResultContext {
 /// The results of a storage proof calculation.
 #[derive(Debug)]
 pub(crate) struct StorageProofResult {
-    /// The calculated V2 proof nodes
-    pub proof: Vec<ProofTrieNodeV2>,
-    /// The storage root calculated by the V2 proof
+    /// The calculated proof nodes
+    pub proof: Vec<ProofTrieNode>,
+    /// The storage root calculated by the proof
     pub root: Option<B256>,
 }
 
@@ -692,7 +691,7 @@ where
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
         let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
         let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let mut v2_calculator =
+        let mut calculator =
             proof_v2::StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Initially mark this worker as available.
@@ -711,7 +710,7 @@ where
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                     self.process_storage_proof(
                         &proof_tx,
-                        &mut v2_calculator,
+                        &mut calculator,
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
@@ -759,7 +758,7 @@ where
     fn process_storage_proof<Provider>(
         &self,
         proof_tx: &ProofTaskTx<Provider>,
-        v2_calculator: &mut proof_v2::StorageProofCalculator<
+        calculator: &mut proof_v2::StorageProofCalculator<
             <Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
             <Provider as HashedCursorFactory>::StorageCursor<'_>,
         >,
@@ -777,10 +776,10 @@ where
             worker_id = self.worker_id,
             hashed_address = ?hashed_address,
             targets_len = input.targets.len(),
-            "Processing V2 storage proof"
+            "Processing storage proof"
         );
 
-        let result = proof_tx.compute_v2_storage_proof(input, v2_calculator);
+        let result = proof_tx.compute_storage_proof(input, calculator);
 
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
@@ -945,7 +944,7 @@ where
         let mut account_nodes_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        // Create both account and storage calculators for V2 proofs.
+        // Create both account and storage calculators for proofs.
         // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
         let account_trie_cursor = provider.account_trie_cursor()?;
         let account_hashed_cursor = provider.hashed_account_cursor()?;
@@ -953,7 +952,7 @@ where
         let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
         let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
-        let mut v2_account_calculator = proof_v2::ProofCalculator::<
+        let mut account_calculator = proof_v2::ProofCalculator::<
             _,
             _,
             AsyncAccountValueEncoder<
@@ -961,7 +960,7 @@ where
                 <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
             >,
         >::new(account_trie_cursor, account_hashed_cursor);
-        let v2_storage_calculator =
+        let storage_calculator =
             Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
                 storage_trie_cursor,
                 storage_hashed_cursor,
@@ -983,8 +982,8 @@ where
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
-                        &mut v2_account_calculator,
-                        v2_storage_calculator.clone(),
+                        &mut account_calculator,
+                        storage_calculator.clone(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
@@ -1030,42 +1029,41 @@ where
         Ok(())
     }
 
-    fn compute_v2_account_multiproof<'a, Provider>(
+    fn compute_account_multiproof<'a, Provider>(
         &self,
-        v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
-        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
-        targets: MultiProofTargetsV2,
-    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
+        account_calculator: &mut AccountProofCalculator<'a, Provider>,
+        storage_calculator: Rc<RefCell<StorageProofCalc<'a, Provider>>>,
+        targets: MultiProofTargets,
+    ) -> Result<(DecodedMultiProof, ValueEncoderStats), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
-        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+        let MultiProofTargets { mut account_targets, storage_targets } = targets;
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "Account V2 multiproof calculation",
+            "Account multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
         );
         let _span_guard = span.enter();
 
-        trace!(target: "trie::proof_task", "Processing V2 account multiproof");
+        trace!(target: "trie::proof_task", "Processing account multiproof");
 
         let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+            dispatch_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
-            v2_storage_calculator,
+            storage_calculator,
         );
 
-        let account_proofs =
-            v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
+        let account_proofs = account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
         let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
 
-        let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
+        let proof = DecodedMultiProof { account_proofs, storage_proofs };
 
         Ok((proof, value_encoder_stats))
     }
@@ -1075,8 +1073,8 @@ where
     /// Returns stats from the value encoder used during proof computation.
     fn process_account_multiproof<'a, Provider>(
         &self,
-        v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
-        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
+        account_calculator: &mut AccountProofCalculator<'a, Provider>,
+        storage_calculator: Rc<RefCell<StorageProofCalc<'a, Provider>>>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
@@ -1088,9 +1086,9 @@ where
         let proof_start = Instant::now();
 
         let AccountMultiproofInput { targets, proof_result_sender } = input;
-        let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
-            v2_account_calculator,
-            v2_storage_calculator,
+        let (result, value_encoder_stats) = match self.compute_account_multiproof::<Provider>(
+            account_calculator,
+            storage_calculator,
             targets,
         ) {
             Ok((proof, stats)) => (Ok(proof), stats),
@@ -1187,17 +1185,17 @@ where
     }
 }
 
-/// Queues V2 storage proofs for all accounts in the targets and returns receivers.
+/// Queues storage proofs for all accounts in the targets and returns receivers.
 ///
 /// This function queues all storage proof tasks to the worker pool but returns immediately
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn dispatch_v2_storage_proofs(
+fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &[ProofV2Target],
-    mut storage_targets: B256Map<Vec<ProofV2Target>>,
+    account_targets: &[ProofTarget],
+    mut storage_targets: B256Map<Vec<ProofTarget>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1247,12 +1245,12 @@ pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
     pub hashed_address: B256,
     /// The set of proof targets
-    pub targets: Vec<ProofV2Target>,
+    pub targets: Vec<ProofTarget>,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
+    pub const fn new(hashed_address: B256, targets: Vec<ProofTarget>) -> Self {
         Self { hashed_address, targets }
     }
 }
@@ -1261,7 +1259,7 @@ impl StorageProofInput {
 #[derive(Debug)]
 pub struct AccountMultiproofInput {
     /// The targets for which to compute the multiproof.
-    pub targets: MultiProofTargetsV2,
+    pub targets: MultiProofTargets,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
 }
