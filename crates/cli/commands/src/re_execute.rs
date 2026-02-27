@@ -91,9 +91,15 @@ fn find_and_trace_failing_tx<C, DB, Spec>(
 
     // Execute transactions one by one to find which one fails.
     let mut state = State::builder().with_database(make_db()).with_bundle_update().build();
+
+    // EIP-161: set state clear flag based on Spurious Dragon activation.
+    state
+        .cache
+        .set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
+
     let mut evm = evm_config.evm_with_env(&mut state, evm_env);
 
-    // Apply pre-execution system calls first.
+    // Apply pre-execution system calls (EIP-2935, EIP-4788).
     if let Err(err) =
         SystemCaller::new(spec.clone()).apply_pre_execution_changes(block.header(), &mut evm)
     {
@@ -152,6 +158,11 @@ fn trace_failed_transaction<C, DB, Spec>(
     };
 
     let mut state = State::builder().with_database(db).with_bundle_update().build();
+
+    // EIP-161: set state clear flag based on Spurious Dragon activation.
+    state
+        .cache
+        .set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
 
     // Apply pre-execution system calls (EIP-4788, EIP-2935) and replay prior txs.
     {
