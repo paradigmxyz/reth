@@ -879,10 +879,7 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module(
-        &self,
-        engine_api: impl IntoEngineApiRpcModule,
-    ) -> AuthRpcModule {
+    pub fn create_auth_module(&self, engine_api: impl IntoEngineApiRpcModule) -> AuthRpcModule {
         let mut module = engine_api.into_rpc_module();
 
         // also merge a subset of `eth_` handlers

@@ -2511,8 +2511,8 @@ mod tests {
         assert_eq!(db_changeset.len(), 1);
         assert_eq!(mem_changeset.len(), 1);
 
-        let db_key = db_changeset[0].1.key.as_b256();
-        let mem_key = mem_changeset[0].1.key.as_b256();
+        let db_key = B256::from(db_changeset[0].1.key);
+        let mem_key = B256::from(mem_changeset[0].1.key);
 
         assert_eq!(db_key, slot_b256, "DB changeset should use plain (unhashed) key");
         assert_eq!(mem_key, slot_b256, "In-memory changeset should use plain (unhashed) key");
@@ -2610,7 +2610,8 @@ mod tests {
 
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
-        let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key.as_b256()).collect();
+        let keys: Vec<B256> =
+            all_changesets.iter().map(|(_, entry)| B256::from(entry.key)).collect();
 
         assert_eq!(
             keys[0], keys[1],
@@ -2707,7 +2708,8 @@ mod tests {
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
         let slot_b256 = B256::from(slot);
-        let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key.as_b256()).collect();
+        let keys: Vec<B256> =
+            all_changesets.iter().map(|(_, entry)| B256::from(entry.key)).collect();
 
         assert_eq!(
             keys[0], keys[1],
