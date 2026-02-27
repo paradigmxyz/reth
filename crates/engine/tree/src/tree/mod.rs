@@ -2583,6 +2583,51 @@ where
         Some(TreeEvent::Download(request))
     }
 
+    /// Handles a downloaded block that was successfully inserted as valid.
+    ///
+    /// If the block matches the sync target head, returns [`TreeAction::MakeCanonical`].
+    /// If it matches a non-head sync target (safe or finalized), makes it canonical inline
+    /// and triggers a download for the remaining blocks towards the actual head.
+    /// Otherwise, tries to connect buffered blocks.
+    fn on_valid_downloaded_block(
+        &mut self,
+        block_num_hash: BlockNumHash,
+    ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
+        // check if we just inserted a block that's part of sync targets,
+        // i.e. head, safe, or finalized
+        if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state() &&
+            sync_target.contains(block_num_hash.hash)
+        {
+            debug!(target: "engine::tree", ?sync_target, "appended downloaded sync target block");
+
+            if sync_target.head_block_hash == block_num_hash.hash {
+                // we just inserted the sync target head block, make it canonical
+                return Ok(Some(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_num_hash.hash,
+                })))
+            }
+
+            // This block is part of the sync target (safe or finalized) but not the
+            // head. Make it canonical and try to connect any buffered children, then
+            // continue downloading towards the actual head if needed.
+            self.make_canonical(block_num_hash.hash)?;
+            self.try_connect_buffered_blocks(block_num_hash)?;
+
+            // Check if we've reached the sync target head after connecting buffered
+            // blocks (e.g. the head block may have already been buffered).
+            if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
+                let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
+                trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
+                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))))
+            }
+
+            return Ok(None)
+        }
+        trace!(target: "engine::tree", "appended downloaded block");
+        self.try_connect_buffered_blocks(block_num_hash)?;
+        Ok(None)
+    }
+
     /// Invoked with a block downloaded from the network
     ///
     /// Returns an event with the appropriate action to take, such as:
@@ -2606,21 +2651,7 @@ where
         // try to append the block
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
-                // check if we just inserted a block that's part of sync targets,
-                // i.e. head, safe, or finalized
-                if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state() &&
-                    sync_target.contains(block_num_hash.hash)
-                {
-                    debug!(target: "engine::tree", ?sync_target, "appended downloaded sync target block");
-
-                    // we just inserted a block that we know is part of the canonical chain, so we
-                    // can make it canonical
-                    return Ok(Some(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                        sync_target_head: block_num_hash.hash,
-                    })))
-                }
-                trace!(target: "engine::tree", "appended downloaded block");
-                self.try_connect_buffered_blocks(block_num_hash)?;
+                return self.on_valid_downloaded_block(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
