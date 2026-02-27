@@ -2650,7 +2650,10 @@ where
 
         // try to append the block
         match self.insert_block(block) {
-            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
+            Ok(
+                InsertPayloadOk::Inserted(BlockStatus::Valid) |
+                InsertPayloadOk::AlreadySeen(BlockStatus::Valid),
+            ) => {
                 return self.on_valid_downloaded_block(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
