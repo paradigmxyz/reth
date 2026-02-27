@@ -2145,8 +2145,7 @@ mod tests {
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
             storage_slot.present_value,
@@ -2232,8 +2231,7 @@ mod tests {
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
             storage_slot.present_value,
