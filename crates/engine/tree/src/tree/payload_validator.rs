@@ -4,7 +4,7 @@ use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
+    payload_processor::{PayloadProcessor, TxChannels},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     CacheWaitDurations, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
@@ -449,8 +449,10 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // Get an iterator over the transactions in the payload
+        // Get an iterator over the transactions in the payload and start preparing
+        // transactions immediately
         let txs = self.tx_iterator_for(&input)?;
+        let tx_channels = self.payload_processor.spawn_tx_iterator(txs, env.transaction_count);
 
         // Extract the BAL, if valid and available
         let block_access_list = ensure_ok!(input
@@ -474,7 +476,7 @@ where
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
-            txs,
+            tx_channels,
             provider_builder,
             overlay_factory.clone(),
             strategy,
@@ -1336,7 +1338,7 @@ where
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
-        txs: T,
+        tx_channels: TxChannels<Evm, T>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P>,
         strategy: StateRootStrategy,
@@ -1354,9 +1356,9 @@ where
                 let spawn_start = Instant::now();
 
                 // Use the pre-computed overlay factory for multiproofs
-                let handle = self.payload_processor.spawn(
+                let handle = self.payload_processor.spawn::<_, _, T>(
                     env,
-                    txs,
+                    tx_channels,
                     provider_builder,
                     overlay_factory,
                     &self.config,
@@ -1373,9 +1375,9 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle = self.payload_processor.spawn_cache_exclusive(
+                let handle = self.payload_processor.spawn_cache_exclusive::<_, T>(
                     env,
-                    txs,
+                    tx_channels,
                     provider_builder,
                     block_access_list,
                 );

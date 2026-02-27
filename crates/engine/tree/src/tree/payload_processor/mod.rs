@@ -103,6 +103,16 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+/// Type alias for [`WithTxEnv`] with the transaction environment for the given EVM.
+type WithTxEnvFor<Evm, I> = WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+
+/// Pre-spawned transaction channels returned by [`PayloadProcessor::spawn_tx_iterator`].
+#[derive(Debug)]
+pub struct TxChannels<Evm: ConfigureEvm, I: ExecutableTxIterator<Evm>> {
+    pub(crate) prewarm: mpsc::Receiver<(usize, WithTxEnvFor<Evm, I>)>,
+    pub(crate) execute: mpsc::Receiver<Result<WithTxEnvFor<Evm, I>, I::Error>>,
+}
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -263,7 +273,7 @@ where
     pub fn spawn<P, F, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
-        transactions: I,
+        tx_channels: TxChannels<Evm, I>,
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
@@ -277,10 +287,6 @@ where
             + Sync
             + 'static,
     {
-        // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
-
         let span = Span::current();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
@@ -289,7 +295,7 @@ where
         let chunk_size = config.multiproof_chunk_size();
         let prewarm_handle = self.spawn_caching_with(
             env,
-            prewarm_rx,
+            tx_channels.prewarm,
             provider_builder,
             Some(to_multi_proof.clone()),
             bal,
@@ -316,7 +322,7 @@ where
             to_multi_proof: Some(to_multi_proof),
             prewarm_handle,
             state_root: Some(state_root_rx),
-            transactions: execution_rx,
+            transactions: tx_channels.execute,
             _span: span,
         }
     }
@@ -328,21 +334,20 @@ where
     pub fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: I,
+        tx_channels: TxChannels<Evm, I>,
         provider_builder: StateProviderBuilder<N, P>,
         bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal);
+        let prewarm_handle =
+            self.spawn_caching_with(env, tx_channels.prewarm, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
             state_root: None,
-            transactions: execution_rx,
+            transactions: tx_channels.execute,
             _span: Span::current(),
         }
     }
@@ -374,16 +379,12 @@ where
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
-    #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
+    pub(crate) fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
         transaction_count: usize,
-    ) -> (
-        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
-    ) {
+    ) -> TxChannels<Evm, I> {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
 
@@ -439,7 +440,7 @@ where
             });
         }
 
-        (prewarm_rx, execute_rx)
+        TxChannels { prewarm: prewarm_rx, execute: execute_rx }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -1080,7 +1081,9 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor, TxChannels,
+        },
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1354,12 +1357,19 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle = payload_processor.spawn(
-            ExecutionEnv::test_default(),
-            (
-                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
-                std::convert::identity,
-            ),
+        type Txs = (
+            Vec<Result<Recovered<TransactionSigned>, core::convert::Infallible>>,
+            fn(
+                Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+            ) -> Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+        );
+
+        let env = ExecutionEnv::test_default();
+        let txs: Txs = (Vec::new(), std::convert::identity);
+        let tx_channels = payload_processor.spawn_tx_iterator(txs, env.transaction_count);
+        let mut handle = payload_processor.spawn::<_, _, Txs>(
+            env,
+            tx_channels,
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
