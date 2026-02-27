@@ -1,5 +1,6 @@
 use crate::error::mdbx_result;
-use std::{fmt, ptr, sync::atomic::AtomicPtr};
+use crossbeam_queue::ArrayQueue;
+use std::fmt;
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
@@ -12,12 +13,12 @@ use std::{fmt, ptr, sync::atomic::AtomicPtr};
 /// table mutex.
 ///
 /// Implemented using [`sharded_slab::Slab`] for lock-free, per-thread-sharded storage of reset
-/// txn handles. A lock-free Treiber stack tracks available slab keys for O(1) pop.
+/// txn handles. A lock-free [`ArrayQueue`] tracks available slab keys for O(1) pop.
 pub(crate) struct ReadTxnPool {
     /// Lock-free concurrent slab storing reset txn pointers, sharded per-thread.
     slab: sharded_slab::Slab<PooledTxn>,
-    /// Lock-free stack of slab keys available for reuse.
-    head: AtomicPtr<KeyNode>,
+    /// Lock-free bounded queue of slab keys available for reuse.
+    keys: ArrayQueue<usize>,
 }
 
 /// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the slab.
@@ -28,67 +29,18 @@ struct PooledTxn(*mut ffi::MDBX_txn);
 unsafe impl Send for PooledTxn {}
 unsafe impl Sync for PooledTxn {}
 
-/// Node in a lock-free Treiber stack of available slab keys.
-struct KeyNode {
-    key: usize,
-    next: *mut Self,
-}
-
 impl ReadTxnPool {
+    const MAX_POOLED: usize = 128;
+
     pub(crate) fn new() -> Self {
-        Self { slab: sharded_slab::Slab::new(), head: AtomicPtr::new(ptr::null_mut()) }
-    }
-
-    /// Pushes a slab key onto the lock-free stack.
-    fn push_key(&self, key: usize) {
-        let node = Box::into_raw(Box::new(KeyNode { key, next: ptr::null_mut() }));
-        loop {
-            let head = self.head.load(std::sync::atomic::Ordering::Relaxed);
-            unsafe { (*node).next = head };
-            if self
-                .head
-                .compare_exchange_weak(
-                    head,
-                    node,
-                    std::sync::atomic::Ordering::Release,
-                    std::sync::atomic::Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                break;
-            }
-        }
-    }
-
-    /// Pops a slab key from the lock-free stack. Returns `None` if empty.
-    fn pop_key(&self) -> Option<usize> {
-        loop {
-            let head = self.head.load(std::sync::atomic::Ordering::Acquire);
-            if head.is_null() {
-                return None;
-            }
-            let next = unsafe { (*head).next };
-            if self
-                .head
-                .compare_exchange_weak(
-                    head,
-                    next,
-                    std::sync::atomic::Ordering::AcqRel,
-                    std::sync::atomic::Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                let node = unsafe { Box::from_raw(head) };
-                return Some(node.key);
-            }
-        }
+        Self { slab: sharded_slab::Slab::new(), keys: ArrayQueue::new(Self::MAX_POOLED) }
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
     ///
     /// Returns `None` if the pool is empty or all renew attempts fail.
     pub(crate) fn get(&self) -> Option<*mut ffi::MDBX_txn> {
-        while let Some(key) = self.pop_key() {
+        while let Some(key) = self.keys.pop() {
             if let Some(handle) = self.slab.take(key) {
                 let txn = handle.0;
                 // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
@@ -116,7 +68,12 @@ impl ReadTxnPool {
         }
 
         if let Some(key) = self.slab.insert(PooledTxn(txn)) {
-            self.push_key(key);
+            if self.keys.push(key).is_err() {
+                // Queue full — take back from slab and abort.
+                if let Some(handle) = self.slab.take(key) {
+                    unsafe { ffi::mdbx_txn_abort(handle.0) };
+                }
+            }
         } else {
             // Slab full — abort the handle to release the reader slot.
             unsafe { ffi::mdbx_txn_abort(txn) };
@@ -125,7 +82,7 @@ impl ReadTxnPool {
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
     pub(crate) fn drain(&self) {
-        while let Some(key) = self.pop_key() {
+        while let Some(key) = self.keys.pop() {
             if let Some(handle) = self.slab.take(key) {
                 unsafe { ffi::mdbx_txn_abort(handle.0) };
             }
@@ -133,14 +90,13 @@ impl ReadTxnPool {
     }
 }
 
-// SAFETY: all fields are Send+Sync — slab is lock-free, head uses atomics,
-// KeyNode pointers have exclusive ownership via CAS.
+// SAFETY: all fields are Send+Sync — slab and ArrayQueue are both lock-free.
 unsafe impl Send for ReadTxnPool {}
 unsafe impl Sync for ReadTxnPool {}
 
 impl fmt::Debug for ReadTxnPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadTxnPool").finish_non_exhaustive()
+        f.debug_struct("ReadTxnPool").field("pooled", &self.keys.len()).finish()
     }
 }
 
