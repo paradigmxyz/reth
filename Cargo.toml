@@ -489,14 +489,9 @@ alloy-transport-ipc = { version = "1.7.3", default-features = false }
 alloy-transport-ws = { version = "1.7.3", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.27.2", default-features = false }
-alloy-op-hardforks = "0.4.4"
 op-alloy-rpc-types = { version = "0.24.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.24.0", default-features = false }
-op-alloy-network = { version = "0.24.0", default-features = false }
 op-alloy-consensus = { version = "0.24.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.24.0", default-features = false }
-op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
 either = { version = "1.15.0", default-features = false }
@@ -741,10 +736,8 @@ ipnet = "2.11"
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 #
@@ -755,9 +748,7 @@ ipnet = "2.11"
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "df124c0" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "df124c0" }
 
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
