@@ -213,7 +213,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     dirty_addresses.remove(acc);
                 }
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()
@@ -221,7 +221,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // can fetch all dirty accounts at once
                 let accs_to_reload = std::mem::take(&mut dirty_addresses);
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()

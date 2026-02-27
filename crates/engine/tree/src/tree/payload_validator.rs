@@ -619,7 +619,7 @@ where
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
-                                trie_updates.clone(),
+                                trie_updates.as_ref().clone(),
                             );
                             #[cfg(feature = "trie-debug")]
                             if _has_diff {
@@ -665,7 +665,7 @@ where
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, elapsed));
+                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -700,7 +700,7 @@ where
                 self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
             }
 
-            (root, updates, root_time.elapsed())
+            (root, Arc::new(updates), root_time.elapsed())
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -1104,7 +1104,7 @@ where
                             let (state_root, trie_updates) = result?;
                             return Ok(Ok(StateRootComputeOutcome {
                                 state_root,
-                                trie_updates,
+                                trie_updates: Arc::new(trie_updates),
                                 #[cfg(feature = "trie-debug")]
                                 debug_recorders: Vec::new(),
                             }));
@@ -1121,7 +1121,7 @@ where
                         let (state_root, trie_updates) = result?;
                         return Ok(Ok(StateRootComputeOutcome {
                             state_root,
-                            trie_updates,
+                            trie_updates: Arc::new(trie_updates),
                             #[cfg(feature = "trie-debug")]
                             debug_recorders: Vec::new(),
                         }));
@@ -1520,7 +1520,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: LazyHashedPostState,
-        trie_output: TrieUpdates,
+        trie_output: Arc<TrieUpdates>,
         overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
@@ -1543,7 +1543,7 @@ where
             Err(handle) => Arc::new(handle.get().clone()),
         };
         let deferred_trie_data =
-            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
+            DeferredTrieData::pending(hashed_state, trie_output, anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 

@@ -202,6 +202,18 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks().iter().map(|block| block.1)
     }
 
+    /// Returns an iterator over all transactions in the chain.
+    pub fn transactions_iter(&self) -> impl Iterator<Item = &N::SignedTx> + '_ {
+        self.blocks_iter().flat_map(|block| block.body().transactions())
+    }
+
+    /// Returns an iterator over all [`Recovered`] transaction references in the chain.
+    pub fn transactions_recovered_iter(
+        &self,
+    ) -> impl Iterator<Item = Recovered<&N::SignedTx>> + '_ {
+        self.blocks_iter().flat_map(|block| block.transactions_recovered())
+    }
+
     /// Returns an iterator over all blocks and their receipts in the chain.
     pub fn blocks_and_receipts(
         &self,

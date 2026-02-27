@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use crate::tree::{
     multiproof::{
@@ -230,8 +230,10 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         disable_pruning: bool,
+        updates: &TrieUpdates,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
+        trie.commit_updates(updates);
         if !disable_pruning {
             trie.prune(prune_depth, max_storage_tries);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
@@ -384,7 +386,7 @@ where
 
         Ok(StateRootComputeOutcome {
             state_root,
-            trie_updates,
+            trie_updates: Arc::new(trie_updates),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -830,7 +832,6 @@ where
                         targets: proof_targets,
                         proof_result_sender: ProofResultContext::new(
                             self.proof_result_tx.clone(),
-                            0,
                             HashedPostState::default(),
                             Instant::now(),
                         ),
@@ -908,12 +909,12 @@ enum SparseTrieTaskMessage {
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
-    pub trie_updates: TrieUpdates,
+    pub trie_updates: Arc<TrieUpdates>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]

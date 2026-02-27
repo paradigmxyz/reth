@@ -19,6 +19,7 @@ mod list;
 mod prune_checkpoints;
 mod repair_trie;
 mod settings;
+mod stage_checkpoints;
 mod state;
 mod static_file_header;
 mod stats;
@@ -70,6 +71,8 @@ pub enum Subcommands {
     Settings(settings::Command),
     /// View or set prune checkpoints
     PruneCheckpoints(prune_checkpoints::Command),
+    // View or set stage checkpoints
+    StageCheckpoints(stage_checkpoints::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
@@ -209,6 +212,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::PruneCheckpoints(command) => {
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::StageCheckpoints(command) => {
                 db_exec!(self.env, tool, N, command.access_rights(), {
                     command.execute(&tool)?;
                 });

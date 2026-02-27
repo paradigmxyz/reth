@@ -23,6 +23,7 @@ metrics.workspace = true
 
 # misc
 dashmap.workspace = true
+thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 

@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use reth_rpc_api::RethNewPayloadInput;
 use serde::Deserialize;
 use std::time::Duration;
 use tracing::{debug, error};
@@ -169,7 +170,15 @@ where
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
-) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value, ExecutionData)> {
+    rlp: Option<Bytes>,
+    reth_new_payload: bool,
+) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    if let Some(rlp) = rlp {
+        return Ok((
+            None,
+            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),))?,
+        ));
+    }
     let block = block
         .into_inner()
         .map_header(|header| header.map(|h| h.into_header_with_defaults()))
@@ -181,7 +190,14 @@ pub(crate) fn block_to_new_payload(
 
     // Convert to execution payload
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)
+    let (version, params, execution_data) =
+        payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
+
+    if reth_new_payload {
+        Ok((None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?))
+    } else {
+        Ok((Some(version), params))
+    }
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an
@@ -266,17 +282,15 @@ pub(crate) fn payload_to_new_payload(
 #[allow(dead_code)]
 pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     provider: P,
-    version: EngineApiMessageVersion,
+    version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
-) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
-    call_new_payload_with_reth(provider, version, params, None).await
+) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
+    call_new_payload_with_reth(provider, version, params).await
 }
 
 /// Response from `reth_newPayload` endpoint, which includes server-measured latency.
 #[derive(Debug, Deserialize)]
 struct RethPayloadStatus {
-    #[serde(flatten)]
-    status: PayloadStatus,
     latency_us: u64,
     #[serde(default)]
     persistence_wait_us: Option<u64>,
@@ -300,72 +314,50 @@ pub(crate) struct NewPayloadTimingBreakdown {
 }
 
 /// Calls either `engine_newPayload*` or `reth_newPayload` depending on whether
-/// `reth_execution_data` is provided.
+/// `version` is provided.
 ///
-/// When `reth_execution_data` is `Some`, uses the `reth_newPayload` endpoint which takes
-/// `ExecutionData` directly and waits for persistence and cache updates to complete.
+/// When `version` is `None`, uses `reth_newPayload` endpoint with provided params.
 ///
 /// Returns the server-reported timing breakdown when using the reth namespace, or `None` for
 /// the standard engine namespace.
 pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
     provider: P,
-    version: EngineApiMessageVersion,
+    version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
-    reth_execution_data: Option<ExecutionData>,
-) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
-    if let Some(execution_data) = reth_execution_data {
-        let method = "reth_newPayload";
-        let reth_params = serde_json::to_value((execution_data.clone(),))
-            .expect("ExecutionData serialization cannot fail");
+) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
+    let method = version.map(|v| v.method_name()).unwrap_or("reth_newPayload");
 
-        debug!(target: "reth-bench", method, "Sending newPayload");
+    debug!(target: "reth-bench", method, "Sending newPayload");
 
-        let mut resp: RethPayloadStatus = provider.client().request(method, &reth_params).await?;
+    let resp = loop {
+        let resp: serde_json::Value = provider.client().request(method, &params).await?;
+        let status = PayloadStatus::deserialize(&resp)?;
 
-        while !resp.status.is_valid() {
-            if resp.status.is_invalid() {
-                error!(target: "reth-bench", status=?resp.status, "Invalid {method}");
-                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
-                    std::io::Error::other(format!("Invalid {method}: {:?}", resp.status)),
-                )))
-            }
-            if resp.status.is_syncing() {
-                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
-                    "invalid range: no canonical state found for parent of requested block",
-                ))
-            }
-            resp = provider.client().request(method, &reth_params).await?;
+        if status.is_valid() {
+            break resp;
         }
-
-        Ok(Some(NewPayloadTimingBreakdown {
-            latency: Duration::from_micros(resp.latency_us),
-            persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
-            execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
-            sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
-        }))
-    } else {
-        let method = version.method_name();
-
-        debug!(target: "reth-bench", method, "Sending newPayload");
-
-        let mut status: PayloadStatus = provider.client().request(method, &params).await?;
-
-        while !status.is_valid() {
-            if status.is_invalid() {
-                error!(target: "reth-bench", ?status, ?params, "Invalid {method}",);
-                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
-                    std::io::Error::other(format!("Invalid {method}: {status:?}")),
-                )))
-            }
-            if status.is_syncing() {
-                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
-                    "invalid range: no canonical state found for parent of requested block",
-                ))
-            }
-            status = provider.client().request(method, &params).await?;
+        if status.is_invalid() {
+            return Err(eyre::eyre!("Invalid {method}: {status:?}"));
         }
-        Ok(None)
+        if status.is_syncing() {
+            return Err(eyre::eyre!(
+                "invalid range: no canonical state found for parent of requested block"
+            ));
+        }
+    };
+
+    if version.is_some() {
+        return Ok(None);
     }
+
+    let resp: RethPayloadStatus = serde_json::from_value(resp)?;
+
+    Ok(Some(NewPayloadTimingBreakdown {
+        latency: Duration::from_micros(resp.latency_us),
+        persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+        execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
+        sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+    }))
 }
 
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given
@@ -403,20 +395,25 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
     P: Provider<N> + EngineApiValidWaitExt<N>,
 >(
     provider: P,
-    message_version: EngineApiMessageVersion,
+    message_version: Option<EngineApiMessageVersion>,
     forkchoice_state: ForkchoiceState,
-    use_reth: bool,
 ) -> TransportResult<ForkchoiceUpdated> {
-    if use_reth {
+    if let Some(message_version) = message_version {
+        call_forkchoice_updated(provider, message_version, forkchoice_state, None).await
+    } else {
         let method = "reth_forkchoiceUpdated";
         let reth_params = serde_json::to_value((forkchoice_state,))
             .expect("ForkchoiceState serialization cannot fail");
 
         debug!(target: "reth-bench", method, "Sending forkchoiceUpdated");
 
-        let mut resp: ForkchoiceUpdated = provider.client().request(method, &reth_params).await?;
+        loop {
+            let resp: ForkchoiceUpdated = provider.client().request(method, &reth_params).await?;
 
-        while !resp.is_valid() {
+            if resp.is_valid() {
+                break Ok(resp)
+            }
+
             if resp.is_invalid() {
                 error!(target: "reth-bench", ?resp, "Invalid {method}");
                 return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
@@ -428,11 +425,6 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
                     "invalid range: no canonical state found for parent of requested block",
                 ))
             }
-            resp = provider.client().request(method, &reth_params).await?;
         }
-
-        Ok(resp)
-    } else {
-        call_forkchoice_updated(provider, message_version, forkchoice_state, None).await
     }
 }

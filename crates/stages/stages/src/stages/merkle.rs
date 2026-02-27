@@ -742,7 +742,7 @@ mod tests {
                     accounts.insert(key, (account, storage));
                 }
 
-                Ok(state_root_prehashed(accounts.into_iter()))
+                Ok(state_root_prehashed(accounts))
             })?;
 
             let static_file_provider = self.db.factory.static_file_provider();

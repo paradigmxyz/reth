@@ -476,26 +476,28 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
-        let traces = self.eth_api().trace_block_with(
-            block_id,
-            None,
-            TracingInspectorConfig::default_parity(),
-            |tx_info, mut ctx| {
-                let traces = ctx
-                    .take_inspector()
-                    .into_parity_builder()
-                    .into_localized_transaction_traces(tx_info);
-                Ok(traces)
-            },
-        );
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else {
+            return Err(EthApiError::HeaderNotFound(block_id).into());
+        };
 
-        let block = self.eth_api().recovered_block(block_id);
-        let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
+        let mut traces = self
+            .eth_api()
+            .trace_block_with(
+                block_id,
+                Some(block.clone()),
+                TracingInspectorConfig::default_parity(),
+                |tx_info, mut ctx| {
+                    let traces = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await?
+            .map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
-        let mut maybe_traces =
-            maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
-
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) &&
+        if let Some(traces) = traces.as_mut() &&
             let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
         {
             traces.extend(self.extract_reward_traces(
@@ -505,7 +507,7 @@ where
             ));
         }
 
-        Ok(maybe_traces)
+        Ok(traces)
     }
 
     /// Replays all transactions in a block
@@ -550,11 +552,15 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
-        let res = self
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else {
+            return Err(EthApiError::HeaderNotFound(block_id).into());
+        };
+
+        let Some(transactions) = self
             .eth_api()
             .trace_block_inspector(
                 block_id,
-                None,
+                Some(block.clone()),
                 OpcodeGasInspector::default,
                 move |tx_info, ctx| {
                     let trace = TransactionOpcodeGas {
@@ -564,11 +570,10 @@ where
                     Ok(trace)
                 },
             )
-            .await?;
-
-        let Some(transactions) = res else { return Ok(None) };
-
-        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+            .await?
+        else {
+            return Ok(None);
+        };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -583,11 +588,15 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
-        let res = self
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else {
+            return Err(EthApiError::HeaderNotFound(block_id).into());
+        };
+
+        let Some(transactions) = self
             .eth_api()
             .trace_block_inspector(
                 block_id,
-                None,
+                Some(block.clone()),
                 StorageInspector::default,
                 move |tx_info, ctx| {
                     let trace = TransactionStorageAccess {
@@ -599,11 +608,10 @@ where
                     Ok(trace)
                 },
             )
-            .await?;
-
-        let Some(transactions) = res else { return Ok(None) };
-
-        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+            .await?
+        else {
+            return Ok(None);
+        };
 
         Ok(Some(BlockStorageAccess {
             block_hash: block.hash(),
