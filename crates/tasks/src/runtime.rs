@@ -268,10 +268,6 @@ struct RuntimeInner {
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
-    /// Handle to the quanta upkeep thread that periodically refreshes the cached
-    /// high-resolution timestamp used by [`quanta::Instant::recent()`].
-    /// Dropped when the runtime is dropped, stopping the upkeep thread.
-    _quanta_upkeep: Option<quanta::Handle>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -806,7 +802,7 @@ impl RuntimeBuilder {
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
             let proof_storage_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_storage_worker_threads)
@@ -814,7 +810,7 @@ impl RuntimeBuilder {
             )?;
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
             let proof_account_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_account_worker_threads)
@@ -858,8 +854,6 @@ impl RuntimeBuilder {
             result
         });
 
-        let quanta_upkeep = quanta::Upkeep::new(Duration::from_millis(1)).start().ok();
-
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
             handle,
@@ -883,7 +877,6 @@ impl RuntimeBuilder {
             prewarming_pool,
             worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
-            _quanta_upkeep: quanta_upkeep,
         };
 
         Ok(Runtime(Arc::new(inner)))
