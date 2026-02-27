@@ -41,11 +41,13 @@ impl ReadTxnPool {
             // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
             // via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
             // taking lck_rdt_lock.
-            if mdbx_result(unsafe { ffi::mdbx_txn_renew(txn) }).is_ok() {
-                return Some(txn);
+            match mdbx_result(unsafe { ffi::mdbx_txn_renew(txn) }) {
+                Ok(_) => return Some(txn),
+                Err(e) => {
+                    tracing::warn!(target: "libmdbx", %e, "failed to renew pooled read transaction");
+                    unsafe { ffi::mdbx_txn_abort(txn) };
+                }
             }
-            // Renew failed — abort the handle and keep trying.
-            unsafe { ffi::mdbx_txn_abort(txn) };
         }
         None
     }
@@ -55,7 +57,8 @@ impl ReadTxnPool {
     /// If reset fails or the pool is full, the handle is aborted instead.
     pub(crate) fn put(&self, txn: *mut ffi::MDBX_txn) {
         // mdbx_txn_reset releases the MVCC snapshot but keeps the reader slot.
-        if mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }).is_err() {
+        if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }) {
+            tracing::warn!(target: "libmdbx", %e, "failed to reset read transaction for pooling");
             unsafe { ffi::mdbx_txn_abort(txn) };
             return;
         }
