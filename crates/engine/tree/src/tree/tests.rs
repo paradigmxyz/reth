@@ -2059,7 +2059,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     reth_tracing::init_test_tracing();
 
     let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_harness = TestHarness::new(chain_spec);
 
     // Build blocks: genesis (0) and safe block (1).
     let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
@@ -2127,7 +2127,7 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
     reth_tracing::init_test_tracing();
 
     let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_harness = TestHarness::new(chain_spec);
 
     let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
     let genesis = &blocks[0];
