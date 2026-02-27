@@ -1,6 +1,6 @@
 use crate::download::{
     manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
-    DownloadProgress,
+    DownloadProgress, SelectionPreset,
 };
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -22,11 +22,11 @@ use std::{
 };
 
 /// Result of the interactive component selector.
-pub enum SelectionResult {
-    /// User confirmed selections with per-component ranges.
-    Selected(BTreeMap<SnapshotComponentType, ComponentSelection>),
-    /// User cancelled.
-    Cancelled,
+pub struct SelectorOutput {
+    /// User-confirmed selections with per-component ranges.
+    pub selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
+    /// Last preset action used in the TUI, if any.
+    pub preset: Option<SelectionPreset>,
 }
 
 /// All distance presets. Groups filter this to only valid options.
@@ -135,10 +135,13 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
 
 struct SelectorApp {
     manifest: SnapshotManifest,
+    full_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
     /// Display groups shown in the TUI.
     groups: Vec<DisplayGroup>,
     /// Current selection for each group.
     selections: Vec<ComponentSelection>,
+    /// Last preset action invoked by user.
+    preset: Option<SelectionPreset>,
     /// Current cursor position.
     cursor: usize,
     /// List state for ratatui.
@@ -146,7 +149,10 @@ struct SelectorApp {
 }
 
 impl SelectorApp {
-    fn new(manifest: SnapshotManifest) -> Self {
+    fn new(
+        manifest: SnapshotManifest,
+        full_preset: BTreeMap<SnapshotComponentType, ComponentSelection>,
+    ) -> Self {
         let groups = build_groups(&manifest);
 
         // Default to the minimal preset (matches --minimal prune config)
@@ -155,7 +161,15 @@ impl SelectorApp {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
 
-        Self { manifest, groups, selections, cursor: 0, list_state }
+        Self {
+            manifest,
+            full_preset,
+            groups,
+            selections,
+            preset: Some(SelectionPreset::Minimal),
+            cursor: 0,
+            list_state,
+        }
     }
 
     fn cycle_right(&mut self) {
@@ -167,6 +181,7 @@ impl SelectorApp {
             let current = self.selections[self.cursor];
             let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
             self.selections[self.cursor] = presets[(idx + 1) % presets.len()];
+            self.preset = None;
         }
     }
 
@@ -179,6 +194,7 @@ impl SelectorApp {
             let current = self.selections[self.cursor];
             let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
             self.selections[self.cursor] = presets[(idx + presets.len() - 1) % presets.len()];
+            self.preset = None;
         }
     }
 
@@ -186,12 +202,28 @@ impl SelectorApp {
         for sel in &mut self.selections {
             *sel = ComponentSelection::All;
         }
+        self.preset = Some(SelectionPreset::Archive);
     }
 
     fn select_minimal(&mut self) {
         for (i, group) in self.groups.iter().enumerate() {
             self.selections[i] = group.types[0].minimal_selection();
         }
+        self.preset = Some(SelectionPreset::Minimal);
+    }
+
+    fn select_full(&mut self) {
+        for (i, group) in self.groups.iter().enumerate() {
+            let mut selection = group.types[0].minimal_selection();
+            for ty in &group.types {
+                if let Some(sel) = self.full_preset.get(ty).copied() {
+                    selection = sel;
+                    break;
+                }
+            }
+            self.selections[i] = selection;
+        }
+        self.preset = Some(SelectionPreset::Full);
     }
 
     fn move_up(&mut self) {
@@ -244,14 +276,17 @@ impl SelectorApp {
 }
 
 /// Runs the interactive component selector TUI.
-pub fn run_selector(manifest: SnapshotManifest) -> eyre::Result<SelectionResult> {
+pub fn run_selector(
+    manifest: SnapshotManifest,
+    full_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> eyre::Result<SelectorOutput> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = SelectorApp::new(manifest);
+    let mut app = SelectorApp::new(manifest, full_preset.clone());
     let result = event_loop(&mut terminal, &mut app);
 
     disable_raw_mode()?;
@@ -264,7 +299,7 @@ pub fn run_selector(manifest: SnapshotManifest) -> eyre::Result<SelectionResult>
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut SelectorApp,
-) -> eyre::Result<SelectionResult> {
+) -> eyre::Result<SelectorOutput> {
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
 
@@ -280,14 +315,18 @@ fn event_loop(
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    return Ok(SelectionResult::Cancelled);
+                    eyre::bail!("Download cancelled by user");
                 }
                 KeyCode::Enter => {
-                    return Ok(SelectionResult::Selected(app.selection_map()));
+                    return Ok(SelectorOutput {
+                        selections: app.selection_map(),
+                        preset: app.preset,
+                    });
                 }
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => app.cycle_right(),
                 KeyCode::Left | KeyCode::Char('h') => app.cycle_left(),
                 KeyCode::Char('a') => app.select_all(),
+                KeyCode::Char('f') => app.select_full(),
                 KeyCode::Char('m') => app.select_minimal(),
                 KeyCode::Up | KeyCode::Char('k') => app.move_up(),
                 KeyCode::Down | KeyCode::Char('j') => app.move_down(),
@@ -389,9 +428,10 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
     f.render_stateful_widget(list, chunks[1], &mut app.list_state);
 
     // Footer
-    let footer =
-        Paragraph::new(" [←/→] adjust  [m] minimal  [a] all  [Enter] confirm  [Esc] cancel")
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .block(Block::default().borders(Borders::ALL));
+    let footer = Paragraph::new(
+        " [←/→] adjust  [m] minimal  [f] full  [a] archive  [Enter] confirm  [Esc] cancel",
+    )
+    .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+    .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
 }

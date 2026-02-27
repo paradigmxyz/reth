@@ -1,9 +1,12 @@
-use crate::download::manifest::{
-    ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest,
+use crate::download::{
+    manifest::{ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest},
+    SelectionPreset,
 };
+use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_config::config::{BlocksPerFileConfig, Config, PruneConfig, StaticFilesConfig};
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use std::{collections::BTreeMap, path::Path};
@@ -141,9 +144,11 @@ where
 ///
 /// When all data components are selected as `All`, no pruning is configured (archive node).
 /// Otherwise, `--minimal` style pruning is applied for missing/partial components.
-pub fn config_for_selections(
+pub(crate) fn config_for_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
+    preset: Option<SelectionPreset>,
+    chain_spec: Option<&impl EthereumHardforks>,
 ) -> Config {
     let tx_sel = selections
         .get(&SnapshotComponentType::Transactions)
@@ -191,8 +196,28 @@ pub fn config_for_selections(
         },
     };
 
-    if is_archive {
+    if is_archive || matches!(preset, Some(SelectionPreset::Archive)) {
         return Config { static_files, ..Default::default() };
+    }
+
+    if matches!(preset, Some(SelectionPreset::Full)) {
+        let defaults = DefaultPruningValues::get_global();
+        let mut segments = defaults.full_prune_modes.clone();
+
+        if defaults.full_bodies_history_use_pre_merge {
+            segments.bodies_history = chain_spec.and_then(|chain_spec| {
+                chain_spec
+                    .ethereum_fork_activation(EthereumHardfork::Paris)
+                    .block_number()
+                    .map(PruneMode::Before)
+            });
+        }
+
+        return Config {
+            prune: PruneConfig { block_interval: PruneConfig::default().block_interval, segments },
+            static_files,
+            ..Default::default()
+        };
     }
 
     let mut config = Config::default();
@@ -257,7 +282,21 @@ pub fn describe_prune_config_from_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
 ) -> Vec<String> {
-    let config = config_for_selections(selections, manifest);
+    describe_prune_config_from_selections_with_preset(
+        selections,
+        manifest,
+        None,
+        None::<&reth_chainspec::ChainSpec>,
+    )
+}
+
+pub(crate) fn describe_prune_config_from_selections_with_preset(
+    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+    manifest: &SnapshotManifest,
+    preset: Option<SelectionPreset>,
+    chain_spec: Option<&impl EthereumHardforks>,
+) -> Vec<String> {
+    let config = config_for_selections(selections, manifest, preset, chain_spec);
     let segments = &config.prune.segments;
     let mut lines = Vec::new();
 
@@ -316,7 +355,12 @@ mod tests {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
-        let config = config_for_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
         let snapshot_block = 21_000_000;
 
         {
@@ -355,7 +399,12 @@ mod tests {
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
-        let config = config_for_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
 
         {
             let tx = db.tx_mut().unwrap();
@@ -378,7 +427,12 @@ mod tests {
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
-        let config = config_for_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
         // Archive node — nothing pruned
         assert_eq!(config.prune.segments.transaction_lookup, None);
         assert_eq!(config.prune.segments.sender_recovery, None);
@@ -393,7 +447,12 @@ mod tests {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
-        let config = config_for_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // All segments clamped to their minimum distances
@@ -427,7 +486,12 @@ mod tests {
             .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(10_064));
         selections
             .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(10_064));
-        let config = config_for_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
 
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
@@ -439,6 +503,45 @@ mod tests {
         );
         assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
         assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
+    }
+
+    #[test]
+    fn full_preset_matches_default_full_prune_config() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(500_000));
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::Distance(10_064));
+
+        let chain_spec = reth_chainspec::MAINNET.clone();
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            Some(SelectionPreset::Full),
+            Some(chain_spec.as_ref()),
+        );
+
+        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.transaction_lookup, None);
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.account_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.storage_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+
+        let paris_block = chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Paris)
+            .block_number()
+            .expect("mainnet Paris block should be known");
+        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Before(paris_block)));
     }
 
     #[test]
