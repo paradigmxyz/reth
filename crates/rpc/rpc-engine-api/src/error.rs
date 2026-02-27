@@ -8,7 +8,7 @@ use jsonrpsee_types::error::{
 };
 use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{EngineObjectValidationError, VersionSpecificValidationError};
+use reth_payload_primitives::EngineObjectValidationError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -115,16 +115,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::InvalidBodiesRange { .. } |
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
-                EngineObjectValidationError::InvalidParams(_) |
-                // Per Engine API spec, structure validation errors for PayloadAttributes
-                // (e.g., missing withdrawals post-Shanghai) should return -32602 "Invalid params".
-                // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md
-                // Fixes: https://github.com/paradigmxyz/reth/issues/8732
-                EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
-                    VersionSpecificValidationError::NoWithdrawalsPostShanghai |
-                    VersionSpecificValidationError::HasWithdrawalsPreShanghai,
-                ),
+                EngineObjectValidationError::InvalidParams(_),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -148,17 +139,11 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
+            // Per Engine API spec, payload attributes structure validation errors
+            // should return -38003: Invalid payload attributes.
+            // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
             EngineApiError::EngineObjectValidationError(
-                EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
-                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun |
-                    VersionSpecificValidationError::BlockAccessListNotSupportedBeforeV6 |
-                    VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
-                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
-                    VersionSpecificValidationError::SlotNumberNotSupportedBeforeV6 |
-                    VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
-                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam,
-                ),
+                EngineObjectValidationError::PayloadAttributes(_),
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
@@ -217,6 +202,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
+    use reth_payload_primitives::VersionSpecificValidationError;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -271,11 +257,11 @@ mod tests {
         );
 
         // PayloadAttributes structure validation errors (e.g., missing withdrawals post-Shanghai)
-        // should return -32602 per the Engine API spec
-        // See: https://github.com/paradigmxyz/reth/issues/8732
+        // should return -38003 per the Engine API spec
+        // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
         ensure_engine_rpc_error(
-            INVALID_PARAMS_CODE,
-            INVALID_PARAMS_MSG,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai,
