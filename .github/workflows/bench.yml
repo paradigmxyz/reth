@@ -366,6 +366,9 @@ jobs:
       BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
+      - name: Clean up previous bench-work
+        run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
+
       - name: Resolve checkout ref
         id: checkout-ref
         uses: actions/github-script@v8
