@@ -1,7 +1,5 @@
 use crate::error::mdbx_result;
 use crossbeam_queue::SegQueue;
-use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
@@ -18,7 +16,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// natural bound.
 pub(crate) struct ReadTxnPool {
     queue: SegQueue<PooledTxn>,
-    len: AtomicUsize,
 }
 
 /// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the queue.
@@ -31,12 +28,7 @@ unsafe impl Sync for PooledTxn {}
 
 impl ReadTxnPool {
     pub(crate) fn new() -> Self {
-        Self { queue: SegQueue::new(), len: AtomicUsize::new(0) }
-    }
-
-    /// Returns the number of pooled handles.
-    pub(crate) fn len(&self) -> usize {
-        self.len.load(Ordering::Relaxed)
+        Self { queue: SegQueue::new() }
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
@@ -44,7 +36,6 @@ impl ReadTxnPool {
     /// Returns `None` if the pool is empty or all renew attempts fail.
     pub(crate) fn get(&self) -> Option<*mut ffi::MDBX_txn> {
         while let Some(handle) = self.queue.pop() {
-            self.len.fetch_sub(1, Ordering::Relaxed);
             let txn = handle.0;
             // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
             // via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
@@ -72,13 +63,11 @@ impl ReadTxnPool {
         }
 
         self.queue.push(PooledTxn(txn));
-        self.len.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
     pub(crate) fn drain(&self) {
         while let Some(handle) = self.queue.pop() {
-            self.len.fetch_sub(1, Ordering::Relaxed);
             abort_txn(handle.0);
         }
     }
@@ -88,12 +77,6 @@ impl ReadTxnPool {
 fn abort_txn(txn: *mut ffi::MDBX_txn) {
     if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort(txn) }) {
         tracing::error!(target: "libmdbx", %e, "failed to abort transaction");
-    }
-}
-
-impl fmt::Debug for ReadTxnPool {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadTxnPool").field("pooled", &self.len()).finish()
     }
 }
 
@@ -135,19 +118,11 @@ mod tests {
 
         // Open and drop a read txn — drop returns the handle to the pool.
         let txn = env.begin_ro_txn().unwrap();
-        let id1 = txn.id().unwrap();
         drop(txn);
-
-        assert_eq!(env.ro_txn_pool().len(), 1);
 
         // Next begin_ro_txn should reuse the pooled handle.
         let txn = env.begin_ro_txn().unwrap();
-        // The renewed txn gets a fresh snapshot, so id may differ, but it should succeed.
-        let _id2 = txn.id().unwrap();
-        drop(txn);
-
-        // Verify we got a valid txn.
-        assert!(id1 > 0);
+        let _id = txn.id().unwrap();
     }
 
     #[test]
@@ -186,9 +161,6 @@ mod tests {
             assert_eq!(val, Some(*b"val"));
             drop(txn);
         }
-
-        // Pool should have exactly 1 handle (all reused the same slot).
-        assert_eq!(env.ro_txn_pool().len(), 1);
     }
 
     #[test]
@@ -198,16 +170,13 @@ mod tests {
 
         // Open several txns concurrently — each gets a fresh handle.
         let txns: Vec<_> = (0..8).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().len(), 0);
 
         // Drop them all — pool should accumulate handles.
         let count = txns.len();
         drop(txns);
-        assert_eq!(env.ro_txn_pool().len(), count);
 
-        // Reopen same number — all should be pooled.
+        // Reopen same number — all should come from the pool.
         let txns: Vec<_> = (0..count).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().len(), 0);
         for txn in &txns {
             let db = txn.open_db(None).unwrap();
             let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
@@ -220,15 +189,11 @@ mod tests {
         let (_dir, env) = test_env();
         seed(&env);
 
-        // Pool some handles.
-        for _ in 0..4 {
-            let txn = env.begin_ro_txn().unwrap();
-            drop(txn);
-        }
-        assert_eq!(env.ro_txn_pool().len(), 1);
+        // Pool a handle.
+        let txn = env.begin_ro_txn().unwrap();
+        drop(txn);
 
         env.ro_txn_pool().drain();
-        assert_eq!(env.ro_txn_pool().len(), 0);
 
         // Pool is empty — get should return None.
         assert!(env.ro_txn_pool().get().is_none());
@@ -243,7 +208,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Committed txns are freed by mdbx, not returned to pool.
-        assert_eq!(env.ro_txn_pool().len(), 0);
+        assert!(env.ro_txn_pool().get().is_none());
     }
 
     #[test]
@@ -394,7 +359,6 @@ mod tests {
             let txns: Vec<_> = (0..16).map(|_| env.begin_ro_txn().unwrap()).collect();
             drop(txns);
         }
-        assert_eq!(env.ro_txn_pool().len(), 16);
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
 
@@ -454,23 +418,5 @@ mod tests {
             h.join().unwrap();
         }
 
-        // Unbounded pool — all 160 handles should be pooled.
-        assert_eq!(env.ro_txn_pool().len(), 160);
-    }
-
-    #[test]
-    fn debug_format() {
-        let (_dir, env) = test_env();
-        seed(&env);
-
-        let debug = format!("{:?}", env.ro_txn_pool());
-        assert!(debug.contains("ReadTxnPool"));
-        assert!(debug.contains("pooled: 0"));
-
-        let txn = env.begin_ro_txn().unwrap();
-        drop(txn);
-
-        let debug = format!("{:?}", env.ro_txn_pool());
-        assert!(debug.contains("pooled: 1"));
     }
 }
