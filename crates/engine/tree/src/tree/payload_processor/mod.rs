@@ -472,7 +472,10 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+        transactions: mpsc::Receiver<(
+            usize,
+            impl ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
+        )>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
