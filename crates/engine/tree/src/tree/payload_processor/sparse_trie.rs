@@ -16,15 +16,15 @@ use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
 };
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -509,12 +509,12 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
+                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(Target::new(path).with_min_len(min_len));
+                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
 
@@ -551,13 +551,13 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .push_account_target(Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .push_account_target(Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                 }
             }
         })?;
@@ -734,13 +734,13 @@ impl PendingTargets {
     }
 
     /// Adds a target to the account targets.
-    fn push_account_target(&mut self, target: Target) {
+    fn push_account_target(&mut self, target: ProofV2Target) {
         self.targets.account_targets.push(target);
         self.len += 1;
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<Target>) {
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }

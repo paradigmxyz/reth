@@ -3820,7 +3820,7 @@ mod tests {
         let mut stack = Vec::new();
         let mut state_mask = TrieMask::default();
 
-        for (&idx, hash) in children_indices.iter().zip(child_hashes.into_iter()) {
+        for (&idx, hash) in children_indices.iter().zip(child_hashes) {
             state_mask.set_bit(idx);
             stack.push(hash);
         }

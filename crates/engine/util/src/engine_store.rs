@@ -108,7 +108,7 @@ impl EngineMessageStore {
                 tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
             }
         }
-        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
+        Ok(filenames_by_ts.into_values().flatten())
     }
 }
 
