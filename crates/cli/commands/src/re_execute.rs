@@ -93,9 +93,7 @@ fn find_and_trace_failing_tx<C, DB, Spec>(
     let mut state = State::builder().with_database(make_db()).with_bundle_update().build();
 
     // EIP-161: set state clear flag based on Spurious Dragon activation.
-    state
-        .cache
-        .set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
+    state.cache.set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
 
     let mut evm = evm_config.evm_with_env(&mut state, evm_env);
 
@@ -160,9 +158,7 @@ fn trace_failed_transaction<C, DB, Spec>(
     let mut state = State::builder().with_database(db).with_bundle_update().build();
 
     // EIP-161: set state clear flag based on Spurious Dragon activation.
-    state
-        .cache
-        .set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
+    state.cache.set_state_clear_flag(spec.is_spurious_dragon_active_at_block(block.number()));
 
     // Apply pre-execution system calls (EIP-4788, EIP-2935) and replay prior txs.
     {
@@ -197,8 +193,7 @@ fn trace_failed_transaction<C, DB, Spec>(
     let tx_env = evm_config.tx_env(tx);
     let mut inspector = TracingInspector::new(TracingInspectorConfig::all());
     let result = {
-        let mut evm =
-            evm_config.evm_with_env_and_inspector(&mut state, evm_env, &mut inspector);
+        let mut evm = evm_config.evm_with_env_and_inspector(&mut state, evm_env, &mut inspector);
         evm.transact(tx_env)
     };
 
@@ -208,9 +203,8 @@ fn trace_failed_transaction<C, DB, Spec>(
         Err(_) => (0, Default::default()),
     };
 
-    let frame = inspector
-        .into_geth_builder()
-        .geth_traces(gas_used, return_value, Default::default());
+    let frame =
+        inspector.into_geth_builder().geth_traces(gas_used, return_value, Default::default());
 
     match serde_json::to_string(&frame) {
         Ok(json) => {
