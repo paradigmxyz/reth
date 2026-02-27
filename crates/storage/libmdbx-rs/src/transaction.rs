@@ -350,18 +350,10 @@ where
                     #[cfg(feature = "read-tx-timeouts")]
                     self.env.txn_manager().remove_active_read_transaction(txn);
 
-                    // Try to reset and return the handle to the pool for reuse.
-                    // mdbx_txn_reset releases the MVCC snapshot but keeps the reader slot,
-                    // so a future mdbx_txn_renew can skip lck_rdt_lock entirely.
-                    if mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }).is_ok()
-                        && self.env.ro_txn_pool().push(txn)
-                    {
-                        return;
-                    }
-
-                    unsafe {
-                        ffi::mdbx_txn_abort(txn);
-                    }
+                    // Reset and return the handle to the pool for lock-free reuse.
+                    // pool.put() calls mdbx_txn_reset internally and falls back to
+                    // mdbx_txn_abort if the reset fails or the pool is full.
+                    self.env.ro_txn_pool().put(txn);
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
