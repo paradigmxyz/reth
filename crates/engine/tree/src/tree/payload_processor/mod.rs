@@ -407,6 +407,8 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
 
+        let span = debug_span!(target: "engine::tree::payload_processor", "recover_transactions", transaction_count).entered();
+
         if transaction_count == 0 {
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
@@ -418,6 +420,7 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _ = span;
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -430,6 +433,7 @@ where
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _ = span;
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
@@ -454,7 +458,6 @@ where
                             tx
                         });
                         let _ = execute_tx.send(tx);
-                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
             });
         }
@@ -744,7 +747,6 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send(tx);
-        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 
