@@ -295,19 +295,15 @@ mod tests {
             .collect();
 
         // Spawn a writer thread.
-        {
-            let env = env.clone();
-            let barrier = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                barrier.wait();
-                for i in 0u32..20 {
-                    let tx = env.begin_rw_txn().unwrap();
-                    let db = tx.open_db(None).unwrap();
-                    tx.put(db.dbi(), i.to_le_bytes(), b"v", WriteFlags::empty()).unwrap();
-                    tx.commit().unwrap();
-                }
-            }));
-        }
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            for i in 0u32..20 {
+                let tx = env.begin_rw_txn().unwrap();
+                let db = tx.open_db(None).unwrap();
+                tx.put(db.dbi(), i.to_le_bytes(), b"v", WriteFlags::empty()).unwrap();
+                tx.commit().unwrap();
+            }
+        }));
 
         for h in handles {
             h.join().unwrap();
@@ -408,14 +404,10 @@ mod tests {
             })
             .collect();
 
-        {
-            let env = env.clone();
-            let barrier = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                barrier.wait();
-                env.ro_txn_pool().drain();
-            }));
-        }
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            env.ro_txn_pool().drain();
+        }));
 
         for h in handles {
             h.join().unwrap();
