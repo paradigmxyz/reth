@@ -619,24 +619,40 @@ impl SplitCommand {
         to_block: u64,
     ) -> eyre::Result<()> {
         let mut writer = output.get_writer(from_block, StaticFileSegment::AccountChangeSets)?;
+        let mut block = from_block;
 
-        for block in from_block..=to_block {
-            let jar = source.get_segment_provider(StaticFileSegment::AccountChangeSets, block)?;
+        while block <= to_block {
+            // Open jar + cursor, reuse for all blocks within this jar's range
+            let jar =
+                source.get_segment_provider(StaticFileSegment::AccountChangeSets, block)?;
+            let jar_block_end = jar
+                .user_header()
+                .block_range()
+                .map(|r| r.end())
+                .unwrap_or(u64::MAX);
+            let mut cursor = jar.cursor()?;
 
-            let mut changes = Vec::new();
-            if let Some(offset) = jar.read_changeset_offset(block)? {
-                let mut cursor = jar.cursor()?;
-                for i in offset.changeset_range() {
-                    if let Some(change) = cursor.get_one::<AccountChangesetMask>(i.into())? {
-                        changes.push(change);
+            loop {
+                let mut changes = Vec::new();
+                if let Some(offset) = jar.read_changeset_offset(block)? {
+                    for i in offset.changeset_range() {
+                        if let Some(change) =
+                            cursor.get_one::<AccountChangesetMask>(i.into())?
+                        {
+                            changes.push(change);
+                        }
                     }
                 }
-            }
 
-            writer.append_account_changeset(changes, block)?;
+                writer.append_account_changeset(changes, block)?;
 
-            if block % 100_000 == 0 {
-                info!(target: "reth::cli", block, to_block, "Account changesets progress");
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Account changesets progress");
+                }
+                block += 1;
+                if block > to_block || block > jar_block_end {
+                    break;
+                }
             }
         }
 
@@ -652,24 +668,39 @@ impl SplitCommand {
         to_block: u64,
     ) -> eyre::Result<()> {
         let mut writer = output.get_writer(from_block, StaticFileSegment::StorageChangeSets)?;
+        let mut block = from_block;
 
-        for block in from_block..=to_block {
-            let jar = source.get_segment_provider(StaticFileSegment::StorageChangeSets, block)?;
+        while block <= to_block {
+            let jar =
+                source.get_segment_provider(StaticFileSegment::StorageChangeSets, block)?;
+            let jar_block_end = jar
+                .user_header()
+                .block_range()
+                .map(|r| r.end())
+                .unwrap_or(u64::MAX);
+            let mut cursor = jar.cursor()?;
 
-            let mut changes = Vec::new();
-            if let Some(offset) = jar.read_changeset_offset(block)? {
-                let mut cursor = jar.cursor()?;
-                for i in offset.changeset_range() {
-                    if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
-                        changes.push(change);
+            loop {
+                let mut changes = Vec::new();
+                if let Some(offset) = jar.read_changeset_offset(block)? {
+                    for i in offset.changeset_range() {
+                        if let Some(change) =
+                            cursor.get_one::<StorageChangesetMask>(i.into())?
+                        {
+                            changes.push(change);
+                        }
                     }
                 }
-            }
 
-            writer.append_storage_changeset(changes, block)?;
+                writer.append_storage_changeset(changes, block)?;
 
-            if block % 100_000 == 0 {
-                info!(target: "reth::cli", block, to_block, "Storage changesets progress");
+                if block.is_multiple_of(100_000) {
+                    info!(target: "reth::cli", block, to_block, "Storage changesets progress");
+                }
+                block += 1;
+                if block > to_block || block > jar_block_end {
+                    break;
+                }
             }
         }
 
