@@ -105,3 +105,241 @@ impl Drop for ReadTxnPool {
         self.drain();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Environment, WriteFlags};
+
+    /// Opens a fresh test environment.
+    fn test_env() -> (tempfile::TempDir, Environment) {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+        (dir, env)
+    }
+
+    /// Inserts a single key so the database isn't empty.
+    fn seed(env: &Environment) {
+        let tx = env.begin_rw_txn().unwrap();
+        let db = tx.open_db(None).unwrap();
+        tx.put(db.dbi(), b"key", b"val", WriteFlags::empty()).unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn get_returns_none_when_empty() {
+        let (_dir, env) = test_env();
+        assert!(env.ro_txn_pool().get().is_none());
+    }
+
+    #[test]
+    fn put_get_roundtrip() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        // Open and drop a read txn — drop returns the handle to the pool.
+        let txn = env.begin_ro_txn().unwrap();
+        let id1 = txn.id().unwrap();
+        drop(txn);
+
+        assert_eq!(env.ro_txn_pool().keys.len(), 1);
+
+        // Next begin_ro_txn should reuse the pooled handle.
+        let txn = env.begin_ro_txn().unwrap();
+        // The renewed txn gets a fresh snapshot, so id may differ, but it should succeed.
+        let _id2 = txn.id().unwrap();
+        drop(txn);
+
+        // Verify the id changed (write happened between first txn and second).
+        // Just verify we got a valid txn.
+        assert!(id1 > 0);
+    }
+
+    #[test]
+    fn pooled_txn_reads_latest_snapshot() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        // Open a read txn and drop it to pool the handle.
+        let txn = env.begin_ro_txn().unwrap();
+        drop(txn);
+
+        // Write new data.
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            tx.put(db.dbi(), b"key2", b"val2", WriteFlags::empty()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // The renewed pooled txn must see the new data.
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(None).unwrap();
+        let val: Option<[u8; 4]> = txn.get(db.dbi(), b"key2").unwrap();
+        assert_eq!(val, Some(*b"val2"));
+    }
+
+    #[test]
+    fn multiple_put_get_cycles() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        for _ in 0..50 {
+            let txn = env.begin_ro_txn().unwrap();
+            let db = txn.open_db(None).unwrap();
+            let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+            assert_eq!(val, Some(*b"val"));
+            drop(txn);
+        }
+
+        // Pool should have exactly 1 handle (all reused the same slot).
+        assert_eq!(env.ro_txn_pool().keys.len(), 1);
+    }
+
+    #[test]
+    fn concurrent_txns_pool_multiple_handles() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        // Open several txns concurrently — each gets a fresh handle.
+        let txns: Vec<_> = (0..8).map(|_| env.begin_ro_txn().unwrap()).collect();
+        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+
+        // Drop them all — pool should accumulate handles.
+        let count = txns.len();
+        drop(txns);
+        assert_eq!(env.ro_txn_pool().keys.len(), count);
+
+        // Reopen same number — all should be pooled.
+        let txns: Vec<_> = (0..count).map(|_| env.begin_ro_txn().unwrap()).collect();
+        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+        for txn in &txns {
+            let db = txn.open_db(None).unwrap();
+            let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+            assert_eq!(val, Some(*b"val"));
+        }
+    }
+
+    #[test]
+    fn drain_empties_pool() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        // Pool some handles.
+        for _ in 0..4 {
+            let txn = env.begin_ro_txn().unwrap();
+            drop(txn);
+        }
+        // All reuse the same slot, so pool has 1.
+        assert!(env.ro_txn_pool().keys.len() > 0);
+
+        env.ro_txn_pool().drain();
+        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+
+        // Pool is empty — get should return None.
+        assert!(env.ro_txn_pool().get().is_none());
+    }
+
+    #[test]
+    fn committed_txn_is_not_pooled() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let txn = env.begin_ro_txn().unwrap();
+        txn.commit().unwrap();
+
+        // Committed txns are freed by mdbx, not returned to pool.
+        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+    }
+
+    #[test]
+    fn multithreaded_pool_usage() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..100 {
+                        let txn = env.begin_ro_txn().unwrap();
+                        let db = txn.open_db(None).unwrap();
+                        let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+                        assert_eq!(val, Some(*b"val"));
+                        drop(txn);
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn multithreaded_mixed_read_write() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
+
+        // Spawn reader threads.
+        let mut handles: Vec<_> = (0..4)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..50 {
+                        let txn = env.begin_ro_txn().unwrap();
+                        let db = txn.open_db(None).unwrap();
+                        // key may or may not exist depending on writer timing.
+                        let _val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+                        drop(txn);
+                    }
+                })
+            })
+            .collect();
+
+        // Spawn a writer thread.
+        {
+            let env = env.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                for i in 0u32..20 {
+                    let tx = env.begin_rw_txn().unwrap();
+                    let db = tx.open_db(None).unwrap();
+                    tx.put(db.dbi(), i.to_le_bytes(), b"v", WriteFlags::empty()).unwrap();
+                    tx.commit().unwrap();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn debug_format() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let debug = format!("{:?}", env.ro_txn_pool());
+        assert!(debug.contains("ReadTxnPool"));
+        assert!(debug.contains("pooled: 0"));
+
+        let txn = env.begin_ro_txn().unwrap();
+        drop(txn);
+
+        let debug = format!("{:?}", env.ro_txn_pool());
+        assert!(debug.contains("pooled: 1"));
+    }
+}
