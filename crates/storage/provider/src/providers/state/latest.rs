@@ -3,7 +3,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
 };
@@ -262,6 +262,19 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             }
             Ok(None)
         }
+    }
+
+    fn storage_entries(&self, address: Address) -> ProviderResult<Vec<StorageEntry>> {
+        let mut entries = Vec::new();
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let walker = cursor.walk_dup(Some(address), None)?;
+        for entry in walker {
+            let (_, storage_entry) = entry?;
+            if !storage_entry.value.is_zero() {
+                entries.push(storage_entry);
+            }
+        }
+        Ok(entries)
     }
 }
 

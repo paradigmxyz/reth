@@ -2,13 +2,13 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Bytecode, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
@@ -87,6 +87,13 @@ pub trait StateProvider:
         // Get basic account information
         // Returns None if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
+    }
+
+    /// Returns all storage entries (non-zero) for the given address.
+    ///
+    /// This can be expensive for contracts with many storage slots.
+    fn storage_entries(&self, _address: Address) -> ProviderResult<Vec<StorageEntry>> {
+        Ok(Vec::new())
     }
 }
 

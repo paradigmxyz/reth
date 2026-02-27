@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
@@ -555,6 +555,48 @@ impl<
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         self.storage_by_lookup_key(address, storage_key)
+    }
+
+    fn storage_entries(&self, address: Address) -> ProviderResult<Vec<StorageEntry>> {
+        use std::collections::BTreeSet;
+
+        // Collect all known storage keys from the current plain state and changesets
+        let mut keys = BTreeSet::new();
+
+        // Walk PlainStorageState for current keys
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let walker = cursor.walk_dup(Some(address), None)?;
+        for entry in walker {
+            let (_, se) = entry?;
+            keys.insert(se.key);
+        }
+
+        // Walk StorageChangeSets for keys that may have been deleted since this block
+        let mut cs_cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
+        let start = reth_db_api::models::BlockNumberAddress((0, address));
+        if let Ok(walker) = cs_cursor.walk(Some(start)) {
+            for entry in walker {
+                let (block_addr, se) = entry?;
+                if block_addr.address() != address {
+                    // Entries are sorted by (block, address), skip once past our address
+                    // range for this block. Other blocks may still have entries.
+                    continue
+                }
+                keys.insert(se.key);
+            }
+        }
+
+        // Query each key at the historical block
+        let mut entries = Vec::new();
+        for key in keys {
+            if let Some(value) = self.storage_by_lookup_key(address, key)? &&
+                !value.is_zero()
+            {
+                entries.push(StorageEntry { key, value });
+            }
+        }
+
+        Ok(entries)
     }
 }
 

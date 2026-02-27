@@ -1,12 +1,12 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::env::BlockEnvironment;
+use alloy_evm::{env::BlockEnvironment, Evm as _};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult, StorageResult};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -27,20 +27,23 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -625,6 +628,100 @@ where
             })
             .await
     }
+
+    /// Returns the contract storage for the given address at the block and transaction index.
+    ///
+    /// Replays all transactions up to the given index to build the intermediate state, then
+    /// enumerates storage slots keyed by their keccak hash.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<StorageRangeResult, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+
+        if tx_idx > block.transaction_count() {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx index {} out of range for block with {} transactions",
+                tx_idx,
+                block.transaction_count()
+            ))
+            .into())
+        }
+
+        let (evm_env, _) = self.eth_api().evm_env_at(block_hash.into()).await?;
+        let parent_hash = block.parent_hash();
+
+        self.eth_api()
+            .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // Replay transactions before tx_idx to reach the desired intermediate state
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                for tx in block.transactions_recovered().take(tx_idx) {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                }
+                drop(evm);
+
+                // Read all base storage entries from the underlying state provider
+                let base_entries = StateProvider::storage_entries(&db.database.0, contract_address)
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                // Build a map keyed by unhashed slot: base values first, overlay on top
+                let mut merged: BTreeMap<B256, U256> = BTreeMap::new();
+                for entry in &base_entries {
+                    if !entry.value.is_zero() {
+                        merged.insert(entry.key, entry.value);
+                    }
+                }
+
+                // Apply overlay from replayed transactions
+                if let Some(account) = db.cache.accounts.get(&contract_address) &&
+                    let Some(plain_account) = &account.account
+                {
+                    for (slot, value) in &plain_account.storage {
+                        let key = B256::from(*slot);
+                        if value.is_zero() {
+                            merged.remove(&key);
+                        } else {
+                            merged.insert(key, *value);
+                        }
+                    }
+                }
+
+                // Hash keys, sort by hash, and paginate
+                let mut hashed: BTreeMap<B256, (B256, U256)> = BTreeMap::new();
+                for (slot, value) in &merged {
+                    hashed.insert(keccak256(slot), (*slot, *value));
+                }
+
+                // Build response starting at key_start
+                let max = max_result as usize;
+                let mut storage = BTreeMap::new();
+                let mut next_key = None;
+                for (hash, (slot, value)) in hashed.range(key_start..) {
+                    if storage.len() >= max {
+                        next_key = Some(*hash);
+                        break;
+                    }
+                    storage.insert(
+                        *hash,
+                        StorageResult { key: *slot, value: B256::from(value.to_be_bytes()) },
+                    );
+                }
+
+                Ok(StorageRangeResult { storage: storage.into(), next_key })
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -1059,13 +1156,23 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<StorageRangeResult> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_storage_range_at(
+            self,
+            block_hash,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(

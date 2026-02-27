@@ -41,6 +41,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])? {
                 fn storage(&self, account: alloy_primitives::Address, storage_key: alloy_primitives::StorageKey) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
+                fn storage_entries(&self, address: alloy_primitives::Address) -> reth_storage_api::errors::provider::ProviderResult<Vec<reth_primitives_traits::StorageEntry>>;
             }
             BytecodeReader $(where [$($generics)*])? {
                 fn bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>;

@@ -4,6 +4,7 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
+use reth_primitives_traits::StorageEntry;
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider, StateProviderBox};
 use reth_trie::{HashedStorage, MultiProofTargets};
@@ -152,6 +153,10 @@ impl StateProvider for StateProviderTraitObjWrapper {
         storage_key: alloy_primitives::StorageKey,
     ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
         self.0.storage(account, storage_key)
+    }
+
+    fn storage_entries(&self, address: Address) -> reth_errors::ProviderResult<Vec<StorageEntry>> {
+        self.0.storage_entries(address)
     }
 
     fn account_code(
