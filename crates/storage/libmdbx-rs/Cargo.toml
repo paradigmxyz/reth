@@ -18,6 +18,7 @@ bitflags.workspace = true
 byteorder.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
+sharded-slab = "0.1"
 smallvec.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
