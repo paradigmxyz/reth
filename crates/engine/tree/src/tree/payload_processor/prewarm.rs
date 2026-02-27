@@ -148,7 +148,16 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
-                while let Ok((index, tx)) = pending.recv() {
+                let mut batch: Vec<(usize, Tx)> = Vec::new();
+
+                while let Ok(item) = pending.recv() {
+                    batch.push(item);
+
+                    // drain everything else that's already queued
+                    while let Ok(item) = pending.try_recv() {
+                        batch.push(item);
+                    }
+
                     if ctx.terminate_execution.load(Ordering::Relaxed) {
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -157,18 +166,23 @@ where
                         break;
                     }
 
-                    tx_count += 1;
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = debug_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, to_multi_proof);
-                    });
+                    batch.sort_unstable_by_key(|(index, _)| *index);
+
+                    #[expect(clippy::iter_with_drain)]
+                    for (index, tx) in batch.drain(..) {
+                        tx_count += 1;
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            let _enter = debug_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(ctx, index, tx, to_multi_proof);
+                        });
+                    }
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
