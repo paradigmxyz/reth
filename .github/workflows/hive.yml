@@ -1,4 +1,4 @@
-# Runs `Soubhik-10/hive` tests.
+# Runs `ethereum/hive` tests.
 
 name: hive
 
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
+          repository: Soubhik-10/hive
           ref: master
           path: hivetests
 
@@ -170,6 +170,8 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-engine
             limit: .*tests/frontier.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/paris.*
 
           # consume-rlp
           - sim: ethereum/eels/consume-rlp
@@ -190,6 +192,8 @@ jobs:
             limit: .*tests/homestead.*
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/paris.*
     needs:
       - prepare-reth-stable
       - prepare-reth-edge
@@ -227,7 +231,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
+          repository: Soubhik-10/hive
           ref: master
           path: hivetests
 

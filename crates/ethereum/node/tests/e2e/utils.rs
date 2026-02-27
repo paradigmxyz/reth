@@ -85,7 +85,9 @@ where
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
                 tx = tx.with_to(*call_destinations.choose(rng).unwrap()).with_input(
-                    (0..rng.random_range(0..10000)).map(|_| rng.random()).collect::<Vec<u8>>(),
+                    (0..rng.random_range(0..10000))
+                        .map(|_| rng.random::<u8>())
+                        .collect::<Vec<u8>>(),
                 );
             }
 
