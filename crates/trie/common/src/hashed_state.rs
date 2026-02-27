@@ -46,44 +46,7 @@ impl HashedPostState {
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
     #[inline]
-    #[cfg(feature = "rayon")]
     pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
-    ) -> Self {
-        state
-            .into_par_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
-    }
-
-    /// Initialize [`HashedPostState`] from bundle state.
-    /// Hashes all changed accounts and storage entries that are currently stored in the bundle
-    /// state.
-    #[cfg(not(feature = "rayon"))]
-    pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    ) -> Self {
-        Self::from_bundle_state_seq::<KH>(state)
-    }
-
-    /// Sequential version of [`Self::from_bundle_state`].
-    ///
-    /// Prefer this over the parallel version when the caller is not running inside a dedicated
-    /// rayon pool, to avoid contending with other work on the global rayon pool.
-    pub fn from_bundle_state_seq<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
         state
