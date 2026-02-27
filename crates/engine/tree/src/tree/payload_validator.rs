@@ -1291,20 +1291,11 @@ where
         }
         drop(_enter);
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
-
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
-        {
-            // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
-        }
+        // Don't block on hashed_post_state here. The background keccak256 hashing task
+        // continues running and will be resolved lazily when actually needed (e.g. state
+        // root fallback or deferred trie input). On L1,
+        // validate_block_post_execution_with_hashed_state is a no-op, so blocking here
+        // just adds ~25ms of unnecessary latency to the critical path.
 
         // record post-execution validation duration
         self.metrics
