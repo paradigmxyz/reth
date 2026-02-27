@@ -1076,8 +1076,7 @@ mod tests {
             pool.add_transaction(Arc::new(f.validated(tx)), 0);
         }
 
-        let mut best =
-            pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
         let mut block_blob_count = 0u64;
         let mut included_txs = 0u64;
 
@@ -1113,9 +1112,6 @@ mod tests {
             block_blob_count, max_blob_count,
             "expected a full blob block (5+1 blobs across senders)"
         );
-        assert_eq!(
-            included_txs, 2,
-            "expected one 5-blob tx and one 1-blob tx in the block"
-        );
+        assert_eq!(included_txs, 2, "expected one 5-blob tx and one 1-blob tx in the block");
     }
 }
