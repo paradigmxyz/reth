@@ -90,9 +90,11 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
-# Big blocks mode requires the testing API and skip-invalid-transactions
+# Big blocks can take >5min to process, exceeding the default MDBX read
+# transaction timeout (5min). Also increase max RPC request size to 500MB
+# since big block payloads are large.
 if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions)
+  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions --db.read-transaction-timeout 0 --rpc.max-request-size 500)
 fi
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
