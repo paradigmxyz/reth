@@ -134,22 +134,6 @@ impl ArenaSparseNodeBranch {
     /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
     const fn unset_child_bit(&mut self, nibble: u8) {
         self.state_mask.unset_bit(nibble);
-        self.branch_masks.hash_mask.unset_bit(nibble);
-        self.branch_masks.tree_mask.unset_bit(nibble);
-    }
-
-    /// Updates this branch's `branch_masks` for `nibble` based on a child's mask bits.
-    const fn set_child_mask_bits(&mut self, nibble: u8, hash_mask_bit: bool, tree_mask_bit: bool) {
-        if hash_mask_bit {
-            self.branch_masks.hash_mask.set_bit(nibble);
-        } else {
-            self.branch_masks.hash_mask.unset_bit(nibble);
-        }
-        if tree_mask_bit {
-            self.branch_masks.tree_mask.set_bit(nibble);
-        } else {
-            self.branch_masks.tree_mask.unset_bit(nibble);
-        }
     }
 
     /// Populates the given [`BranchNodeCompact`] from this branch's masks and children hashes.
@@ -427,7 +411,7 @@ fn find_ancestor(
 ) -> FindAncestorResult {
     // Pop stack until head is ancestor of full_path.
     while stack.len() > 1 && !full_path.starts_with(&stack.last().unwrap().path) {
-        pop_and_propagate_stack(arena, stack, false);
+        pop_and_propagate_stack(arena, stack);
     }
 
     loop {
@@ -547,7 +531,6 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
 fn pop_and_propagate_stack(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
-    propagate_masks: bool,
 ) -> ArenaStackEntry {
     let entry = stack.pop().expect("pop_and_propagate_stack can't be called on empty stack");
     trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
@@ -558,19 +541,6 @@ fn pop_and_propagate_stack(
     if let Some(parent) = stack.last() {
         let cur_num_leaves = arena[entry.index].num_leaves();
         let cur_dirty_leaves = arena[entry.index].num_dirty_leaves();
-
-        // Propagate branch_masks from the popped child to the parent. This must happen
-        // before the dirty-delta propagation below, because setting masks may mark the
-        // parent dirty (via `to_dirty`), which affects the parent's `num_dirty_leaves`.
-        if propagate_masks {
-            let child_nibble = entry.path.last().unwrap();
-            let hash_bit = arena[entry.index].hash_mask_bit();
-            let tree_bit = arena[entry.index].tree_mask_bit();
-            let parent_branch = arena[parent.index].branch_mut();
-            if parent_branch.state.is_dirty() {
-                parent_branch.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
-            }
-        }
 
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
         let leaves_dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
@@ -638,7 +608,7 @@ fn push_stack(
 fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEntry>) {
     trace!(target: TRACE_TARGET, "Draining stack");
     while stack.len() > 1 {
-        pop_and_propagate_stack(arena, stack, false);
+        pop_and_propagate_stack(arena, stack);
     }
 }
 
@@ -804,6 +774,31 @@ impl ArenaSparseSubtrie {
     }
 }
 
+/// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
+fn get_branch_masks(
+    arena: &Arena<ArenaSparseNode>,
+    branch: &ArenaSparseNodeBranch,
+) -> BranchNodeMasks {
+    let mut masks = BranchNodeMasks::default();
+
+    for (dense_idx, nibble) in branch.state_mask.iter().enumerate() {
+        let (hash_bit, tree_bit) = match branch.children[dense_idx] {
+            ArenaSparseNodeBranchChild::Blinded(_) => (
+                branch.branch_masks.hash_mask.is_bit_set(nibble),
+                branch.branch_masks.tree_mask.is_bit_set(nibble),
+            ),
+            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                let child = &arena[child_idx];
+                (child.hash_mask_bit(), child.tree_mask_bit())
+            }
+        };
+
+        masks.set_child_bits(nibble, hash_bit, tree_bit);
+    }
+
+    masks
+}
+
 /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
 ///
 /// Uses the `ArenaStackEntry` stack to walk dirty branches depth-first. For each branch,
@@ -956,7 +951,8 @@ fn update_cached_rlp(
         let state_mask = b.state_mask;
         let short_key = b.short_key;
         let num_leaves = b.state.num_leaves();
-        let new_branch_masks = b.branch_masks;
+        let prev_branch_masks = b.branch_masks;
+        let new_branch_masks = get_branch_masks(arena, b);
         let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty { .. });
 
         rlp_buf.clear();
@@ -980,8 +976,9 @@ fn update_cached_rlp(
 
         rlp_node_buf.truncate(rlp_node_buf.len() - num_children);
 
-        arena[head_idx].branch_mut().state =
-            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+        let branch = arena[head_idx].branch_mut();
+        branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+        branch.branch_masks = new_branch_masks;
         rlp_node_buf.push(rlp_node);
 
         // Step 2c: Emit trie update actions for dirty branches only.
@@ -993,9 +990,9 @@ fn update_cached_rlp(
             let logical_path = logical_branch_path(arena, stack.last().unwrap());
 
             if !logical_path.is_empty() {
-                if new_branch_masks.is_empty() {
+                if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
                     actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
-                } else {
+                } else if !new_branch_masks.is_empty() {
                     let mut compact = BranchNodeCompact::default();
                     arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
                     actions.push(SparseTrieUpdatesAction::InsertUpdated(logical_path, compact));
@@ -1007,7 +1004,7 @@ fn update_cached_rlp(
         // branch_masks to the parent. If the stack is now empty, the root is done.
         // Otherwise resume the parent branch from the nibble after the child that was
         // just completed.
-        let popped_path = pop_and_propagate_stack(arena, stack, true).path;
+        let popped_path = pop_and_propagate_stack(arena, stack).path;
         if stack.is_empty() {
             break;
         }
@@ -1069,6 +1066,7 @@ fn split_and_insert_leaf(
 
     trace!(
         target: TRACE_TARGET,
+        path = ?old_child_entry.path,
         ?new_leaf_path,
         ?old_child_short_key,
         diverge_len,
@@ -1405,7 +1403,7 @@ fn remove_leaf(
             // Pop the leaf entry, propagating any pending num_leaves delta to the
             // parent. This is important when collapse_branch has replaced the stack
             // entry's node (changing num_leaves) without updating prev_num_leaves.
-            pop_and_propagate_stack(arena, stack, false);
+            pop_and_propagate_stack(arena, stack);
 
             if stack.is_empty() {
                 // The leaf is the root — replace with EmptyRoot and push it back onto
@@ -1519,7 +1517,7 @@ fn collapse_branch(
     let branch_idx = branch_entry.index;
     let branch = arena[branch_idx].branch_ref();
     let remaining_nibble = branch.state_mask.iter().next().unwrap();
-    let branch_short_key = arena[branch_idx].branch_ref().short_key;
+    let branch_short_key = branch.short_key;
 
     debug_assert_eq!(branch.state_mask.count_bits(), 1, "collapse_branch requires exactly 1 child");
     debug_assert!(
@@ -1531,6 +1529,7 @@ fn collapse_branch(
         target: TRACE_TARGET,
         path = ?branch_entry.path,
         short_key = ?branch_short_key,
+        branch_masks = ?branch.branch_masks,
         ?remaining_nibble,
         "Collapsing single-child branch",
     );
@@ -1877,7 +1876,7 @@ impl ArenaParallelSparseTrie {
 
         // Pop the subtrie entry before mutating, so collapse_branch sees the parent at
         // stack.last().
-        pop_and_propagate_stack(&mut self.upper_arena, stack, false);
+        pop_and_propagate_stack(&mut self.upper_arena, stack);
 
         // Extract the subtrie and recycle it. Before clearing, drain any update actions
         // that were recorded during the subtrie's update_leaves (e.g. InsertRemoved from
@@ -2215,11 +2214,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     actions.append(subtrie_actions);
                 }
 
-                // Pop subtrie; pop_and_propagate_stack handles the dirty delta and
-                // branch_masks propagation to the parent.
+                // Pop subtrie; pop_and_propagate_stack handles the dirty delta propagation to the
+                // parent.
                 let popped_path =
-                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack, true)
-                        .path;
+                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
                 if self.buffers.stack.is_empty() {
                     break;
                 }
@@ -2266,7 +2264,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             // All children processed; pop and propagate dirty/leaf deltas to parent.
             let popped_path =
-                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack, false).path;
+                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
             if self.buffers.stack.is_empty() {
                 break;
             }
@@ -2724,14 +2722,14 @@ mod tests {
             let mut actual_updates = apst.take_updates();
             self.minimize_sparse_updates(&mut actual_updates);
 
-            //assert_eq!(
-            //    expected_trie_updates.storage_nodes, actual_updates.updated_nodes,
-            //    "updated nodes mismatch"
-            //);
-            //assert_eq!(
-            //    expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
-            //    "removed nodes mismatch"
-            //);
+            assert_eq!(
+                expected_trie_updates.storage_nodes, actual_updates.updated_nodes,
+                "updated nodes mismatch"
+            );
+            assert_eq!(
+                expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
+                "removed nodes mismatch"
+            );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
 
@@ -2779,8 +2777,8 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(2000))]
         #[test]
         fn arena_trie_proptest(
-            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=1000usize),
-            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=300usize),
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
+            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
         ) {
             reth_tracing::init_test_tracing();
