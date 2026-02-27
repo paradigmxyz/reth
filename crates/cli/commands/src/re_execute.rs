@@ -71,7 +71,7 @@ impl<C: ChainSpecParser> Command<C> {
 
 /// Traces a failed transaction at the given index within a block, producing opcode-level output.
 ///
-/// Creates a [`BlockExecutor`](alloy_evm::block::BlockExecutor) with a [`TracingInspector`]
+/// Creates a [`BlockExecutor`] with a [`TracingInspector`]
 /// attached but initially disabled. The inspector is enabled only for the target transaction,
 /// keeping pre-execution changes and prior transaction replay uninstrumented.
 /// The resulting trace is logged as a JSON-serialized geth-style `DefaultFrame` containing
