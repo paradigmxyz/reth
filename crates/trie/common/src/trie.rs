@@ -31,8 +31,28 @@ impl BranchNodeMasks {
     }
 
     /// Returns true if both interior masks are empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.hash_mask.is_empty() && self.tree_mask.is_empty()
+    }
+
+    /// Returns the masks with the given bits set for the given child nibble.
+    pub const fn with_child_bits(
+        mut self,
+        nibble: u8,
+        hash_mask_bit: bool,
+        tree_mask_bit: bool,
+    ) -> Self {
+        if hash_mask_bit {
+            self.hash_mask.set_bit(nibble);
+        } else {
+            self.hash_mask.unset_bit(nibble);
+        }
+        if tree_mask_bit {
+            self.tree_mask.set_bit(nibble);
+        } else {
+            self.tree_mask.unset_bit(nibble);
+        }
+        self
     }
 }
 

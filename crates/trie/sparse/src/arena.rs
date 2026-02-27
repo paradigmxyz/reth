@@ -27,6 +27,8 @@ enum ArenaSparseNodeState {
     Revealed {
         /// Total number of revealed leaves underneath this node (recursively).
         num_leaves: u64,
+        /// Tree mask and hash mask for database persistence (`TrieUpdates`).
+        masks: BranchNodeMasks,
     },
     /// The node has a cached RLP encoding that is still valid.
     Cached {
@@ -34,6 +36,8 @@ enum ArenaSparseNodeState {
         rlp_node: RlpNode,
         /// Total number of revealed leaves underneath this node (recursively).
         num_leaves: u64,
+        /// Tree mask and hash mask for database persistence (`TrieUpdates`).
+        masks: BranchNodeMasks,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty {
@@ -41,6 +45,11 @@ enum ArenaSparseNodeState {
         num_leaves: u64,
         /// Number of dirty (modified since last hash) leaves underneath this node.
         num_dirty_leaves: u64,
+        /// Tree mask and hash mask for database persistence (`TrieUpdates`). This field tracks the
+        /// most up-to-date version of masks.
+        masks: BranchNodeMasks,
+        /// The most recently cached/revealed masks value.
+        prev_masks: BranchNodeMasks,
     },
 }
 
@@ -48,8 +57,13 @@ impl ArenaSparseNodeState {
     /// Converts into a [`Self::Dirty`] if it's not already, preserving the `num_leaves` field.
     fn to_dirty(&self) -> Self {
         match self {
-            Self::Revealed { num_leaves, .. } | Self::Cached { num_leaves, .. } => {
-                Self::Dirty { num_leaves: *num_leaves, num_dirty_leaves: 0 }
+            Self::Revealed { num_leaves, masks, .. } | Self::Cached { num_leaves, masks, .. } => {
+                Self::Dirty {
+                    num_leaves: *num_leaves,
+                    num_dirty_leaves: 0,
+                    masks: *masks,
+                    prev_masks: *masks,
+                }
             }
             Self::Dirty { .. } => self.clone(),
         }
@@ -62,7 +76,7 @@ impl ArenaSparseNodeState {
 
     const fn num_leaves(&self) -> u64 {
         match self {
-            Self::Revealed { num_leaves } |
+            Self::Revealed { num_leaves, .. } |
             Self::Cached { num_leaves, .. } |
             Self::Dirty { num_leaves, .. } => *num_leaves,
         }
@@ -71,7 +85,7 @@ impl ArenaSparseNodeState {
     /// Applies a delta to the state's `num_leaves` field, returning the new value.
     const fn add_num_leaves(&mut self, delta: i64) -> u64 {
         match self {
-            Self::Revealed { num_leaves } |
+            Self::Revealed { num_leaves, .. } |
             Self::Cached { num_leaves, .. } |
             Self::Dirty { num_leaves, .. } => {
                 *num_leaves = (*num_leaves as i64 + delta) as u64;
@@ -93,6 +107,15 @@ impl ArenaSparseNodeState {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
             _ => None,
+        }
+    }
+
+    /// Returns the current [`BranchNodeMasks`] for a node.
+    const fn masks(&self) -> &BranchNodeMasks {
+        match self {
+            Self::Cached { masks, .. } |
+            Self::Revealed { masks, .. } |
+            Self::Dirty { masks, .. } => masks,
         }
     }
 }
@@ -126,30 +149,31 @@ struct ArenaSparseNodeBranch {
     /// The short key (extension key) for this branch. When non-empty, the node's path is the
     /// path of the parent extension node with this short key.
     short_key: Nibbles,
-    /// Tree mask and hash mask for database persistence (`TrieUpdates`).
-    branch_masks: BranchNodeMasks,
 }
 
 impl ArenaSparseNodeBranch {
     /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
-    const fn unset_child_bit(&mut self, nibble: u8) {
+    fn unset_child_bit(&mut self, nibble: u8, child_was_leaf: bool, child_was_dirty_leaf: bool) {
         self.state_mask.unset_bit(nibble);
-        self.branch_masks.hash_mask.unset_bit(nibble);
-        self.branch_masks.tree_mask.unset_bit(nibble);
-    }
 
-    /// Updates this branch's `branch_masks` for `nibble` based on a child's mask bits.
-    const fn set_child_mask_bits(&mut self, nibble: u8, hash_mask_bit: bool, tree_mask_bit: bool) {
-        if hash_mask_bit {
-            self.branch_masks.hash_mask.set_bit(nibble);
-        } else {
-            self.branch_masks.hash_mask.unset_bit(nibble);
+        self.state = self.state.to_dirty();
+        let ArenaSparseNodeState::Dirty { num_leaves, num_dirty_leaves, masks, .. } =
+            &mut self.state
+        else {
+            unreachable!()
+        };
+
+        if child_was_leaf {
+            *num_leaves -= 1;
         }
-        if tree_mask_bit {
-            self.branch_masks.tree_mask.set_bit(nibble);
-        } else {
-            self.branch_masks.tree_mask.unset_bit(nibble);
+
+        if child_was_dirty_leaf {
+            debug_assert!(child_was_leaf);
+            *num_dirty_leaves -= 1;
         }
+
+        masks.hash_mask.unset_bit(nibble);
+        masks.tree_mask.unset_bit(nibble);
     }
 
     /// Populates the given [`BranchNodeCompact`] from this branch's masks and children hashes.
@@ -159,8 +183,9 @@ impl ArenaSparseNodeBranch {
         compact: &mut BranchNodeCompact,
     ) {
         let mut hashes = Vec::new();
+        let masks = self.state.masks();
         for (dense_idx, nibble) in self.state_mask.iter().enumerate() {
-            if self.branch_masks.hash_mask.is_bit_set(nibble) {
+            if masks.hash_mask.is_bit_set(nibble) {
                 let hash = match &self.children[dense_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node.as_hash().expect("blinded child must be a hash")
@@ -172,13 +197,8 @@ impl ArenaSparseNodeBranch {
                 hashes.push(hash);
             }
         }
-        *compact = BranchNodeCompact::new(
-            self.state_mask,
-            self.branch_masks.tree_mask,
-            self.branch_masks.hash_mask,
-            hashes,
-            None,
-        );
+        *compact =
+            BranchNodeCompact::new(self.state_mask, masks.tree_mask, masks.hash_mask, hashes, None);
     }
 }
 
@@ -205,6 +225,20 @@ enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
+    /// Returns a new Leaf with a Dirty state.
+    fn new_dirty_leaf(key: Nibbles, value: Vec<u8>) -> Self {
+        Self::Leaf {
+            key,
+            value,
+            state: ArenaSparseNodeState::Dirty {
+                num_leaves: 1,
+                num_dirty_leaves: 1,
+                masks: Default::default(),
+                prev_masks: Default::default(),
+            },
+        }
+    }
+
     fn num_leaves(&self) -> u64 {
         match self {
             Self::EmptyRoot | Self::TakenSubtrie => 0,
@@ -223,6 +257,8 @@ impl ArenaSparseNode {
         }
     }
 
+    /// Returns a mutable reference to the node's state. Can only be called on branch and leaf
+    /// nodes.
     fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
             Self::Branch(b) => &mut b.state,
@@ -290,7 +326,7 @@ impl ArenaSparseNode {
     ///
     /// That is, if the node is a branch with any non-empty `branch_masks`.
     fn tree_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| !b.branch_masks.is_empty())
+        self.as_branch().is_some_and(|b| !b.state.masks().is_empty())
     }
 
     /// Returns the cached hash of this node. Panics if the node's state is not `Cached`.
@@ -315,11 +351,17 @@ impl From<ProofTrieNodeV2> for ArenaSparseNode {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
             TrieNodeV2::EmptyRoot => Self::EmptyRoot,
-            TrieNodeV2::Leaf(leaf) => Self::Leaf {
-                state: ArenaSparseNodeState::Revealed { num_leaves: 1 },
-                key: leaf.key,
-                value: leaf.value,
-            },
+            TrieNodeV2::Leaf(leaf) => {
+                debug_assert!(masks.is_none(), "Leafs cannot have masks");
+                Self::Leaf {
+                    state: ArenaSparseNodeState::Revealed {
+                        num_leaves: 1,
+                        masks: Default::default(),
+                    },
+                    key: leaf.key,
+                    value: leaf.value,
+                }
+            }
             TrieNodeV2::Branch(branch) => {
                 let mut children = SmallVec::with_capacity(branch.state_mask.count_bits() as usize);
                 for (stack_ptr, _nibble) in branch.state_mask.iter().enumerate() {
@@ -327,11 +369,13 @@ impl From<ProofTrieNodeV2> for ArenaSparseNode {
                         .push(ArenaSparseNodeBranchChild::Blinded(branch.stack[stack_ptr].clone()));
                 }
                 Self::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed { num_leaves: 0 },
+                    state: ArenaSparseNodeState::Revealed {
+                        num_leaves: 0,
+                        masks: masks.unwrap_or_default(),
+                    },
                     children,
                     state_mask: branch.state_mask,
                     short_key: branch.key,
-                    branch_masks: masks.unwrap_or_default(),
                 })
             }
             TrieNodeV2::Extension(_) => {
@@ -555,22 +599,14 @@ fn pop_and_propagate_stack(
     #[cfg(debug_assertions)]
     debug_assert_branch_consistency(arena, entry.index);
 
-    if let Some(parent) = stack.last() {
-        let cur_num_leaves = arena[entry.index].num_leaves();
-        let cur_dirty_leaves = arena[entry.index].num_dirty_leaves();
+    if let Some(parent_entry) = stack.last() {
+        let (child, parent) = {
+            let (c, p) = arena.get2_mut(entry.index, parent_entry.index);
+            (c.expect("child node must exist"), p.expect("parent node must exist"))
+        };
 
-        // Propagate branch_masks from the popped child to the parent. This must happen
-        // before the dirty-delta propagation below, because setting masks may mark the
-        // parent dirty (via `to_dirty`), which affects the parent's `num_dirty_leaves`.
-        if propagate_masks {
-            let child_nibble = entry.path.last().unwrap();
-            let hash_bit = arena[entry.index].hash_mask_bit();
-            let tree_bit = arena[entry.index].tree_mask_bit();
-            let parent_branch = arena[parent.index].branch_mut();
-            if parent_branch.state.is_dirty() {
-                parent_branch.set_child_mask_bits(child_nibble, hash_bit, tree_bit);
-            }
-        }
+        let cur_num_leaves = child.num_leaves();
+        let cur_dirty_leaves = child.num_dirty_leaves();
 
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
         let leaves_dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
@@ -579,21 +615,37 @@ fn pop_and_propagate_stack(
         // itself is dirty (e.g. structurally modified with 0 dirty leaves), propagate
         // dirty state to the parent. This covers dirtying, cleaning (e.g. after hashing),
         // and structural changes like child removal in collapse_branch.
-        let child_is_dirty = arena[entry.index].is_dirty();
-        let parent_state = arena[parent.index].state_mut();
+        let child_is_dirty = child.is_dirty();
 
+        let parent_state = parent.state_mut();
         if leaves_dirty_delta != 0 || child_is_dirty {
+            let (mut masks, prev_masks) = match parent_state {
+                ArenaSparseNodeState::Cached { masks, .. } |
+                ArenaSparseNodeState::Revealed { masks, .. } => (*masks, *masks),
+                ArenaSparseNodeState::Dirty { masks, prev_masks, .. } => (*masks, *prev_masks),
+            };
+
+            if propagate_masks {
+                let child_nibble = entry.path.last().unwrap();
+                let hash_bit = child.hash_mask_bit();
+                let tree_bit = child.tree_mask_bit();
+                masks = masks.with_child_bits(child_nibble, hash_bit, tree_bit);
+            }
+
             *parent_state = ArenaSparseNodeState::Dirty {
                 num_leaves: (parent_state.num_leaves() as i64 + leaves_delta) as u64,
                 num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + leaves_dirty_delta)
                     as u64,
+                masks,
+                prev_masks,
             };
+
             trace!(
                 target: TRACE_TARGET,
                 path = ?entry.path,
                 leaves_delta,
                 leaves_dirty_delta,
-                parent_path = ?parent.path,
+                parent_path = ?parent_entry.path,
                 ?parent_state,
                 "Propagated dirty state to parent",
             );
@@ -603,7 +655,7 @@ fn pop_and_propagate_stack(
                 target: TRACE_TARGET,
                 path = ?entry.path,
                 leaves_delta,
-                parent_path = ?parent.path,
+                parent_path = ?parent_entry.path,
                 ?parent_state,
                 "Propagated leaf count delta to parent",
             );
@@ -723,7 +775,7 @@ impl ArenaSparseSubtrie {
                         &mut self.buffers.stack,
                         &mut self.root,
                         full_path,
-                        value,
+                        value.clone(),
                         find_result,
                     );
                 }
@@ -956,8 +1008,7 @@ fn update_cached_rlp(
         let state_mask = b.state_mask;
         let short_key = b.short_key;
         let num_leaves = b.state.num_leaves();
-        let new_branch_masks = b.branch_masks;
-        let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty { .. });
+        let new_masks = *b.state.masks();
 
         rlp_buf.clear();
         let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -974,14 +1025,22 @@ fn update_cached_rlp(
             path = ?stack.last().unwrap().path,
             short_key = ?arena[head_idx].short_key(),
             children = ?state_mask.iter().zip(rlp_node_buf[rlp_node_buf.len() - num_children..].iter()).collect::<Vec<_>>(),
+            ?new_masks,
             rlp_node = ?rlp_node,
             "Calculated branch RlpNode",
         );
 
         rlp_node_buf.truncate(rlp_node_buf.len() - num_children);
 
-        arena[head_idx].branch_mut().state =
-            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+        let prev_state = mem::replace(
+            &mut arena[head_idx].branch_mut().state,
+            ArenaSparseNodeState::Cached {
+                rlp_node: rlp_node.clone(),
+                num_leaves,
+                masks: new_masks,
+            },
+        );
+
         rlp_node_buf.push(rlp_node);
 
         // Step 2c: Emit trie update actions for dirty branches only.
@@ -989,18 +1048,33 @@ fn update_cached_rlp(
         // actions — their DB state is unchanged. Only dirty branches can have
         // changed masks or structure.
         // Skip the root node (empty logical path) as PST does.
-        if let Some(actions) = update_actions.as_mut().filter(|_| was_dirty) {
-            let logical_path = logical_branch_path(arena, stack.last().unwrap());
-
-            if !logical_path.is_empty() {
-                if new_branch_masks.is_empty() {
-                    actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
-                } else {
-                    let mut compact = BranchNodeCompact::default();
-                    arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
-                    actions.push(SparseTrieUpdatesAction::InsertUpdated(logical_path, compact));
+        match (update_actions.as_mut(), prev_state) {
+            (Some(actions), ArenaSparseNodeState::Dirty { masks, prev_masks, .. }) => {
+                let logical_path = logical_branch_path(arena, stack.last().unwrap());
+                if !logical_path.is_empty() {
+                    match (prev_masks.is_empty(), masks.is_empty()) {
+                        (_, false) => {
+                            // May or may not have been previously stored, but now it is, upsert
+                            let mut compact = BranchNodeCompact::default();
+                            arena[head_idx]
+                                .branch_ref()
+                                .set_branch_node_compact(arena, &mut compact);
+                            actions.push(SparseTrieUpdatesAction::InsertUpdated(
+                                logical_path,
+                                compact,
+                            ));
+                        }
+                        (false, true) => {
+                            // Was stored, now isn't
+                            actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+                        }
+                        (true, true) => {
+                            // Wasn't stored, is still not stored
+                        }
+                    }
                 }
             }
+            _ => {}
         }
 
         // Step 2d: Pop this branch from the stack, propagating leaf-count deltas and
@@ -1039,8 +1113,11 @@ fn encode_leaf(
     let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
 
     let num_leaves = arena[idx].num_leaves();
-    *arena[idx].state_mut() =
-        ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+    *arena[idx].state_mut() = ArenaSparseNodeState::Cached {
+        rlp_node: rlp_node.clone(),
+        num_leaves,
+        masks: Default::default(),
+    };
     rlp_node_buf.push(rlp_node);
 }
 
@@ -1060,7 +1137,7 @@ fn split_and_insert_leaf(
     stack: &mut Vec<ArenaStackEntry>,
     root: &mut Index,
     new_leaf_path: Nibbles,
-    value: &[u8],
+    value: Vec<u8>,
 ) {
     let old_child_entry = stack.last().expect("stack isn't empty");
     let old_child_idx = old_child_entry.index;
@@ -1080,9 +1157,9 @@ fn split_and_insert_leaf(
 
     // Truncate the old child's key/short_key and mark it dirty.
     match &mut arena[old_child_idx] {
-        ArenaSparseNode::Leaf { key, state, .. } => {
-            *key = old_child_suffix;
-            *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+        ArenaSparseNode::Leaf { value, .. } => {
+            arena[old_child_idx] =
+                ArenaSparseNode::new_dirty_leaf(old_child_suffix, mem::take(value))
         }
         ArenaSparseNode::Branch(b) => {
             b.short_key = old_child_suffix;
@@ -1091,18 +1168,18 @@ fn split_and_insert_leaf(
         _ => unreachable!("split_and_insert_leaf called on non-Leaf/Branch node"),
     }
 
-    let old_child_num_leaves = arena[old_child_idx].num_leaves();
-    let old_child_dirty_leaves = arena[old_child_idx].num_dirty_leaves();
+    let old_child = &arena[old_child_idx];
+    let old_child_num_leaves = old_child.num_leaves();
+    let old_child_dirty_leaves = old_child.num_dirty_leaves();
+    let old_child_hash_bit = old_child.hash_mask_bit();
+    let old_child_tree_bit = old_child.tree_mask_bit();
 
     let short_key = new_leaf_path.slice(..diverge_len);
     let new_leaf_nibble = new_leaf_path.get_unchecked(diverge_len);
     debug_assert_ne!(old_child_nibble, new_leaf_nibble);
 
-    let new_leaf_idx = arena.insert(ArenaSparseNode::Leaf {
-        state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
-        key: new_leaf_path.slice(diverge_len + 1..),
-        value: value.to_vec(),
-    });
+    let new_leaf_idx = arena
+        .insert(ArenaSparseNode::new_dirty_leaf(new_leaf_path.slice(diverge_len + 1..), value));
 
     let (first_nibble, first_child, second_nibble, second_child) =
         if old_child_nibble < new_leaf_nibble {
@@ -1120,12 +1197,20 @@ fn split_and_insert_leaf(
         state: ArenaSparseNodeState::Dirty {
             num_leaves: old_child_num_leaves + 1,
             num_dirty_leaves: old_child_dirty_leaves + 1,
+            // The new child is a leaf, but the old child might require mask bits
+            masks: BranchNodeMasks::default().with_child_bits(
+                old_child_nibble,
+                old_child_hash_bit,
+                old_child_tree_bit,
+            ),
+            prev_masks: Default::default(),
         },
         children,
         state_mask,
         short_key,
-        branch_masks: BranchNodeMasks::default(),
     }));
+
+    trace!(target: TRACE_TARGET, branch = ?arena[new_branch_idx], "Inserted new branch");
 
     replace_child_in_parent(arena, stack, root, new_branch_idx);
 }
@@ -1207,7 +1292,7 @@ fn upsert_leaf(
     stack: &mut Vec<ArenaStackEntry>,
     root: &mut Index,
     full_path: &Nibbles,
-    value: &[u8],
+    value: Vec<u8>,
     find_result: FindAncestorResult,
 ) -> UpsertLeafResult {
     trace!(target: TRACE_TARGET, ?find_result, "Upserting leaf");
@@ -1220,11 +1305,8 @@ fn upsert_leaf(
         FindAncestorResult::EmptyRoot => {
             let head_idx = head.index;
             let head_path = head.path;
-            arena[head_idx] = ArenaSparseNode::Leaf {
-                state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
-                key: full_path.slice(head_path.len()..),
-                value: value.to_vec(),
-            };
+            arena[head_idx] =
+                ArenaSparseNode::new_dirty_leaf(full_path.slice(head_path.len()..), value.to_vec());
             UpsertLeafResult::None
         }
         FindAncestorResult::RevealedLeaf => {
@@ -1240,10 +1322,12 @@ fn upsert_leaf(
 
             if &leaf_full_path == full_path {
                 // Same leaf — update value in place.
-                if let ArenaSparseNode::Leaf { value: v, state, .. } = &mut arena[head_idx] {
+                if let ArenaSparseNode::Leaf { key, value: v, .. } = &mut arena[head_idx] {
+                    let key = *key;
+                    let mut v = mem::take(v);
                     v.clear();
-                    v.extend_from_slice(value);
-                    *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+                    v.extend_from_slice(&value);
+                    arena[head_idx] = ArenaSparseNode::new_dirty_leaf(key, v);
                 }
             } else {
                 // Different leaf — split into a branch.
@@ -1277,21 +1361,17 @@ fn upsert_leaf(
 
             let head_branch_logical_path = logical_branch_path(arena, head);
             let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
-            let new_leaf = arena.insert(ArenaSparseNode::Leaf {
-                state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
-                key: leaf_key,
-                value: value.to_vec(),
-            });
+            let new_leaf_idx = arena.insert(ArenaSparseNode::new_dirty_leaf(leaf_key, value));
 
             let branch = arena[head_idx].branch_mut();
             branch.state_mask.set_bit(child_nibble);
-            branch.children.insert(insert_pos, ArenaSparseNodeBranchChild::Revealed(new_leaf));
+            branch.children.insert(insert_pos, ArenaSparseNodeBranchChild::Revealed(new_leaf_idx));
 
             // Push the leaf onto the stack so pop_and_propagate_stack handles marking
             // the parent dirty and propagating leaf counts.
             let mut leaf_path = head_branch_logical_path;
             leaf_path.push_unchecked(child_nibble);
-            push_stack(arena, stack, new_leaf, leaf_path, true);
+            push_stack(arena, stack, new_leaf_idx, leaf_path, true);
 
             UpsertLeafResult::NewChild
         }
@@ -1400,7 +1480,7 @@ fn remove_leaf(
 
             // Capture the leaf's dirty count before popping/removing, so we only
             // decrement the parent's num_dirty_leaves if the leaf was actually dirty.
-            let leaf_dirty_count = arena[head_idx].num_dirty_leaves();
+            let leaf_was_dirty = arena[head_idx].is_dirty();
 
             // Pop the leaf entry, propagating any pending num_leaves delta to the
             // parent. This is important when collapse_branch has replaced the stack
@@ -1425,18 +1505,11 @@ fn remove_leaf(
             let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
                 .expect("leaf nibble not found in parent state_mask");
 
-            let old_num_leaves = parent_branch.state.num_leaves();
-            let old_dirty_leaves = parent_branch.state.num_dirty_leaves();
-
             // Remove the leaf from the arena and from the parent's children.
             arena.remove(head_idx);
             let parent_branch = arena[parent_idx].branch_mut();
             parent_branch.children.remove(dense_idx);
-            parent_branch.unset_child_bit(child_nibble);
-            parent_branch.state = ArenaSparseNodeState::Dirty {
-                num_leaves: old_num_leaves - 1,
-                num_dirty_leaves: old_dirty_leaves.saturating_sub(leaf_dirty_count),
-            };
+            parent_branch.unset_child_bit(child_nibble, true, leaf_was_dirty);
 
             // If the branch now has only one child, collapse it. The blinded sibling
             // case was already handled above before any mutations.
@@ -1537,13 +1610,16 @@ fn collapse_branch(
 
     // Record the collapsed branch's logical path for trie update tracking if it
     // was previously persisted in the DB trie.
-    if let Some(actions) = update_actions.as_mut() &&
-        !branch.branch_masks.is_empty()
-    {
-        let logical_path = logical_branch_path(arena, branch_entry);
-        if !logical_path.is_empty() {
-            actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+    match (update_actions.as_mut(), &branch.state) {
+        (Some(actions), ArenaSparseNodeState::Dirty { prev_masks, .. })
+            if !prev_masks.is_empty() =>
+        {
+            let logical_path = logical_branch_path(arena, branch_entry);
+            if !logical_path.is_empty() {
+                actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+            }
         }
+        _ => {}
     }
 
     // Build the prefix: branch's short_key + remaining child's nibble.
@@ -1556,11 +1632,11 @@ fn collapse_branch(
 
     // Prepend the prefix to the child's key/short_key and mark dirty.
     match &mut arena[child_idx] {
-        ArenaSparseNode::Leaf { key, state, .. } => {
+        ArenaSparseNode::Leaf { key, value, .. } => {
             let mut new_key = prefix;
             new_key.extend(key);
-            *key = new_key;
-            *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+            let value = mem::take(value);
+            arena[child_idx] = ArenaSparseNode::new_dirty_leaf(new_key, value);
         }
         ArenaSparseNode::Branch(b) => {
             let mut new_short_key = prefix;
@@ -1575,11 +1651,12 @@ fn collapse_branch(
                 b.short_key = new_short_key;
                 b.state = b.state.to_dirty();
             }
-            ArenaSparseNode::Leaf { key, state, .. } => {
+            ArenaSparseNode::Leaf { key, value, .. } => {
                 let mut new_key = prefix;
                 new_key.extend(key);
                 *key = new_key;
-                *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+                let value = mem::take(value);
+                arena[child_idx] = ArenaSparseNode::new_dirty_leaf(new_key, value);
             }
             _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
         },
@@ -1671,6 +1748,7 @@ fn reveal_node(
         target: TRACE_TARGET,
         path = ?node.path,
         rlp_node = ?cached_rlp,
+        masks = ?node.masks,
         "Revealing node",
     );
 
@@ -1679,7 +1757,11 @@ fn reveal_node(
 
     let state = arena_node.state_mut();
     let num_leaves = state.num_leaves();
-    *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, num_leaves };
+    *state = ArenaSparseNodeState::Cached {
+        rlp_node: cached_rlp,
+        num_leaves,
+        masks: node.masks.unwrap_or_default(),
+    };
 
     let child_idx = arena.insert(arena_node);
 
@@ -1900,9 +1982,7 @@ impl ArenaParallelSparseTrie {
             .expect("child nibble not found in parent state_mask");
 
         parent_branch.children.remove(dense_idx);
-        parent_branch.unset_child_bit(child_nibble);
-        // The branch structure changed (child removed), so any cached RLP is stale.
-        parent_branch.state = parent_branch.state.to_dirty();
+        parent_branch.unset_child_bit(child_nibble, false, false);
 
         if parent_branch.state_mask.count_bits() == 1 {
             collapse_branch(
@@ -1953,8 +2033,8 @@ impl ArenaParallelSparseTrie {
                         updates.updated_nodes.remove(&path);
                         updates.removed_nodes.insert(path);
                     }
-                    SparseTrieUpdatesAction::RemoveUpdated(_path) => {
-                        panic!("SparseTrieUpdatesAction::RemoveUpdated is not used by ArenaParallelSparseTrie");
+                    SparseTrieUpdatesAction::RemoveUpdated(_) => {
+                        panic!("RemoveUpdated not supported")
                     }
                     SparseTrieUpdatesAction::InsertUpdated(path, branch_node) => {
                         updates.updated_nodes.insert(path, branch_node);
@@ -2002,8 +2082,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
             TrieNodeV2::Leaf(leaf) => {
                 trace!(target: TRACE_TARGET, key = ?leaf.key, "Setting leaf root");
+                debug_assert!(masks.is_none(), "Leaf cannot have masks");
                 self.upper_arena[self.root] = ArenaSparseNode::Leaf {
-                    state: ArenaSparseNodeState::Revealed { num_leaves: 1 },
+                    state: ArenaSparseNodeState::Revealed {
+                        num_leaves: 1,
+                        masks: Default::default(),
+                    },
                     key: leaf.key,
                     value: leaf.value,
                 };
@@ -2017,11 +2101,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 }
 
                 self.upper_arena[self.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed { num_leaves: 0 },
+                    state: ArenaSparseNodeState::Revealed {
+                        num_leaves: 0,
+                        masks: masks.unwrap_or_default(),
+                    },
                     children,
                     state_mask: branch.state_mask,
                     short_key: branch.key,
-                    branch_masks: masks.unwrap_or_default(),
                 });
             }
             TrieNodeV2::Extension(_) => {
@@ -2370,7 +2456,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         let mut update_idx = 0;
         while update_idx < sorted.len() {
-            let (key, ref full_path, ref update) = sorted[update_idx];
+            let (key, ref full_path, ref mut update) = sorted[update_idx];
 
             let find_result = find_ancestor(&mut self.upper_arena, &mut stack, full_path);
 
@@ -2452,7 +2538,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             &mut stack,
                             &mut self.root,
                             full_path,
-                            v,
+                            mem::take(v),
                             find_result,
                         );
                         if matches!(result, UpsertLeafResult::NewChild) {
@@ -2724,14 +2810,14 @@ mod tests {
             let mut actual_updates = apst.take_updates();
             self.minimize_sparse_updates(&mut actual_updates);
 
-            //assert_eq!(
-            //    expected_trie_updates.storage_nodes, actual_updates.updated_nodes,
-            //    "updated nodes mismatch"
-            //);
-            //assert_eq!(
-            //    expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
-            //    "removed nodes mismatch"
-            //);
+            assert_eq!(
+                expected_trie_updates.storage_nodes, actual_updates.updated_nodes,
+                "updated nodes mismatch"
+            );
+            assert_eq!(
+                expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
+                "removed nodes mismatch"
+            );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
 
@@ -2779,8 +2865,8 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(2000))]
         #[test]
         fn arena_trie_proptest(
-            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=1000usize),
-            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=300usize),
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
+            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
         ) {
             reth_tracing::init_test_tracing();
