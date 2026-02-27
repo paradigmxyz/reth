@@ -115,13 +115,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::InvalidBodiesRange { .. } |
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
-                EngineObjectValidationError::InvalidParams(_) |
-                // Per Engine API spec, structure validation errors for PayloadAttributes
-                // (e.g., missing withdrawals post-Shanghai, missing parentBeaconBlockRoot
-                // post-Cancun) should return -32602 "Invalid params", not -38003.
-                // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md
-                // Fixes: https://github.com/paradigmxyz/reth/issues/8732
-                EngineObjectValidationError::PayloadAttributes(_),
+                EngineObjectValidationError::InvalidParams(_),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -129,6 +123,19 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::ErrorObject::owned(
                     INVALID_PARAMS_CODE,
                     INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
+            // Per Engine API spec, payload attributes structure validation errors
+            // (e.g., missing withdrawals post-Shanghai, extra parentBeaconBlockRoot
+            // pre-V3) should return -38003: Invalid payload attributes.
+            // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(_),
+            ) => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                    INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                     Some(ErrorData::new(error)),
                 )
             }
@@ -254,11 +261,11 @@ mod tests {
         );
 
         // PayloadAttributes structure validation errors (e.g., missing withdrawals post-Shanghai)
-        // should return -32602 per the Engine API spec
-        // See: https://github.com/paradigmxyz/reth/issues/8732
+        // should return -38003 per the Engine API spec
+        // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
         ensure_engine_rpc_error(
-            INVALID_PARAMS_CODE,
-            INVALID_PARAMS_MSG,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai,
