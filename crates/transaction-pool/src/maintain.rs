@@ -213,7 +213,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     dirty_addresses.remove(acc);
                 }
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()
@@ -221,7 +221,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // can fetch all dirty accounts at once
                 let accs_to_reload = std::mem::take(&mut dirty_addresses);
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()
@@ -572,7 +572,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                     // Re-insert transaction with the new sidecar
                                     let origin = tx.origin;
                                     let Some(tx) = EthPoolTransaction::try_from_eip4844(
-                                        tx.transaction.clone_into_consensus(),
+                                        tx.to_consensus(),
                                         sidecar.into(),
                                     ) else {
                                         return;
@@ -771,7 +771,7 @@ where
     let local_transactions = local_transactions
         .into_iter()
         .map(|tx| {
-            let consensus_tx = tx.transaction.clone_into_consensus().into_inner();
+            let consensus_tx = tx.to_consensus().into_inner();
             let rlp_data = consensus_tx.encoded_2718();
 
             TxBackup { rlp: rlp_data.into(), origin: tx.origin }

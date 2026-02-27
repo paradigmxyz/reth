@@ -117,7 +117,7 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
@@ -240,7 +240,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = eth_api.replay_transactions_until(
@@ -360,14 +360,15 @@ where
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. replay the required number of transactions
-                for tx in block.transactions_recovered().take(tx_index) {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit(res.state);
-                }
+                eth_api.replay_transactions_until(
+                    &mut db,
+                    evm_env.clone(),
+                    block.transactions_recovered(),
+                    *block.body().transactions()[tx_index].tx_hash(),
+                )?;
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
@@ -436,6 +437,8 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
+                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
                     let transactions = block.transactions_recovered().take(num_txs);
 
                     // Execute all transactions until index

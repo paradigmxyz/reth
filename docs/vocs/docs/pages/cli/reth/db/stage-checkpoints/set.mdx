@@ -1,18 +1,25 @@
-# reth db settings set transaction_hash_numbers
+# reth db stage-checkpoints set
 
-Store transaction hash to number mapping in rocksdb instead of MDBX
+Set a stage checkpoint
 
 ```bash
-$ reth db settings set transaction_hash_numbers --help
+$ reth db stage-checkpoints set --help
 ```
 ```txt
-Usage: reth db settings set transaction_hash_numbers [OPTIONS] <VALUE>
-
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Usage: reth db stage-checkpoints set [OPTIONS] --stage <STAGE> --block-number <BLOCK_NUMBER>
 
 Options:
+      --stage <STAGE>
+          Stage to update
+
+          [possible values: era, headers, bodies, sender-recovery, execution, prune-sender-recovery, merkle-unwind, account-hashing, storage-hashing, merkle-execute, transaction-lookup, index-storage-history, index-account-history, prune, finish]
+
+      --block-number <BLOCK_NUMBER>
+          Block number to set as stage checkpoint
+
+      --clear-stage-unit
+          Clear stage-specific unit checkpoint payload
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -40,7 +47,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
@@ -73,9 +80,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

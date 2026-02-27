@@ -1,5 +1,7 @@
 //! Sparse Trie task related functionality.
 
+use std::sync::Arc;
+
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
@@ -31,7 +33,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use tracing::{debug, debug_span, error, instrument};
+use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
@@ -51,7 +53,7 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
 
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
-    chunk_size: Option<usize>,
+    chunk_size: usize,
     /// If this number is exceeded and chunking is enabled, then this will override whether or not
     /// there are any active workers and force chunking across workers. This is to prevent tasks
     /// which are very long from hitting a single worker.
@@ -90,8 +92,8 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
-    /// Pending targets to be dispatched to the proof workers.
-    pending_targets: MultiProofTargetsV2,
+    /// Pending proof targets queued for dispatch to proof workers.
+    pending_targets: PendingTargets,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -112,13 +114,13 @@ where
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
-        chunk_size: Option<usize>,
+        chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_named("trie-hashing", move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });
@@ -192,8 +194,10 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         disable_pruning: bool,
+        updates: &TrieUpdates,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
+        trie.commit_updates(updates);
         if !disable_pruning {
             trie.prune(prune_depth, max_storage_tries);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
@@ -234,8 +238,13 @@ where
         let now = Instant::now();
 
         loop {
+            let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(t.elapsed());
+
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
@@ -249,17 +258,32 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
-                    let mut result = result.result?;
 
+                    let mut result = result.result?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
                         let res = next.result?;
                         result.extend(res);
                     }
 
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_proof_coalesce_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     self.on_proof_result(result)?;
+                    self.metrics
+                        .sparse_trie_reveal_multiproof_duration_histogram
+                        .record(t.elapsed());
                 },
             }
 
@@ -267,8 +291,10 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
+                t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -281,9 +307,11 @@ where
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
+                t = Instant::now();
                 self.process_new_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
                 self.dispatch_pending_targets();
-            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+            } else if self.pending_targets.len() > self.chunk_size {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
@@ -306,7 +334,7 @@ where
 
         Ok(StateRootComputeOutcome {
             state_root,
-            trie_updates,
+            trie_updates: Arc::new(trie_updates),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -404,12 +432,12 @@ where
         })
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        if self.pending_updates == 0 {
+            return Ok(());
+        }
+
+        let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
@@ -465,49 +493,37 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = tracing::Span::current();
-        let storage_results = storage_updates
-            .iter_mut()
-            .filter(|(_, updates)| !updates.is_empty())
-            .map(|(address, updates)| {
-                let trie = self.trie.take_or_create_storage_trie(address);
-                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+        // Process all storage updates, skipping tries with no pending updates.
+        let span = debug_span!("process_storage_leaf_updates").entered();
+        for (address, updates) in storage_updates {
+            if updates.is_empty() {
+                continue;
+            }
+            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
-                (address, updates, fetched, trie)
-            })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
-                let mut targets = Vec::new();
+            let trie = self.trie.get_or_create_storage_trie_mut(*address);
+            let fetched = self.fetched_storage_targets.entry(*address).or_default();
+            let mut targets = Vec::new();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
+            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
                         entry.insert(min_len);
                         targets.push(Target::new(path).with_min_len(min_len));
                     }
-                })?;
-
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        drop(span);
-
-        for (address, targets, fetched, trie) in storage_results {
-            self.fetched_storage_targets.insert(*address, fetched);
-            self.trie.insert_storage_trie(*address, trie);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    targets.push(Target::new(path).with_min_len(min_len));
+                }
+            })?;
 
             if !targets.is_empty() {
-                self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
+                self.pending_targets.extend_storage_targets(address, targets);
             }
         }
+
+        drop(span);
 
         // Process account trie updates and fill the account targets.
         self.process_account_leaf_updates(new)?;
@@ -535,15 +551,13 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .account_targets
-                            .push(Target::new(target).with_min_len(min_len));
+                            .push_account_target(Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .account_targets
-                        .push(Target::new(target).with_min_len(min_len));
+                        .push_account_target(Target::new(target).with_min_len(min_len));
                 }
             }
         })?;
@@ -594,18 +608,7 @@ where
                         return true;
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                            storage_root == EMPTY_ROOT_HASH
-                        {
-                            Vec::new()
-                        } else {
-                            account_rlp_buf.clear();
-                            account
-                                .unwrap_or_default()
-                                .into_trie_account(storage_root)
-                                .encode(account_rlp_buf);
-                            account_rlp_buf.clone()
-                        };
+                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
                         return false;
@@ -613,13 +616,13 @@ where
                 }
 
                 // Get the current account state either from the trie or from latest account update.
-                let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
-                    Some(encoded).filter(|encoded| !encoded.is_empty())
-                } else if !self.account_updates.contains_key(addr) {
-                    self.trie.get_account_value(addr)
-                } else {
+                let trie_account = match self.account_updates.get(addr) {
+                    Some(LeafUpdate::Changed(encoded)) => {
+                        Some(encoded).filter(|encoded| !encoded.is_empty())
+                    }
                     // Needs to be revealed first
-                    return true;
+                    Some(LeafUpdate::Touched) => return true,
+                    None => self.trie.get_account_value(addr),
                 };
 
                 let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
@@ -636,13 +639,7 @@ where
                     (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
-                let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-                    Vec::new()
-                } else {
-                    account_rlp_buf.clear();
-                    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-                    account_rlp_buf.clone()
-                };
+                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;
 
@@ -663,39 +660,89 @@ where
         Ok(())
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
     fn dispatch_pending_targets(&mut self) {
-        if !self.pending_targets.is_empty() {
-            let chunking_length = self.pending_targets.chunking_length();
-            dispatch_with_chunking(
-                std::mem::take(&mut self.pending_targets),
-                chunking_length,
-                self.chunk_size,
-                self.max_targets_for_chunking,
-                self.proof_worker_handle.available_account_workers(),
-                self.proof_worker_handle.available_storage_workers(),
-                MultiProofTargetsV2::chunks,
-                |proof_targets| {
-                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput {
-                            targets: proof_targets,
-                            proof_result_sender: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                0,
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        },
-                    ) {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                    }
-                },
-            );
+        if self.pending_targets.is_empty() {
+            return;
         }
+
+        let _span = debug_span!("dispatch_pending_targets").entered();
+        let (targets, chunking_length) = self.pending_targets.take();
+        dispatch_with_chunking(
+            targets,
+            chunking_length,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+            self.proof_worker_handle.available_account_workers(),
+            self.proof_worker_handle.available_storage_workers(),
+            MultiProofTargetsV2::chunks,
+            |proof_targets| {
+                if let Err(e) =
+                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                        targets: proof_targets,
+                        proof_result_sender: ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                    })
+                {
+                    error!("failed to dispatch account multiproof: {e:?}");
+                }
+            },
+        );
+    }
+}
+
+/// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
+fn encode_account_leaf_value(
+    account: Option<Account>,
+    storage_root: B256,
+    account_rlp_buf: &mut Vec<u8>,
+) -> Vec<u8> {
+    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+        return Vec::new();
+    }
+
+    account_rlp_buf.clear();
+    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+    account_rlp_buf.clone()
+}
+
+/// Pending proof targets queued for dispatch to proof workers, along with their count.
+#[derive(Default)]
+struct PendingTargets {
+    /// The proof targets.
+    targets: MultiProofTargetsV2,
+    /// Number of account + storage proof targets currently queued.
+    len: usize,
+}
+
+impl PendingTargets {
+    /// Returns the number of pending targets.
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if there are no pending targets.
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Takes the pending targets, replacing with empty defaults.
+    fn take(&mut self) -> (MultiProofTargetsV2, usize) {
+        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+    }
+
+    /// Adds a target to the account targets.
+    fn push_account_target(&mut self, target: Target) {
+        self.targets.account_targets.push(target);
+        self.len += 1;
+    }
+
+    /// Extends storage targets for the given address.
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<Target>) {
+        self.len += targets.len();
+        self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
 }
 
@@ -711,12 +758,12 @@ enum SparseTrieTaskMessage {
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
-    pub trie_updates: TrieUpdates,
+    pub trie_updates: Arc<TrieUpdates>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
@@ -726,7 +773,7 @@ pub struct StateRootComputeOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_trie_sparse::ParallelSparseTrie;
 
     #[test]
@@ -776,5 +823,34 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+        let mut account_rlp_buf = vec![0xAB];
+        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+
+        assert!(encoded.is_empty());
+        // Early return should not touch the caller's buffer.
+        assert_eq!(account_rlp_buf, vec![0xAB]);
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
+        let storage_root = B256::from([0x99; 32]);
+        let account = Some(Account {
+            nonce: 7,
+            balance: U256::from(42),
+            bytecode_hash: Some(B256::from([0xAA; 32])),
+        });
+        let mut account_rlp_buf = vec![0x00, 0x01];
+
+        let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
+        let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
+
+        assert_eq!(decoded.nonce, 7);
+        assert_eq!(decoded.balance, U256::from(42));
+        assert_eq!(decoded.storage_root, storage_root);
+        assert_eq!(account_rlp_buf, encoded);
     }
 }

@@ -20,7 +20,6 @@ use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_engine_primitives::{SMALL_BLOCK_GAS_THRESHOLD, SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -33,7 +32,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::{ForEachOrdered, Runtime};
+use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -287,7 +286,7 @@ where
 
         let parent_state_root = env.parent_state_root;
         let transaction_count = env.transaction_count;
-        let chunk_size = Self::adaptive_chunk_size(config, env.gas_used);
+        let chunk_size = config.multiproof_chunk_size();
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -352,37 +351,28 @@ where
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
-    /// Transaction count threshold below which sequential signature recovery is used.
+    /// Transaction count threshold below which sequential conversion is used.
     ///
     /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
-    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential ECDSA
-    /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
-    /// for small blocks.
+    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential conversion.
+    /// Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach` for small
+    /// blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
-    /// Returns the multiproof chunk size adapted to the block's gas usage.
+    /// Number of leading transactions to convert sequentially before entering the rayon
+    /// parallel path.
     ///
-    /// For blocks with ≤20M gas used, a smaller chunk size (30) yields better throughput.
-    /// For larger blocks, the configured default chunk size is used.
-    const fn adaptive_chunk_size(config: &TreeConfig, gas_used: u64) -> Option<usize> {
-        if !config.multiproof_chunking_enabled() {
-            return None;
-        }
-
-        let size = if gas_used > 0 && gas_used <= SMALL_BLOCK_GAS_THRESHOLD {
-            SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE
-        } else {
-            config.multiproof_chunk_size()
-        };
-
-        Some(size)
-    }
+    /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
+    /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
+    /// a small head sequentially and sending it immediately, execution can start without
+    /// waiting for rayon scheduling.
+    const PARALLEL_PREFETCH_COUNT: usize = 4;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
-    /// iteration with [`ForEachOrdered`] to recover signatures in parallel while streaming
+    /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
@@ -401,50 +391,50 @@ where
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
-            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            // channel-based reorder overhead when it costs more than sequential conversion.
             debug!(
                 target: "engine::tree::payload_processor",
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                for (idx, tx) in transactions.into_iter().enumerate() {
-                    let tx = convert.convert(tx);
-                    let tx = tx.map(|tx| {
-                        let (tx_env, tx) = tx.into_parts();
-                        WithTxEnv { tx_env, tx: Arc::new(tx) }
-                    });
-                    if let Ok(tx) = &tx {
-                        let _ = prewarm_tx.send((idx, tx.clone()));
-                    }
-                    let _ = execute_tx.send(tx);
-                }
+                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
-            self.executor.spawn_blocking(move || {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
+            //
+            // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
+            // few transactions are recovered sequentially and sent immediately before
+            // entering the parallel iterator for the remainder.
+            let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+            self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                transactions
-                    .into_par_iter()
+                let mut all: Vec<_> = transactions.into_iter().collect();
+                let rest = all.split_off(prefetch.min(all.len()));
+
+                // Convert the first few transactions sequentially so execution can
+                // start immediately without waiting for rayon work-stealing.
+                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+
+                // Convert the remaining transactions in parallel.
+                rest.into_par_iter()
                     .enumerate()
-                    .map(|(idx, tx)| {
+                    .map(|(i, tx)| {
+                        let idx = i + prefetch;
                         let tx = convert.convert(tx);
-                        tx.map(|tx| {
+                        let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            // Send to prewarming out of order with the original index.
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
-                        })
+                        });
+                        (idx, tx)
                     })
-                    .for_each_ordered(|tx| {
+                    .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
+                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
             });
         }
@@ -496,7 +486,7 @@ where
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(bal) = bal {
@@ -540,7 +530,7 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         parent_state_root: B256,
-        chunk_size: Option<usize>,
+        chunk_size: usize,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -550,7 +540,9 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("sparse-trie", move || {
+            increase_thread_priority();
+
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
@@ -592,8 +584,6 @@ where
             );
 
             let result = task.run();
-            // Capture the computed state_root before sending the result
-            let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -602,6 +592,7 @@ where
             // block's take() blocks until we've stored the trie for reuse.
             let mut guard = preserved_sparse_trie.lock();
 
+            let task_result = result.as_ref().ok().cloned();
             // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -625,7 +616,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -633,11 +624,12 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
+                    &result.trie_updates,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {
                 debug!(
@@ -705,6 +697,31 @@ where
             *cached = Some(new_cache);
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
+    }
+}
+
+/// Converts transactions sequentially and sends them to the prewarm and execute channels.
+fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    iter: impl Iterator<Item = RawTx>,
+    convert: &C,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+) where
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    TxEnv: Clone,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    for (idx, raw_tx) in iter.enumerate() {
+        let tx = convert.convert(raw_tx);
+        let tx = tx.map(|tx| {
+            let (tx_env, tx) = tx.into_parts();
+            WithTxEnv { tx_env, tx: Arc::new(tx) }
+        });
+        if let Ok(tx) = &tx {
+            let _ = prewarm_tx.send((idx, tx.clone()));
+        }
+        let _ = execute_tx.send(tx);
+        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 
@@ -805,9 +822,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
-        core::iter::repeat_with(|| self.transactions.recv())
-            .take_while(|res| res.is_ok())
-            .map(|res| res.unwrap())
+        self.transactions.iter()
     }
 }
 
@@ -1039,11 +1054,13 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
+impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
 where
     EvmEnvFor<Evm>: Default,
 {
-    fn default() -> Self {
+    /// Creates a new [`ExecutionEnv`] with default values for testing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn test_default() -> Self {
         Self {
             evm_env: Default::default(),
             hash: Default::default(),
@@ -1061,7 +1078,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
+        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1336,7 +1353,7 @@ mod tests {
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
         let mut handle = payload_processor.spawn(
-            Default::default(),
+            ExecutionEnv::test_default(),
             (
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,

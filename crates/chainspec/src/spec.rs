@@ -855,15 +855,9 @@ impl From<Genesis> for ChainSpec {
                             // those networks we use the activation
                             // blocks of those networks
                             match genesis.config.chain_id {
-                                1 => {
-                                    if ttd == MAINNET_PARIS_TTD {
-                                        return Some(MAINNET_PARIS_BLOCK)
-                                    }
-                                }
-                                11155111 => {
-                                    if ttd == SEPOLIA_PARIS_TTD {
-                                        return Some(SEPOLIA_PARIS_BLOCK)
-                                    }
+                                1 if ttd == MAINNET_PARIS_TTD => return Some(MAINNET_PARIS_BLOCK),
+                                11155111 if ttd == SEPOLIA_PARIS_TTD => {
+                                    return Some(SEPOLIA_PARIS_BLOCK)
                                 }
                                 _ => {}
                             };

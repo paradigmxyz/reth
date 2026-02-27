@@ -11,6 +11,7 @@ use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
@@ -260,14 +261,13 @@ struct RuntimeInner {
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
+    /// Named single-thread worker map. Each unique name gets a dedicated OS thread
+    /// that is reused across all tasks submitted under that name.
+    worker_map: WorkerMap,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
-    /// Handle to the quanta upkeep thread that periodically refreshes the cached
-    /// high-resolution timestamp used by [`quanta::Instant::recent()`].
-    /// Dropped when the runtime is dropped, stopping the upkeep thread.
-    _quanta_upkeep: Option<quanta::Handle>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -472,6 +472,25 @@ impl Runtime {
         R: Send + 'static,
     {
         self.0.handle.spawn_blocking(func)
+    }
+
+    /// Spawns a blocking closure on a dedicated, named OS thread.
+    ///
+    /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
+    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
+    /// is created lazily on first use and its OS thread name is set to `name`.
+    ///
+    /// This is useful for tasks that benefit from running on a stable thread, e.g. for
+    /// thread-local state reuse or to avoid thread creation overhead on hot paths.
+    ///
+    /// Returns a [`LazyHandle`](crate::LazyHandle) handle that resolves on first access and caches
+    /// the result.
+    pub fn spawn_blocking_named<F, R>(&self, name: &'static str, func: F) -> crate::LazyHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
     }
 
     /// Spawns the task onto the runtime.
@@ -783,7 +802,7 @@ impl RuntimeBuilder {
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
             let proof_storage_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_storage_worker_threads)
@@ -791,7 +810,7 @@ impl RuntimeBuilder {
             )?;
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
             let proof_account_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_account_worker_threads)
@@ -835,8 +854,6 @@ impl RuntimeBuilder {
             result
         });
 
-        let quanta_upkeep = quanta::Upkeep::new(Duration::from_millis(1)).start().ok();
-
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
             handle,
@@ -858,8 +875,8 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
             prewarming_pool,
+            worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
-            _quanta_upkeep: quanta_upkeep,
         };
 
         Ok(Runtime(Arc::new(inner)))

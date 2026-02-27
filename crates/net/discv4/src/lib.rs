@@ -955,10 +955,8 @@ impl Discv4Service {
 
         // Check if ENR was updated
         match (last_enr_seq, old_enr) {
-            (Some(new), Some(old)) => {
-                if new > old {
-                    self.send_enr_request(record);
-                }
+            (Some(new), Some(old)) if new > old => {
+                self.send_enr_request(record);
             }
             (Some(_), None) => {
                 // got an ENR
@@ -1195,10 +1193,8 @@ impl Discv4Service {
         } else {
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
-                (Some(new), Some(old)) => {
-                    if new > old {
-                        self.send_enr_request(record);
-                    }
+                (Some(new), Some(old)) if new > old => {
+                    self.send_enr_request(record);
                 }
                 (Some(_), None) => {
                     self.send_enr_request(record);
@@ -1355,10 +1351,8 @@ impl Discv4Service {
                     _ => return,
                 };
                 match (fork_id, old_fork_id) {
-                    (Some(new), Some(old)) => {
-                        if new != old {
-                            self.notify(DiscoveryUpdate::EnrForkId(record, new))
-                        }
+                    (Some(new), Some(old)) if new != old => {
+                        self.notify(DiscoveryUpdate::EnrForkId(record, new))
                     }
                     (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
                     _ => {}

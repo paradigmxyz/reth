@@ -1,16 +1,17 @@
-# reth db settings set storages_history
+# reth db stage-checkpoints
 
-Store storage history in rocksdb instead of MDBX
+`reth db stage-checkpoints` subcommand
 
 ```bash
-$ reth db settings set storages_history --help
+$ reth db stage-checkpoints --help
 ```
 ```txt
-Usage: reth db settings set storages_history [OPTIONS] <VALUE>
+Usage: reth db stage-checkpoints [OPTIONS] <COMMAND>
 
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Commands:
+  get   Get stage checkpoint(s) from database
+  set   Set a stage checkpoint
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -40,7 +41,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
@@ -73,9 +74,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

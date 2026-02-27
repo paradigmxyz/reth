@@ -6,7 +6,7 @@ use reth_chainspec::{
     ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
 };
 use reth_network_peers::NodeRecord;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 
 hardfork!(

@@ -1,18 +1,19 @@
-# op-reth db settings set use_hashed_state
+# reth db stage-checkpoints get
 
-Use hashed state tables (HashedAccounts/HashedStorages) as canonical state
+Get stage checkpoint(s) from database
 
 ```bash
-$ op-reth db settings set use_hashed_state --help
+$ reth db stage-checkpoints get --help
 ```
 ```txt
-Usage: op-reth db settings set use_hashed_state [OPTIONS] <VALUE>
-
-Arguments:
-  <VALUE>
-          [possible values: true, false]
+Usage: reth db stage-checkpoints get [OPTIONS]
 
 Options:
+      --stage <STAGE>
+          Specific stage to query. If omitted, shows all stages
+
+          [possible values: era, headers, bodies, sender-recovery, execution, prune-sender-recovery, merkle-unwind, account-hashing, storage-hashing, merkle-execute, transaction-lookup, index-storage-history, index-account-history, prune, finish]
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -22,9 +23,9 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              optimism, optimism_sepolia, optimism-sepolia, base, base_sepolia, base-sepolia, arena-z, arena-z-sepolia, automata, base-devnet-0-sepolia-dev-0, bob, boba-sepolia, boba, camp-sepolia, celo, creator-chain-testnet-sepolia, cyber, cyber-sepolia, ethernity, ethernity-sepolia, fraxtal, funki, funki-sepolia, hashkeychain, ink, ink-sepolia, lisk, lisk-sepolia, lyra, metal, metal-sepolia, mint, mode, mode-sepolia, oplabs-devnet-0-sepolia-dev-0, orderly, ozean-sepolia, pivotal-sepolia, polynomial, race, race-sepolia, radius_testnet-sepolia, redstone, rehearsal-0-bn-0-rehearsal-0-bn, rehearsal-0-bn-1-rehearsal-0-bn, settlus-mainnet, settlus-sepolia-sepolia, shape, shape-sepolia, silent-data-mainnet, snax, soneium, soneium-minato-sepolia, sseed, swan, swell, tbn, tbn-sepolia, unichain, unichain-sepolia, worldchain, worldchain-sepolia, xterio-eth, zora, zora-sepolia, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
-          [default: optimism]
+          [default: mainnet]
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -40,7 +41,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
@@ -73,9 +74,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

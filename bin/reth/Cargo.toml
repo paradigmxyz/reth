@@ -30,7 +30,8 @@ workspace = true
 # reth
 reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider.workspace = true
 reth-revm.workspace = true
@@ -110,7 +111,6 @@ dev = ["reth-ethereum-cli/dev"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",
-    "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
