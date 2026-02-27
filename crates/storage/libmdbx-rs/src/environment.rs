@@ -15,7 +15,7 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::{mpsc::sync_channel, Arc},
+    sync::{mpsc::sync_channel, Arc, Mutex},
     thread::sleep,
     time::Duration,
 };
@@ -95,9 +95,32 @@ impl Environment {
     }
 
     /// Create a read-only transaction for use with the environment.
+    ///
+    /// Reuses a previously-reset transaction handle from the internal pool when available,
+    /// avoiding the `lck_rdt_lock` mutex in MDBX's `mvcc_bind_slot` on each new transaction.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
+        // Try to reuse a pooled reset transaction handle.
+        if let Some(txn_ptr) = self.inner.ro_txn_pool.pop() {
+            // SAFETY: the pooled pointer was previously created by mdbx_txn_begin_ex and then
+            // reset via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
+            // taking lck_rdt_lock.
+            match mdbx_result(unsafe { ffi::mdbx_txn_renew(txn_ptr) }) {
+                Ok(_) => return Ok(Transaction::new_from_ptr(self.clone(), txn_ptr)),
+                Err(_) => {
+                    // Renew failed — abort the handle and fall through to create a new one.
+                    unsafe { ffi::mdbx_txn_abort(txn_ptr) };
+                }
+            }
+        }
+
         Transaction::new(self.clone())
+    }
+
+    /// Returns the read transaction pool.
+    #[inline]
+    pub(crate) fn ro_txn_pool(&self) -> &ReadTxnPool {
+        &self.inner.ro_txn_pool
     }
 
     /// Create a read-write transaction for use with the environment. This method will block while
@@ -239,10 +262,17 @@ struct EnvironmentInner {
     env_kind: EnvironmentKind,
     /// Transaction manager
     txn_manager: TxnManager,
+    /// Pool of reset read-only transaction handles for reuse.
+    ro_txn_pool: ReadTxnPool,
 }
 
 impl Drop for EnvironmentInner {
     fn drop(&mut self) {
+        // Abort all pooled read transactions before closing the environment.
+        self.ro_txn_pool.drain(|txn| unsafe {
+            ffi::mdbx_txn_abort(txn);
+        });
+
         // Close open mdbx environment on drop
         unsafe {
             ffi::mdbx_env_close_ex(self.env, false);
@@ -254,6 +284,66 @@ impl Drop for EnvironmentInner {
 // thread-safe
 unsafe impl Send for EnvironmentInner {}
 unsafe impl Sync for EnvironmentInner {}
+
+/// Pool of reset read-only MDBX transaction handles.
+///
+/// With `MDBX_NOTLS` (which reth always sets), every `mdbx_txn_begin_ex` for a read transaction
+/// calls `mvcc_bind_slot`, which acquires `lck_rdt_lock` — a pthread mutex. Under high
+/// concurrency (e.g., prewarming), this becomes a contention point.
+///
+/// This pool caches transaction handles that have been reset via `mdbx_txn_reset`. A reset handle
+/// retains its reader slot, so `mdbx_txn_renew` can reactivate it without touching the reader
+/// table mutex.
+pub(crate) struct ReadTxnPool {
+    txns: Mutex<Vec<*mut ffi::MDBX_txn>>,
+}
+
+impl ReadTxnPool {
+    /// Maximum number of handles to keep pooled. Beyond this, handles are aborted on return.
+    const MAX_POOLED: usize = 128;
+
+    fn new() -> Self {
+        Self { txns: Mutex::new(Vec::new()) }
+    }
+
+    /// Pops a reset transaction handle from the pool, if available.
+    pub(crate) fn pop(&self) -> Option<*mut ffi::MDBX_txn> {
+        self.txns.lock().unwrap_or_else(|e| e.into_inner()).pop()
+    }
+
+    /// Pushes a reset transaction handle back into the pool.
+    ///
+    /// Returns `true` if the handle was pooled, `false` if the pool is full (caller must abort).
+    pub(crate) fn push(&self, txn: *mut ffi::MDBX_txn) -> bool {
+        let mut pool = self.txns.lock().unwrap_or_else(|e| e.into_inner());
+        if pool.len() < Self::MAX_POOLED {
+            pool.push(txn);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Aborts all pooled transaction handles using the provided callback.
+    fn drain(&self, mut abort_fn: impl FnMut(*mut ffi::MDBX_txn)) {
+        let mut pool = self.txns.lock().unwrap_or_else(|e| e.into_inner());
+        for txn in pool.drain(..) {
+            abort_fn(txn);
+        }
+    }
+}
+
+// SAFETY: the raw txn pointers are only used behind a Mutex and each pointer is exclusively
+// owned (not aliased) while in the pool.
+unsafe impl Send for ReadTxnPool {}
+unsafe impl Sync for ReadTxnPool {}
+
+impl fmt::Debug for ReadTxnPool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let len = self.txns.lock().map(|v| v.len()).unwrap_or(0);
+        f.debug_struct("ReadTxnPool").field("pooled", &len).finish()
+    }
+}
 
 /// Determines how data is mapped into memory
 ///
@@ -750,7 +840,12 @@ impl EnvironmentBuilder {
             }
         };
 
-        let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
+        let env = EnvironmentInner {
+            env,
+            txn_manager,
+            env_kind: self.kind,
+            ro_txn_pool: ReadTxnPool::new(),
+        };
 
         Ok(Environment { inner: Arc::new(env) })
     }
