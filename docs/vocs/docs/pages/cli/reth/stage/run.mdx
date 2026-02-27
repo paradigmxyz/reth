@@ -294,17 +294,12 @@ Networking:
 
           [default: 130]
 
-      --max-tx-reqs-peer <COUNT>
-          Max concurrent `GetPooledTransactions` requests per peer.
-
-          [default: 1]
-
       --max-seen-tx-history <COUNT>
           Max number of seen transactions to remember per peer.
 
-          Default is 320 transaction hashes.
+          Default is 8192 transaction hashes.
 
-          [default: 320]
+          [default: 8192]
 
       --max-pending-imports <COUNT>
           Max number of transactions to import concurrently.
@@ -337,6 +332,16 @@ Networking:
           Max capacity of cache of hashes for transactions pending fetch.
 
           [default: 25600]
+
+      --tx-fetch-timeout <MS>
+          Time in milliseconds to wait for a peer to respond before timing out.
+
+          [default: 5000]
+
+      --max-announces-per-peer <COUNT>
+          Max announcements tracked per peer across all stages.
+
+          [default: 4096]
 
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.

@@ -145,6 +145,21 @@ impl PoolError {
             }
         }
     }
+
+    /// Returns `true` if the error was caused by an underpriced transaction.
+    ///
+    /// This includes transactions rejected as underpriced and replacement transactions
+    /// with insufficient gas price bumps. These are local/dynamic conditions that may
+    /// change as gas prices fluctuate.
+    #[inline]
+    pub const fn is_underpriced(&self) -> bool {
+        matches!(
+            &self.kind,
+            PoolErrorKind::ReplacementUnderpriced |
+                PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Underpriced) |
+                PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_)
+        )
+    }
 }
 
 /// Represents all errors that can happen when validating transactions for the pool for EIP-4844
