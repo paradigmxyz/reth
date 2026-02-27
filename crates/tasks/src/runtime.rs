@@ -779,11 +779,10 @@ impl RuntimeBuilder {
             prewarming_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
-            let default_threads_half = (default_threads / 2).max(1);
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(default_threads_half)
+                .num_threads(default_threads)
                 .thread_name(|i| format!("cpu-{i:02}"))
                 .build()?;
 
