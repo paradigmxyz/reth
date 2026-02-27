@@ -262,9 +262,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // match storage.
             match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value = state_provider
-                        .storage(address, old_storage.key)?
-                        .unwrap_or_default();
+                    let new_storage_value =
+                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
                     entry.insert((old_storage.value, new_storage_value));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
