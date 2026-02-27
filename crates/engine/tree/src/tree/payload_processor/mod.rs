@@ -38,9 +38,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
-};
+use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
     ops::Not,
     sync::{
@@ -60,14 +58,6 @@ pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
-
-/// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
-///
-/// These values were determined by performing benchmarks using gradually increasing values to judge
-/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
-/// would deteriorate to the point where PST might as well not be used.
-pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
-    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -584,11 +574,9 @@ where
                         "Creating new sparse trie - no preserved trie available"
                     );
                     let default_trie = RevealableSparseTrie::blind_from(
-                        ParallelSparseTrie::default().with_parallelism_thresholds(
-                            PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
-                        ),
+                        ArenaParallelSparseTrie::default(),
                     );
-                    SparseStateTrie::new()
+                    SparseStateTrie::default()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)

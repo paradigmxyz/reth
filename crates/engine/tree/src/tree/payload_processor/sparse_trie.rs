@@ -29,7 +29,7 @@ use reth_trie_parallel::{
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
-    errors::SparseTrieResult, DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie,
+    errors::SparseTrieResult, ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, SparseStateTrie,
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
@@ -39,7 +39,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 const MAX_PENDING_UPDATES: usize = 100;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
+pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
@@ -774,7 +774,7 @@ pub struct StateRootComputeOutcome {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
-    use reth_trie_sparse::ParallelSparseTrie;
+    use reth_trie_sparse::ArenaParallelSparseTrie;
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
@@ -797,7 +797,7 @@ mod tests {
         let expected_state = hashed_state.clone();
 
         let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::run_hashing_task(
+            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
                 updates_rx,
                 hashed_state_tx,
             );

@@ -117,7 +117,7 @@ impl ArenaSparseNodeBranchChild {
 }
 
 /// The branch-specific data stored in an [`ArenaSparseNode::Branch`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ArenaSparseNodeBranch {
     /// Cached or dirty state of this node.
     state: ArenaSparseNodeState,
@@ -171,7 +171,7 @@ impl ArenaSparseNodeBranch {
 }
 
 /// A node in the arena-based sparse trie.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ArenaSparseNode {
     /// Indicates a trie with no nodes.
     EmptyRoot,
@@ -361,7 +361,7 @@ struct ArenaStackEntry {
 }
 
 /// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ArenaTrieBuffers {
     /// Reusable stack buffer for trie traversals.
     stack: Vec<ArenaStackEntry>,
@@ -619,7 +619,7 @@ fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEnt
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ArenaSparseSubtrie {
     /// The arena allocating nodes within this subtrie.
     arena: Arena<ArenaSparseNode>,
@@ -1992,7 +1992,7 @@ struct ArenaRequiredProof {
 /// - `0x2` has path length 1 and short key `0x345`, which would place its children at path length
 ///   5. The subtrie is pulled back to `0x2` itself, so the branch and both leaves live in one
 ///   subtrie rooted at `0x2`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
     upper_arena: Arena<ArenaSparseNode>,
@@ -2827,13 +2827,13 @@ mod tests {
             mock::MockHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
         },
         prefix_set::PrefixSet,
-        proof_v2::{self, StorageProofCalculator},
+        proof_v2::StorageProofCalculator,
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
         StorageRoot,
     };
     use reth_trie_common::{
         prefix_set::PrefixSetMut, updates::StorageTrieUpdates, HashedPostStateSorted,
-        HashedStorage, Nibbles, ProofTrieNodeV2,
+        HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
     };
     use std::{collections::BTreeMap, iter::once};
     use tracing::{trace, trace_span};
@@ -3028,9 +3028,9 @@ mod tests {
             // Reveal-update loop: call update_leaves, collect required proofs, fetch them,
             // reveal, and repeat until no more proofs are needed.
             loop {
-                let mut targets: Vec<proof_v2::Target> = Vec::new();
+                let mut targets: Vec<ProofV2Target> = Vec::new();
                 apst.update_leaves(&mut leaf_updates, |key, min_len| {
-                    targets.push(proof_v2::Target::new(key).with_min_len(min_len));
+                    targets.push(ProofV2Target::new(key).with_min_len(min_len));
                 })
                 .expect("update_leaves should succeed");
 
@@ -3079,7 +3079,7 @@ mod tests {
         }
 
         /// Generates storage proofs for the given targets using `StorageProofCalculator`.
-        fn proof_v2(&self, targets: &mut [proof_v2::Target]) -> Vec<ProofTrieNodeV2> {
+        fn proof_v2(&self, targets: &mut [ProofV2Target]) -> Vec<ProofTrieNodeV2> {
             let trie_cursor = self
                 .trie_cursor_factory
                 .storage_trie_cursor(HASHED_ADDRESS)
