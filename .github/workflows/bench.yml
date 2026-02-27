@@ -7,10 +7,6 @@
 # same block range (snapshot recovered between runs) to compare performance.
 
 on:
-  # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
-  # merge_group:
-  push:
-    branches: [main]
   issue_comment:
     types: [created, edited]
   workflow_dispatch:
@@ -60,46 +56,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  codspeed:
-    if: github.event_name == 'push'
-    runs-on: depot-ubuntu-latest
-    concurrency:
-      group: bench-codspeed-${{ github.head_ref || github.run_id }}
-      cancel-in-progress: true
-    strategy:
-      matrix:
-        partition: [1, 2]
-        total_partitions: [2]
-        include:
-          - partition: 1
-            crates: "-p reth-primitives -p reth-trie-common -p reth-trie-sparse"
-          - partition: 2
-            crates: "-p reth-trie"
-    name: codspeed (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/merge', github.event.issue.number) || '' }}
-      - uses: rui314/setup-mold@v1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Install cargo-codspeed
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-codspeed
-      - name: Build the benchmark target(s)
-        run: cargo codspeed build --profile profiling --features test-utils ${{ matrix.crates }}
-      - name: Run the benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          run: cargo codspeed run ${{ matrix.crates }}
-          mode: instrumentation
-          token: ${{ secrets.CODSPEED_TOKEN }}
-
   reth-bench-ack:
     if: |
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
@@ -295,7 +251,6 @@ jobs:
                 });
                 allRuns.push(...r);
               }
-              // Only count runs that trigger reth-bench (not push-triggered codspeed runs)
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();

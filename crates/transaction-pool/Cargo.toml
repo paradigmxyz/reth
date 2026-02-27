@@ -71,7 +71,6 @@ paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-criterion.workspace = true
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
@@ -127,28 +126,3 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "revm/arbitrary",
 ]
-
-[[bench]]
-name = "truncate"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "reorder"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "priority"
-required-features = ["arbitrary"]
-harness = false
-
-[[bench]]
-name = "insertion"
-required-features = ["test-utils", "arbitrary"]
-harness = false
-
-[[bench]]
-name = "canonical_state_change"
-required-features = ["test-utils", "arbitrary"]
-harness = false

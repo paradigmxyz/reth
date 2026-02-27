@@ -1,0 +1,73 @@
+---
+description: Experimental hot/cold storage architecture in Reth v1.11.
+---
+
+# Storage V2 (Experimental)
+
+:::warning
+`--storage.v2` is **experimental**. It is stable enough for testing and non-critical workloads,
+but may change in future releases. Please report issues on [GitHub](https://github.com/paradigmxyz/reth/issues)
+or in the [Telegram group](https://t.me/paradigm_reth).
+:::
+
+Reth v1.11 introduces an experimental hot/cold storage architecture behind the `--storage.v2` flag.
+It routes history indices and transaction hash lookups to RocksDB, writes changesets to static files,
+and drops the legacy plain state tables — resulting in significantly lower disk usage.
+
+## Disk savings
+
+Measured at block `24,396,823` on Ethereum mainnet:
+
+| Node Type | Without `--storage.v2` | With `--storage.v2` | Savings |
+| --------- | ---------------------- | ------------------- | ------- |
+| Full      | 1.46 TB                | 1.02 TB             | **-30%** |
+| Minimal   | 449 GB                 | 224 GB              | **-50%** |
+| Archive   | 2.99 TB                | 2.31 TB             | **-23%** |
+
+## Quick start
+
+### Fresh sync
+
+`--storage.v2` is a **genesis-initialization-only** setting. You must start a fresh sync — it cannot be enabled on an existing database.
+
+```bash
+reth node \
+    --storage.v2 \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+Combine with other flags as usual (`--full`, `--minimal`, `--http`, etc.):
+
+```bash
+reth node \
+    --storage.v2 \
+    --full \
+    --http --http.api eth,trace \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+### Using snapshots
+
+To avoid syncing from genesis, download a pre-built snapshot from
+[snapshots.reth.rs](https://snapshots.reth.rs) and start from there:
+
+```bash
+# Download and extract a v2 snapshot (see snapshots.reth.rs for available options)
+reth download --chain mainnet
+
+# Then start the node
+reth node \
+    --authrpc.jwtsecret /path/to/secret
+```
+
+## Important caveats
+
+- **Fresh sync required** — you cannot enable `--storage.v2` on an existing v1 database. If you have an existing node, you need to either resync from scratch or restore from a v2 snapshot.
+- **Cannot switch back** — once a database is initialized with `--storage.v2`, it stays that way. Switching back to v1 storage requires a full resync without the flag.
+- **Experimental** — the storage format may change between releases. Future upgrades could require a resync.
+
+## Further reading
+
+- [v1.11.0 release notes](https://github.com/paradigmxyz/reth/releases/tag/v1.11.0) — full details on storage v2 and other changes
+- [Pruning & Full Node](/run/faq/pruning) — configure pruning modes alongside storage v2
+- [Configuration](/run/configuration) — general node configuration reference

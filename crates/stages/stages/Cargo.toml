@@ -97,9 +97,6 @@ rand.workspace = true
 paste.workspace = true
 tempfile.workspace = true
 
-# Stage benchmarks
-criterion = { workspace = true, features = ["async_tokio"] }
-
 [features]
 test-utils = [
     "reth-network-p2p/test-utils",
@@ -126,8 +123,3 @@ test-utils = [
 ]
 rocksdb = ["reth-provider/rocksdb", "reth-db-common/rocksdb"]
 edge = ["rocksdb"]
-
-[[bench]]
-name = "criterion"
-harness = false
-required-features = ["test-utils"]
