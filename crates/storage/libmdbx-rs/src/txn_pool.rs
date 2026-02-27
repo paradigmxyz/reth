@@ -217,7 +217,7 @@ mod tests {
             let txn = env.begin_ro_txn().unwrap();
             drop(txn);
         }
-        assert!(env.ro_txn_pool().queue.len() > 0);
+        assert_eq!(env.ro_txn_pool().queue.len(), 1);
 
         env.ro_txn_pool().drain();
         assert_eq!(env.ro_txn_pool().queue.len(), 0);
