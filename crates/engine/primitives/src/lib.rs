@@ -182,6 +182,13 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 
+    /// Whether [`Self::validate_block_post_execution_with_hashed_state`] performs actual
+    /// validation. When `false`, the engine skips eagerly blocking on the background
+    /// hashed-post-state computation, removing ~25ms from the critical path on L1.
+    fn needs_hashed_post_state_validation(&self) -> bool {
+        false
+    }
+
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
