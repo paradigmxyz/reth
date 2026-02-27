@@ -52,7 +52,11 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
-    pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+    pub fn new(mut targets: MultiProofTargetsV2, size: usize) -> Self {
+        targets.account_targets.sort_unstable_by_key(|t| t.key());
+        for slots in targets.storage_targets.values_mut() {
+            slots.sort_unstable_by_key(|t| t.key());
+        }
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
