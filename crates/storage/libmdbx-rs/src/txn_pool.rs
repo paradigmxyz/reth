@@ -1,6 +1,7 @@
 use crate::error::mdbx_result;
-use crossbeam_queue::ArrayQueue;
+use crossbeam_queue::SegQueue;
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
@@ -12,9 +13,12 @@ use std::fmt;
 /// retains its reader slot, so `mdbx_txn_renew` can reactivate it without touching the reader
 /// table mutex.
 ///
-/// Implemented as a bounded lock-free [`ArrayQueue`] of reset txn pointers.
+/// Implemented as an unbounded lock-free [`SegQueue`] of reset txn pointers. The pool can never
+/// hold more handles than were actually created, so the reader table's `max_readers` is the
+/// natural bound.
 pub(crate) struct ReadTxnPool {
-    queue: ArrayQueue<PooledTxn>,
+    queue: SegQueue<PooledTxn>,
+    len: AtomicUsize,
 }
 
 /// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the queue.
@@ -26,10 +30,13 @@ unsafe impl Send for PooledTxn {}
 unsafe impl Sync for PooledTxn {}
 
 impl ReadTxnPool {
-    const MAX_POOLED: usize = 128;
-
     pub(crate) fn new() -> Self {
-        Self { queue: ArrayQueue::new(Self::MAX_POOLED) }
+        Self { queue: SegQueue::new(), len: AtomicUsize::new(0) }
+    }
+
+    /// Returns the number of pooled handles.
+    pub(crate) fn len(&self) -> usize {
+        self.len.load(Ordering::Relaxed)
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
@@ -37,6 +44,7 @@ impl ReadTxnPool {
     /// Returns `None` if the pool is empty or all renew attempts fail.
     pub(crate) fn get(&self) -> Option<*mut ffi::MDBX_txn> {
         while let Some(handle) = self.queue.pop() {
+            self.len.fetch_sub(1, Ordering::Relaxed);
             let txn = handle.0;
             // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
             // via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
@@ -54,7 +62,7 @@ impl ReadTxnPool {
 
     /// Resets an active read transaction handle and returns it to the pool.
     ///
-    /// If reset fails or the pool is full, the handle is aborted instead.
+    /// If reset fails, the handle is aborted instead.
     pub(crate) fn put(&self, txn: *mut ffi::MDBX_txn) {
         // mdbx_txn_reset releases the MVCC snapshot but keeps the reader slot.
         if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }) {
@@ -63,14 +71,14 @@ impl ReadTxnPool {
             return;
         }
 
-        if self.queue.push(PooledTxn(txn)).is_err() {
-            abort_txn(txn);
-        }
+        self.queue.push(PooledTxn(txn));
+        self.len.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
     pub(crate) fn drain(&self) {
         while let Some(handle) = self.queue.pop() {
+            self.len.fetch_sub(1, Ordering::Relaxed);
             abort_txn(handle.0);
         }
     }
@@ -85,7 +93,7 @@ fn abort_txn(txn: *mut ffi::MDBX_txn) {
 
 impl fmt::Debug for ReadTxnPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadTxnPool").field("pooled", &self.queue.len()).finish()
+        f.debug_struct("ReadTxnPool").field("pooled", &self.len()).finish()
     }
 }
 
@@ -130,7 +138,7 @@ mod tests {
         let id1 = txn.id().unwrap();
         drop(txn);
 
-        assert_eq!(env.ro_txn_pool().queue.len(), 1);
+        assert_eq!(env.ro_txn_pool().len(), 1);
 
         // Next begin_ro_txn should reuse the pooled handle.
         let txn = env.begin_ro_txn().unwrap();
@@ -180,7 +188,7 @@ mod tests {
         }
 
         // Pool should have exactly 1 handle (all reused the same slot).
-        assert_eq!(env.ro_txn_pool().queue.len(), 1);
+        assert_eq!(env.ro_txn_pool().len(), 1);
     }
 
     #[test]
@@ -190,16 +198,16 @@ mod tests {
 
         // Open several txns concurrently — each gets a fresh handle.
         let txns: Vec<_> = (0..8).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().queue.len(), 0);
+        assert_eq!(env.ro_txn_pool().len(), 0);
 
         // Drop them all — pool should accumulate handles.
         let count = txns.len();
         drop(txns);
-        assert_eq!(env.ro_txn_pool().queue.len(), count);
+        assert_eq!(env.ro_txn_pool().len(), count);
 
         // Reopen same number — all should be pooled.
         let txns: Vec<_> = (0..count).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().queue.len(), 0);
+        assert_eq!(env.ro_txn_pool().len(), 0);
         for txn in &txns {
             let db = txn.open_db(None).unwrap();
             let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
@@ -217,10 +225,10 @@ mod tests {
             let txn = env.begin_ro_txn().unwrap();
             drop(txn);
         }
-        assert_eq!(env.ro_txn_pool().queue.len(), 1);
+        assert_eq!(env.ro_txn_pool().len(), 1);
 
         env.ro_txn_pool().drain();
-        assert_eq!(env.ro_txn_pool().queue.len(), 0);
+        assert_eq!(env.ro_txn_pool().len(), 0);
 
         // Pool is empty — get should return None.
         assert!(env.ro_txn_pool().get().is_none());
@@ -235,7 +243,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Committed txns are freed by mdbx, not returned to pool.
-        assert_eq!(env.ro_txn_pool().queue.len(), 0);
+        assert_eq!(env.ro_txn_pool().len(), 0);
     }
 
     #[test]
@@ -386,7 +394,7 @@ mod tests {
             let txns: Vec<_> = (0..16).map(|_| env.begin_ro_txn().unwrap()).collect();
             drop(txns);
         }
-        assert_eq!(env.ro_txn_pool().queue.len(), 16);
+        assert_eq!(env.ro_txn_pool().len(), 16);
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
 
@@ -423,7 +431,7 @@ mod tests {
         let env = std::sync::Arc::new(env);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
 
-        // 8 threads each open 20 txns simultaneously, exceeding MAX_POOLED (128).
+        // 8 threads each open 20 txns simultaneously.
         // Total: 160 concurrent txns. max_readers set to 256 to allow this.
         let handles: Vec<_> = (0..8)
             .map(|_| {
@@ -446,8 +454,8 @@ mod tests {
             h.join().unwrap();
         }
 
-        // Pool should be capped at MAX_POOLED.
-        assert!(env.ro_txn_pool().queue.len() <= 128);
+        // Unbounded pool — all 160 handles should be pooled.
+        assert_eq!(env.ro_txn_pool().len(), 160);
     }
 
     #[test]
