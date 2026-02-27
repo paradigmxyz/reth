@@ -8962,7 +8962,6 @@ dependencies = [
  "parking_lot",
  "rand 0.9.2",
  "reth-mdbx-sys",
- "sharded-slab",
  "smallvec",
  "tempfile",
  "thiserror 2.0.18",

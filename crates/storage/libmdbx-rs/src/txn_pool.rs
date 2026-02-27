@@ -12,20 +12,16 @@ use std::fmt;
 /// retains its reader slot, so `mdbx_txn_renew` can reactivate it without touching the reader
 /// table mutex.
 ///
-/// Implemented using [`sharded_slab::Slab`] for lock-free, per-thread-sharded storage of reset
-/// txn handles. A lock-free [`ArrayQueue`] tracks available slab keys for O(1) pop.
+/// Implemented as a bounded lock-free [`ArrayQueue`] of reset txn pointers.
 pub(crate) struct ReadTxnPool {
-    /// Lock-free concurrent slab storing reset txn pointers, sharded per-thread.
-    slab: sharded_slab::Slab<PooledTxn>,
-    /// Lock-free bounded queue of slab keys available for reuse.
-    keys: ArrayQueue<usize>,
+    queue: ArrayQueue<PooledTxn>,
 }
 
-/// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the slab.
+/// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the queue.
 struct PooledTxn(*mut ffi::MDBX_txn);
 
 // SAFETY: MDBX txn pointers are safe to send across threads — we ensure exclusive
-// ownership via the slab's insert/take semantics.
+// ownership via the queue's push/pop semantics.
 unsafe impl Send for PooledTxn {}
 unsafe impl Sync for PooledTxn {}
 
@@ -33,26 +29,23 @@ impl ReadTxnPool {
     const MAX_POOLED: usize = 128;
 
     pub(crate) fn new() -> Self {
-        Self { slab: sharded_slab::Slab::new(), keys: ArrayQueue::new(Self::MAX_POOLED) }
+        Self { queue: ArrayQueue::new(Self::MAX_POOLED) }
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
     ///
     /// Returns `None` if the pool is empty or all renew attempts fail.
     pub(crate) fn get(&self) -> Option<*mut ffi::MDBX_txn> {
-        while let Some(key) = self.keys.pop() {
-            if let Some(handle) = self.slab.take(key) {
-                let txn = handle.0;
-                // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
-                // via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
-                // taking lck_rdt_lock.
-                if mdbx_result(unsafe { ffi::mdbx_txn_renew(txn) }).is_ok() {
-                    return Some(txn);
-                }
-                // Renew failed — abort the handle and keep trying.
-                unsafe { ffi::mdbx_txn_abort(txn) };
+        while let Some(handle) = self.queue.pop() {
+            let txn = handle.0;
+            // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
+            // via mdbx_txn_reset. mdbx_txn_renew reuses the existing reader slot without
+            // taking lck_rdt_lock.
+            if mdbx_result(unsafe { ffi::mdbx_txn_renew(txn) }).is_ok() {
+                return Some(txn);
             }
-            // Key was stale (already taken) — try next.
+            // Renew failed — abort the handle and keep trying.
+            unsafe { ffi::mdbx_txn_abort(txn) };
         }
         None
     }
@@ -67,36 +60,23 @@ impl ReadTxnPool {
             return;
         }
 
-        if let Some(key) = self.slab.insert(PooledTxn(txn)) {
-            if self.keys.push(key).is_err() {
-                // Queue full — take back from slab and abort.
-                if let Some(handle) = self.slab.take(key) {
-                    unsafe { ffi::mdbx_txn_abort(handle.0) };
-                }
-            }
-        } else {
-            // Slab full — abort the handle to release the reader slot.
+        if self.queue.push(PooledTxn(txn)).is_err() {
+            // Pool full — abort the handle to release the reader slot.
             unsafe { ffi::mdbx_txn_abort(txn) };
         }
     }
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
     pub(crate) fn drain(&self) {
-        while let Some(key) = self.keys.pop() {
-            if let Some(handle) = self.slab.take(key) {
-                unsafe { ffi::mdbx_txn_abort(handle.0) };
-            }
+        while let Some(handle) = self.queue.pop() {
+            unsafe { ffi::mdbx_txn_abort(handle.0) };
         }
     }
 }
 
-// SAFETY: all fields are Send+Sync — slab and ArrayQueue are both lock-free.
-unsafe impl Send for ReadTxnPool {}
-unsafe impl Sync for ReadTxnPool {}
-
 impl fmt::Debug for ReadTxnPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadTxnPool").field("pooled", &self.keys.len()).finish()
+        f.debug_struct("ReadTxnPool").field("pooled", &self.queue.len()).finish()
     }
 }
 
@@ -141,7 +121,7 @@ mod tests {
         let id1 = txn.id().unwrap();
         drop(txn);
 
-        assert_eq!(env.ro_txn_pool().keys.len(), 1);
+        assert_eq!(env.ro_txn_pool().queue.len(), 1);
 
         // Next begin_ro_txn should reuse the pooled handle.
         let txn = env.begin_ro_txn().unwrap();
@@ -149,8 +129,7 @@ mod tests {
         let _id2 = txn.id().unwrap();
         drop(txn);
 
-        // Verify the id changed (write happened between first txn and second).
-        // Just verify we got a valid txn.
+        // Verify we got a valid txn.
         assert!(id1 > 0);
     }
 
@@ -192,7 +171,7 @@ mod tests {
         }
 
         // Pool should have exactly 1 handle (all reused the same slot).
-        assert_eq!(env.ro_txn_pool().keys.len(), 1);
+        assert_eq!(env.ro_txn_pool().queue.len(), 1);
     }
 
     #[test]
@@ -202,16 +181,16 @@ mod tests {
 
         // Open several txns concurrently — each gets a fresh handle.
         let txns: Vec<_> = (0..8).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+        assert_eq!(env.ro_txn_pool().queue.len(), 0);
 
         // Drop them all — pool should accumulate handles.
         let count = txns.len();
         drop(txns);
-        assert_eq!(env.ro_txn_pool().keys.len(), count);
+        assert_eq!(env.ro_txn_pool().queue.len(), count);
 
         // Reopen same number — all should be pooled.
         let txns: Vec<_> = (0..count).map(|_| env.begin_ro_txn().unwrap()).collect();
-        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+        assert_eq!(env.ro_txn_pool().queue.len(), 0);
         for txn in &txns {
             let db = txn.open_db(None).unwrap();
             let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
@@ -229,11 +208,10 @@ mod tests {
             let txn = env.begin_ro_txn().unwrap();
             drop(txn);
         }
-        // All reuse the same slot, so pool has 1.
-        assert!(env.ro_txn_pool().keys.len() > 0);
+        assert!(env.ro_txn_pool().queue.len() > 0);
 
         env.ro_txn_pool().drain();
-        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+        assert_eq!(env.ro_txn_pool().queue.len(), 0);
 
         // Pool is empty — get should return None.
         assert!(env.ro_txn_pool().get().is_none());
@@ -248,7 +226,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Committed txns are freed by mdbx, not returned to pool.
-        assert_eq!(env.ro_txn_pool().keys.len(), 0);
+        assert_eq!(env.ro_txn_pool().queue.len(), 0);
     }
 
     #[test]
