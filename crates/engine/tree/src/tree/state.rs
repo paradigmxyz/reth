@@ -139,7 +139,7 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Both parent hash and anchor hash must match to ensure the overlay is valid.
     /// This prevents using a stale overlay after persistence has advanced the anchor.
-    pub(crate) fn get_cached_overlay(
+    pub fn get_cached_overlay(
         &self,
         parent_hash: B256,
         expected_anchor: B256,

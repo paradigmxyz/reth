@@ -250,7 +250,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 None,
                             );
 
-                            let mut state_hook = handle.state_hook();
+                            let mut state_hook = handle.state_hook().expect("state hook is None");
 
                             for (i, update) in state_updates.into_iter().enumerate() {
                                 state_hook.on_state(StateChangeSource::Transaction(i), &update);
