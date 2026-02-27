@@ -34,7 +34,7 @@ impl ReadTxnPool {
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
     ///
     /// Returns `None` if the pool is empty or all renew attempts fail.
-    pub(crate) fn get(&self) -> Option<*mut ffi::MDBX_txn> {
+    pub(crate) fn pop(&self) -> Option<*mut ffi::MDBX_txn> {
         while let Some(handle) = self.queue.pop() {
             let txn = handle.0;
             // SAFETY: this pointer was previously created by mdbx_txn_begin_ex and reset
@@ -54,7 +54,7 @@ impl ReadTxnPool {
     /// Resets an active read transaction handle and returns it to the pool.
     ///
     /// If reset fails, the handle is aborted instead.
-    pub(crate) fn put(&self, txn: *mut ffi::MDBX_txn) {
+    pub(crate) fn push(&self, txn: *mut ffi::MDBX_txn) {
         // mdbx_txn_reset releases the MVCC snapshot but keeps the reader slot.
         if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }) {
             tracing::warn!(target: "libmdbx", %e, "failed to reset read transaction for pooling");
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn get_returns_none_when_empty() {
         let (_dir, env) = test_env();
-        assert!(env.ro_txn_pool().get().is_none());
+        assert!(env.ro_txn_pool().pop().is_none());
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
         env.ro_txn_pool().drain();
 
         // Pool is empty — get should return None.
-        assert!(env.ro_txn_pool().get().is_none());
+        assert!(env.ro_txn_pool().pop().is_none());
     }
 
     #[test]
@@ -208,7 +208,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Committed txns are freed by mdbx, not returned to pool.
-        assert!(env.ro_txn_pool().get().is_none());
+        assert!(env.ro_txn_pool().pop().is_none());
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl Environment {
     /// avoiding the `lck_rdt_lock` mutex in MDBX's `mvcc_bind_slot` on each new transaction.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
-        if let Some(txn_ptr) = self.inner.ro_txn_pool.get() {
+        if let Some(txn_ptr) = self.inner.ro_txn_pool.pop() {
             return Ok(Transaction::new_from_ptr(self.clone(), txn_ptr));
         }
         Transaction::new(self.clone())
