@@ -243,13 +243,6 @@ def compute_paired_stats(
     }
 
 
-def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
-    """Compute aggregate metrics from parsed CSV data."""
-    blocks = len(combined)
-    return {
-        "blocks": blocks,
-    }
-
 
 def format_duration(seconds: float) -> str:
     if seconds >= 60:
@@ -274,20 +267,54 @@ def fmt_mgas(v: float) -> str:
     return f"{v:.2f}"
 
 
+def significance(pct: float, ci_pct: float, lower_is_better: bool) -> str:
+    """Return significance label: 'good', 'bad', or 'neutral'."""
+    significant = abs(pct) > ci_pct
+    if not significant:
+        return "neutral"
+    elif (pct < 0) == lower_is_better:
+        return "good"
+    else:
+        return "bad"
+
+
 def change_str(pct: float, ci_pct: float, lower_is_better: bool) -> str:
     """Format change% with paired CI significance.
 
     Significant if the CI doesn't cross zero (i.e. |pct| > ci_pct).
     """
-    significant = abs(pct) > ci_pct
-    if not significant:
-        emoji = "⚪"
-    elif (pct < 0) == lower_is_better:
-        emoji = "✅"
-    else:
-        emoji = "❌"
-
+    sig = significance(pct, ci_pct, lower_is_better)
+    emoji = {"good": "✅", "bad": "❌", "neutral": "⚪"}[sig]
     return f"{pct:+.2f}% {emoji} (±{ci_pct:.2f}%)"
+
+
+def compute_changes(
+    baseline_stats: dict, feature_stats: dict, paired_stats: dict
+) -> dict:
+    """Pre-compute change percentages and significance for each metric."""
+    def pct(base: float, feat: float) -> float:
+        return (feat - base) / base * 100.0 if base > 0 else 0.0
+
+    def ci_pct(ci_ms: float, base_ms: float) -> float:
+        return ci_ms / base_ms * 100.0 if base_ms > 0 else 0.0
+
+    metrics = [
+        ("mean", "mean_ms", "ci_ms", "mean_ms", True),
+        ("p50", "p50_ms", "p50_ci_ms", "p50_ms", True),
+        ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
+        ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
+        ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
+    ]
+    changes = {}
+    for name, stat_key, ci_key, base_key, lower_is_better in metrics:
+        p = pct(baseline_stats[stat_key], feature_stats[stat_key])
+        c = ci_pct(paired_stats[ci_key], baseline_stats[base_key])
+        changes[name] = {
+            "pct": round(p, 4),
+            "ci_pct": round(c, 4),
+            "sig": significance(p, c, lower_is_better),
+        }
+    return changes
 
 
 def generate_comparison_table(
@@ -438,11 +465,6 @@ def main():
     all_baseline = [r for run in baseline_runs for r in run]
     all_feature = [r for run in feature_runs for r in run]
 
-    summary = compute_summary(all_feature, gas)
-    with open(args.output_summary, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"Summary written to {args.output_summary}")
-
     baseline_stats = compute_stats(all_baseline)
     feature_stats = compute_stats(all_feature)
     paired_stats = compute_paired_stats(baseline_runs, feature_runs)
@@ -479,12 +501,39 @@ def main():
         ("execution_cache_wait_us", "Execution Cache Update Wait"),
     ]
     wait_time_tables = []
+    wait_time_data = {}
     for field, title in wait_fields:
         b_stats = compute_wait_stats(all_baseline, field)
         f_stats = compute_wait_stats(all_feature, field)
+        if b_stats and f_stats:
+            wait_time_data[field] = {
+                "title": title,
+                "baseline": b_stats,
+                "feature": f_stats,
+            }
         table = generate_wait_time_table(title, b_stats, f_stats, baseline_label, feature_label)
         if table:
             wait_time_tables.append(table)
+
+    summary = {
+        "blocks": paired_stats["blocks"],
+        "baseline": {
+            "name": baseline_name,
+            "ref": baseline_ref,
+            "stats": baseline_stats,
+        },
+        "feature": {
+            "name": feature_name,
+            "ref": feature_sha,
+            "stats": feature_stats,
+        },
+        "paired": paired_stats,
+        "changes": compute_changes(baseline_stats, feature_stats, paired_stats),
+        "wait_times": wait_time_data,
+    }
+    with open(args.output_summary, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"Summary written to {args.output_summary}")
 
     markdown = generate_markdown(
         summary, comparison_table,

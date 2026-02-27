@@ -14,8 +14,6 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
-/// Invalid payload attributes code.
-pub const INVALID_PAYLOAD_ATTRIBUTES: i32 = -38003;
 /// Payload unsupported fork code.
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
@@ -25,9 +23,6 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
-
-/// Error message for the request too large error.
-const INVALID_PAYLOAD_ATTRIBUTES_MSG: &str = "Invalid payload attributes";
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
@@ -131,17 +126,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
-            EngineApiError::EngineObjectValidationError(
-                EngineObjectValidationError::PayloadAttributes(_),
-            ) => {
-                // Note: the data field is not required by the spec, but is also included by other
-                // clients
-                jsonrpsee_types::error::ErrorObject::owned(
-                    INVALID_PAYLOAD_ATTRIBUTES,
-                    INVALID_PAYLOAD_ATTRIBUTES_MSG,
-                    Some(ErrorData::new(error)),
-                )
-            }
             EngineApiError::UnknownPayload => jsonrpsee_types::error::ErrorObject::owned(
                 UNKNOWN_PAYLOAD_CODE,
                 error.to_string(),
@@ -155,6 +139,16 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
+            // Per Engine API spec, payload attributes structure validation errors
+            // should return -38003: Invalid payload attributes.
+            // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(_),
+            ) => jsonrpsee_types::error::ErrorObject::owned(
+                INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                Some(ErrorData::new(error)),
+            ),
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::UnsupportedFork,
             ) => jsonrpsee_types::error::ErrorObject::owned(
@@ -208,7 +202,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
-
+    use reth_payload_primitives::VersionSpecificValidationError;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -246,6 +240,8 @@ mod tests {
             )),
         );
 
+        // ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes is for semantic validation
+        // errors that occur AFTER the structure check passes, so it returns -38003
         ensure_engine_rpc_error(
             -38003,
             "Invalid payload attributes",
@@ -258,6 +254,30 @@ mod tests {
             UNKNOWN_PAYLOAD_CODE,
             "Unknown payload",
             EngineApiError::UnknownPayload,
+        );
+
+        // PayloadAttributes structure validation errors (e.g., missing withdrawals post-Shanghai)
+        // should return -38003 per the Engine API spec
+        // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
+        ensure_engine_rpc_error(
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::NoWithdrawalsPostShanghai,
+                ),
+            ),
+        );
+
+        // Beacon root shape mismatches on PayloadAttributes are reported as -38003.
+        ensure_engine_rpc_error(
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                ),
+            ),
         );
     }
 }

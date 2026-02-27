@@ -24,7 +24,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
@@ -41,7 +41,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
-use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
+use reth_primitives_traits::{Account, Bytecode, RecoveredBlock, SealedHeader};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -57,7 +57,9 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
+};
 pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
     collections::BTreeMap,
@@ -1091,14 +1093,6 @@ where
         })
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn account_code(&self, addr: &Address) -> Result<Option<Bytecode>, ProviderError> {
         self.block_on_async(async {
             let code = self
@@ -1172,7 +1166,7 @@ where
     Node: NodeTypes,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
-        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
+        self.state_root_with_updates(hashed_state).map(|(root, _)| root)
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
@@ -1218,14 +1212,14 @@ where
     fn plain_state_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageKey>)>,
-    ) -> Result<Vec<(Address, Vec<reth_primitives::StorageEntry>)>, ProviderError> {
+    ) -> Result<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>, ProviderError> {
         let mut results = Vec::new();
 
         for (address, keys) in addresses_with_keys {
             let mut values = Vec::new();
             for key in keys {
                 let value = self.storage(address, key)?.unwrap_or_default();
-                values.push(reth_primitives::StorageEntry::new(key, value));
+                values.push(reth_primitives_traits::StorageEntry::new(key, value));
             }
             results.push((address, values));
         }
@@ -1321,9 +1315,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
-        // Return empty hashed post state for RPC provider
-        HashedPostState::default()
+    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 

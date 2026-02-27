@@ -52,7 +52,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        let Environment { provider_factory, config, .. } =
+        let Environment { provider_factory, config, data_dir: _ } =
             self.env.init::<N>(AccessRights::RW, runtime)?;
 
         let target = self.command.unwind_target(provider_factory.clone())?;

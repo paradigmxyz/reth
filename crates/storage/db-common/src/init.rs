@@ -36,6 +36,12 @@ use reth_trie::{
     IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
 };
 use reth_trie_db::DatabaseStateRoot;
+
+type DbStateRoot<'a, TX, A> = StateRootComputer<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use tracing::{debug, error, info, trace, warn};
@@ -824,7 +830,20 @@ fn compute_state_root<Provider>(
     prefix_sets: Option<TriePrefixSets>,
 ) -> Result<B256, InitStorageError>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+{
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_state_root_inner::<_, A>(provider, prefix_sets)
+    })
+}
+
+fn compute_state_root_inner<Provider, A>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    A: reth_trie_db::TrieTableAdapter,
 {
     trace!(target: "reth::cli", "Computing state root");
 
@@ -834,7 +853,7 @@ where
 
     loop {
         let mut state_root =
-            StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
+            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state);
 
         if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);

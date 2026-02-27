@@ -21,6 +21,12 @@ use core::error::Error;
 /// When provided to [`FullConsensus::validate_block_post_execution`], this allows skipping
 /// the receipt root computation and using the pre-computed values instead.
 pub type ReceiptRootBloom = (B256, Bloom);
+
+/// Pre-computed transaction root.
+///
+/// When provided to [`Consensus::validate_block_pre_execution_with_tx_root`], this allows
+/// skipping transaction trie reconstruction from the block body.
+pub type TransactionRoot = B256;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
@@ -78,6 +84,22 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
+
+    /// Validate a block disregarding world state using an optional pre-computed transaction root.
+    ///
+    /// If `transaction_root` is provided, the implementation should use the pre-computed
+    /// transaction root instead of recomputing it from the block body. The value must have been
+    /// derived from `block.body().calculate_tx_root()`.
+    ///
+    /// By default this falls back to [`Self::validate_block_pre_execution`].
+    fn validate_block_pre_execution_with_tx_root(
+        &self,
+        block: &SealedBlock<B>,
+        transaction_root: Option<TransactionRoot>,
+    ) -> Result<(), ConsensusError> {
+        let _ = transaction_root;
+        self.validate_block_pre_execution(block)
+    }
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.

@@ -172,9 +172,96 @@ Before submitting changes, ensure:
 2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
-5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+5. **CLI Docs** (if CLI changed): Run `make update-book-cli` (see below)
+6. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+### CLI Reference Docs (`book` CI Job)
+
+The CLI reference pages under `docs/vocs/docs/pages/cli/` are **auto-generated** from the `reth` binary's `--help` output. **Do not edit these files manually** — any hand edits will be overwritten and CI will fail regardless.
+
+When you add, remove, or modify CLI commands, subcommands, or flags, regenerate the CLI docs by running:
+
+```bash
+make update-book-cli
+```
+
+This builds `reth` in debug mode and runs `docs/cli/update.sh` to regenerate all CLI pages. Commit the resulting changes.
+
+The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating the docs and running `git diff --exit-code`. If the committed docs don't match the generated output, CI fails. Manually editing these pages is never productive — always use `make update-book-cli`.
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
+
+#### Titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) with an optional scope:
+
+```
+<type>(<scope>): <short description>
+```
+
+**Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`
+
+**Scope** (optional): crate or area, e.g. `evm`, `trie`, `rpc`, `engine`, `net`
+
+Examples:
+- `fix(rpc): correct gas estimation for ERC-20 transfers`
+- `perf: batch trie updates to reduce cursor overhead`
+- `feat(engine): add new_payload_interval metric`
+
+#### Descriptions
+
+Keep it short. Say what changed and why — nothing more.
+
+**Do:**
+- Write 1–3 sentences summarizing the change
+- Explain _why_ if the diff doesn't make it obvious
+- Link related issues or EIPs
+- Include benchmark numbers for perf changes
+
+**Don't:**
+- List every file changed — that's what the diff is for
+- Repeat the title in the body
+- Add "Files changed" or "Changes" sections
+- Write walls of text that go stale when the diff is updated
+- Use filler like "This PR introduces...", "comprehensive", "robust", "enhance", "leverage"
+
+**Template:**
+
+```
+Closes #<issue>
+
+<what changed, 1-3 sentences>
+
+<why, if not obvious from the diff>
+```
+
+**Good example:**
+
+```
+Closes #16800
+
+Adds fallback for external IP resolution so node startup doesn't fail
+when STUN is unreachable. Falls back to the configured default.
+```
+
+**Bad example:**
+
+```
+## Summary
+This PR introduces comprehensive improvements to the IP resolution system.
+
+## Changes
+- Modified `crates/net/discv4/src/lib.rs` to add fallback
+- Modified `crates/net/discv4/src/config.rs` to add default IP
+- Added tests in `crates/net/discv4/src/tests/ip.rs`
+
+## Files Changed
+- crates/net/discv4/src/lib.rs
+- crates/net/discv4/src/config.rs
+- crates/net/discv4/src/tests/ip.rs
+```
+
+#### Labels and CI
 
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
@@ -455,5 +542,8 @@ cargo build --release
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo docs --document-private-items
+
+# Regenerate CLI reference docs (after CLI changes)
+make update-book-cli
 ```
