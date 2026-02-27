@@ -151,7 +151,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
-                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
+                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun |
+                    VersionSpecificValidationError::BlockAccessListNotSupportedBeforeV6 |
+                    VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
+                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
+                    VersionSpecificValidationError::SlotNumberNotSupportedBeforeV6 |
+                    VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
+                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam,
                 ),
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,

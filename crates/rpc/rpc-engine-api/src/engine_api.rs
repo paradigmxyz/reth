@@ -30,7 +30,8 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{
-    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethPayloadStatus,
+    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethNewPayloadInput,
+    RethPayloadStatus,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -1422,7 +1423,7 @@ where
 ///
 /// Waits for execution cache and sparse trie locks before processing.
 #[async_trait]
-impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer
+impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer<ExecutionData>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
@@ -1431,9 +1432,39 @@ where
     Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
+    async fn reth_new_payload(
+        &self,
+        input: RethNewPayloadInput<ExecutionData>,
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayload");
-        self.reth_new_payload_metered(payload).await
+        match input {
+            RethNewPayloadInput::ExecutionData(payload) => {
+                self.reth_new_payload_metered(payload).await
+            }
+            RethNewPayloadInput::BlockRlp(rlp) => {
+                let block = alloy_rlp::Decodable::decode(&mut rlp.as_ref())
+                    .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+                let payload =
+                    EngineT::block_to_payload(reth_primitives_traits::SealedBlock::new_unhashed(
+                        block,
+                    ));
+                self.reth_new_payload_metered(payload).await
+            }
+        }
+    }
+
+    async fn reth_forkchoice_updated(
+        &self,
+        forkchoice_state: ForkchoiceState,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
+        self.validate_and_execute_forkchoice(
+            EngineApiMessageVersion::V3,
+            forkchoice_state,
+            None,
+        )
+        .await
+        .map_err(Into::into)
     }
 }
 
@@ -1441,14 +1472,14 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
-    Self: EngineApiServer<EngineT> + RethEngineApiServer,
+    Self: EngineApiServer<EngineT> + RethEngineApiServer<ExecutionData>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
         let mut module = EngineApiServer::<EngineT>::into_rpc(self.clone()).remove_context();
 
         // Merge reth_newPayload endpoint
         module
-            .merge(RethEngineApiServer::into_rpc(self).remove_context())
+            .merge(RethEngineApiServer::<ExecutionData>::into_rpc(self).remove_context())
             .expect("No conflicting methods");
 
         module
