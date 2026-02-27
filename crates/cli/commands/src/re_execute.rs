@@ -11,7 +11,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm, Evm};
+use reth_evm::{execute::Executor, system_calls::SystemCaller, ConfigureEvm, Evm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected, NodePrimitives};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
@@ -71,13 +71,15 @@ impl<C: ChainSpecParser> Command<C> {
 ///
 /// Used when `execute_one` fails for a whole block and we don't know which transaction caused it.
 /// `make_db` is called to build a fresh state provider database at the parent block.
-fn find_and_trace_failing_tx<C, DB>(
+fn find_and_trace_failing_tx<C, DB, Spec>(
     evm_config: &C,
     make_db: impl Fn() -> StateProviderDatabase<DB>,
     block: &reth_primitives_traits::RecoveredBlock<<C::Primitives as NodePrimitives>::Block>,
+    spec: Spec,
 ) where
     C: ConfigureEvm,
     DB: reth_revm::database::EvmStateProvider,
+    Spec: EthereumHardforks + Clone,
 {
     let evm_env = match evm_config.evm_env(block.header()) {
         Ok(env) => env,
@@ -90,6 +92,14 @@ fn find_and_trace_failing_tx<C, DB>(
     // Execute transactions one by one to find which one fails.
     let mut state = State::builder().with_database(make_db()).with_bundle_update().build();
     let mut evm = evm_config.evm_with_env(&mut state, evm_env);
+
+    // Apply pre-execution system calls first.
+    if let Err(err) =
+        SystemCaller::new(spec.clone()).apply_pre_execution_changes(block.header(), &mut evm)
+    {
+        error!(%err, "Failed to apply pre-execution changes for opcode tracing");
+        return;
+    }
 
     let mut failing_index = None;
     for (i, tx) in block.transactions_recovered().enumerate() {
@@ -104,7 +114,7 @@ fn find_and_trace_failing_tx<C, DB>(
 
     match failing_index {
         Some(tx_index) => {
-            trace_failed_transaction(evm_config, make_db(), block, tx_index);
+            trace_failed_transaction(evm_config, make_db(), block, tx_index, spec);
         }
         None => {
             error!(
@@ -117,18 +127,21 @@ fn find_and_trace_failing_tx<C, DB>(
 
 /// Traces a failed transaction at the given index within a block, producing opcode-level output.
 ///
-/// Builds state at the parent block, replays all prior transactions, then re-executes the
-/// failing transaction with a [`TracingInspector`] attached to capture opcode-level detail.
+/// Builds state at the parent block, applies pre-execution system calls (EIP-4788, EIP-2935),
+/// replays all prior transactions, then re-executes the failing transaction with a
+/// [`TracingInspector`] attached to capture opcode-level detail.
 /// The resulting trace is logged as a JSON-serialized geth-style `DefaultFrame` containing
 /// opcode-level `structLogs`.
-fn trace_failed_transaction<C, DB>(
+fn trace_failed_transaction<C, DB, Spec>(
     evm_config: &C,
     db: StateProviderDatabase<DB>,
     block: &reth_primitives_traits::RecoveredBlock<<C::Primitives as NodePrimitives>::Block>,
     tx_index: usize,
+    spec: Spec,
 ) where
     C: ConfigureEvm,
     DB: reth_revm::database::EvmStateProvider,
+    Spec: EthereumHardforks,
 {
     let evm_env = match evm_config.evm_env(block.header()) {
         Ok(env) => env,
@@ -140,9 +153,16 @@ fn trace_failed_transaction<C, DB>(
 
     let mut state = State::builder().with_database(db).with_bundle_update().build();
 
-    // Replay all transactions before the failing one to build up state.
+    // Apply pre-execution system calls (EIP-4788, EIP-2935) and replay prior txs.
     {
         let mut evm = evm_config.evm_with_env(&mut state, evm_env.clone());
+        if let Err(err) =
+            SystemCaller::new(spec).apply_pre_execution_changes(block.header(), &mut evm)
+        {
+            error!(%err, "Failed to apply pre-execution changes for opcode tracing");
+            return;
+        }
+
         for (i, tx) in block.transactions_recovered().enumerate() {
             if i >= tx_index {
                 break;
@@ -303,7 +323,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 // failing index, then trace that tx with an inspector.
                                 let parent_num = block.number() - 1;
                                 find_and_trace_failing_tx(
-                                    &evm_config, || db_at(parent_num), &block,
+                                    &evm_config,
+                                    || db_at(parent_num),
+                                    &block,
+                                    provider_factory.chain_spec(),
                                 );
 
                                 if skip_invalid_blocks {
@@ -372,6 +395,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                             db_at(block.number() - 1),
                                             &block,
                                             i,
+                                            provider_factory.chain_spec(),
                                         );
 
                                         if skip_invalid_blocks {
