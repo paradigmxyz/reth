@@ -45,7 +45,7 @@ impl ReadTxnPool {
                 Ok(_) => return Some(txn),
                 Err(e) => {
                     tracing::warn!(target: "libmdbx", %e, "failed to renew pooled read transaction");
-                    unsafe { ffi::mdbx_txn_abort(txn) };
+                    abort_txn(txn);
                 }
             }
         }
@@ -59,21 +59,27 @@ impl ReadTxnPool {
         // mdbx_txn_reset releases the MVCC snapshot but keeps the reader slot.
         if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn) }) {
             tracing::warn!(target: "libmdbx", %e, "failed to reset read transaction for pooling");
-            unsafe { ffi::mdbx_txn_abort(txn) };
+            abort_txn(txn);
             return;
         }
 
         if self.queue.push(PooledTxn(txn)).is_err() {
-            // Pool full — abort the handle to release the reader slot.
-            unsafe { ffi::mdbx_txn_abort(txn) };
+            abort_txn(txn);
         }
     }
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
     pub(crate) fn drain(&self) {
         while let Some(handle) = self.queue.pop() {
-            unsafe { ffi::mdbx_txn_abort(handle.0) };
+            abort_txn(handle.0);
         }
+    }
+}
+
+/// Aborts a transaction handle, logging any error.
+fn abort_txn(txn: *mut ffi::MDBX_txn) {
+    if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort(txn) }) {
+        tracing::error!(target: "libmdbx", %e, "failed to abort transaction");
     }
 }
 
