@@ -70,7 +70,7 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
-alloy-node-bindings = "1.6.3"
+alloy-node-bindings = "1.5.2"
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 backon.workspace = true

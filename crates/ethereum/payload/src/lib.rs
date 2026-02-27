@@ -154,8 +154,16 @@ where
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider.as_ref());
-    let mut db =
-        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
+    let chain_spec = client.chain_spec();
+
+    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
+
+    // Build state with BAL builder enabled when Amsterdam is active
+    let mut db = State::builder()
+        .with_database(cached_reads.as_db_mut(state))
+        .with_bundle_update()
+        .with_bal_builder_if(is_amsterdam)
+        .build();
 
     let mut builder = evm_config
         .builder_for_next_block(
@@ -169,11 +177,10 @@ where
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: Some(attributes.withdrawals().clone()),
                 extra_data: builder_config.extra_data,
+                slot_number: attributes.slot_number,
             },
         )
         .map_err(PayloadBuilderError::other)?;
-
-    let chain_spec = client.chain_spec();
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -324,6 +331,25 @@ where
                 }
                 continue
             }
+            // EIP-7778: the executor tracks gas_before_refund while the payload builder's
+            // pre-check uses gas_after_refund. Near-full blocks can pass the pre-check but
+            // fail the executor's check. Skip the tx and continue building.
+            Err(BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit,
+                    block_available_gas,
+                },
+            )) => {
+                trace!(target: "payload_builder", %transaction_gas_limit, %block_available_gas, ?tx, "skipping transaction exceeding block gas limit");
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    &InvalidPoolTransactionError::ExceedsGasLimit(
+                        transaction_gas_limit,
+                        block_available_gas,
+                    ),
+                );
+                continue
+            }
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
@@ -360,7 +386,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
         builder.finish(state_provider.as_ref())?;
 
     let requests = chain_spec
@@ -377,9 +403,10 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    let payload =
+        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests, block_access_list)
+            // add blob sidecars from the executed txs
+            .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

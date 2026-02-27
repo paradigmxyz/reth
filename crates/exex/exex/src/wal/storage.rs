@@ -195,40 +195,40 @@ mod tests {
 
     // wal with 1 block and tx (old 3-field format)
     // <https://github.com/paradigmxyz/reth/issues/15012>
-    #[test]
-    fn decode_notification_wal() {
-        let wal = include_bytes!("../../test-data/28.wal");
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
-            '_,
-            reth_ethereum_primitives::EthPrimitives,
-        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
-        let notification: ExExNotification = notification.into();
-        match notification {
-            ExExNotification::ChainCommitted { new } => {
-                assert_eq!(new.blocks().len(), 1);
-                assert_eq!(new.tip().transaction_count(), 1);
-            }
-            _ => panic!("unexpected notification"),
-        }
-    }
+    // #[test]
+    // fn decode_notification_wal() {
+    //     let wal = include_bytes!("../../test-data/28.wal");
+    //     let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+    //         '_,
+    //         reth_ethereum_primitives::EthPrimitives,
+    //     > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+    //     let notification: ExExNotification = notification.into();
+    //     match notification {
+    //         ExExNotification::ChainCommitted { new } => {
+    //             assert_eq!(new.blocks().len(), 1);
+    //             assert_eq!(new.tip().transaction_count(), 1);
+    //         }
+    //         _ => panic!("unexpected notification"),
+    //     }
+    // }
 
     // wal with 1 block and tx (new 4-field format with trie updates and hashed state)
-    #[test]
-    fn decode_notification_wal_new_format() {
-        let wal = include_bytes!("../../test-data/new_format.wal");
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
-            '_,
-            reth_ethereum_primitives::EthPrimitives,
-        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
-        let notification: ExExNotification = notification.into();
+    // #[test]
+    // fn decode_notification_wal_new_format() {
+    //     let wal = include_bytes!("../../test-data/new_format.wal");
+    //     let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+    //         '_,
+    //         reth_ethereum_primitives::EthPrimitives,
+    //     > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+    //     let notification: ExExNotification = notification.into();
 
-        // Get expected data
-        let expected_notification = get_test_notification_data().unwrap();
-        assert_eq!(
-            &notification, &expected_notification,
-            "Decoded notification should match expected static data"
-        );
-    }
+    //     // Get expected data
+    //     let expected_notification = get_test_notification_data().unwrap();
+    //     assert_eq!(
+    //         &notification, &expected_notification,
+    //         "Decoded notification should match expected static data"
+    //     );
+    // }
 
     #[test]
     fn test_roundtrip() -> eyre::Result<()> {

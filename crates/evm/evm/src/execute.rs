@@ -3,7 +3,10 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::{
+    eip2718::WithEncoded,
+    eip7928::{compute_block_access_list_hash, BlockAccessList},
+};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
@@ -165,6 +168,7 @@ pub trait Executor<DB: Database>: Sized {
 /// - `bundle_state`: Accumulated state changes from all transactions
 /// - `state_provider`: Access to the current state for additional lookups
 /// - `state_root`: The calculated state root after all changes
+/// - `block_access_list_hash`: Block access list hash (EIP-7928, Amsterdam)
 ///
 /// # Usage
 ///
@@ -208,6 +212,8 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
+    /// Block access list hash (EIP-7928, Amsterdam).
+    pub block_access_list_hash: Option<B256>,
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -225,6 +231,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         bundle_state: &'a BundleState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
+        block_access_list_hash: Option<B256>,
     ) -> Self {
         Self {
             evm_env,
@@ -235,6 +242,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             bundle_state,
             state_provider,
             state_root,
+            block_access_list_hash,
         }
     }
 }
@@ -304,6 +312,8 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
+    /// Block access list built during execution (EIP-7928, Amsterdam).
+    pub block_access_list: Option<BlockAccessList>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -453,7 +463,9 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes()
+        self.executor.apply_pre_execution_changes()?;
+
+        Ok(())
     }
 
     fn execute_transaction_with_commit_condition(
@@ -468,6 +480,7 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
+
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -483,6 +496,11 @@ where
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
+
+        // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
+        let block_access_list = result.block_access_list.clone();
+        let block_access_list_hash =
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
@@ -502,11 +520,18 @@ where
             bundle_state: &db.bundle_state,
             state_provider: &state,
             state_root,
+            block_access_list_hash,
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+        Ok(BlockBuilderOutcome {
+            execution_result: result,
+            hashed_state,
+            trie_updates,
+            block,
+            block_access_list,
+        })
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
@@ -535,8 +560,12 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .without_state_clear()
+            .with_bal_builder_if(true)
+            .build();
         Self { strategy_factory, db }
     }
 }

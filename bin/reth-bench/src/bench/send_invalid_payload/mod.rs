@@ -240,6 +240,7 @@ impl Command {
             ExecutionPayload::V1(p) => config.apply_to_payload_v1(p),
             ExecutionPayload::V2(p) => config.apply_to_payload_v2(p),
             ExecutionPayload::V3(p) => config.apply_to_payload_v3(p),
+            ExecutionPayload::V4(p) => config.apply_to_payload_v3(&mut p.payload_inner),
         };
 
         let skip_recalc = self.skip_hash_recalc || config.should_skip_hash_recalc();
@@ -254,6 +255,9 @@ impl Command {
                         ExecutionPayload::V1(p) => p.block_hash,
                         ExecutionPayload::V2(p) => p.payload_inner.block_hash,
                         ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash,
+                        ExecutionPayload::V4(p) => {
+                            p.payload_inner.payload_inner.payload_inner.block_hash
+                        }
                     }
                 }
             };
@@ -262,6 +266,9 @@ impl Command {
                 ExecutionPayload::V1(p) => p.block_hash = new_hash,
                 ExecutionPayload::V2(p) => p.payload_inner.block_hash = new_hash,
                 ExecutionPayload::V3(p) => p.payload_inner.payload_inner.block_hash = new_hash,
+                ExecutionPayload::V4(p) => {
+                    p.payload_inner.payload_inner.payload_inner.block_hash = new_hash
+                }
             }
         }
 
