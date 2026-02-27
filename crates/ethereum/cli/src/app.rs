@@ -97,7 +97,21 @@ where
     {
         let runner = match self.runner.take() {
             Some(runner) => runner,
-            None => CliRunner::try_default_runtime()?,
+            None => {
+                let runtime_config = match &self.cli.command {
+                    Commands::Node(command) => {
+                        reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
+                            reserved_cpu_cores: command.engine.reserved_cpu_cores,
+                            proof_storage_worker_threads: command.engine.storage_worker_count,
+                            proof_account_worker_threads: command.engine.account_worker_count,
+                            prewarming_threads: command.engine.prewarming_threads,
+                            ..Default::default()
+                        })
+                    }
+                    _ => reth_tasks::RuntimeConfig::default(),
+                };
+                CliRunner::try_with_runtime_config(runtime_config)?
+            }
         };
 
         // Add network name if available to the logs dir
@@ -123,8 +137,8 @@ where
     ///
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
-        if self.guard.is_none() {
-            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
+        if let Some(layers) = self.layers.take() {
+            self.guard = self.cli.init_tracing(runner, layers)?;
         }
 
         Ok(())
@@ -160,17 +174,6 @@ where
             if let Some(ws_api) = &command.rpc.ws_api {
                 Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
             }
-
-            let rayon_config = RayonConfig {
-                reserved_cpu_cores: command.engine.reserved_cpu_cores,
-                proof_storage_worker_threads: command.engine.storage_worker_count,
-                proof_account_worker_threads: command.engine.account_worker_count,
-                prewarming_threads: command.engine.prewarming_threads,
-                ..Default::default()
-            };
-            let runner = CliRunner::try_with_runtime_config(
-                reth_tasks::RuntimeConfig::default().with_rayon(rayon_config),
-            )?;
 
             runner.run_command_until_exit(|ctx| {
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))

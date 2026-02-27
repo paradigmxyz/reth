@@ -1,6 +1,9 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{
+    map::{DefaultHashBuilder, FbBuildHasher},
+    Bytes,
+};
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
@@ -13,7 +16,7 @@ const MAX_CACHE_SIZE: u32 = 10_000;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
-pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>>>)
+pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -37,9 +40,7 @@ where
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(
-    moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
-)
+pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
