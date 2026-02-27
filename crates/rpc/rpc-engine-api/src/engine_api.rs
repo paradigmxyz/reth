@@ -1444,10 +1444,9 @@ where
             RethNewPayloadInput::BlockRlp(rlp) => {
                 let block = alloy_rlp::Decodable::decode(&mut rlp.as_ref())
                     .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                let payload =
-                    EngineT::block_to_payload(reth_primitives_traits::SealedBlock::new_unhashed(
-                        block,
-                    ));
+                let payload = EngineT::block_to_payload(
+                    reth_primitives_traits::SealedBlock::new_unhashed(block),
+                );
                 self.reth_new_payload_metered(payload).await
             }
         }
@@ -1458,13 +1457,9 @@ where
         forkchoice_state: ForkchoiceState,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
-        self.validate_and_execute_forkchoice(
-            EngineApiMessageVersion::V3,
-            forkchoice_state,
-            None,
-        )
-        .await
-        .map_err(Into::into)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, forkchoice_state, None)
+            .await
+            .map_err(Into::into)
     }
 }
 
