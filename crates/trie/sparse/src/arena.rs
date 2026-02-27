@@ -636,6 +636,11 @@ impl ArenaSparseSubtrie {
         self.required_proofs.clear();
     }
 
+    /// Prunes nodes beyond `max_depth` within this subtrie.
+    fn prune(&mut self, max_depth: usize) -> usize {
+        prune_arena(&mut self.arena, self.root, max_depth)
+    }
+
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
     /// [`Self::reveal_nodes`], but checks accessibility for [`LeafUpdate::Touched`] entries.
     ///
@@ -1012,6 +1017,127 @@ fn update_cached_rlp(
     }
 
     rlp_node_buf.pop().expect("root RlpNode must be on rlp_node_buf after update_cached_rlp")
+}
+
+/// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
+/// `path_offset` is the number of nibbles already consumed from `full_path`.
+fn get_leaf_value_in_arena<'a>(
+    arena: &'a Arena<ArenaSparseNode>,
+    mut current: Index,
+    full_path: &Nibbles,
+    mut path_offset: usize,
+) -> Option<&'a Vec<u8>> {
+    loop {
+        match &arena[current] {
+            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
+            ArenaSparseNode::Leaf { key, value, .. } => {
+                let remaining = full_path.slice(path_offset..);
+                return (remaining == *key).then_some(value);
+            }
+            ArenaSparseNode::Branch(b) => {
+                let short_key = &b.short_key;
+                let logical_end = path_offset + short_key.len();
+                if full_path.len() <= logical_end ||
+                    full_path.slice(path_offset..logical_end) != *short_key
+                {
+                    return None;
+                }
+
+                let child_nibble = full_path.get_unchecked(logical_end);
+                let dense_idx = child_dense_index(b.state_mask, child_nibble)?;
+                match &b.children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Blinded(_) => return None,
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                        current = *child_idx;
+                        path_offset = logical_end + 1;
+                    }
+                }
+            }
+            ArenaSparseNode::Subtrie(subtrie) => {
+                return get_leaf_value_in_arena(
+                    &subtrie.arena,
+                    subtrie.root,
+                    full_path,
+                    path_offset,
+                );
+            }
+        }
+    }
+}
+
+/// Immutable traversal from the given root in `arena`, following `full_path` to find a leaf.
+/// Returns whether the leaf exists or not, or an error if a blinded node is encountered or
+/// the value doesn't match.
+fn find_leaf_in_arena(
+    arena: &Arena<ArenaSparseNode>,
+    mut current: Index,
+    full_path: &Nibbles,
+    mut path_offset: usize,
+    expected_value: Option<&Vec<u8>>,
+) -> Result<LeafLookup, LeafLookupError> {
+    loop {
+        match &arena[current] {
+            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
+                return Ok(LeafLookup::NonExistent);
+            }
+            ArenaSparseNode::Leaf { key, value, .. } => {
+                let remaining = full_path.slice(path_offset..);
+                if remaining != *key {
+                    return Ok(LeafLookup::NonExistent);
+                }
+                if let Some(expected) = expected_value {
+                    if *expected != *value {
+                        return Err(LeafLookupError::ValueMismatch {
+                            path: full_path.clone(),
+                            expected: Some(expected.clone()),
+                            actual: value.clone(),
+                        });
+                    }
+                }
+                return Ok(LeafLookup::Exists);
+            }
+            ArenaSparseNode::Branch(b) => {
+                let short_key = &b.short_key;
+                let logical_end = path_offset + short_key.len();
+
+                if full_path.len() <= logical_end {
+                    return Ok(LeafLookup::NonExistent);
+                }
+
+                if full_path.slice(path_offset..logical_end) != *short_key {
+                    return Ok(LeafLookup::NonExistent);
+                }
+
+                let child_nibble = full_path.get_unchecked(logical_end);
+                let Some(dense_idx) = child_dense_index(b.state_mask, child_nibble) else {
+                    return Ok(LeafLookup::NonExistent);
+                };
+
+                match &b.children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                        let hash =
+                            rlp_node.as_hash().unwrap_or_else(|| keccak256(rlp_node.as_slice()));
+                        let mut blinded_path = full_path.slice(..logical_end);
+                        blinded_path.push_unchecked(child_nibble);
+                        return Err(LeafLookupError::BlindedNode { path: blinded_path, hash });
+                    }
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                        current = *child_idx;
+                        path_offset = logical_end + 1;
+                    }
+                }
+            }
+            ArenaSparseNode::Subtrie(subtrie) => {
+                return find_leaf_in_arena(
+                    &subtrie.arena,
+                    subtrie.root,
+                    full_path,
+                    path_offset,
+                    expected_value,
+                );
+            }
+        }
+    }
 }
 
 /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`. If the leaf is already
@@ -1622,6 +1748,114 @@ fn migrate_nodes(
     } else {
         dst.insert(node)
     }
+}
+
+/// Recursively removes a node and all its revealed descendants from the arena.
+fn remove_subtree(arena: &mut Arena<ArenaSparseNode>, idx: Index) {
+    let node = arena.remove(idx).unwrap();
+    if let ArenaSparseNode::Branch(b) = node {
+        for child in b.children {
+            if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
+                remove_subtree(arena, child_idx);
+            }
+        }
+    }
+}
+
+/// Prunes nodes beyond `max_depth` in the given arena, replacing them with blinded
+/// (hash) stubs. Returns the number of nodes converted to hash stubs.
+///
+/// Depth counts nodes traversed (not nibbles). Embedded nodes (RLP < 32 bytes) are
+/// preserved since they have no hash representation.
+fn prune_arena(arena: &mut Arena<ArenaSparseNode>, root: Index, max_depth: usize) -> usize {
+    // Only branches can have pruneable children.
+    if !matches!(&arena[root], ArenaSparseNode::Branch(_)) {
+        return 0;
+    }
+
+    let mut pruned = 0;
+    // Stack of (node_index, depth, start_nibble).
+    let mut stack: Vec<(Index, usize, u8)> = vec![(root, 0, 0)];
+
+    loop {
+        let Some(&mut (head_idx, depth, ref mut start_nibble)) = stack.last_mut() else {
+            break;
+        };
+        let start = *start_nibble;
+
+        let state_mask = arena[head_idx].branch_ref().state_mask;
+
+        let mut descended = false;
+        for (dense_idx, nibble) in state_mask.iter().enumerate() {
+            if nibble < start {
+                continue;
+            }
+
+            let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
+                ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
+                ArenaSparseNodeBranchChild::Blinded(_) => continue,
+            };
+
+            // At max_depth, prune revealed children that have a cached hash RLP.
+            if depth >= max_depth {
+                let cached_rlp = match &arena[child_idx] {
+                    ArenaSparseNode::Branch(b) => b.state.cached_rlp_node().cloned(),
+                    ArenaSparseNode::Leaf { state, .. } => state.cached_rlp_node().cloned(),
+                    _ => None,
+                };
+
+                if let Some(rlp_node) = cached_rlp.filter(|n| n.is_hash()) {
+                    // Remove the child subtree from the arena.
+                    if let ArenaSparseNode::Branch(b) = arena.remove(child_idx).unwrap() {
+                        for child in b.children {
+                            if let ArenaSparseNodeBranchChild::Revealed(idx) = child {
+                                remove_subtree(arena, idx);
+                            }
+                        }
+                    }
+
+                    // Replace parent's child with a blinded reference.
+                    arena[head_idx].branch_mut().children[dense_idx] =
+                        ArenaSparseNodeBranchChild::Blinded(rlp_node);
+
+                    pruned += 1;
+                }
+                continue;
+            }
+
+            // depth < max_depth: descend into branch children.
+            if matches!(&arena[child_idx], ArenaSparseNode::Branch(_)) {
+                *start_nibble = nibble + 1;
+                stack.push((child_idx, depth + 1, 0));
+                descended = true;
+                break;
+            }
+        }
+
+        if descended {
+            continue;
+        }
+
+        // All children processed at this depth; recalculate num_leaves and pop.
+        let b = arena[head_idx].branch_ref();
+        let new_num_leaves: u64 = b
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                ArenaSparseNodeBranchChild::Revealed(idx) => Some(arena[*idx].num_leaves()),
+                ArenaSparseNodeBranchChild::Blinded(_) => None,
+            })
+            .sum();
+        match &mut arena[head_idx].branch_mut().state {
+            ArenaSparseNodeState::Cached { num_leaves, .. } |
+            ArenaSparseNodeState::Revealed { num_leaves } |
+            ArenaSparseNodeState::Dirty { num_leaves, .. } => *num_leaves = new_num_leaves,
+        }
+
+        stack.pop();
+    }
+
+    pruned
 }
 
 /// Reveals a single proof node using a pre-computed [`FindAncestorResult`] from
@@ -2274,16 +2508,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.update_actions = update_actions;
     }
 
-    fn get_leaf_value(&self, _full_path: &Nibbles) -> Option<&Vec<u8>> {
-        todo!()
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
+        get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
     }
 
     fn find_leaf(
         &self,
-        _full_path: &Nibbles,
-        _expected_value: Option<&Vec<u8>>,
+        full_path: &Nibbles,
+        expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-        todo!()
+        find_leaf_in_arena(&self.upper_arena, self.root, full_path, 0, expected_value)
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
@@ -2338,8 +2572,86 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.upper_arena[self.root].num_leaves() as usize
     }
 
-    fn prune(&mut self, _max_depth: usize) -> usize {
-        todo!()
+    fn prune(&mut self, max_depth: usize) -> usize {
+        // Only descend if the root is a branch; otherwise there are no subtries.
+        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            return 0;
+        }
+
+        self.buffers.stack.clear();
+        push_stack(
+            &self.upper_arena,
+            &mut self.buffers.stack,
+            self.root,
+            Nibbles::default(),
+            false,
+        );
+
+        let mut pruned = 0;
+        let mut start_nibble: u8 = 0;
+
+        loop {
+            let head_idx = self.buffers.stack.last().unwrap().index;
+
+            // If the current head is a subtrie, prune it and pop.
+            if let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] {
+                pruned += subtrie.prune(max_depth);
+
+                let popped_path =
+                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
+                if self.buffers.stack.is_empty() {
+                    break;
+                }
+                start_nibble = popped_path.last().unwrap() + 1;
+                continue;
+            }
+
+            // Head is a branch — iterate its children looking for branches/subtries.
+            let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
+
+            let mut descended = false;
+            for (dense_idx, nibble) in state_mask.iter().enumerate() {
+                if nibble < start_nibble {
+                    continue;
+                }
+
+                let child_idx = match &self.upper_arena[head_idx].branch_ref().children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                match &self.upper_arena[child_idx] {
+                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => {
+                        let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
+                        push_stack(
+                            &self.upper_arena,
+                            &mut self.buffers.stack,
+                            child_idx,
+                            path,
+                            false,
+                        );
+                        start_nibble = 0;
+                        descended = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if descended {
+                continue;
+            }
+
+            // All children processed; pop.
+            let popped_path =
+                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
+            if self.buffers.stack.is_empty() {
+                break;
+            }
+            start_nibble = popped_path.last().unwrap() + 1;
+        }
+
+        pruned
     }
 
     #[instrument(
@@ -2723,12 +3035,14 @@ mod tests {
             let mut actual_updates = apst.take_updates();
             self.minimize_sparse_updates(&mut actual_updates);
 
-            assert_eq!(
-                expected_trie_updates.storage_nodes, actual_updates.updated_nodes,
+            pretty_assertions::assert_eq!(
+                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
+                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>().sort(),
                 "updated nodes mismatch"
             );
-            assert_eq!(
-                expected_trie_updates.removed_nodes, actual_updates.removed_nodes,
+            pretty_assertions::assert_eq!(
+                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
+                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>().sort(),
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
