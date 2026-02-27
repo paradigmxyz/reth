@@ -76,6 +76,16 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
+        Self::from_bundle_state_seq::<KH>(state)
+    }
+
+    /// Sequential version of [`Self::from_bundle_state`].
+    ///
+    /// Prefer this over the parallel version when the caller is not running inside a dedicated
+    /// rayon pool, to avoid contending with other work on the global rayon pool.
+    pub fn from_bundle_state_seq<'a, KH: KeyHasher>(
+        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Self {
         state
             .into_iter()
             .map(|(address, account)| {
