@@ -315,6 +315,150 @@ mod tests {
     }
 
     #[test]
+    fn multithreaded_concurrent_open_close() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+
+        // 16 threads each open and close 200 txns — exercises pool contention.
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..200 {
+                        let txn = env.begin_ro_txn().unwrap();
+                        let db = txn.open_db(None).unwrap();
+                        let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+                        assert_eq!(val, Some(*b"val"));
+                        // Intentionally don't call drop explicitly — let scope handle it.
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn multithreaded_hold_multiple_txns() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+
+        // Each thread holds multiple txns open simultaneously, then drops them all.
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..20 {
+                        let txns: Vec<_> = (0..4).map(|_| env.begin_ro_txn().unwrap()).collect();
+                        for txn in &txns {
+                            let db = txn.open_db(None).unwrap();
+                            let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+                            assert_eq!(val, Some(*b"val"));
+                        }
+                        drop(txns);
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn multithreaded_drain_under_contention() {
+        let (_dir, env) = test_env();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+
+        // Fill the pool with handles.
+        {
+            let txns: Vec<_> = (0..16).map(|_| env.begin_ro_txn().unwrap()).collect();
+            drop(txns);
+        }
+        assert_eq!(env.ro_txn_pool().queue.len(), 16);
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
+
+        // 4 threads racing to get from pool + 1 thread draining.
+        let mut handles: Vec<_> = (0..4)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..50 {
+                        let _txn = env.begin_ro_txn(); // may or may not get a pooled handle
+                    }
+                })
+            })
+            .collect();
+
+        {
+            let env = env.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                env.ro_txn_pool().drain();
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn multithreaded_pool_saturation() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().set_max_readers(256).open(dir.path()).unwrap();
+        seed(&env);
+
+        let env = std::sync::Arc::new(env);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+
+        // 8 threads each open 20 txns simultaneously, exceeding MAX_POOLED (128).
+        // Total: 160 concurrent txns. max_readers set to 256 to allow this.
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let env = env.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let txns: Vec<_> = (0..20).map(|_| env.begin_ro_txn().unwrap()).collect();
+                    for txn in &txns {
+                        let db = txn.open_db(None).unwrap();
+                        let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
+                        assert_eq!(val, Some(*b"val"));
+                    }
+                    drop(txns);
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Pool should be capped at MAX_POOLED.
+        assert!(env.ro_txn_pool().queue.len() <= 128);
+    }
+
+    #[test]
     fn debug_format() {
         let (_dir, env) = test_env();
         seed(&env);
