@@ -376,13 +376,16 @@ where
             return Poll::Ready(Ok(()))
         }
 
-        // check if the interval is reached
-        while this.interval.poll_tick(cx).is_ready() {
-            // start a new job if there is no pending block, we haven't reached the deadline,
-            // and the payload isn't frozen
-            if this.pending_block.is_none() && !this.best_payload.is_frozen() {
-                this.spawn_build_job();
-            }
+        // Check if a scheduled build tick is reached.
+        //
+        // Important: only poll the interval if there is no active build job.
+        // Polling (and consuming) ticks while a build is still pending can delay follow-up builds
+        // by a full interval even if the current attempt has already finished.
+        if this.pending_block.is_none() &&
+            !this.best_payload.is_frozen() &&
+            this.interval.poll_tick(cx).is_ready()
+        {
+            this.spawn_build_job();
         }
 
         // poll the pending block
