@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    ethstream::MAX_MESSAGE_SIZE,
+    message::DEFAULT_MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
@@ -26,6 +26,11 @@ pub trait EthRlpxHandshake: Debug + Send + Sync + 'static {
         fork_filter: ForkFilter,
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>>;
+
+    /// Returns the maximum allowed ETH message size for this handshake implementation.
+    fn max_message_size(&self) -> usize {
+        DEFAULT_MAX_MESSAGE_SIZE
+    }
 }
 
 /// An unauthenticated stream that can send and receive messages.
@@ -50,9 +55,30 @@ impl<T> UnauthEth for T where
 /// The Ethereum P2P handshake.
 ///
 /// This performs the regular ethereum `eth` rlpx handshake.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct EthHandshake;
+pub struct EthHandshake {
+    max_message_size: usize,
+}
+
+impl EthHandshake {
+    /// Creates a new handshake configuration with a custom ETH message size limit.
+    pub const fn new(max_message_size: usize) -> Self {
+        Self { max_message_size }
+    }
+
+    /// Returns the configured ETH message size limit.
+    #[inline]
+    pub const fn max_message_size(&self) -> usize {
+        self.max_message_size
+    }
+}
+
+impl Default for EthHandshake {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_MESSAGE_SIZE)
+    }
+}
 
 impl EthRlpxHandshake for EthHandshake {
     fn handshake<'a>(
@@ -63,10 +89,21 @@ impl EthRlpxHandshake for EthHandshake {
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(status, fork_filter))
-                .await
-                .map_err(|_| EthStreamError::StreamTimeout)?
+            timeout(
+                timeout_limit,
+                EthereumEthHandshake(unauth).eth_handshake(
+                    status,
+                    fork_filter,
+                    self.max_message_size,
+                ),
+            )
+            .await
+            .map_err(|_| EthStreamError::StreamTimeout)?
         })
+    }
+
+    fn max_message_size(&self) -> usize {
+        self.max_message_size
     }
 }
 
@@ -84,6 +121,7 @@ where
         self,
         unified_status: UnifiedStatus,
         fork_filter: ForkFilter,
+        max_message_size: usize,
     ) -> Result<UnifiedStatus, EthStreamError> {
         let unauth = self.0;
 
@@ -110,7 +148,7 @@ where
             }
         };
 
-        if their_msg.len() > MAX_MESSAGE_SIZE {
+        if their_msg.len() > max_message_size {
             unauth
                 .disconnect(DisconnectReason::ProtocolBreach)
                 .await

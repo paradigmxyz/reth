@@ -73,8 +73,9 @@ impl EthRlpxHandshake for BscHandshake {
     ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
             let fut = async {
-                let negotiated_status =
-                    EthereumEthHandshake(unauth).eth_handshake(status, fork_filter).await?;
+                let negotiated_status = EthereumEthHandshake(unauth)
+                    .eth_handshake(status, fork_filter, self.max_message_size())
+                    .await?;
                 Self::upgrade_status(unauth, negotiated_status).await
             };
             timeout(timeout_limit, fut).await.map_err(|_| EthStreamError::StreamTimeout)?

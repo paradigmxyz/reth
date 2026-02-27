@@ -580,6 +580,16 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the maximum allowed ETH message size.
+    ///
+    /// Note: this replaces the current handshake with a new [`EthHandshake`] configured with the
+    /// given size. If a custom handshake was previously set via [`Self::eth_rlpx_handshake`], it
+    /// will be overwritten.
+    pub fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
+        self.handshake = Arc::new(EthHandshake::new(max_message_size));
+        self
+    }
+
     /// Set the optional network id.
     pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
         self.network_id = network_id;

@@ -7,7 +7,7 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage, DEFAULT_MAX_MESSAGE_SIZE},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -28,15 +28,12 @@ use tokio::time::timeout;
 use tokio_stream::Stream;
 use tracing::{debug, trace};
 
-/// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
-// https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
-pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
-
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
 #[pin_project]
 #[derive(Debug)]
 pub struct UnauthedEthStream<S> {
+    max_message_size: usize,
     #[pin]
     inner: S,
 }
@@ -44,7 +41,13 @@ pub struct UnauthedEthStream<S> {
 impl<S> UnauthedEthStream<S> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
     pub const fn new(inner: S) -> Self {
-        Self { inner }
+        Self { max_message_size: DEFAULT_MAX_MESSAGE_SIZE, inner }
+    }
+
+    /// Sets the maximum allowed ETH message size for this stream.
+    pub const fn with_max_message_size(mut self, max_message_size: usize) -> Self {
+        self.max_message_size = max_message_size;
+        self
     }
 
     /// Consumes the type and returns the wrapped stream
@@ -94,12 +97,14 @@ where
             status = %status.into_message(),
             "sending eth status to peer"
         );
-        let their_status =
-            EthereumEthHandshake(&mut self.inner).eth_handshake(status, fork_filter).await?;
+        let their_status = EthereumEthHandshake(&mut self.inner)
+            .eth_handshake(status, fork_filter, self.max_message_size)
+            .await?;
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake
-        let stream = EthStream::new(status.version, self.inner);
+        let stream =
+            EthStream::with_max_message_size(status.version, self.inner, self.max_message_size);
 
         Ok((stream, their_status))
     }
@@ -110,6 +115,8 @@ where
 pub struct EthStreamInner<N> {
     /// Negotiated eth version
     version: EthVersion,
+    /// Maximum allowed ETH message size.
+    max_message_size: usize,
     _pd: std::marker::PhantomData<N>,
 }
 
@@ -119,7 +126,12 @@ where
 {
     /// Creates a new [`EthStreamInner`] with the given eth version
     pub const fn new(version: EthVersion) -> Self {
-        Self { version, _pd: std::marker::PhantomData }
+        Self::with_max_message_size(version, DEFAULT_MAX_MESSAGE_SIZE)
+    }
+
+    /// Creates a new [`EthStreamInner`] with the given eth version and message size limit.
+    pub const fn with_max_message_size(version: EthVersion, max_message_size: usize) -> Self {
+        Self { version, max_message_size, _pd: std::marker::PhantomData }
     }
 
     /// Returns the eth version
@@ -130,7 +142,7 @@ where
 
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
-        if bytes.len() > MAX_MESSAGE_SIZE {
+        if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
 
@@ -186,7 +198,17 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self { eth: EthStreamInner::new(version), inner }
+        Self::with_max_message_size(version, inner, DEFAULT_MAX_MESSAGE_SIZE)
+    }
+
+    /// Creates a new unauthed [`EthStream`] with a custom max message size.
+    #[inline]
+    pub const fn with_max_message_size(
+        version: EthVersion,
+        inner: S,
+        max_message_size: usize,
+    ) -> Self {
+        Self { eth: EthStreamInner::with_max_message_size(version, max_message_size), inner }
     }
 
     /// Returns the eth version.
