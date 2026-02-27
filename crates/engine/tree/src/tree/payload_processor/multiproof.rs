@@ -77,10 +77,11 @@ pub enum MultiProofMessage {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub(super) struct StateHookSender(CrossbeamSender<MultiProofMessage>);
+pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
 
 impl StateHookSender {
-    pub(crate) const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
+    /// Creates a new [`StateHookSender`] wrapping the given channel sender.
+    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
         Self(inner)
     }
 }
