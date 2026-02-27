@@ -62,6 +62,7 @@ permissions:
 jobs:
   codspeed:
     if: github.event_name == 'push'
+    continue-on-error: true
     runs-on: depot-ubuntu-latest
     concurrency:
       group: bench-codspeed-${{ github.head_ref || github.run_id }}
