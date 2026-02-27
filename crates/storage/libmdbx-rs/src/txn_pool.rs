@@ -1,5 +1,5 @@
 use crate::error::mdbx_result;
-use crossbeam_queue::SegQueue;
+use crossbeam_queue::ArrayQueue;
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
@@ -10,12 +10,8 @@ use crossbeam_queue::SegQueue;
 /// This pool caches transaction handles that have been reset via `mdbx_txn_reset`. A reset handle
 /// retains its reader slot, so `mdbx_txn_renew` can reactivate it without touching the reader
 /// table mutex.
-///
-/// Implemented as an unbounded lock-free [`SegQueue`] of reset txn pointers. The pool can never
-/// hold more handles than were actually created, so the reader table's `max_readers` is the
-/// natural bound.
 pub(crate) struct ReadTxnPool {
-    queue: SegQueue<PooledTxn>,
+    queue: ArrayQueue<PooledTxn>,
 }
 
 /// Wrapper around a raw txn pointer to satisfy `Send + Sync` for the queue.
@@ -27,8 +23,8 @@ unsafe impl Send for PooledTxn {}
 unsafe impl Sync for PooledTxn {}
 
 impl ReadTxnPool {
-    pub(crate) const fn new() -> Self {
-        Self { queue: SegQueue::new() }
+    pub(crate) fn new() -> Self {
+        Self { queue: ArrayQueue::new(256) }
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
@@ -62,7 +58,9 @@ impl ReadTxnPool {
             return;
         }
 
-        self.queue.push(PooledTxn(txn));
+        if self.queue.push(PooledTxn(txn)).is_err() {
+            abort_txn(txn);
+        }
     }
 
     /// Aborts all pooled transaction handles. Called during environment shutdown.
