@@ -1089,14 +1089,14 @@ fn find_leaf_in_arena(
                 if remaining != *key {
                     return Ok(LeafLookup::NonExistent);
                 }
-                if let Some(expected) = expected_value {
-                    if *expected != *value {
-                        return Err(LeafLookupError::ValueMismatch {
-                            path: full_path.clone(),
-                            expected: Some(expected.clone()),
-                            actual: value.clone(),
-                        });
-                    }
+                if let Some(expected) = expected_value &&
+                    *expected != *value
+                {
+                    return Err(LeafLookupError::ValueMismatch {
+                        path: *full_path,
+                        expected: Some(expected.clone()),
+                        actual: value.clone(),
+                    });
                 }
                 return Ok(LeafLookup::Exists);
             }
@@ -1184,7 +1184,7 @@ fn encode_leaf(
 /// created branch once this returns.
 fn split_and_insert_leaf(
     arena: &mut Arena<ArenaSparseNode>,
-    stack: &mut Vec<ArenaStackEntry>,
+    stack: &mut [ArenaStackEntry],
     root: &mut Index,
     new_leaf_path: Nibbles,
     value: &[u8],
@@ -1639,7 +1639,7 @@ fn check_subtrie_collapse_needs_proof(
 /// the remaining child which has taken its place.
 fn collapse_branch(
     arena: &mut Arena<ArenaSparseNode>,
-    stack: &mut Vec<ArenaStackEntry>,
+    stack: &mut [ArenaStackEntry],
     root: &mut Index,
     update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
 ) {
@@ -1781,10 +1781,7 @@ fn prune_arena(arena: &mut Arena<ArenaSparseNode>, root: Index, max_depth: usize
     // Stack of (node_index, depth, start_nibble).
     let mut stack: Vec<(Index, usize, u8)> = vec![(root, 0, 0)];
 
-    loop {
-        let Some(&mut (head_idx, depth, ref mut start_nibble)) = stack.last_mut() else {
-            break;
-        };
+    while let Some(&mut (head_idx, depth, ref mut start_nibble)) = stack.last_mut() {
         let start = *start_nibble;
 
         let state_mask = arena[head_idx].branch_ref().state_mask;
@@ -1952,8 +1949,8 @@ struct ArenaRequiredProof {
 /// - **Upper trie**: Nodes whose path length is **< 2** nibbles live directly in `upper_arena`.
 ///   These are branch nodes at paths like `0x` or `0x3`.
 /// - **Lower subtries**: Children of upper-trie branches that would have a path length **≥ 2**
-///   become the roots of [`ArenaSparseSubtrie`]s, stored as [`ArenaSparseNode::Subtrie`] children
-///   of the upper-trie branch.
+///   become the roots of `ArenaSparseSubtrie`s, stored as `ArenaSparseNode::Subtrie` children of
+///   the upper-trie branch.
 ///
 /// A branch's short key can extend its logical reach past the 2-nibble boundary. When this happens
 /// the subtrie boundary is "pulled back" to the branch itself, so the entire extension + branch
@@ -2294,7 +2291,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Sort nodes lexicographically by path.
-        nodes.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        nodes.sort_unstable_by_key(|n| n.path);
 
         // Take the stack out to avoid borrow conflicts with `self`.
         let mut stack = mem::take(&mut self.buffers.stack);
@@ -2676,7 +2673,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+        sorted.sort_unstable_by_key(|entry| entry.1);
 
         let mut stack = mem::take(&mut self.buffers.stack);
         stack.clear();
