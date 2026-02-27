@@ -11,14 +11,15 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
+use reth_evm::{execute::Executor, ConfigureEvm, Evm};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected, NodePrimitives};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
     StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_stages::stages::calculate_gas_used_from_headers;
+use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -62,6 +63,139 @@ impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+}
+
+/// Finds the failing transaction within a block by re-executing transactions individually,
+/// then traces it at the opcode level.
+///
+/// Used when `execute_one` fails for a whole block and we don't know which transaction caused it.
+/// `make_db` is called to build a fresh state provider database at the parent block.
+fn find_and_trace_failing_tx<C, DB>(
+    evm_config: &C,
+    make_db: impl Fn() -> StateProviderDatabase<DB>,
+    block: &reth_primitives_traits::RecoveredBlock<<C::Primitives as NodePrimitives>::Block>,
+) where
+    C: ConfigureEvm,
+    DB: reth_revm::database::EvmStateProvider,
+{
+    let evm_env = match evm_config.evm_env(block.header()) {
+        Ok(env) => env,
+        Err(err) => {
+            error!(%err, "Failed to create EVM env for opcode tracing");
+            return;
+        }
+    };
+
+    // Execute transactions one by one to find which one fails.
+    let mut state = State::builder().with_database(make_db()).with_bundle_update().build();
+    let mut evm = evm_config.evm_with_env(&mut state, evm_env);
+
+    let mut failing_index = None;
+    for (i, tx) in block.transactions_recovered().enumerate() {
+        let tx_env = evm_config.tx_env(tx);
+        if evm.transact_commit(tx_env).is_err() {
+            failing_index = Some(i);
+            break;
+        }
+    }
+    drop(evm);
+    drop(state);
+
+    match failing_index {
+        Some(tx_index) => {
+            trace_failed_transaction(evm_config, make_db(), block, tx_index);
+        }
+        None => {
+            error!(
+                block_number = block.number(),
+                "Could not locate failing transaction within block during tracing"
+            );
+        }
+    }
+}
+
+/// Traces a failed transaction at the given index within a block, producing opcode-level output.
+///
+/// Builds state at the parent block, replays all prior transactions, then re-executes the
+/// failing transaction with a [`TracingInspector`] attached to capture opcode-level detail.
+/// The resulting trace is logged as a JSON-serialized geth-style `DefaultFrame` containing
+/// opcode-level `structLogs`.
+fn trace_failed_transaction<C, DB>(
+    evm_config: &C,
+    db: StateProviderDatabase<DB>,
+    block: &reth_primitives_traits::RecoveredBlock<<C::Primitives as NodePrimitives>::Block>,
+    tx_index: usize,
+) where
+    C: ConfigureEvm,
+    DB: reth_revm::database::EvmStateProvider,
+{
+    let evm_env = match evm_config.evm_env(block.header()) {
+        Ok(env) => env,
+        Err(err) => {
+            error!(%err, "Failed to create EVM env for opcode tracing");
+            return;
+        }
+    };
+
+    let mut state = State::builder().with_database(db).with_bundle_update().build();
+
+    // Replay all transactions before the failing one to build up state.
+    {
+        let mut evm = evm_config.evm_with_env(&mut state, evm_env.clone());
+        for (i, tx) in block.transactions_recovered().enumerate() {
+            if i >= tx_index {
+                break;
+            }
+            let tx_env = evm_config.tx_env(tx);
+            if let Err(err) = evm.transact_commit(tx_env) {
+                error!(index = i, %err, "Failed to replay transaction before failing tx");
+                return;
+            }
+        }
+    }
+
+    // Execute the failing transaction with a tracing inspector.
+    let tx = match block.transactions_recovered().nth(tx_index) {
+        Some(tx) => tx,
+        None => {
+            error!(tx_index, "Transaction index out of bounds for opcode tracing");
+            return;
+        }
+    };
+    let tx_env = evm_config.tx_env(tx);
+    let mut inspector = TracingInspector::new(TracingInspectorConfig::all());
+    let result = {
+        let mut evm =
+            evm_config.evm_with_env_and_inspector(&mut state, evm_env, &mut inspector);
+        evm.transact(tx_env)
+    };
+
+    // Build geth-style trace with opcode-level structLogs.
+    let (gas_used, return_value) = match &result {
+        Ok(r) => (r.result.gas_used(), r.result.output().cloned().unwrap_or_default()),
+        Err(_) => (0, Default::default()),
+    };
+
+    let frame = inspector
+        .into_geth_builder()
+        .geth_traces(gas_used, return_value, Default::default());
+
+    match serde_json::to_string(&frame) {
+        Ok(json) => {
+            error!(
+                block_number = block.number(),
+                block_hash = ?block.hash(),
+                tx_index,
+                tx_hash = ?block.body().transactions()[tx_index].tx_hash(),
+                execution_result = ?result.as_ref().map(|r| &r.result),
+                opcode_trace = %json,
+                "Opcode-level trace for failing transaction"
+            );
+        }
+        Err(err) => {
+            error!(%err, "Failed to serialize opcode trace");
+        }
     }
 }
 
@@ -164,6 +298,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let result = match executor.execute_one(&block) {
                             Ok(result) => result,
                             Err(err) => {
+                                // Find which tx failed and trace it at the opcode
+                                // level. Re-execute txs one by one to locate the
+                                // failing index, then trace that tx with an inspector.
+                                let parent_num = block.number() - 1;
+                                find_and_trace_failing_tx(
+                                    &evm_config, || db_at(parent_num), &block,
+                                );
+
                                 if skip_invalid_blocks {
                                     executor =
                                         evm_config.batch_executor(db_at(block.number()));
@@ -223,6 +365,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         };
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
+
+                                        // Trace the mismatched tx at the opcode level.
+                                        trace_failed_transaction(
+                                            &evm_config,
+                                            db_at(block.number() - 1),
+                                            &block,
+                                            i,
+                                        );
+
                                         if skip_invalid_blocks {
                                             executor = evm_config
                                                 .batch_executor(db_at(block.number()));
