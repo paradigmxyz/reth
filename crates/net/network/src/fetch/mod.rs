@@ -8,8 +8,8 @@ use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockAccessLists, Capabilities, EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies,
-    GetBlockHeaders, NetworkPrimitives,
+    BlockAccessLists, Capabilities, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -61,6 +61,10 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Waker to notify when a new peer might satisfy queued requests.
+    ///
+    /// Stored so that `new_active_peer` can wake the fetcher when a peer is added.
+    waker: Option<std::task::Waker>,
 }
 
 // === impl StateSyncer ===
@@ -78,6 +82,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            waker: None,
         }
     }
 
@@ -103,6 +108,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 range_info,
             },
         );
+        // waking the fetcher ensures any queued request will be retried
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     /// Removes the peer from the peer list, after which it is no longer available for future
@@ -147,7 +156,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
     /// full history available
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
-        let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
+        // filter out peers that aren't idle or don't meet the requirement
+        let mut idle = self.peers.iter().filter(|(_, peer)| {
+            peer.state.is_idle() &&
+                match &requirement {
+                    BestPeerRequirements::EthVersion(ver) => {
+                        peer.capabilities.supports_eth_version(*ver)
+                    }
+                    _ => true,
+                }
+        });
 
         let mut best_peer = idle.next()?;
 
@@ -155,13 +173,13 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer meets the requirements better
             if maybe_better.1.is_better(best_peer.1, &requirement) {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer has better rtt and both have same range quality
@@ -450,6 +468,7 @@ impl Peer {
             BestPeerRequirements::None => false,
             BestPeerRequirements::FullBlockRange(range) => self.has_better_range(other, range),
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
+            BestPeerRequirements::EthVersion(_) => false,
         }
     }
 }
@@ -554,9 +573,8 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns the best peer requirements for this request.
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
-            Self::GetBlockHeaders { .. } | Self::GetBlockAccessLists { .. } => {
-                BestPeerRequirements::None
-            }
+            Self::GetBlockHeaders { .. } => BestPeerRequirements::None,
+            Self::GetBlockAccessLists { .. } => BestPeerRequirements::EthVersion(EthVersion::Eth71),
             Self::GetBlockBodies { range_hint, .. } => {
                 if let Some(range) = range_hint {
                     BestPeerRequirements::FullBlockRange(range.clone())
@@ -598,6 +616,8 @@ enum BestPeerRequirements {
     FullBlockRange(RangeInclusive<u64>),
     /// Peer must have full range.
     FullBlock,
+    /// Peer must support at least this eth protocol version.
+    EthVersion(EthVersion),
 }
 
 #[cfg(test)]
