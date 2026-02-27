@@ -608,12 +608,11 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
     }
 }
 
-#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: Send + Sync> crate::CallTraceIndexReader for NoopProvider<C, N> {
     fn call_trace_from_blocks(
         &self,
         _address: Address,
-        _range: std::ops::RangeInclusive<BlockNumber>,
+        _range: core::ops::RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockNumber>> {
         Ok(Vec::new())
     }
@@ -621,7 +620,7 @@ impl<C: Send + Sync, N: Send + Sync> crate::CallTraceIndexReader for NoopProvide
     fn call_trace_to_blocks(
         &self,
         _address: Address,
-        _range: std::ops::RangeInclusive<BlockNumber>,
+        _range: core::ops::RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockNumber>> {
         Ok(Vec::new())
     }

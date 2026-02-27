@@ -1,5 +1,7 @@
+use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
+use core::ops::RangeInclusive;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Reader for call trace indices (from/to address → block number bitmaps).
@@ -13,7 +15,7 @@ pub trait CallTraceIndexReader: Send + Sync {
     fn call_trace_from_blocks(
         &self,
         address: Address,
-        range: std::ops::RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockNumber>>;
 
     /// Returns block numbers where the given address appeared as a transaction recipient
@@ -21,6 +23,6 @@ pub trait CallTraceIndexReader: Send + Sync {
     fn call_trace_to_blocks(
         &self,
         address: Address,
-        range: std::ops::RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockNumber>>;
 }
