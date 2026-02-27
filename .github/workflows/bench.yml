@@ -79,19 +79,27 @@ jobs:
         if: github.event_name == 'issue_comment'
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const user = context.payload.comment.user.login;
-            try {
-              const { status } = await github.rest.orgs.checkMembershipForUser({
-                org: 'paradigmxyz',
-                username: user,
-              });
-              if (status !== 204 && status !== 302) {
-                core.setFailed(`@${user} is not a member of paradigmxyz`);
+            const orgs = ['paradigmxyz', 'tempoxyz'];
+            let isMember = false;
+            for (const org of orgs) {
+              try {
+                const { status } = await github.rest.orgs.checkMembershipForUser({
+                  org,
+                  username: user,
+                });
+                if (status === 204 || status === 302) {
+                  isMember = true;
+                  break;
+                }
+              } catch (e) {
+                // not a member of this org, continue
               }
-            } catch (e) {
-              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            }
+            if (!isMember) {
+              core.setFailed(`@${user} is not a member of paradigmxyz or tempoxyz`);
             }
 
       - name: Parse arguments
