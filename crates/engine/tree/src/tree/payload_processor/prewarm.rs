@@ -33,9 +33,9 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
     Arc,
 };
@@ -157,6 +157,11 @@ where
                         break;
                     }
 
+                    // skip transactions already executed by the main loop
+                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                        continue;
+                    }
+
                     tx_count += 1;
                     let parent_span = Span::current();
                     s.spawn(move |_| {
@@ -209,6 +214,11 @@ where
             };
 
             if terminate_execution.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // skip if main execution has already processed this transaction
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                 return;
             }
 
@@ -497,6 +507,10 @@ where
     pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
+    /// Shared counter tracking the next transaction index to be executed by the main execution
+    /// loop. Prewarm workers skip transactions with `index < counter` since those have already
+    /// been executed.
+    pub executed_tx_index: Arc<AtomicUsize>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
@@ -558,7 +572,7 @@ where
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
+            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
@@ -620,8 +634,6 @@ where
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    use reth_trie::proof_v2;
-
     let mut targets = MultiProofTargetsV2::default();
     let mut storage_target_count = 0;
     for (addr, account) in state {
@@ -647,7 +659,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(proof_v2::Target::from(hashed_slot));
+            storage_slots.push(ProofV2Target::from(hashed_slot));
         }
 
         storage_target_count += storage_slots.len();

@@ -192,7 +192,7 @@ where
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
-            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+            withdrawals: block.body().withdrawals.as_ref().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: block.header().extra_data.clone(),
         })
     }
@@ -207,7 +207,7 @@ where
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
-            withdrawals: attributes.withdrawals.map(Cow::Owned),
+            withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
             extra_data: attributes.extra_data,
         })
     }
@@ -287,7 +287,7 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            withdrawals: payload.payload.withdrawals().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
         })
     }
