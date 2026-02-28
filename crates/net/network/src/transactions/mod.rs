@@ -1344,9 +1344,23 @@ where
             return
         }
 
+        let mut transactions = transactions.0;
+
+        // Truncate to remaining capacity early to bound work on all subsequent processing.
+        // Well-behaved peers follow the 4096 soft limit, so oversized payloads are likely
+        // malicious and we avoid wasting CPU on them.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            let skipped = transactions.len() - capacity;
+            transactions.truncate(capacity);
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(skipped as u64);
+            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        }
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let client_version = peer.client_version.clone();
-        let mut transactions = transactions.0;
 
         let start = Instant::now();
 
@@ -1365,20 +1379,11 @@ where
             }
         }
 
-        // 1. filter out txns already inserted into pool
-        let txns_count_pre_pool_filter = transactions.len();
-        self.pool.retain_unknown(&mut transactions);
-        if txns_count_pre_pool_filter > transactions.len() {
-            let already_known_txns_count = txns_count_pre_pool_filter - transactions.len();
-            self.metrics
-                .occurrences_transactions_already_in_pool
-                .increment(already_known_txns_count as u64);
-        }
-
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // Remove known and invalid transactions
+        // 1. Remove known, already-tracked, and invalid transactions first since these are
+        // cheap in-memory checks against local maps
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
                 entry.get_mut().insert(peer_id);
@@ -1397,16 +1402,14 @@ where
             true
         });
 
-        // Truncate to remaining capacity before recovery to avoid wasting CPU on transactions
-        // that won't be imported anyway.
-        let capacity = self.remaining_pool_import_capacity();
-        if transactions.len() > capacity {
-            let skipped = transactions.len() - capacity;
-            transactions.truncate(capacity);
+        // 2. filter out txns already inserted into pool
+        let txns_count_pre_pool_filter = transactions.len();
+        self.pool.retain_unknown(&mut transactions);
+        if txns_count_pre_pool_filter > transactions.len() {
+            let already_known_txns_count = txns_count_pre_pool_filter - transactions.len();
             self.metrics
-                .skipped_transactions_pending_pool_imports_at_capacity
-                .increment(skipped as u64);
-            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+                .occurrences_transactions_already_in_pool
+                .increment(already_known_txns_count as u64);
         }
 
         let txs_len = transactions.len();
