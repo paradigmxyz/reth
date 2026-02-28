@@ -25,6 +25,13 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     where
         Self::Item: Send,
         F: FnMut(Self::Item);
+
+    /// Like [`for_each_ordered`](Self::for_each_ordered), but runs the parallel work on the
+    /// given `pool` instead of the global rayon thread pool.
+    fn for_each_ordered_in<F>(self, pool: &rayon::ThreadPool, f: F)
+    where
+        Self::Item: Send,
+        F: FnMut(Self::Item);
 }
 
 impl<I: IndexedParallelIterator> ForEachOrdered for I {
@@ -33,7 +40,15 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
         Self::Item: Send,
         F: FnMut(Self::Item),
     {
-        ordered_impl(self, f);
+        ordered_impl(self, None, f);
+    }
+
+    fn for_each_ordered_in<F>(self, pool: &rayon::ThreadPool, f: F)
+    where
+        Self::Item: Send,
+        F: FnMut(Self::Item),
+    {
+        ordered_impl(self, Some(pool), f);
     }
 }
 
@@ -90,7 +105,7 @@ impl<T> Shared<T> {
 ///
 /// Each slot has its own [`Condvar`], so the consumer blocks precisely on the slot it needs
 /// with zero spurious wakeups.
-fn ordered_impl<I, F>(iter: I, mut f: F)
+fn ordered_impl<I, F>(iter: I, pool: Option<&rayon::ThreadPool>, mut f: F)
 where
     I: IndexedParallelIterator,
     I::Item: Send,
@@ -105,7 +120,7 @@ where
 
     let shared = Shared::<I::Item>::new(n);
 
-    rayon::in_place_scope(|s| {
+    in_place_scope_in(pool, |s| {
         // Producer: compute items in parallel and write them into their slots.
         s.spawn(|_| {
             let res = catch_unwind(AssertUnwindSafe(|| {
@@ -133,6 +148,17 @@ where
             f(value);
         }
     });
+}
+
+fn in_place_scope_in<'scope, F, R>(pool: Option<&rayon::ThreadPool>, f: F)
+where
+    F: FnOnce(&rayon::Scope<'scope>) -> R,
+{
+    if let Some(pool) = pool {
+        pool.in_place_scope(f);
+    } else {
+        rayon::in_place_scope(f);
+    }
 }
 
 #[cfg(test)]
