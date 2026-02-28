@@ -12,7 +12,8 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
-    handshake::{EthHandshake, EthRlpxHandshake},
+    errors::EthStreamError,
+    handshake::{EthHandshake, EthRlpxHandshake, UnauthEth},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
     UnifiedStatus,
 };
@@ -22,7 +23,9 @@ use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashSet, future::Future, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
+};
 
 // re-export for convenience
 use crate::{
@@ -580,13 +583,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
-    /// Sets the maximum allowed ETH message size.
+    /// Sets the maximum allowed ETH message size for post-handshake streams.
     ///
-    /// Note: this replaces the current handshake with a new [`EthHandshake`] configured with the
-    /// given size. If a custom handshake was previously set via [`Self::eth_rlpx_handshake`], it
-    /// will be overwritten.
+    /// This wraps the current handshake, preserving its `handshake()` logic while overriding the
+    /// message size limit used by the ETH and snap streams.
     pub fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
-        self.handshake = Arc::new(EthHandshake::new(max_message_size));
+        self.handshake = Arc::new(WithMaxMessageSize { inner: self.handshake, max_message_size });
         self
     }
 
@@ -726,6 +728,30 @@ impl NetworkMode {
     /// Returns true if network has entered proof-of-stake
     pub const fn is_stake(&self) -> bool {
         matches!(self, Self::Stake)
+    }
+}
+
+/// Wraps an [`EthRlpxHandshake`] implementation, overriding the stream-level message size limit
+/// while preserving the inner handshake logic.
+#[derive(Debug)]
+struct WithMaxMessageSize {
+    inner: Arc<dyn EthRlpxHandshake>,
+    max_message_size: usize,
+}
+
+impl EthRlpxHandshake for WithMaxMessageSize {
+    fn handshake<'a>(
+        &'a self,
+        unauth: &'a mut dyn UnauthEth,
+        status: UnifiedStatus,
+        fork_filter: ForkFilter,
+        timeout_limit: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
+        self.inner.handshake(unauth, status, fork_filter, timeout_limit)
+    }
+
+    fn max_message_size(&self) -> usize {
+        self.max_message_size
     }
 }
 
