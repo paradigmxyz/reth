@@ -4,6 +4,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    num::NonZeroUsize,
     ops::Not,
     path::PathBuf,
 };
@@ -221,12 +222,8 @@ pub struct NetworkArgs {
     pub network_id: Option<u64>,
 
     /// Maximum allowed ETH message size in bytes. Default is 10 MiB.
-    #[arg(
-        long = "eth-max-message-size",
-        value_name = "BYTES",
-        value_parser = parse_eth_max_message_size
-    )]
-    pub eth_max_message_size: Option<usize>,
+    #[arg(long = "eth-max-message-size", value_name = "BYTES")]
+    pub eth_max_message_size: Option<NonZeroUsize>,
 
     /// Restrict network communication to the given IP networks (CIDR masks).
     ///
@@ -390,7 +387,7 @@ impl NetworkArgs {
             .required_block_hashes(self.required_block_hashes.clone())
             .apply(|builder| {
                 if let Some(max_size) = self.eth_max_message_size {
-                    builder.eth_max_message_size(max_size)
+                    builder.eth_max_message_size(max_size.get())
                 } else {
                     builder
                 }
@@ -724,16 +721,6 @@ impl Default for DiscoveryArgs {
     }
 }
 
-/// Parse ETH max message size as raw bytes.
-fn parse_eth_max_message_size(s: &str) -> Result<usize, String> {
-    let value = s.parse::<usize>().map_err(|_| format!("Invalid byte size: {s}"))?;
-    if value == 0 {
-        return Err("ETH max message size must be greater than 0".to_string());
-    }
-
-    Ok(value)
-}
-
 /// Parse a block number=hash pair or just a hash into `BlockNumHash`
 fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
     if let Some((num_str, hash_str)) = s.split_once('=') {
@@ -945,7 +932,10 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.eth_max_message_size, Some(15 * 1024 * 1024));
+        assert_eq!(
+            args.eth_max_message_size,
+            Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap())
+        );
     }
 
     #[test]
@@ -964,7 +954,10 @@ mod tests {
         ]);
         assert!(result.is_ok());
         let args = result.unwrap().args;
-        assert_eq!(args.eth_max_message_size, Some(16 * 1024 * 1024));
+        assert_eq!(
+            args.eth_max_message_size,
+            Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap())
+        );
     }
 
     #[test]
