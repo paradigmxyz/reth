@@ -928,8 +928,7 @@ where
             self.recovered_block(block_hash.into()),
         )?;
 
-        let block = block
-            .ok_or_else(|| EthApiError::Internal(reth_errors::RethError::msg("Block Not Found")))?;
+        let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
 
         let json = self
             .spawn_blocking_io(move |eth_api| {
