@@ -160,6 +160,10 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
+    ///
+    /// Children at each level are sorted by block number (ascending), with ties broken by hash,
+    /// to ensure deterministic ordering. This is important because callers like
+    /// [`try_connect_buffered_blocks`] process blocks in the returned order.
     fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlock<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
@@ -168,13 +172,23 @@ impl<B: Block> BlockBuffer<B> {
         while let Some(parent_hash) = remove_parent_children.pop() {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_children) = self.parent_to_child.remove(&parent_hash) {
-                // remove child from buffer
-                for child_hash in &parent_children {
+                // Sort children deterministically: by block number, then by hash.
+                // HashSet iteration order is non-deterministic and can cause flaky
+                // canonicalization when multiple children exist at the same level.
+                let mut sorted_children: Vec<_> = parent_children.into_iter().collect();
+                sorted_children.sort_by(|a, b| {
+                    let num_a = self.blocks.get(a).map(|blk| blk.number());
+                    let num_b = self.blocks.get(b).map(|blk| blk.number());
+                    num_a.cmp(&num_b).then_with(|| a.cmp(b))
+                });
+
+                // remove child from buffer in deterministic order
+                for child_hash in &sorted_children {
                     if let Some(block) = self.remove_block(child_hash) {
                         removed_blocks.push(block);
                     }
                 }
-                remove_parent_children.extend(parent_children);
+                remove_parent_children.extend(sorted_children);
             }
         }
         removed_blocks
