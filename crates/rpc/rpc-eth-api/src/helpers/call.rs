@@ -361,6 +361,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
+                    RpcNodeCore::evm_config(&this)
+                        .executor_for_block(&mut db, block.sealed_block())
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?
+                        .apply_pre_execution_changes()
+                        .map_err(Self::Error::from_eth_err)?;
+
                     let block_transactions = block.transactions_recovered().take(num_txs);
                     for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
