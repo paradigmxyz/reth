@@ -3,7 +3,7 @@
 
 use core::fmt;
 
-use super::{LoadBlock, LoadPendingBlock, LoadState, SpawnBlocking, Trace};
+use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
@@ -15,7 +15,7 @@ use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -702,6 +702,70 @@ pub trait Call:
                 f(&mut db, evm_env, tx_env)
             })
             .await
+        }
+    }
+
+    /// Retrieves the transaction if it exists and executes it.
+    ///
+    /// Before the transaction is executed, all previous transaction in the block are applied to the
+    /// state by executing them first.
+    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
+    /// and the database that points to the beginning of the transaction.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
+    fn spawn_replay_transaction<F, R>(
+        &self,
+        hash: B256,
+        f: F,
+    ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
+    where
+        Self: LoadBlock + LoadTransaction,
+        F: FnOnce(
+                TransactionInfo,
+                ResultAndState<HaltReasonFor<Self::Evm>>,
+                StateCacheDb,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let (transaction, block) = match self.transaction_and_block(hash).await? {
+                None => return Ok(None),
+                Some(res) => res,
+            };
+            let (tx, tx_info) = transaction.split();
+
+            // we need to get the state of the parent block because we're essentially replaying the
+            // block the transaction is included in
+            let parent_block = block.parent_hash();
+
+            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+                let block_txs = block.transactions_recovered();
+
+                let mut executor = RpcNodeCore::evm_config(&this)
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+
+                // replay all transactions prior to the targeted transaction
+                for block_tx in block_txs {
+                    if block_tx.tx_hash() == tx.tx_hash() {
+                        break;
+                    }
+                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                }
+
+                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
+
+                let res = executor.evm_mut().transact(tx_env).map_err(Self::Error::from_evm_err)?;
+                drop(executor);
+                f(tx_info, res, db)
+            })
+            .await
+            .map(Some)
         }
     }
 

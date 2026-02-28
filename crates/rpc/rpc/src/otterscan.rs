@@ -21,7 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm::{context_interface::result::ExecutionResult, inspector::NoOpInspector};
+use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -132,14 +132,10 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                NoOpInspector {},
-                |_tx_info, _inspector, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                    _ => Ok(None),
-                },
-            )
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
+                ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                _ => Ok(None),
+            })
             .await
             .map(Option::flatten)
             .map_err(Into::into)?;
