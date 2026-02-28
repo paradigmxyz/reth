@@ -15,6 +15,7 @@
 //! all the `Eth` traits, e.g. `reth_rpc::EthApi`.
 
 pub mod block;
+pub mod block_access_list;
 pub mod blocking_task;
 pub mod call;
 pub mod config;
@@ -40,7 +41,7 @@ pub use state::{EthState, LoadState};
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
-use crate::FullEthApiTypes;
+use crate::{helpers::block_access_list::GetBlockAccessList, FullEthApiTypes};
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt: LoadTransaction + LoadBlock + SpawnBlocking + Trace + Call {}
@@ -60,6 +61,7 @@ pub trait FullEthApi:
     + EthFees
     + Trace
     + LoadReceipt
+    + GetBlockAccessList
 {
 }
 
@@ -73,5 +75,6 @@ impl<T> FullEthApi for T where
         + EthFees
         + Trace
         + LoadReceipt
+        + GetBlockAccessList
 {
 }
