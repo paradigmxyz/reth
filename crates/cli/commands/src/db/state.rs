@@ -9,7 +9,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
 use reth_tasks::spawn_scoped_os_thread;
 use std::{
@@ -17,7 +17,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tracing::{error, info};
+use tracing::info;
 
 /// Log progress every 5 seconds
 const LOG_INTERVAL: Duration = Duration::from_secs(30);
@@ -152,16 +152,10 @@ impl Command {
         let mut storage_keys = BTreeSet::new();
 
         if history_in_rocksdb {
-            error!(
-                target: "reth::cli",
-                "Historical storage queries with RocksDB backend are not yet supported. \
-                 Use MDBX for storage history or query current state without --block."
-            );
-            return Ok(());
+            self.collect_staticfile_storage_keys(tool, address, &mut storage_keys)?;
+        } else {
+            self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
         }
-
-        // Collect keys from MDBX StorageChangeSets using parallel scanning
-        self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
 
         info!(
             target: "reth::cli",
@@ -203,6 +197,63 @@ impl Command {
         }
 
         self.print_results(address, Some(block), account, &entries);
+
+        Ok(())
+    }
+
+    /// Collects storage keys from static file StorageChangeSets (storage_v2).
+    fn collect_staticfile_storage_keys<N: NodeTypesWithDB + ProviderNodeTypes>(
+        &self,
+        tool: &DbTool<N>,
+        address: Address,
+        keys: &mut BTreeSet<B256>,
+    ) -> eyre::Result<()> {
+        let tip = tool.provider_factory.provider()?.best_block_number()?;
+
+        if tip == 0 {
+            return Ok(());
+        }
+
+        info!(
+            target: "reth::cli",
+            address = %address,
+            tip,
+            "Scanning static file storage changesets"
+        );
+
+        let static_file_provider = tool.provider_factory.static_file_provider();
+        let walker = static_file_provider.walk_storage_changeset_range(0..=tip);
+
+        let mut total_scanned = 0usize;
+        let mut last_log = Instant::now();
+
+        for changeset_result in walker {
+            let (block_addr, storage_entry) = changeset_result?;
+            total_scanned += 1;
+
+            if block_addr.address() == address {
+                keys.insert(storage_entry.key);
+            }
+
+            if last_log.elapsed() >= LOG_INTERVAL {
+                info!(
+                    target: "reth::cli",
+                    address = %address,
+                    entries_scanned = total_scanned,
+                    unique_keys = keys.len(),
+                    "Scanning static file storage changesets"
+                );
+                last_log = Instant::now();
+            }
+        }
+
+        info!(
+            target: "reth::cli",
+            address = %address,
+            total_entries = total_scanned,
+            unique_keys = keys.len(),
+            "Finished static file storage changeset scan"
+        );
 
         Ok(())
     }

@@ -454,7 +454,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.27.2", default-features = false }
+alloy-evm = { version = "0.28.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -489,14 +489,9 @@ alloy-transport-ipc = { version = "1.7.3", default-features = false }
 alloy-transport-ws = { version = "1.7.3", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.27.2", default-features = false }
-alloy-op-hardforks = "0.4.4"
-op-alloy-rpc-types = { version = "0.23.1", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
-op-alloy-network = { version = "0.23.1", default-features = false }
-op-alloy-consensus = { version = "0.23.1", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.23.1", default-features = false }
-op-alloy-flz = { version = "0.13.1", default-features = false }
+op-alloy-rpc-types = { version = "0.24.0", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.24.0", default-features = false }
+op-alloy-consensus = { version = "0.24.0", default-features = false }
 
 # misc
 either = { version = "1.15.0", default-features = false }
@@ -665,6 +660,7 @@ cipher = "0.4.3"
 comfy-table = "7.0"
 concat-kdf = "0.1.0"
 crossbeam-channel = "0.5.13"
+crossbeam-queue = "0.3"
 crossbeam-utils = "0.8"
 crossterm = "0.29.0"
 csv = "1.3.0"
@@ -741,10 +737,8 @@ ipnet = "2.11"
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 #
@@ -755,9 +749,7 @@ ipnet = "2.11"
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "df124c0" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "df124c0" }
 
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
