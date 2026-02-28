@@ -89,7 +89,7 @@ fn generate_from_compact(
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     if is_enum {
-        let enum_lines = EnumHandler::new(fields).generate_from(ident);
+        let enum_lines = EnumHandler::new(fields, quote!()).generate_from(ident);
 
         // Builds the object instantiation.
         lines.push(quote! {
@@ -99,7 +99,7 @@ fn generate_from_compact(
             };
         });
     } else {
-        let mut struct_handler = StructHandler::new(fields);
+        let mut struct_handler = StructHandler::new(fields, quote!());
         lines.append(&mut struct_handler.generate_from(known_types.as_slice()));
 
         // Builds the object instantiation.
@@ -188,7 +188,7 @@ fn generate_to_compact_direct(
     }];
 
     if is_enum {
-        let enum_lines = EnumHandler::new(fields).generate_to(ident, &out);
+        let enum_lines = EnumHandler::new(fields, out).generate_to(ident);
 
         lines.push(quote! {
             flags.set_variant(match self {
@@ -196,7 +196,7 @@ fn generate_to_compact_direct(
             });
         })
     } else {
-        lines.append(&mut StructHandler::new(fields).generate_to(&out));
+        lines.append(&mut StructHandler::new(fields, out).generate_to());
     }
 
     lines.push(quote! {
@@ -223,7 +223,7 @@ fn generate_to_compact_zstd(
     }];
 
     if is_enum {
-        let enum_lines = EnumHandler::new(fields).generate_to(ident, &out);
+        let enum_lines = EnumHandler::new(fields, out).generate_to(ident);
 
         lines.push(quote! {
             flags.set_variant(match self {
@@ -231,7 +231,7 @@ fn generate_to_compact_zstd(
             });
         })
     } else {
-        lines.append(&mut StructHandler::new(fields).generate_to(&out));
+        lines.append(&mut StructHandler::new(fields, out).generate_to());
     }
 
     lines.push(quote! {

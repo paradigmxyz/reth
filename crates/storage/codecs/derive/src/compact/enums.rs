@@ -5,14 +5,16 @@ pub struct EnumHandler<'a> {
     current_variant_index: u8,
     fields_iterator: std::iter::Peekable<std::slice::Iter<'a, FieldTypes>>,
     enum_lines: Vec<TokenStream2>,
+    out: TokenStream2,
 }
 
 impl<'a> EnumHandler<'a> {
-    pub fn new(fields: &'a FieldList) -> Self {
+    pub fn new(fields: &'a FieldList, out: TokenStream2) -> Self {
         EnumHandler {
             current_variant_index: 0u8,
             enum_lines: vec![],
             fields_iterator: fields.iter().peekable(),
+            out,
         }
     }
 
@@ -20,12 +22,12 @@ impl<'a> EnumHandler<'a> {
         self.fields_iterator.next()
     }
 
-    pub fn generate_to(mut self, ident: &Ident, out: &TokenStream2) -> Vec<TokenStream2> {
+    pub fn generate_to(mut self, ident: &Ident) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
-                FieldTypes::EnumVariant(name) => self.to(name, ident, out),
+                FieldTypes::EnumVariant(name) => self.to(name, ident),
                 FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
@@ -91,7 +93,7 @@ impl<'a> EnumHandler<'a> {
     ///
     /// `fields_iterator` might look something like [`VariantUnit`, `VariantUnnamedField`, Field,
     /// `VariantUnit`...].
-    pub fn to(&mut self, variant_name: &str, ident: &Ident, out: &TokenStream2) {
+    pub fn to(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
         let current_variant_index = self.current_variant_index;
 
@@ -104,6 +106,7 @@ impl<'a> EnumHandler<'a> {
                         format_ident!("to_compact")
                     };
 
+                    let out = &self.out;
                     // Unnamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {

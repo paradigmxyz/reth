@@ -4,14 +4,16 @@ use super::*;
 pub struct StructHandler<'a> {
     fields_iterator: std::iter::Peekable<std::slice::Iter<'a, FieldTypes>>,
     lines: Vec<TokenStream2>,
+    out: TokenStream2,
     pub is_wrapper: bool,
 }
 
 impl<'a> StructHandler<'a> {
-    pub fn new(fields: &'a FieldList) -> Self {
+    pub fn new(fields: &'a FieldList, out: TokenStream2) -> Self {
         StructHandler {
             lines: vec![],
             fields_iterator: fields.iter().peekable(),
+            out,
             is_wrapper: false,
         }
     }
@@ -20,11 +22,11 @@ impl<'a> StructHandler<'a> {
         self.fields_iterator.next()
     }
 
-    pub fn generate_to(mut self, out: &TokenStream2) -> Vec<TokenStream2> {
+    pub fn generate_to(mut self) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
                 FieldTypes::EnumVariant(_) | FieldTypes::EnumUnnamedField(_) => unreachable!(),
-                FieldTypes::StructField(field_descriptor) => self.to(field_descriptor, out),
+                FieldTypes::StructField(field_descriptor) => self.to(field_descriptor),
             }
         }
         self.lines
@@ -43,7 +45,7 @@ impl<'a> StructHandler<'a> {
     }
 
     /// Generates `to_compact` code for a struct field.
-    fn to(&mut self, field_descriptor: &StructFieldDescriptor, out: &TokenStream2) {
+    fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
         let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, is_reference: _ } =
             field_descriptor;
 
@@ -57,6 +59,7 @@ impl<'a> StructHandler<'a> {
         if name.is_empty() {
             self.is_wrapper = true;
 
+            let out = &self.out;
             self.lines.push(quote! {
                 let _len = self.0.#to_compact_ident(#out);
             });
@@ -73,6 +76,8 @@ impl<'a> StructHandler<'a> {
         let name = format_ident!("{name}");
         let set_len_method = format_ident!("set_{name}_len");
         let len = format_ident!("{name}_len");
+
+        let out = &self.out;
 
         // B256 with #[maybe_zero] attribute for example
         if *is_compact && !is_flag_type(ftype) {

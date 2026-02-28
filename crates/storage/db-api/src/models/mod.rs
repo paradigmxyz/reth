@@ -183,9 +183,9 @@ impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
     fn encode(self) -> Self::Encoded {
-        let mut buf = [0u8];
-        self.to_compact(&mut buf.as_mut());
-        buf
+        let mut buf = Vec::with_capacity(1);
+        self.to_compact(&mut buf);
+        buf.try_into().unwrap()
     }
 }
 
