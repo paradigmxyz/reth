@@ -27,40 +27,34 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
 
             let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
 
-            let bal = self
-                .spawn_blocking_io(move |eth_api| {
-                    let state = eth_api
-                        .provider()
-                        .state_by_block_id(block.parent_hash().into())
-                        .map_err(Self::Error::from_eth_err)?;
+            self.spawn_blocking_io(move |eth_api| {
+                let state = eth_api
+                    .provider()
+                    .state_by_block_id(block.parent_hash().into())
+                    .map_err(Self::Error::from_eth_err)?;
 
-                    let mut db = State::builder()
-                        .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(
-                            state,
-                        )))
-                        .with_bal_builder()
-                        .build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                    .with_bal_builder()
+                    .build();
 
-                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                    // Move to tx index 1 before first tx (index 0 is for pre-execution)
-                    for tx in block.transactions_recovered() {
-                        let tx_env = eth_api.evm_config().tx_env(tx);
-                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit(res.state);
-                    }
+                for tx in block.transactions_recovered() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit(res.state);
+                }
 
-                    eth_api.apply_post_execution_changes(&block, &mut db)?;
-                    // Current index is now n+1 for post-execution
+                eth_api.apply_post_execution_changes(&block, &mut db)?;
 
-                    let bal = db.take_built_alloy_bal().ok_or_else(|| {
-                        EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
-                    })?;
+                let bal = db.take_built_alloy_bal().ok_or_else(|| {
+                    EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
+                })?;
 
-                    return Ok(Some(bal))
-                })
-                .await;
-            bal
+                Ok(Some(bal))
+            })
+            .await
         }
     }
 }
