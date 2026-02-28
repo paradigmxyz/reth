@@ -7,7 +7,7 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage, DEFAULT_MAX_MESSAGE_SIZE},
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -41,7 +41,7 @@ pub struct UnauthedEthStream<S> {
 impl<S> UnauthedEthStream<S> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
     pub const fn new(inner: S) -> Self {
-        Self { max_message_size: DEFAULT_MAX_MESSAGE_SIZE, inner }
+        Self { max_message_size: MAX_MESSAGE_SIZE, inner }
     }
 
     /// Sets the maximum allowed ETH message size for this stream.
@@ -126,7 +126,7 @@ where
 {
     /// Creates a new [`EthStreamInner`] with the given eth version
     pub const fn new(version: EthVersion) -> Self {
-        Self::with_max_message_size(version, DEFAULT_MAX_MESSAGE_SIZE)
+        Self::with_max_message_size(version, MAX_MESSAGE_SIZE)
     }
 
     /// Creates a new [`EthStreamInner`] with the given eth version and message size limit.
@@ -198,7 +198,7 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self::with_max_message_size(version, inner, DEFAULT_MAX_MESSAGE_SIZE)
+        Self::with_max_message_size(version, inner, MAX_MESSAGE_SIZE)
     }
 
     /// Creates a new unauthed [`EthStream`] with a custom max message size.

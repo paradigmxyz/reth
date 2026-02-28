@@ -3,7 +3,7 @@
 //! A stream type for handling both eth and snap protocol messages over a single `RLPx` connection.
 //! Provides message encoding/decoding, ID multiplexing, and protocol message processing.
 
-use super::message::DEFAULT_MAX_MESSAGE_SIZE;
+use super::message::MAX_MESSAGE_SIZE;
 use crate::{
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
@@ -212,7 +212,7 @@ where
 {
     /// Create a new eth and snap protocol stream
     const fn new(eth_version: EthVersion) -> Self {
-        Self::with_max_message_size(eth_version, DEFAULT_MAX_MESSAGE_SIZE)
+        Self::with_max_message_size(eth_version, MAX_MESSAGE_SIZE)
     }
 
     /// Create a new eth and snap protocol stream with a custom max message size.

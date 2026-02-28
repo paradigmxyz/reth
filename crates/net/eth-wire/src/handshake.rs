@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    message::DEFAULT_MAX_MESSAGE_SIZE,
+    message::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
@@ -29,7 +29,7 @@ pub trait EthRlpxHandshake: Debug + Send + Sync + 'static {
 
     /// Returns the maximum allowed ETH message size for this handshake implementation.
     fn max_message_size(&self) -> usize {
-        DEFAULT_MAX_MESSAGE_SIZE
+        MAX_MESSAGE_SIZE
     }
 }
 
@@ -76,7 +76,7 @@ impl EthHandshake {
 
 impl Default for EthHandshake {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_MESSAGE_SIZE)
+        Self::new(MAX_MESSAGE_SIZE)
     }
 }
 
