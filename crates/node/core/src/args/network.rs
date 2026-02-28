@@ -557,7 +557,7 @@ pub struct DiscoveryArgs {
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
-    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
 
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
