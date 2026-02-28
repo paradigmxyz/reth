@@ -1166,7 +1166,7 @@ where
     Node: NodeTypes,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
-        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
+        self.state_root_with_updates(hashed_state).map(|(root, _)| root)
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
