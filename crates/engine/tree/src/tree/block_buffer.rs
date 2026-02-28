@@ -163,7 +163,7 @@ impl<B: Block> BlockBuffer<B> {
     ///
     /// Children at each level are sorted by block number (ascending), with ties broken by hash,
     /// to ensure deterministic ordering. This is important because callers like
-    /// [`try_connect_buffered_blocks`] process blocks in the returned order.
+    /// `try_connect_buffered_blocks` process blocks in the returned order.
     fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlock<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
