@@ -21,16 +21,13 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{
-    Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry, StorageSlotKey,
-};
+use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangesetEntry, DatabaseProviderFactory, NodePrimitivesProvider,
-    StateProvider, StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
+    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -226,7 +223,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, ChangesetEntry)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         block_range_end: BlockNumber,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
         let mut state: BundleStateInit = HashMap::default();
@@ -263,16 +260,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             };
 
             // match storage.
-            match account_state.2.entry(old_storage.key.as_b256()) {
+            match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value = match old_storage.key {
-                        StorageSlotKey::Hashed(_) => state_provider
-                            .storage_by_hashed_key(address, old_storage.key.as_b256())?
-                            .unwrap_or_default(),
-                        StorageSlotKey::Plain(_) => state_provider
-                            .storage(address, old_storage.key.as_b256())?
-                            .unwrap_or_default(),
-                    };
+                    let new_storage_value =
+                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
                     entry.insert((old_storage.value, new_storage_value));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -286,7 +277,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 .entry(address)
                 .or_default()
                 .1
-                .push(StorageEntry::from(old_storage));
+                .push(old_storage);
         }
 
         Ok((state, reverts))
@@ -1312,8 +1303,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1329,10 +1319,12 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let tagged_key = StorageSlotKey::from_u256(key).to_changeset(use_hashed);
                         (
                             BlockNumberAddress((block_number, revert.address)),
-                            ChangesetEntry { key: tagged_key, value: value.to_previous_value() },
+                            StorageEntry {
+                                key: B256::from(key.to_be_bytes()),
+                                value: value.to_previous_value(),
+                            },
                         )
                     })
                 })
@@ -1367,8 +1359,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         block_number: BlockNumber,
         address: Address,
         storage_key: B256,
-    ) -> ProviderResult<Option<ChangesetEntry>> {
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
+    ) -> ProviderResult<Option<StorageEntry>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1387,9 +1378,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let tagged_key = StorageSlotKey::from_u256(key).to_changeset(use_hashed);
-                        (tagged_key.as_b256() == storage_key).then(|| ChangesetEntry {
-                            key: tagged_key,
+                        let slot_key = B256::from(key.to_be_bytes());
+                        (slot_key == storage_key).then(|| StorageEntry {
+                            key: slot_key,
                             value: value.to_previous_value(),
                         })
                     })
@@ -1415,13 +1406,11 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = to_range(range);
         let mut changesets = Vec::new();
         let database_start = range.start;
         let mut database_end = range.end;
-
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
 
         if let Some(head_block) = &self.head_block {
             database_end = head_block.anchor().number;
@@ -1440,12 +1429,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let tagged_key =
-                                StorageSlotKey::from_u256(key).to_changeset(use_hashed);
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
-                                ChangesetEntry {
-                                    key: tagged_key,
+                                StorageEntry {
+                                    key: B256::from(key.to_be_bytes()),
                                     value: value.to_previous_value(),
                                 },
                             )
@@ -2158,8 +2145,7 @@ mod tests {
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
             storage_slot.present_value,
@@ -2245,8 +2231,7 @@ mod tests {
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
             storage_slot.present_value,
@@ -2524,8 +2509,8 @@ mod tests {
         assert_eq!(db_changeset.len(), 1);
         assert_eq!(mem_changeset.len(), 1);
 
-        let db_key = db_changeset[0].1.key.as_b256();
-        let mem_key = mem_changeset[0].1.key.as_b256();
+        let db_key = B256::from(db_changeset[0].1.key);
+        let mem_key = B256::from(mem_changeset[0].1.key);
 
         assert_eq!(db_key, slot_b256, "DB changeset should use plain (unhashed) key");
         assert_eq!(mem_key, slot_b256, "In-memory changeset should use plain (unhashed) key");
@@ -2623,7 +2608,8 @@ mod tests {
 
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
-        let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key.as_b256()).collect();
+        let keys: Vec<B256> =
+            all_changesets.iter().map(|(_, entry)| B256::from(entry.key)).collect();
 
         assert_eq!(
             keys[0], keys[1],
@@ -2720,7 +2706,8 @@ mod tests {
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
         let slot_b256 = B256::from(slot);
-        let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key.as_b256()).collect();
+        let keys: Vec<B256> =
+            all_changesets.iter().map(|(_, entry)| B256::from(entry.key)).collect();
 
         assert_eq!(
             keys[0], keys[1],

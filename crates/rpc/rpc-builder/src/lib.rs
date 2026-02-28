@@ -875,6 +875,7 @@ where
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
+    ///   * `reth_` namespace
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
