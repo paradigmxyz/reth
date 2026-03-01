@@ -1339,7 +1339,9 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
-    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1, PayloadAttributes};
+    use alloy_rpc_types_engine::{
+        ClientCode, ClientVersionV1, PayloadAttributes, PayloadStatusEnum,
+    };
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
@@ -1546,6 +1548,69 @@ mod tests {
             .expect("forkchoiceUpdatedV3 should return a syncing response");
         assert!(response.payload_status.is_syncing());
         assert!(response.payload_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_valid_forkchoice_missing_beacon_root_returns_invalid_attributes() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x22; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "when attrs are invalid, API should first evaluate forkchoice without attrs"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let response = api_task.await.expect("api task should not panic");
+        assert_matches!(
+            response,
+            Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::PayloadAttributes(_)
+            ))
+        );
+
+        match tokio::time::timeout(std::time::Duration::from_millis(100), handle.from_api.recv())
+            .await
+        {
+            Err(_) | Ok(None) => {}
+            Ok(Some(BeaconEngineMessage::ForkchoiceUpdated { .. })) => {
+                panic!("no second forkchoiceUpdated call should be sent when attrs are invalid")
+            }
+            Ok(Some(other)) => panic!("unexpected engine message: {other:?}"),
+        }
     }
 
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
