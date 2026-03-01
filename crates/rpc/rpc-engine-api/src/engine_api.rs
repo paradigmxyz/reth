@@ -13,7 +13,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
     ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    PayloadStatusEnum, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -747,9 +747,20 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attrs {
+        if let Some(attrs) = payload_attrs {
+            // Evaluate forkchoice first. If the node is syncing / accepted / invalid for this
+            // state, return that outcome before validating payload attributes.
+            let fcu_res_without_attrs =
+                self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
+            if !matches!(
+                fcu_res_without_attrs.payload_status.status,
+                PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted
+            ) {
+                return Ok(fcu_res_without_attrs)
+            }
+
             let attr_validation_res =
-                self.inner.validator.ensure_well_formed_attributes(version, attrs);
+                self.inner.validator.ensure_well_formed_attributes(version, &attrs);
 
             // From the engine API spec:
             //
@@ -759,24 +770,19 @@ where
             // MUST NOT begin a payload build process. In such an event, the forkchoiceState
             // update MUST NOT be rolled back.
             //
-            // NOTE: This will also apply to the validation result for the cancun or
-            // shanghai-specific fields provided in the payload attributes.
-            //
-            // To do this, we set the payload attrs to `None` if attribute validation failed, but
-            // we still apply the forkchoice update.
+            // NOTE: This also applies to cancun/shanghai-specific payload attributes.
             if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
-                // TODO: decide if we want this branch - the FCU INVALID response might be more
-                // useful than the payload attributes INVALID response
-                if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
-                }
                 return Err(err.into())
             }
+
+            return Ok(self
+                .inner
+                .beacon_consensus
+                .fork_choice_updated(state, Some(attrs), version)
+                .await?)
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?)
     }
 
     /// Returns reference to supported capabilities.
