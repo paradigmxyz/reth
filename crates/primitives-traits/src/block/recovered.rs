@@ -786,6 +786,7 @@ mod rpc_compat {
         {
             let block_number = self.header().number();
             let base_fee = self.header().base_fee_per_gas();
+            let block_timestamp = self.header().timestamp();
             let block_length = self.rlp_length();
             let block_hash = Some(self.hash());
 
@@ -798,14 +799,13 @@ mod rpc_compat {
                 .zip(senders)
                 .enumerate()
                 .map(|(idx, (tx, sender))| {
-                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash,
                         block_number: Some(block_number),
                         base_fee,
                         index: Some(idx as u64),
-                        ..Default::default()
+                        block_timestamp: Some(block_timestamp),
                     };
 
                     converter(Recovered::new_unchecked(tx, sender), tx_info)

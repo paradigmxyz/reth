@@ -291,15 +291,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let block_hash = block.hash();
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
+                let block_timestamp = block.timestamp();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee: base_fee_per_gas,
                         index: Some(index as u64),
-                        ..Default::default()
+                        block_timestamp: Some(block_timestamp),
                     };
 
                     return Ok(Some(
@@ -364,20 +364,20 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let block_hash = block.hash();
                     let block_number = block.number();
                     let base_fee_per_gas = block.base_fee_per_gas();
+                    let block_timestamp = block.timestamp();
 
                     block
                         .transactions_with_sender()
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
-                            #[allow(clippy::needless_update)]
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
-                                ..Default::default()
+                                block_timestamp: Some(block_timestamp),
                             };
                             Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
@@ -637,6 +637,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                     block_hash: cached.block.hash(),
                     block_number: cached.block.number(),
                     base_fee: cached.block.base_fee_per_gas(),
+                    block_timestamp: Some(cached.block.timestamp()),
                 }));
             }
 
@@ -662,6 +663,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                     block_hash: meta.block_hash,
                     block_number: meta.block_number,
                     base_fee: meta.base_fee,
+                    block_timestamp: Some(meta.timestamp),
                 }));
             }
 

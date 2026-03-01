@@ -753,3 +753,32 @@ ipnet = "2.11"
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+alloy-consensus = { path = "../alloy/crates/consensus" }
+alloy-consensus-any = { path = "../alloy/crates/consensus-any" }
+alloy-contract = { path = "../alloy/crates/contract" }
+alloy-eips = { path = "../alloy/crates/eips" }
+alloy-genesis = { path = "../alloy/crates/genesis" }
+alloy-json-rpc = { path = "../alloy/crates/json-rpc" }
+alloy-network = { path = "../alloy/crates/network" }
+alloy-network-primitives = { path = "../alloy/crates/network-primitives" }
+alloy-provider = { path = "../alloy/crates/provider" }
+alloy-pubsub = { path = "../alloy/crates/pubsub" }
+alloy-rpc-client = { path = "../alloy/crates/rpc-client" }
+alloy-rpc-types = { path = "../alloy/crates/rpc-types" }
+alloy-rpc-types-admin = { path = "../alloy/crates/rpc-types-admin" }
+alloy-rpc-types-anvil = { path = "../alloy/crates/rpc-types-anvil" }
+alloy-rpc-types-beacon = { path = "../alloy/crates/rpc-types-beacon" }
+alloy-rpc-types-debug = { path = "../alloy/crates/rpc-types-debug" }
+alloy-rpc-types-engine = { path = "../alloy/crates/rpc-types-engine" }
+alloy-rpc-types-eth = { path = "../alloy/crates/rpc-types-eth" }
+alloy-rpc-types-mev = { path = "../alloy/crates/rpc-types-mev" }
+alloy-rpc-types-trace = { path = "../alloy/crates/rpc-types-trace" }
+alloy-rpc-types-txpool = { path = "../alloy/crates/rpc-types-txpool" }
+alloy-serde = { path = "../alloy/crates/serde" }
+alloy-signer = { path = "../alloy/crates/signer" }
+alloy-signer-local = { path = "../alloy/crates/signer-local" }
+alloy-transport = { path = "../alloy/crates/transport" }
+alloy-transport-http = { path = "../alloy/crates/transport-http" }
+alloy-transport-ipc = { path = "../alloy/crates/transport-ipc" }
+alloy-transport-ws = { path = "../alloy/crates/transport-ws" }
