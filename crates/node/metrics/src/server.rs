@@ -419,7 +419,7 @@ fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
 mod tests {
     use super::*;
     use reqwest::Client;
-    use reth_tasks::TaskManager;
+    use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
     use std::net::{SocketAddr, TcpListener};
 
@@ -433,7 +433,7 @@ mod tests {
         listener.local_addr().unwrap()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_metrics_endpoint() {
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
         let version_info = VersionInfo {
@@ -445,8 +445,7 @@ mod tests {
             build_profile: "test",
         };
 
-        let tasks = TaskManager::current();
-        let executor = tasks.executor();
+        let runtime = Runtime::test();
 
         let hooks = Hooks::builder().build();
 
@@ -455,7 +454,7 @@ mod tests {
             listen_addr,
             version_info,
             chain_spec_info,
-            executor,
+            runtime.clone(),
             hooks,
             std::env::temp_dir(),
         );
@@ -471,5 +470,8 @@ mod tests {
         let body = response.text().await.unwrap();
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
+
+        // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
     }
 }

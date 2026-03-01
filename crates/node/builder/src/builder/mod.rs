@@ -79,7 +79,7 @@ pub type RethFullAdapter<DB, Types> =
 /// configured components and can interact with the node.
 ///
 /// There are convenience functions for networks that come with a preset of types and components via
-/// the [`Node`] trait, see `reth_node_ethereum::EthereumNode` or `reth_optimism_node::OpNode`.
+/// the [`Node`] trait, see `reth_node_ethereum::EthereumNode`.
 ///
 /// The [`NodeBuilder::node`] function configures the node's types and components in one step.
 ///
@@ -903,8 +903,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .request_handler(self.provider().clone())
             .split_with_handle();
 
-        self.executor.spawn_critical_blocking("p2p txpool", Box::pin(txpool));
-        self.executor.spawn_critical_blocking("p2p eth request handler", Box::pin(eth));
+        self.executor.spawn_critical_blocking_task("p2p txpool", Box::pin(txpool));
+        self.executor.spawn_critical_blocking_task("p2p eth request handler", Box::pin(eth));
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);
@@ -985,8 +985,8 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 self.config().chain.clone(),
                 secret_key,
                 default_peers_path,
+                self.executor.clone(),
             )
-            .with_task_executor(Box::new(self.executor.clone()))
             .set_head(self.head);
 
         Ok(builder)

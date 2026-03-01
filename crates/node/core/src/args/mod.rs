@@ -68,10 +68,6 @@ pub use benchmark_args::BenchmarkArgs;
 mod engine;
 pub use engine::{DefaultEngineValues, EngineArgs};
 
-/// `RessArgs` for configuring ress subprotocol.
-mod ress_args;
-pub use ress_args::RessArgs;
-
 /// `EraArgs` for configuring ERA files import.
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
@@ -80,9 +76,9 @@ pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 mod static_files;
 pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
-/// `RocksDbArgs` for configuring RocksDB table routing.
-mod rocksdb;
-pub use rocksdb::{RocksDbArgs, RocksDbArgsError};
+/// `StorageArgs` for configuring storage settings.
+mod storage;
+pub use storage::StorageArgs;
 
 mod error;
 pub mod types;

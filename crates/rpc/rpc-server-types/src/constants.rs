@@ -47,23 +47,16 @@ pub fn default_max_tracing_requests() -> usize {
 pub const DEFAULT_PROOF_PERMITS: usize = 25;
 
 /// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
-
-/// The default IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 
-/// The engine_api IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc";
-
 /// The `engine_api` IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
 /// The default limit for blocks count in `eth_simulateV1`.
 pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
+
+/// The default maximum number of total storage slots for `eth_getStorageValues`.
+pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;

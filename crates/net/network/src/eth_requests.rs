@@ -6,12 +6,13 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, GetReceipts70, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
-    Receipts69, Receipts70,
+    BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
+    NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -281,6 +282,19 @@ where
         let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// For now this returns one empty BAL per requested hash.
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
+
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -351,6 +365,9 @@ where
                     }
                     IncomingEthRequest::GetReceipts70 { peer_id, request, response } => {
                         this.on_receipts70_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetBlockAccessLists { peer_id, request, response } => {
+                        this.on_block_access_lists_request(peer_id, request, response)
                     }
                 }
             },
@@ -436,5 +453,16 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetReceipts70,
         /// The channel sender for the response containing Receipts70.
         response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
+    },
+    /// Request Block Access Lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists {
+        /// The ID of the peer to request block access lists from.
+        peer_id: PeerId,
+        /// The requested block hashes.
+        request: GetBlockAccessLists,
+        /// The channel sender for the response containing block access lists.
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
 }

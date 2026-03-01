@@ -1,8 +1,6 @@
 //! Compilation operations for reth and reth-bench.
 
 use crate::git::GitManager;
-use alloy_primitives::address;
-use alloy_provider::{Provider, ProviderBuilder};
 use eyre::{eyre, Result, WrapErr};
 use std::{fs, path::PathBuf, process::Command};
 use tracing::{debug, error, info, warn};
@@ -25,54 +23,14 @@ impl CompilationManager {
         Ok(Self { repo_root, output_dir, git_manager })
     }
 
-    /// Detect if the RPC endpoint is an Optimism chain
-    pub(crate) async fn detect_optimism_chain(&self, rpc_url: &str) -> Result<bool> {
-        info!("Detecting chain type from RPC endpoint...");
-
-        // Create Alloy provider
-        let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
-        let provider = ProviderBuilder::new().connect_http(url);
-
-        // Check for Optimism predeploy at address 0x420000000000000000000000000000000000000F
-        let is_optimism = !provider
-            .get_code_at(address!("0x420000000000000000000000000000000000000F"))
-            .await?
-            .is_empty();
-
-        if is_optimism {
-            info!("Detected Optimism chain");
-        } else {
-            info!("Detected Ethereum chain");
-        }
-
-        Ok(is_optimism)
-    }
-
     /// Get the path to the cached binary using explicit commit hash
-    pub(crate) fn get_cached_binary_path_for_commit(
-        &self,
-        commit: &str,
-        is_optimism: bool,
-    ) -> PathBuf {
+    pub(crate) fn get_cached_binary_path_for_commit(&self, commit: &str) -> PathBuf {
         let identifier = &commit[..8]; // Use first 8 chars of commit
-
-        let binary_name = if is_optimism {
-            format!("op-reth_{}", identifier)
-        } else {
-            format!("reth_{}", identifier)
-        };
-
-        self.output_dir.join("bin").join(binary_name)
+        self.output_dir.join("bin").join(format!("reth_{identifier}"))
     }
 
     /// Compile reth using cargo build and cache the binary
-    pub(crate) fn compile_reth(
-        &self,
-        commit: &str,
-        is_optimism: bool,
-        features: &str,
-        rustflags: &str,
-    ) -> Result<()> {
+    pub(crate) fn compile_reth(&self, commit: &str, features: &str, rustflags: &str) -> Result<()> {
         // Validate that current git commit matches the expected commit
         let current_commit = self.git_manager.get_current_commit()?;
         if current_commit != commit {
@@ -83,7 +41,7 @@ impl CompilationManager {
             ));
         }
 
-        let cached_path = self.get_cached_binary_path_for_commit(commit, is_optimism);
+        let cached_path = self.get_cached_binary_path_for_commit(commit);
 
         // Check if cached binary already exists (since path contains commit hash, it's valid)
         if cached_path.exists() {
@@ -93,7 +51,7 @@ impl CompilationManager {
 
         info!("No cached binary found, compiling (commit: {})...", &commit[..8]);
 
-        let binary_name = if is_optimism { "op-reth" } else { "reth" };
+        let binary_name = "reth";
 
         info!(
             "Compiling {} with profiling configuration (commit: {})...",
@@ -106,14 +64,6 @@ impl CompilationManager {
 
         cmd.arg("--features").arg(features);
         info!("Using features: {features}");
-
-        // Add bin-specific arguments for optimism
-        if is_optimism {
-            cmd.arg("--bin")
-                .arg("op-reth")
-                .arg("--manifest-path")
-                .arg("crates/optimism/bin/Cargo.toml");
-        }
 
         cmd.current_dir(&self.repo_root);
 

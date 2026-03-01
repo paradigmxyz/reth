@@ -2,7 +2,7 @@ use futures_util::Future;
 use reth_basic_payload_builder::{HeaderForPayload, PayloadBuilder, PayloadConfig};
 use reth_ethereum::{
     node::api::{PayloadBuilderAttributes, PayloadKind},
-    tasks::TaskSpawner,
+    tasks::Runtime,
 };
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
@@ -12,23 +12,22 @@ use std::{
 };
 
 /// A [PayloadJob] that builds empty blocks.
-pub struct EmptyBlockPayloadJob<Tasks, Builder>
+pub struct EmptyBlockPayloadJob<Builder>
 where
     Builder: PayloadBuilder,
 {
     /// The configuration for how the payload will be created.
     pub(crate) config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
-    pub(crate) _executor: Tasks,
+    pub(crate) _executor: Runtime,
     /// The type responsible for building payloads.
     ///
     /// See [PayloadBuilder]
     pub(crate) builder: Builder,
 }
 
-impl<Tasks, Builder> PayloadJob for EmptyBlockPayloadJob<Tasks, Builder>
+impl<Builder> PayloadJob for EmptyBlockPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -61,9 +60,8 @@ where
 }
 
 /// A [PayloadJob] is a future that's being polled by the `PayloadBuilderService`
-impl<Tasks, Builder> Future for EmptyBlockPayloadJob<Tasks, Builder>
+impl<Builder> Future for EmptyBlockPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,

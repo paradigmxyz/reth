@@ -8,6 +8,15 @@ use reth_db_api::{
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
+/// Result of a single prune step in [`DbTxPruneExt::prune_table_with_range_step`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PruneStepResult {
+    /// `true` if the walker is finished, `false` if it may have more data to prune.
+    done: bool,
+    /// `true` if the current entry was deleted, `false` if it was skipped.
+    deleted: bool,
+}
+
 pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Clear the entire table in a single operation.
     ///
@@ -91,25 +100,26 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                 break false
             }
 
-            let done = self.prune_table_with_range_step(
+            let result = self.prune_table_with_range_step(
                 &mut walker,
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )?;
 
-            if done {
+            if result.deleted {
+                deleted_entries += 1;
+            }
+
+            if result.done {
                 break true
             }
-            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
     }
 
     /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
@@ -120,18 +130,21 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
+    ) -> Result<PruneStepResult, DatabaseError> {
+        let Some(res) = walker.next() else {
+            return Ok(PruneStepResult { done: true, deleted: false })
+        };
 
         let row = res?;
 
-        if !skip_filter(&row) {
+        if skip_filter(&row) {
+            Ok(PruneStepResult { done: false, deleted: false })
+        } else {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
+            Ok(PruneStepResult { done: false, deleted: true })
         }
-
-        Ok(false)
     }
 
     /// Prune a DUPSORT table for the specified key range.

@@ -17,6 +17,7 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
+use reth_tasks::RayonConfig;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
 
@@ -96,13 +97,32 @@ where
     {
         let runner = match self.runner.take() {
             Some(runner) => runner,
-            None => CliRunner::try_default_runtime()?,
+            None => {
+                let runtime_config = match &self.cli.command {
+                    Commands::Node(command) => {
+                        reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
+                            reserved_cpu_cores: command.engine.reserved_cpu_cores,
+                            proof_storage_worker_threads: command.engine.storage_worker_count,
+                            proof_account_worker_threads: command.engine.account_worker_count,
+                            prewarming_threads: command.engine.prewarming_threads,
+                            ..Default::default()
+                        })
+                    }
+                    _ => reth_tasks::RuntimeConfig::default(),
+                };
+                CliRunner::try_with_runtime_config(runtime_config)?
+            }
         };
 
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.cli.command.chain_spec() {
             self.cli.logs.log_file_directory =
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
+        }
+
+        // Apply node-specific log defaults before initializing tracing
+        if matches!(self.cli.command, Commands::Node(_)) {
+            self.cli.logs.apply_node_defaults();
         }
 
         self.init_tracing(&runner)?;
@@ -117,8 +137,8 @@ where
     ///
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
-        if self.guard.is_none() {
-            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
+        if let Some(layers) = self.layers.take() {
+            self.guard = self.cli.init_tracing(runner, layers)?;
         }
 
         Ok(())
@@ -143,6 +163,8 @@ where
     N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
+    let rt = runner.runtime();
+
     match cli.command {
         Commands::Node(command) => {
             // Validate RPC modules using the configured validator
@@ -157,13 +179,13 @@ where
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
+        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
         Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
+            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components, rt))
         }
-        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
+        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => {
             runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
@@ -177,7 +199,9 @@ where
         Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
+        Commands::ReExecute(command) => {
+            runner.run_until_ctrl_c(command.execute::<N>(components, rt))
+        }
         Commands::Ext(command) => command.execute(runner),
     }
 }

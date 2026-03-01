@@ -3,17 +3,16 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_trie_sparse::SparseStateTrie;
-use reth_trie_sparse_parallel::ParallelSparseTrie;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
-pub(super) type SparseTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
+pub(super) type SparseTrie = SparseStateTrie;
 
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
-/// [`SparseTrieTask`](super::sparse_trie::SparseTrieTask) for trie reuse.
+/// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
 #[derive(Debug, Default, Clone)]
 pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
@@ -28,6 +27,27 @@ impl SharedPreservedSparseTrie {
     /// waits for the trie to be stored.
     pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
         PreservedTrieGuard(self.0.lock())
+    }
+
+    /// Waits until the sparse trie lock becomes available.
+    ///
+    /// This acquires and immediately releases the lock, ensuring that any
+    /// ongoing operations complete before returning. Useful for synchronization
+    /// before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub(super) fn wait_for_availability(&self) -> std::time::Duration {
+        let start = Instant::now();
+        let _guard = self.0.lock();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for preserved sparse trie to become available"
+            );
+        }
+        elapsed
     }
 }
 

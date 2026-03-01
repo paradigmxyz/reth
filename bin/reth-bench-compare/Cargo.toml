@@ -45,9 +45,6 @@ serde_json.workspace = true
 # Time handling
 chrono = { workspace = true, features = ["serde"] }
 
-# Path manipulation
-shellexpand.workspace = true
-
 # CSV handling
 csv.workspace = true
 
@@ -98,5 +95,5 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+# no-op feature flag for CI matrices
 ethereum = []

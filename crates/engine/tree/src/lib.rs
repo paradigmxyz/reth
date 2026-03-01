@@ -100,6 +100,8 @@ pub mod chain;
 pub mod download;
 /// Engine Api chain handler support.
 pub mod engine;
+/// Engine orchestrator launch helper.
+pub mod launch;
 /// Metrics support.
 pub mod metrics;
 /// The background writer service, coordinating write operations on static files and the database.

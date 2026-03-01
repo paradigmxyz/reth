@@ -8,14 +8,12 @@ use jsonrpsee_types::error::{
 };
 use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::EngineObjectValidationError;
+use reth_payload_primitives::{EngineObjectValidationError, VersionSpecificValidationError};
 use thiserror::Error;
 
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
-/// Invalid payload attributes code.
-pub const INVALID_PAYLOAD_ATTRIBUTES: i32 = -38003;
 /// Payload unsupported fork code.
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
@@ -25,9 +23,6 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
-
-/// Error message for the request too large error.
-const INVALID_PAYLOAD_ATTRIBUTES_MSG: &str = "Invalid payload attributes";
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
@@ -120,7 +115,16 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::InvalidBodiesRange { .. } |
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
-                EngineObjectValidationError::InvalidParams(_),
+                EngineObjectValidationError::InvalidParams(_) |
+                // Per Engine API spec, structure validation errors for PayloadAttributes
+                // (e.g., missing withdrawals post-Shanghai) should return -32602 "Invalid params".
+                // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md
+                // Fixes: https://github.com/paradigmxyz/reth/issues/8732
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
+                    VersionSpecificValidationError::NoWithdrawalsPostShanghai |
+                    VersionSpecificValidationError::HasWithdrawalsPreShanghai,
+                ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -128,17 +132,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::ErrorObject::owned(
                     INVALID_PARAMS_CODE,
                     INVALID_PARAMS_MSG,
-                    Some(ErrorData::new(error)),
-                )
-            }
-            EngineApiError::EngineObjectValidationError(
-                EngineObjectValidationError::PayloadAttributes(_),
-            ) => {
-                // Note: the data field is not required by the spec, but is also included by other
-                // clients
-                jsonrpsee_types::error::ErrorObject::owned(
-                    INVALID_PAYLOAD_ATTRIBUTES,
-                    INVALID_PAYLOAD_ATTRIBUTES_MSG,
                     Some(ErrorData::new(error)),
                 )
             }
@@ -155,6 +148,16 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
+                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
+                ),
+            ) => jsonrpsee_types::error::ErrorObject::owned(
+                INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                Some(ErrorData::new(error)),
+            ),
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::UnsupportedFork,
             ) => jsonrpsee_types::error::ErrorObject::owned(
@@ -208,7 +211,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
-
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -246,6 +248,8 @@ mod tests {
             )),
         );
 
+        // ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes is for semantic validation
+        // errors that occur AFTER the structure check passes, so it returns -38003
         ensure_engine_rpc_error(
             -38003,
             "Invalid payload attributes",
@@ -258,6 +262,30 @@ mod tests {
             UNKNOWN_PAYLOAD_CODE,
             "Unknown payload",
             EngineApiError::UnknownPayload,
+        );
+
+        // PayloadAttributes structure validation errors (e.g., missing withdrawals post-Shanghai)
+        // should return -32602 per the Engine API spec
+        // See: https://github.com/paradigmxyz/reth/issues/8732
+        ensure_engine_rpc_error(
+            INVALID_PARAMS_CODE,
+            INVALID_PARAMS_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::NoWithdrawalsPostShanghai,
+                ),
+            ),
+        );
+
+        // Beacon root shape mismatches on PayloadAttributes are reported as -38003.
+        ensure_engine_rpc_error(
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                ),
+            ),
         );
     }
 }

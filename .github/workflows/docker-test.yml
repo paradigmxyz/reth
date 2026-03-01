@@ -1,0 +1,82 @@
+name: Build test Docker image
+
+on:
+  workflow_call:
+    inputs:
+      hive_target:
+        required: true
+        type: string
+        description: "Docker bake target to build (e.g. hive-stable, hive-edge)"
+      artifact_name:
+        required: false
+        type: string
+        default: "artifacts"
+        description: "Name for the uploaded artifact"
+
+jobs:
+  build:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - run: mkdir -p artifacts
+
+      - name: Get git info
+        id: git
+        run: |
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
+
+      - name: Detect fork
+        id: fork
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "is_fork=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Depot build (upstream only)
+      - name: Set up Depot CLI
+        if: steps.fork.outputs.is_fork == 'false'
+        uses: depot/setup-action@v1
+
+      - name: Build reth image (Depot)
+        if: steps.fork.outputs.is_fork == 'false'
+        uses: depot/bake-action@v1
+        env:
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          files: docker-bake.hcl
+          targets: ${{ inputs.hive_target }}
+          push: false
+
+      # Docker build (forks)
+      - name: Set up Docker Buildx
+        if: steps.fork.outputs.is_fork == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build reth image (Docker)
+        if: steps.fork.outputs.is_fork == 'true'
+        uses: docker/bake-action@v6
+        env:
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+        with:
+          files: docker-bake.hcl
+          targets: ${{ inputs.hive_target }}
+          push: false
+          set: |
+            *.dockerfile=Dockerfile
+
+      - name: Upload reth image
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./artifacts

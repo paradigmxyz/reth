@@ -11,7 +11,7 @@ use reth_db_api::{
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-use reth_tracing::tracing::{debug, trace, warn};
+use reth_tracing::tracing::{debug, instrument, trace, warn};
 use std::{
     backtrace::Backtrace,
     collections::HashMap,
@@ -307,6 +307,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
+    #[instrument(name = "Tx::commit", level = "debug", target = "providers::db", skip_all)]
     fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {

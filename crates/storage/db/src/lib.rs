@@ -43,11 +43,8 @@ pub mod test_utils {
     use super::*;
     use crate::mdbx::DatabaseArguments;
     use parking_lot::RwLock;
-    use reth_db_api::{
-        database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
-    };
+    use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
     use reth_fs_util;
-    use reth_libmdbx::MaxReadTransactionDuration;
     use std::{
         fmt::Formatter,
         path::{Path, PathBuf},
@@ -143,6 +140,10 @@ pub mod test_utils {
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
         }
+
+        fn path(&self) -> std::path::PathBuf {
+            self.db().path()
+        }
     }
 
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
@@ -179,12 +180,7 @@ pub mod test_utils {
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
 
-        let db = init_db(
-            &path,
-            DatabaseArguments::new(ClientVersion::default())
-                .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-        )
-        .expect(&emsg);
+        let db = init_db(&path, DatabaseArguments::test()).expect(&emsg);
 
         Arc::new(TempDatabase::new(db, path))
     }
@@ -194,12 +190,7 @@ pub mod test_utils {
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
-        let db = init_db(
-            path.as_path(),
-            DatabaseArguments::new(ClientVersion::default())
-                .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-        )
-        .expect(&emsg);
+        let db = init_db(path.as_path(), DatabaseArguments::test()).expect(&emsg);
         Arc::new(TempDatabase::new(db, path))
     }
 
@@ -214,20 +205,14 @@ pub mod test_utils {
         let datadir = datadir.as_ref().to_path_buf();
         let db_path = datadir.join("db");
         let emsg = format!("{ERROR_DB_CREATION}: {db_path:?}");
-        let db = init_db(
-            &db_path,
-            DatabaseArguments::new(ClientVersion::default())
-                .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-        )
-        .expect(&emsg);
+        let db = init_db(&db_path, DatabaseArguments::test()).expect(&emsg);
         Arc::new(TempDatabase::new(db, datadir))
     }
 
     /// Create read only database for testing
     #[track_caller]
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let args = DatabaseArguments::new(ClientVersion::default())
-            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+        let args = DatabaseArguments::test();
 
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
@@ -260,7 +245,7 @@ mod tests {
         // Test that TempDatabase properly cleans up its directory when dropped
         let temp_path = {
             let db = crate::test_utils::create_test_rw_db();
-            let path = db.path().to_path_buf();
+            let path = db.path();
             assert!(path.exists(), "Database directory should exist while TempDatabase is alive");
             path
             // TempDatabase dropped here

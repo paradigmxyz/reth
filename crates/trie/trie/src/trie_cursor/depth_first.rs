@@ -6,36 +6,9 @@ use tracing::trace;
 
 /// Compares two Nibbles in depth-first order.
 ///
-/// In depth-first ordering:
-/// - Descendants come before their ancestors (children before parents)
-/// - Siblings are ordered lexicographically
-///
-/// # Example
-///
-/// ```text
-/// 0x11 comes before 0x1 (child before parent)
-/// 0x12 comes before 0x1 (child before parent)
-/// 0x11 comes before 0x12 (lexicographical among siblings)
-/// 0x1 comes before 0x21 (lexicographical among siblings)
-/// Result: 0x11, 0x12, 0x1, 0x21
-/// ```
+/// See [`reth_trie_common::depth_first_cmp`] for details.
 pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
-    // If the two are of equal length, then compare them lexicographically
-    if a.len() == b.len() {
-        return a.cmp(b)
-    }
-
-    // If one is a prefix of the other, then the other comes first
-    let common_prefix_len = a.common_prefix_length(b);
-    if a.len() == common_prefix_len {
-        return Ordering::Greater
-    } else if b.len() == common_prefix_len {
-        return Ordering::Less
-    }
-
-    // Otherwise the nibble after the prefix determines the ordering. We know that neither is empty
-    // at this point, otherwise the previous if/else block would have caught it.
-    a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))
+    reth_trie_common::depth_first_cmp(a, b)
 }
 
 /// An iterator that traverses trie nodes in depth-first post-order.

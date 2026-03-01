@@ -25,7 +25,7 @@ use reth_tracing::tracing::error;
 use std::{
     collections::HashMap,
     ops::{Deref, Range},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -146,6 +146,24 @@ impl DatabaseArguments {
         }
     }
 
+    /// Create database arguments suitable for testing.
+    ///
+    /// Uses a small geometry (64MB max, 4MB growth) to avoid exhausting the system's
+    /// virtual memory map limit (`vm.max_map_count`) when many test databases are open
+    /// concurrently.
+    pub fn test() -> Self {
+        Self {
+            geometry: Geometry {
+                size: Some(0..(64 * MEGABYTE)),
+                growth_step: Some(4 * MEGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
+            max_read_transaction_duration: Some(MaxReadTransactionDuration::Unbounded),
+            ..Self::new(ClientVersion::default())
+        }
+    }
+
     /// Sets the upper size limit of the db environment, the maximum database size in bytes.
     pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
         if let Some(max_size) = max_size {
@@ -226,6 +244,8 @@ impl DatabaseArguments {
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
+    /// Path to the database directory.
+    path: PathBuf,
     /// Opened DBIs for reuse.
     /// Important: Do not manually close these DBIs, like via `mdbx_dbi_close`.
     /// More generally, do not dynamically create, re-open, or drop tables at
@@ -258,6 +278,10 @@ impl Database for DatabaseEnv {
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
+    }
+
+    fn path(&self) -> PathBuf {
+        self.path.clone()
     }
 }
 
@@ -490,6 +514,7 @@ impl DatabaseEnv {
 
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
             _lock_file,

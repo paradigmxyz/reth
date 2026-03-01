@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
 use parking_lot::Mutex;
 use reth_db_api::{
@@ -9,7 +9,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
 use reth_tasks::spawn_scoped_os_thread;
 use std::{
@@ -17,7 +17,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tracing::{error, info};
+use tracing::info;
 
 /// Log progress every 5 seconds
 const LOG_INTERVAL: Duration = Duration::from_secs(30);
@@ -63,39 +63,65 @@ impl Command {
         address: Address,
         limit: usize,
     ) -> eyre::Result<()> {
+        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state();
+
         let entries = tool.provider_factory.db_ref().view(|tx| {
-            // Get account info
-            let account = tx.get::<tables::PlainAccountState>(address)?;
-
-            // Get storage entries
-            let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            let mut entries = Vec::new();
-            let mut last_log = Instant::now();
-
-            let walker = cursor.walk_dup(Some(address), None)?;
-            for (idx, entry) in walker.enumerate() {
-                let (_, storage_entry) = entry?;
-
-                if storage_entry.value != U256::ZERO {
-                    entries.push((storage_entry.key, storage_entry.value));
+            let (account, walker_entries) = if use_hashed_state {
+                let hashed_address = keccak256(address);
+                let account = tx.get::<tables::HashedAccounts>(hashed_address)?;
+                let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+                let walker = cursor.walk_dup(Some(hashed_address), None)?;
+                let mut entries = Vec::new();
+                let mut last_log = Instant::now();
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
+                    if entries.len() >= limit {
+                        break;
+                    }
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            address = %address,
+                            slots_scanned = idx,
+                            "Scanning storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
-
-                if entries.len() >= limit {
-                    break;
+                (account, entries)
+            } else {
+                // Get account info
+                let account = tx.get::<tables::PlainAccountState>(address)?;
+                // Get storage entries
+                let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                let walker = cursor.walk_dup(Some(address), None)?;
+                let mut entries = Vec::new();
+                let mut last_log = Instant::now();
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
+                    if entries.len() >= limit {
+                        break;
+                    }
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            address = %address,
+                            slots_scanned = idx,
+                            "Scanning storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
+                (account, entries)
+            };
 
-                if last_log.elapsed() >= LOG_INTERVAL {
-                    info!(
-                        target: "reth::cli",
-                        address = %address,
-                        slots_scanned = idx,
-                        "Scanning storage slots"
-                    );
-                    last_log = Instant::now();
-                }
-            }
-
-            Ok::<_, eyre::Report>((account, entries))
+            Ok::<_, eyre::Report>((account, walker_entries))
         })??;
 
         let (account, storage_entries) = entries;
@@ -119,23 +145,17 @@ impl Command {
 
         // Check storage settings to determine where history is stored
         let storage_settings = tool.provider_factory.cached_storage_settings();
-        let history_in_rocksdb = storage_settings.storages_history_in_rocksdb;
+        let history_in_rocksdb = storage_settings.storage_v2;
 
         // For historical queries, enumerate keys from history indices only
         // (not PlainStorageState, which reflects current state)
         let mut storage_keys = BTreeSet::new();
 
         if history_in_rocksdb {
-            error!(
-                target: "reth::cli",
-                "Historical storage queries with RocksDB backend are not yet supported. \
-                 Use MDBX for storage history or query current state without --block."
-            );
-            return Ok(());
+            self.collect_staticfile_storage_keys(tool, address, &mut storage_keys)?;
+        } else {
+            self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
         }
-
-        // Collect keys from MDBX StorageChangeSets using parallel scanning
-        self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
 
         info!(
             target: "reth::cli",
@@ -177,6 +197,63 @@ impl Command {
         }
 
         self.print_results(address, Some(block), account, &entries);
+
+        Ok(())
+    }
+
+    /// Collects storage keys from static file StorageChangeSets (storage_v2).
+    fn collect_staticfile_storage_keys<N: NodeTypesWithDB + ProviderNodeTypes>(
+        &self,
+        tool: &DbTool<N>,
+        address: Address,
+        keys: &mut BTreeSet<B256>,
+    ) -> eyre::Result<()> {
+        let tip = tool.provider_factory.provider()?.best_block_number()?;
+
+        if tip == 0 {
+            return Ok(());
+        }
+
+        info!(
+            target: "reth::cli",
+            address = %address,
+            tip,
+            "Scanning static file storage changesets"
+        );
+
+        let static_file_provider = tool.provider_factory.static_file_provider();
+        let walker = static_file_provider.walk_storage_changeset_range(0..=tip);
+
+        let mut total_scanned = 0usize;
+        let mut last_log = Instant::now();
+
+        for changeset_result in walker {
+            let (block_addr, storage_entry) = changeset_result?;
+            total_scanned += 1;
+
+            if block_addr.address() == address {
+                keys.insert(storage_entry.key);
+            }
+
+            if last_log.elapsed() >= LOG_INTERVAL {
+                info!(
+                    target: "reth::cli",
+                    address = %address,
+                    entries_scanned = total_scanned,
+                    unique_keys = keys.len(),
+                    "Scanning static file storage changesets"
+                );
+                last_log = Instant::now();
+            }
+        }
+
+        info!(
+            target: "reth::cli",
+            address = %address,
+            total_entries = total_scanned,
+            unique_keys = keys.len(),
+            "Finished static file storage changeset scan"
+        );
 
         Ok(())
     }

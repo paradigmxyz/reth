@@ -1,11 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Unified Dockerfile for reth and op-reth, optimized for Depot builds
+# Dockerfile for reth, optimized for Depot builds
 # Usage:
-#   reth:    --build-arg BINARY=reth
-#   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
+#   reth: --build-arg BINARY=reth
 
-FROM rust:1 AS builder
+FROM rust:1.93 AS builder
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
@@ -19,7 +18,7 @@ ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
-# Binary to build (reth or op-reth)
+# Binary to build
 ARG BINARY=reth
 
 # Manifest path for the binary
@@ -52,14 +51,15 @@ RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
     --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
+    export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
+    sccache --start-server && \
     if [ -n "$RUSTFLAGS" ]; then \
         export RUSTFLAGS="$RUSTFLAGS"; \
     elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
     fi && \
-    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
-
-RUN sccache --show-stats || true
+    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml && \
+    sccache --show-stats
 
 # Copy binary to a known location (ARG not resolved in COPY)
 # Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/

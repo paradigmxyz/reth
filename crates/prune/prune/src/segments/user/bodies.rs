@@ -400,8 +400,7 @@ mod tests {
                 delete_below_block: 1,
                 expected_deleted: 0,
             },
-            // Test 2: Genesis state [0..=0] -> syncs to block 100 (eg. op-reth node after op-reth
-            // init-state)
+            // Test 2: Genesis state [0..=0] -> syncs to block 100 (eg. node after init-state)
             MinBlockTestCase {
                 initial_range: Some(SegmentRangeInclusive::new(0, 0)),
                 updated_range: SegmentRangeInclusive::new(0, 100),

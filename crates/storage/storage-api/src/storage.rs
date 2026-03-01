@@ -3,12 +3,12 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{Address, BlockNumber, B256};
-use core::ops::{RangeBounds, RangeInclusive};
+use core::ops::RangeInclusive;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Storage reader
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageReader: Send {
     /// Get plainstate storages for addresses and storage keys.
     fn plain_state_storages(
@@ -34,7 +34,7 @@ pub trait StorageReader: Send {
 
 /// Storage `ChangeSet` reader
 #[cfg(feature = "db-api")]
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageChangeSetReader: Send {
     /// Iterate over storage changesets and return the storage state from before this block.
     fn storage_changeset(
@@ -55,7 +55,7 @@ pub trait StorageChangeSetReader: Send {
     /// Get all storage changesets in a range of blocks.
     fn storage_changesets_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
     /// Get the total count of all storage changes.

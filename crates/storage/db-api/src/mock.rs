@@ -16,7 +16,7 @@ use crate::{
     DatabaseError,
 };
 use core::ops::Bound;
-use std::{collections::BTreeMap, ops::RangeBounds};
+use std::{collections::BTreeMap, ops::RangeBounds, path::PathBuf};
 
 /// Mock database implementation for testing and development.
 ///
@@ -49,6 +49,10 @@ impl Database for DatabaseMock {
     /// The mock transaction doesn't actually perform any database operations.
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(TxMock::default())
+    }
+
+    fn path(&self) -> PathBuf {
+        PathBuf::default()
     }
 }
 

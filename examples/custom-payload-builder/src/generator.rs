@@ -7,18 +7,18 @@ use reth_ethereum::{
     node::api::{Block, PayloadBuilderAttributes},
     primitives::SealedHeader,
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
-    tasks::TaskSpawner,
+    tasks::Runtime,
 };
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
 #[derive(Debug)]
-pub struct EmptyBlockPayloadJobGenerator<Client, Tasks, Builder> {
+pub struct EmptyBlockPayloadJobGenerator<Client, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// How to spawn building tasks
-    executor: Tasks,
+    executor: Runtime,
     /// The configuration for the job generator.
     _config: BasicPayloadJobGeneratorConfig,
     /// The type responsible for building payloads.
@@ -29,12 +29,12 @@ pub struct EmptyBlockPayloadJobGenerator<Client, Tasks, Builder> {
 
 // === impl EmptyBlockPayloadJobGenerator ===
 
-impl<Client, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Tasks, Builder> {
+impl<Client, Builder> EmptyBlockPayloadJobGenerator<Client, Builder> {
     /// Creates a new [EmptyBlockPayloadJobGenerator] with the given config and custom
     /// [PayloadBuilder]
     pub fn with_builder(
         client: Client,
-        executor: Tasks,
+        executor: Runtime,
         config: BasicPayloadJobGeneratorConfig,
         builder: Builder,
     ) -> Self {
@@ -42,20 +42,18 @@ impl<Client, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Tasks, Builde
     }
 }
 
-impl<Client, Tasks, Builder> PayloadJobGenerator
-    for EmptyBlockPayloadJobGenerator<Client, Tasks, Builder>
+impl<Client, Builder> PayloadJobGenerator for EmptyBlockPayloadJobGenerator<Client, Builder>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
         + 'static,
-    Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder + Unpin + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = EmptyBlockPayloadJob<Tasks, Builder>;
+    type Job = EmptyBlockPayloadJob<Builder>;
 
     /// This is invoked when the node receives payload attributes from the beacon node via
     /// `engine_forkchoiceUpdatedV1`
