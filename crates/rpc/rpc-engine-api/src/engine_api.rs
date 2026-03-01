@@ -1344,10 +1344,11 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1, PayloadAttributes};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-    use reth_engine_primitives::BeaconEngineMessage;
+    use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::Block;
     use reth_network_api::{
@@ -1503,6 +1504,54 @@ mod tests {
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
         assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_syncing_precedes_invalid_payload_attributes_validation() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x11; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
+            parent_beacon_block_root: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "FCU for syncing state should be evaluated before payload attributes"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx.send(Ok(OnForkChoiceUpdated::syncing())).expect("send syncing response");
+
+        let response = api_task
+            .await
+            .expect("api task should not panic")
+            .expect("forkchoiceUpdatedV3 should return a syncing response");
+        assert!(response.payload_status.is_syncing());
+        assert!(response.payload_id.is_none());
     }
 
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
