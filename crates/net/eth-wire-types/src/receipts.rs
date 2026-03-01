@@ -4,11 +4,22 @@ use alloc::vec::Vec;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_primitives::Receipt;
 
 /// A request for transaction receipts from the given block hashes.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -55,7 +66,7 @@ impl alloy_rlp::Decodable for GetReceipts70 {
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Deref, IntoIterator)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -85,7 +96,9 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
 /// Eth/69 receipt response type that removes bloom filters from the protocol.
 ///
 /// This is effectively a subset of [`Receipts`].
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Deref, IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -103,8 +116,7 @@ impl<T: TxReceipt> Receipts69<T> {
     /// every receipt.
     pub fn into_with_bloom(self) -> Receipts<T> {
         Receipts(
-            self.0
-                .into_iter()
+            self.into_iter()
                 .map(|receipts| receipts.into_iter().map(|r| r.into_with_bloom()).collect())
                 .collect(),
         )

@@ -1295,7 +1295,6 @@ where
                 let has_blob_txs = msg.has_eip4844();
 
                 let non_blob_txs = msg
-                    .0
                     .into_iter()
                     .map(N::PooledTransaction::try_from)
                     .filter_map(Result::ok)
