@@ -117,13 +117,15 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_) |
                 // Per Engine API spec, structure validation errors for PayloadAttributes
-                // (e.g., missing withdrawals post-Shanghai) should return -32602 "Invalid params".
+                // (e.g., missing withdrawals post-Shanghai, extra parentBeaconBlockRoot on V1/V2)
+                // should return -32602 "Invalid params".
                 // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md
                 // Fixes: https://github.com/paradigmxyz/reth/issues/8732
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
-                    VersionSpecificValidationError::HasWithdrawalsPreShanghai,
+                    VersionSpecificValidationError::HasWithdrawalsPreShanghai |
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
@@ -150,7 +152,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
                     VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
                 ),
             ) => jsonrpsee_types::error::ErrorObject::owned(
@@ -277,13 +278,24 @@ mod tests {
             ),
         );
 
-        // Beacon root shape mismatches on PayloadAttributes are reported as -38003.
+        // ParentBeaconBlockRoot on V1/V2 is a structure mismatch → -32602
+        ensure_engine_rpc_error(
+            INVALID_PARAMS_CODE,
+            INVALID_PARAMS_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                ),
+            ),
+        );
+
+        // Missing ParentBeaconBlockRoot on V3+ → -38003
         ensure_engine_rpc_error(
             INVALID_PAYLOAD_ATTRIBUTES_ERROR,
             INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
                 ),
             ),
         );
