@@ -16,17 +16,17 @@ rpc-compat:
   # syncing mode, the test expects syncing to be false on start
   - eth_syncing/check-syncing (reth)
 
-engine-withdrawals: []
+engine-withdrawals: [ ]
 
-engine-api: []
+engine-api: [ ]
 
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
 
-sync: []
+sync: [ ]
 
-engine-auth: []
+engine-auth: [ ]
 
 # EIP-7610 related tests (Revert creation in case of non-empty storage):
 #
