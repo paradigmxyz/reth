@@ -13,7 +13,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
     ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PayloadStatusEnum, PraguePayloadFields,
+    PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -747,20 +747,9 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        let payload_attrs = if let Some(attrs) = payload_attrs {
-            // Evaluate forkchoice first. If the node is syncing / accepted / invalid for this
-            // state, return that outcome before validating payload attributes.
-            let fcu_res_without_attrs =
-                self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
-            if !matches!(
-                fcu_res_without_attrs.payload_status.status,
-                PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted
-            ) {
-                return Ok(fcu_res_without_attrs)
-            }
-
+        if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
-                self.inner.validator.ensure_well_formed_attributes(version, &attrs);
+                self.inner.validator.ensure_well_formed_attributes(version, attrs);
 
             // From the engine API spec:
             //
@@ -772,13 +761,14 @@ where
             //
             // NOTE: This also applies to cancun/shanghai-specific payload attributes.
             if let Err(err) = attr_validation_res {
+                let fcu_res =
+                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
+                if fcu_res.is_invalid() || fcu_res.payload_status.is_syncing() {
+                    return Ok(fcu_res)
+                }
                 return Err(err.into())
             }
-
-            Some(attrs)
-        } else {
-            None
-        };
+        }
 
         Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
     }
