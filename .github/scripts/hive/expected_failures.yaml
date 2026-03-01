@@ -16,25 +16,14 @@ rpc-compat:
   # syncing mode, the test expects syncing to be false on start
   - eth_syncing/check-syncing (reth)
 
-# no fix due to https://github.com/paradigmxyz/reth/issues/8732
-engine-withdrawals:
-  - Withdrawals Fork On Genesis (Paris) (reth)
-  - Withdrawals Fork on Block 1 (Paris) (reth)
-  - Withdrawals Fork on Block 2 (Paris) (reth)
-  - Withdrawals Fork on Block 3 (Paris) (reth)
-  - Withdraw to a single account (Paris) (reth)
-  - Withdraw to two accounts (Paris) (reth)
-  - Withdraw many accounts (Paris) (reth)
-  - Withdraw zero amount (Paris) (reth)
-  - Empty Withdrawals (Paris) (reth)
-  - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
-  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
+engine-withdrawals: [ ]
 
 engine-api: [ ]
 
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
+
 sync: [ ]
 
 engine-auth: [ ]
@@ -45,7 +34,7 @@ engine-auth: [ ]
 #   The test artificially creates an empty account with storage, then tests EIP-7610's behavior.
 #   On mainnet, ~25 such accounts exist as contract addresses (derived from keccak(prefix, caller,
 #   nonce/salt), not from public keys). No private key exists for contract addresses. To trigger
-#   this with EIP-7702, you'd need to recover a private key from one of the already deployed contract addresses - mathematically impossible. 
+#   this with EIP-7702, you'd need to recover a private key from one of the already deployed contract addresses - mathematically impossible.
 #
 # tests/paris/eip7610_create_collision/test_initcollision.py::test_init_collision_*
 #   Requires hash collision on create2 address to target already deployed accounts with storage.
