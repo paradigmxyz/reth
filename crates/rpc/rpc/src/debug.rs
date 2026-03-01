@@ -3,7 +3,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, map::HashMap, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -296,6 +296,14 @@ where
             block_overrides,
             tx_index,
         } = opts;
+
+        // Extract storage override keys before they are consumed. These are used
+        // to pre-load overridden slots into the journal before CREATE/CREATE2 marks
+        // the account as "newly created" (which causes the journal to return zero
+        // for any slot not already loaded). See `StateOverrideSeeder`.
+        let storage_override_keys =
+            StateOverrideSeeder::extract_keys(state_overrides.as_ref());
+
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
 
         // Check if we need to replay transactions for a specific tx_index
@@ -310,11 +318,12 @@ where
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let mut seeder = StateOverrideSeeder::new(storage_override_keys);
                 let res = this.eth_api().inspect(
                     &mut *db,
                     evm_env.clone(),
                     tx_env.clone(),
-                    &mut inspector,
+                    &mut (&mut seeder, &mut inspector),
                 )?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, db)
@@ -1158,5 +1167,100 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+/// Inspector that pre-loads state-override storage slots into the journal before
+/// `create_account_checkpoint()` marks a CREATE2 target as "newly created".
+///
+/// **Why this is needed:** revm's journal optimizes SLOAD for newly-created accounts
+/// by returning zero for any storage slot not already in the journal's in-memory map
+/// (since a truly new account has empty storage). However, when `stateOverrides` with
+/// `stateDiff` pre-populate storage for an address that is later deployed via CREATE2,
+/// those override values are in the database but never loaded into the journal. After
+/// CREATE2 marks the account as created, the journal short-circuits and returns zero
+/// instead of querying the database.
+///
+/// **How this fixes it:** The inspector's `create()` callback fires *before*
+/// `create_account_checkpoint()`. By calling `journal.sload()` for each overridden
+/// slot at this point, the values are loaded from the database into the journal's
+/// account storage as "Occupied" entries. When CREATE2 subsequently sets the Created
+/// flag, these Occupied entries survive and subsequent SLOADs return the correct
+/// override values.
+///
+/// **Trade-off:** Pre-loading via `sload()` marks the slots as warm, which slightly
+/// changes the gas cost of the first real SLOAD from cold (2100) to warm (100). This
+/// is acceptable for debug/trace RPCs. A proper fix would require revm to expose an
+/// API for seeding cold storage slots.
+struct StateOverrideSeeder {
+    /// Maps overridden addresses to their set of overridden storage keys.
+    storage_override_keys: HashMap<Address, Vec<U256>>,
+}
+
+impl StateOverrideSeeder {
+    fn new(storage_override_keys: HashMap<Address, Vec<U256>>) -> Self {
+        Self { storage_override_keys }
+    }
+
+    /// Extracts the set of overridden storage keys from the state overrides.
+    fn extract_keys(
+        state_overrides: Option<&alloy_rpc_types_eth::state::StateOverride>,
+    ) -> HashMap<Address, Vec<U256>> {
+        let Some(overrides) = state_overrides else {
+            return HashMap::default();
+        };
+        overrides
+            .iter()
+            .filter_map(|(addr, account_override)| {
+                let storage = account_override
+                    .state_diff
+                    .as_ref()
+                    .or(account_override.state.as_ref())?;
+                if storage.is_empty() {
+                    return None;
+                }
+                let keys: Vec<U256> = storage.keys().map(|k| U256::from_be_bytes(k.0)).collect();
+                Some((*addr, keys))
+            })
+            .collect()
+    }
+}
+
+impl<CTX> revm::inspector::Inspector<CTX> for StateOverrideSeeder
+where
+    CTX: revm::context_interface::ContextTr,
+{
+    fn create(
+        &mut self,
+        context: &mut CTX,
+        inputs: &mut revm::interpreter::CreateInputs,
+    ) -> Option<revm::interpreter::CreateOutcome> {
+        use revm::context_interface::{journaled_state::JournalTr, CreateScheme};
+
+        if self.storage_override_keys.is_empty() {
+            return None;
+        }
+
+        // Compute the target address for CREATE2/Custom schemes.
+        // For CREATE, the address depends on the caller's nonce which may not be
+        // finalized yet, so we skip seeding (CREATE + stateDiff is rare).
+        let addr = match inputs.scheme() {
+            CreateScheme::Create2 { salt } => {
+                inputs.caller().create2_from_code(salt.to_be_bytes(), inputs.init_code())
+            }
+            CreateScheme::Custom { address } => address,
+            CreateScheme::Create => return None,
+        };
+
+        if let Some(keys) = self.storage_override_keys.get(&addr) {
+            for &slot in keys {
+                // sload() populates the journal's account storage map. Errors are
+                // silently ignored — if the DB read fails, the slot simply won't
+                // be seeded and will return zero (same as without the fix).
+                let _ = context.journal_mut().sload(addr, slot);
+            }
+        }
+
+        None
     }
 }
