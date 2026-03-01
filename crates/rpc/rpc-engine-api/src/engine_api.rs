@@ -747,7 +747,7 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        if let Some(attrs) = payload_attrs {
+        let payload_attrs = if let Some(attrs) = payload_attrs {
             // Evaluate forkchoice first. If the node is syncing / accepted / invalid for this
             // state, return that outcome before validating payload attributes.
             let fcu_res_without_attrs =
@@ -775,14 +775,12 @@ where
                 return Err(err.into())
             }
 
-            return Ok(self
-                .inner
-                .beacon_consensus
-                .fork_choice_updated(state, Some(attrs), version)
-                .await?)
-        }
+            Some(attrs)
+        } else {
+            None
+        };
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
     }
 
     /// Returns reference to supported capabilities.
