@@ -301,8 +301,7 @@ where
         // to pre-load overridden slots into the journal before CREATE/CREATE2 marks
         // the account as "newly created" (which causes the journal to return zero
         // for any slot not already loaded). See `StateOverrideSeeder`.
-        let storage_override_keys =
-            StateOverrideSeeder::extract_keys(state_overrides.as_ref());
+        let storage_override_keys = StateOverrideSeeder::extract_keys(state_overrides.as_ref());
 
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
 
@@ -1198,7 +1197,7 @@ struct StateOverrideSeeder {
 }
 
 impl StateOverrideSeeder {
-    fn new(storage_override_keys: HashMap<Address, Vec<U256>>) -> Self {
+    const fn new(storage_override_keys: HashMap<Address, Vec<U256>>) -> Self {
         Self { storage_override_keys }
     }
 
@@ -1212,10 +1211,8 @@ impl StateOverrideSeeder {
         overrides
             .iter()
             .filter_map(|(addr, account_override)| {
-                let storage = account_override
-                    .state_diff
-                    .as_ref()
-                    .or(account_override.state.as_ref())?;
+                let storage =
+                    account_override.state_diff.as_ref().or(account_override.state.as_ref())?;
                 if storage.is_empty() {
                     return None;
                 }
