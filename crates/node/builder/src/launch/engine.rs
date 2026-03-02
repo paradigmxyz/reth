@@ -241,6 +241,7 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            ctx.task_executor().clone(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
