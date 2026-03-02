@@ -451,7 +451,7 @@ where
                 // parallel right away (sending to prewarm as soon as each tx is
                 // converted), but the ordered consumer waits for the sequential path
                 // to finish before yielding to execution.
-                executor.spawn_blocking_named("tx-iterator-parallel", move || {
+                executor.spawn_blocking_named("tx-iterator-par", move || {
                     rest.into_par_iter()
                         .enumerate()
                         .map(|(i, tx)| {
