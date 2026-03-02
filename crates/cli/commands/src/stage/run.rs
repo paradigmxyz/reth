@@ -282,14 +282,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::AccountHashing => (
                     Box::new(AccountHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size, commit_entries: u64::MAX },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::StorageHashing => (
                     Box::new(StorageHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size, commit_entries: u64::MAX },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
                         etl_config,
                     )),
                     None,
