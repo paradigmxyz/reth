@@ -155,11 +155,12 @@ where
             return Ok(None)
         };
 
-        if start_block == 0 {
-            return Ok(Some(ExecutionOutcome::default()))
-        }
+        let Some(parent_block) = start_block.checked_sub(1) else {
+            // Block 0 has no parent state to replay from.
+            return Ok(None)
+        };
 
-        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
+        let state_provider = self.provider().history_by_block_number(parent_block)?;
         let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
 
         let mut blocks = Vec::with_capacity(block_count as usize);
