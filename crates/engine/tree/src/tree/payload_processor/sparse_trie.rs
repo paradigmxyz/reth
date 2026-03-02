@@ -190,7 +190,7 @@ where
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
-        max_storage_tries: usize,
+        max_hot_slots: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         disable_pruning: bool,
@@ -199,8 +199,7 @@ where
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
         if !disable_pruning {
-            // `max_storage_tries` is treated as global LFU hot-slot capacity by SparseStateTrie.
-            trie.prune(prune_depth, max_storage_tries);
+            trie.prune(prune_depth, max_hot_slots);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
         }
         let deferred = trie.take_deferred_drops();

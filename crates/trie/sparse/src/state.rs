@@ -850,9 +850,7 @@ where
 
     /// Prunes account/storage tries according to global LFU hot-slot retention.
     ///
-    /// The `max_storage_tries` argument is interpreted as the LFU hot-slot capacity.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained.
+    /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
     /// - Account trie retains only paths needed for retained addresses.
     /// - Storage tries retain only paths needed for retained slots.
     /// - All other revealed paths are pruned to hash stubs or fully evicted.
@@ -871,10 +869,10 @@ where
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
         skip_all,
-        fields(%max_depth, %max_storage_tries)
+        fields(%max_depth, %max_hot_slots)
     )]
-    pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        self.hot_slots_lfu.set_capacity(max_storage_tries);
+    pub fn prune(&mut self, max_depth: usize, max_hot_slots: usize) {
+        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
         let retained = self.hot_slots_lfu.retained_slots_by_address();
         let mut retained_account_paths: Vec<Nibbles> =
             retained.keys().copied().map(Nibbles::unpack).collect();
@@ -1076,9 +1074,16 @@ struct HotSlotsLfu {
 }
 
 impl HotSlotsLfu {
-    /// Sets LFU capacity and trims entries if needed.
-    fn set_capacity(&mut self, capacity: usize) {
+    /// Sets LFU capacity, decays frequencies, and trims entries if needed.
+    fn decay_and_evict(&mut self, capacity: usize) {
         self.capacity = capacity;
+
+        // Halve all frequencies so stale entries gradually decay to zero.
+        self.frequencies.retain(|_, freq| {
+            *freq >>= 1;
+            *freq > 0
+        });
+
         while self.frequencies.len() > self.capacity {
             let Some(evict_key) = self
                 .frequencies
