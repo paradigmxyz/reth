@@ -45,12 +45,7 @@ async fn only_blobs_eviction() {
     let size_range = 10..1100;
 
     // create mock tx distribution, 100% blobs
-    let tx_ratio = MockTransactionRatio {
-        legacy_pct: 0,
-        dynamic_fee_pct: 0,
-        blob_pct: 100,
-        access_list_pct: 0,
-    };
+    let tx_ratio = MockTransactionRatio::new(0, 0, 0, 100);
 
     // Vary the amount of senders
     let senders = [1, 10, 100, total_txs];
@@ -162,12 +157,7 @@ async fn mixed_eviction() {
     let size_range = 10..1100;
 
     // Adjust the ratios to include a mix of transaction types
-    let tx_ratio = MockTransactionRatio {
-        legacy_pct: 25,
-        dynamic_fee_pct: 25,
-        blob_pct: 25,
-        access_list_pct: 25,
-    };
+    let tx_ratio = MockTransactionRatio::new(25, 25, 25, 25);
 
     let senders = [1, 5, 10];
     for sender_amt in &senders {
@@ -269,12 +259,7 @@ async fn nonce_gaps_eviction() {
     let size_range = 10..1100;
 
     // Adjust the ratios to include a mix of transaction types
-    let tx_ratio = MockTransactionRatio {
-        legacy_pct: 25,
-        dynamic_fee_pct: 25,
-        blob_pct: 25,
-        access_list_pct: 25,
-    };
+    let tx_ratio = MockTransactionRatio::new(25, 25, 25, 25);
 
     let senders = [1, 5, 10];
     for sender_amt in &senders {

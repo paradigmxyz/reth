@@ -397,12 +397,7 @@ mod tests {
 
     #[test]
     fn test_on_chain_nonce_scenario() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
+        let transaction_ratio = MockTransactionRatio::new(30, 0, 70, 0);
 
         let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
@@ -434,12 +429,7 @@ mod tests {
 
     #[test]
     fn test_higher_nonce_scenario() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
+        let transaction_ratio = MockTransactionRatio::new(30, 0, 70, 0);
 
         let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
@@ -471,12 +461,7 @@ mod tests {
 
     #[test]
     fn test_below_base_fee_scenario() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
+        let transaction_ratio = MockTransactionRatio::new(30, 0, 70, 0);
 
         let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
@@ -510,12 +495,7 @@ mod tests {
 
     #[test]
     fn test_fill_nonce_gap_scenario() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
+        let transaction_ratio = MockTransactionRatio::new(30, 0, 70, 0);
 
         let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
@@ -563,12 +543,7 @@ mod tests {
 
     #[test]
     fn test_random_scenarios() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
+        let transaction_ratio = MockTransactionRatio::new(30, 0, 70, 0);
 
         let base_fee = 10u128;
         let fee_ranges = MockFeeRange {

@@ -1612,12 +1612,7 @@ impl MockTransactionDistribution {
         // now we can check and modify the distribution, preserving potentially uneven ratios
         // between transaction types
         if first_tx.is_eip4844() {
-            modified_distribution.transaction_ratio = MockTransactionRatio {
-                legacy_pct: 0,
-                access_list_pct: 0,
-                dynamic_fee_pct: 0,
-                blob_pct: 100,
-            };
+            modified_distribution.transaction_ratio = MockTransactionRatio::new(0, 0, 0, 100);
 
             // finally generate the transaction set
             NonConflictingSetOutcome::BlobsOnly(modified_distribution.tx_set(
