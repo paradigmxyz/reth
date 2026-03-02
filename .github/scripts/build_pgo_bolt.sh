@@ -2,10 +2,13 @@
 # PGO+BOLT optimized build script for reth/op-reth.
 #
 # Environment variables:
-#   BINARY   - Binary to build: reth (default) or op-reth
-#   PROFILE  - Cargo profile (default: maxperf)
-#   FEATURES - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
-#   TARGET   - Target triple (default: auto-detected from rustc)
+#   BINARY       - Binary to build: reth (default) or op-reth
+#   PROFILE      - Cargo profile (default: maxperf)
+#   FEATURES     - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
+#   TARGET       - Target triple (default: auto-detected from rustc)
+#   PGO_PROFDATA - Path to a pre-collected .profdata file (optional).
+#                  When set, the PGO instrumentation phase is skipped and this
+#                  profile is used directly for the optimized build.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -72,20 +75,29 @@ run() {
     "$1" --help &>/dev/null || true
 }
 
-export LLVM_PROFILE_FILE=$PWD/target/pgo-profiles/${BINARY}_%m_%p.profraw
-
 echo "Installing cargo-pgo..."
 cargo install cargo-pgo --quiet
 rustup component add llvm-tools-preview
 install_bolt
 cargo pgo info
 
-# PGO: build instrumented, run, gather profiles
+# PGO phase: use pre-collected profile or fall back to instrumentation
 echo "=== PGO Phase ==="
-echo "Building PGO-instrumented binary..."
-cargo pgo build -- "${CARGO_ARGS[@]}"
-echo "Running instrumented binary to gather profiles..."
-run "target/$TARGET/$PROFILE_DIR/$BINARY"
+if [ -n "${PGO_PROFDATA:-}" ] && [ -f "$PGO_PROFDATA" ]; then
+    echo "Using pre-collected PGO profile: $PGO_PROFDATA"
+    ls -lh "$PGO_PROFDATA"
+    # Place the profdata where cargo-pgo expects it
+    PGO_MERGED_DIR="$PWD/target/pgo-profiles"
+    mkdir -p "$PGO_MERGED_DIR"
+    cp "$PGO_PROFDATA" "$PGO_MERGED_DIR/merged.profdata"
+else
+    echo "No pre-collected profile, running instrumentation..."
+    export LLVM_PROFILE_FILE=$PWD/target/pgo-profiles/${BINARY}_%m_%p.profraw
+    echo "Building PGO-instrumented binary..."
+    cargo pgo build -- "${CARGO_ARGS[@]}"
+    echo "Running instrumented binary to gather profiles..."
+    run "target/$TARGET/$PROFILE_DIR/$BINARY"
+fi
 
 # BOLT: build instrumented with PGO, run, optimize
 echo "=== BOLT Phase ==="

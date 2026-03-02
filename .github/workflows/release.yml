@@ -13,6 +13,10 @@ on:
         description: "Enable dry run mode (builds artifacts but skips uploads and release creation)"
         type: boolean
         default: false
+      pgo_blocks:
+        description: "Number of blocks to execute for PGO profiling on self-hosted runner"
+        type: string
+        default: "10"
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -60,10 +64,54 @@ jobs:
           cargo_ver=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           [[ "$tag" == "$cargo_ver"* ]] || { echo "Tag $tag doesn’t match the Cargo version $cargo_ver"; exit 1; }
 
+  pgo-profile:
+    name: collect PGO profiles
+    runs-on: [self-hosted, Linux, X64]
+    needs: extract-version
+    timeout-minutes: 120
+    env:
+      SCHELK_MOUNT: /reth-bench
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            dmsetup linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+      - name: Check snapshot is available
+        run: |
+          if ! .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "::error::Snapshot not available on this runner"
+            exit 1
+          fi
+
+      - name: Collect PGO profiles
+        run: |
+          PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
+          PROFILE=maxperf \
+          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
+            .github/scripts/pgo-profile.sh
+
+      - name: Upload PGO profile
+        uses: actions/upload-artifact@v6
+        with:
+          name: pgo-profdata
+          path: target/pgo-profiles/merged.profdata
+          retention-days: 1
+
   build:
     name: build release
     runs-on: ${{ matrix.configs.os }}
-    needs: extract-version
+    needs: [extract-version, pgo-profile]
     continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
       fail-fast: true
@@ -113,6 +161,13 @@ jobs:
           echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
+      - name: Download PGO profile
+        if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/download-artifact@v7
+        with:
+          name: pgo-profdata
+          path: pgo-profiles
+
       - name: Build Reth with PGO+BOLT
         if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
         run: |
@@ -123,6 +178,7 @@ jobs:
           PROFILE=${{ matrix.configs.profile }} \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           TARGET=${{ matrix.configs.target }} \
+          PGO_PROFDATA="$PWD/pgo-profiles/merged.profdata" \
             .github/scripts/build_pgo_bolt.sh
 
       - name: Build Reth
