@@ -13,7 +13,6 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
-#[cfg(feature = "std")]
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,

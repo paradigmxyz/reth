@@ -1169,9 +1169,7 @@ impl SparseTrie for ParallelSparseTrie {
                     child.extend(key);
 
                     // Within the safe zone or on a retained path — keep traversing.
-                    if depth < max_depth ||
-                        has_retained_descendant(&retained_leaves, &child)
-                    {
+                    if depth < max_depth || has_retained_descendant(&retained_leaves, &child) {
                         stack.push((child, depth + 1));
                         continue;
                     }
@@ -1208,9 +1206,7 @@ impl SparseTrie for ParallelSparseTrie {
                         child.push_unchecked(nibble);
 
                         // Within the safe zone or on a retained path — keep traversing.
-                        if depth < max_depth ||
-                            has_retained_descendant(&retained_leaves, &child)
-                        {
+                        if depth < max_depth || has_retained_descendant(&retained_leaves, &child) {
                             stack.push((child, depth + 1));
                             continue;
                         }
@@ -7957,10 +7953,7 @@ mod tests {
         assert!(trie.size_hint() < nodes_before, "should have pruned nodes");
 
         // The retained key's value must still be readable.
-        assert!(
-            trie.get_leaf_value(&retained_key).is_some(),
-            "retained leaf must survive"
-        );
+        assert!(trie.get_leaf_value(&retained_key).is_some(), "retained leaf must survive");
 
         // A sibling key under a different top-level branch must be blinded.
         let dropped_key = all_keys[4]; // [1, 0, ...]
