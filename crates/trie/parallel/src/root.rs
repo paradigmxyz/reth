@@ -105,7 +105,7 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = channel::bounded(1);
+            let (tx, rx) = channel::oneshot();
 
             // Spawn a blocking task to calculate account's storage root from database I/O
             drop(handle.spawn_blocking(move || {

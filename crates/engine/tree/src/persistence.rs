@@ -374,7 +374,7 @@ mod tests {
         let handle = default_persistence_handle();
 
         let blocks = vec![];
-        let (tx, rx) = channel::bounded(1);
+        let (tx, rx) = channel::oneshot();
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -393,7 +393,7 @@ mod tests {
         let block_hash = executed.recovered_block().hash();
 
         let blocks = vec![executed];
-        let (tx, rx) = channel::bounded(1);
+        let (tx, rx) = channel::oneshot();
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -413,7 +413,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = channel::bounded(1);
+        let (tx, rx) = channel::oneshot();
 
         handle.save_blocks(blocks, tx).unwrap();
         let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
@@ -430,7 +430,7 @@ mod tests {
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = channel::bounded(1);
+            let (tx, rx) = channel::oneshot();
 
             handle.save_blocks(blocks, tx).unwrap();
 

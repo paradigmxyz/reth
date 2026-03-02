@@ -408,7 +408,7 @@ impl ValidatorTestHarness {
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = channel::bounded(1);
+        let (_tx, rx) = channel::oneshot();
 
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
