@@ -44,7 +44,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::AtomicUsize,
         mpsc::{self, channel},
         Arc,
     },
@@ -489,17 +489,16 @@ where
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
 
         // configure prewarming
-        let prewarm_ctx = PrewarmContext {
+        let prewarm_ctx = PrewarmContext::new(
             env,
-            evm_config: self.evm_config.clone(),
-            saved_cache: saved_cache.clone(),
-            provider: provider_builder,
-            metrics: PrewarmMetrics::default(),
-            terminate_execution: Arc::new(AtomicBool::new(false)),
-            executed_tx_index: Arc::clone(&executed_tx_index),
-            precompile_cache_disabled: self.precompile_cache_disabled,
-            precompile_cache_map: self.precompile_cache_map.clone(),
-        };
+            self.evm_config.clone(),
+            saved_cache.clone(),
+            provider_builder,
+            PrewarmMetrics::default(),
+            Arc::clone(&executed_tx_index),
+            self.precompile_cache_disabled,
+            self.precompile_cache_map.clone(),
+        );
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),

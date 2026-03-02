@@ -149,7 +149,7 @@ where
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
-                    if ctx.terminate_execution.load(Ordering::Relaxed) {
+                    if ctx.should_stop() {
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
                             "Termination requested, stopping transaction distribution"
@@ -207,13 +207,13 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some((evm, metrics, terminate_execution)) =
+            let Some((evm, metrics)) =
                 worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
             else {
                 return;
             };
 
-            if terminate_execution.load(Ordering::Relaxed) {
+            if ctx.should_stop() {
                 return;
             }
 
@@ -241,7 +241,7 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            if terminate_execution.load(Ordering::Relaxed) {
+            if ctx.should_stop() {
                 return;
             }
 
@@ -358,7 +358,7 @@ where
             bal.par_iter().for_each_init(
                 || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
                 |(ctx, provider), account| {
-                    if ctx.terminate_execution.load(Ordering::Relaxed) {
+                    if ctx.should_stop() {
                         return;
                     }
                     ctx.prefetch_bal_account(provider, account);
@@ -452,7 +452,7 @@ where
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
                     debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
-                    self.ctx.terminate_execution.store(true, Ordering::Relaxed);
+                    self.ctx.stop();
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
@@ -506,7 +506,7 @@ where
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
-    pub terminate_execution: Arc<AtomicBool>,
+    terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
@@ -517,13 +517,40 @@ where
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
+impl<N, P, Evm> PrewarmContext<N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    /// Creates a new prewarm context.
+    pub fn new(
+        env: ExecutionEnv<Evm>,
+        evm_config: Evm,
+        saved_cache: Option<SavedCache>,
+        provider: StateProviderBuilder<N, P>,
+        metrics: PrewarmMetrics,
+        executed_tx_index: Arc<AtomicUsize>,
+        precompile_cache_disabled: bool,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
+        Self {
+            env,
+            evm_config,
+            saved_cache,
+            provider,
+            metrics,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index,
+            precompile_cache_disabled,
+            precompile_cache_map,
+        }
+    }
+}
+
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<(
-    EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
-    PrewarmMetrics,
-    Arc<AtomicBool>,
-)>;
+type PrewarmEvmState<Evm> =
+    Option<(EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>, PrewarmMetrics)>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -582,7 +609,19 @@ where
             });
         }
 
-        Some((evm, self.metrics.clone(), self.terminate_execution.clone()))
+        Some((evm, self.metrics.clone()))
+    }
+
+    /// Returns `true` if prewarming should stop.
+    #[inline]
+    pub fn should_stop(&self) -> bool {
+        self.terminate_execution.load(Ordering::Relaxed)
+    }
+
+    /// Signals all prewarm tasks to stop execution.
+    #[inline]
+    pub fn stop(&self) {
+        self.terminate_execution.store(true, Ordering::Relaxed);
     }
 
     /// Prefetches a single account and all its storage slots from the BAL into the cache.
