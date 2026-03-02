@@ -7,21 +7,18 @@ use crate::{
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashSet},
+    map::{B256Map, HashSet},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 #[cfg(feature = "std")]
-use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
     TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-#[cfg(feature = "std")]
-use tracing::debug;
 use tracing::{instrument, trace};
 
 /// Holds data that should be dropped after any locks are released.
@@ -325,8 +322,6 @@ where
         {
             for (account, storage_proofs) in multiproof.storage_proofs {
                 self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
-                // Mark this storage trie as hot (accessed this tick)
-                self.storage.modifications.mark_accessed(account);
             }
 
             Ok(())
@@ -372,8 +367,6 @@ where
             for (account, result, revealed_nodes, trie, bufs) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
-                // Mark this storage trie as hot (accessed this tick)
-                self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -881,7 +874,6 @@ where
         fields(%max_depth, %max_storage_tries)
     )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        let _ = max_depth;
         self.hot_slots_lfu.set_capacity(max_storage_tries);
         let retained = self.hot_slots_lfu.retained_slots_by_address();
         let mut retained_account_paths: Vec<Nibbles> =
@@ -891,12 +883,12 @@ where
         rayon::join(
             || {
                 if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune_by_retained_leaves(&retained_account_paths);
+                    trie.prune(max_depth, &retained_account_paths);
                 }
                 self.revealed_account_paths.clear();
             },
             || {
-                self.storage.prune_by_retained_slots(retained);
+                self.storage.prune_by_retained_slots(max_depth, retained);
             },
         );
 
@@ -933,127 +925,19 @@ struct StorageTries<S = ParallelSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
-    /// Tracks access patterns and modification state of storage tries for smart pruning decisions.
-    modifications: StorageTrieModifications,
 }
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes and evicts storage tries.
-    ///
-    /// Keeps the top `max_storage_tries` by a score combining size and heat.
-    /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
-    #[allow(dead_code)]
-    fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        let fn_start = Instant::now();
-        let mut stats =
-            StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
-
-        // Update heat for accessed tries
-        self.modifications.update_and_reset();
-
-        // Collect (address, size, score) for all tries
-        // Score = size * heat_multiplier
-        // Hot tries (high heat) get boosted weight
-        let mut trie_info: Vec<(B256, usize, usize)> = self
-            .tries
-            .iter()
-            .map(|(address, trie)| {
-                let size = match trie {
-                    RevealableSparseTrie::Blind(_) => return (*address, 0, 0),
-                    RevealableSparseTrie::Revealed(t) => t.size_hint(),
-                };
-                let heat = self.modifications.heat(address);
-                // Heat multiplier: 1 (cold) to 3 (very hot, heat >= 4)
-                let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
-                (*address, size, size * heat_multiplier)
-            })
-            .collect();
-
-        // Use O(n) selection to find top max_storage_tries by score
-        if trie_info.len() > max_storage_tries {
-            trie_info
-                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.2.cmp(&a.2));
-            trie_info.truncate(max_storage_tries);
-        }
-        let tries_to_keep: B256Map<usize> =
-            trie_info.iter().map(|(address, size, _)| (*address, *size)).collect();
-        stats.tries_to_keep = tries_to_keep.len();
-
-        // Collect keys to evict
-        let tries_to_clear: Vec<B256> =
-            self.tries.keys().filter(|addr| !tries_to_keep.contains_key(*addr)).copied().collect();
-        stats.tries_to_evict = tries_to_clear.len();
-
-        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for address in &tries_to_clear {
-            if let Some(mut trie) = self.tries.remove(address) {
-                trie.clear();
-                self.cleared_tries.push(trie);
-            }
-            if let Some(mut paths) = self.revealed_paths.remove(address) {
-                paths.clear();
-                self.cleared_revealed_paths.push(paths);
-            }
-            self.modifications.remove(address);
-        }
-
-        // Prune storage tries that are kept, but only if:
-        // - They haven't been pruned since last access
-        // - They're large enough to be worth pruning
-        const MIN_SIZE_TO_PRUNE: usize = 1000;
-        let prune_start = Instant::now();
-        for (address, size) in &tries_to_keep {
-            if *size < MIN_SIZE_TO_PRUNE {
-                stats.skipped_small += 1;
-                continue; // Small tries aren't worth the DFS cost
-            }
-            let Some(heat_state) = self.modifications.get_mut(address) else {
-                continue; // No heat state = not tracked
-            };
-            // Only prune if backlog >= 2 (skip every other cycle)
-            if heat_state.prune_backlog < 2 {
-                stats.skipped_recently_pruned += 1;
-                continue; // Recently pruned, skip this cycle
-            }
-            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                trie.prune(max_depth);
-                heat_state.prune_backlog = 0; // Reset backlog after prune
-                stats.pruned_count += 1;
-            }
-        }
-        stats.prune_elapsed = prune_start.elapsed();
-
-        // Clear revealed_paths for kept tries
-        for hash in tries_to_keep.keys() {
-            if let Some(paths) = self.revealed_paths.get_mut(hash) {
-                paths.clear();
-            }
-        }
-
-        stats.total_tries_after = self.tries.len();
-        stats.total_elapsed = fn_start.elapsed();
-
-        debug!(
-            target: "trie::sparse",
-            before = stats.total_tries_before,
-            after = stats.total_tries_after,
-            kept = stats.tries_to_keep,
-            evicted = stats.tries_to_evict,
-            pruned = stats.pruned_count,
-            skipped_small = stats.skipped_small,
-            skipped_recent = stats.skipped_recently_pruned,
-            ?stats.prune_elapsed,
-            ?stats.total_elapsed,
-            "StorageTries::prune completed"
-        );
-    }
-
     /// Prunes storage tries using LFU-retained slots.
     ///
-    /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
-    /// those slots.
-    fn prune_by_retained_slots(&mut self, mut retained_slots: B256Map<Vec<Nibbles>>) {
+    /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned
+    /// using both the depth limit and retained slot paths.
+    fn prune_by_retained_slots(
+        &mut self,
+        max_depth: usize,
+        mut retained_slots: B256Map<Vec<Nibbles>>,
+    ) {
         let addresses_to_evict: Vec<B256> = self
             .tries
             .keys()
@@ -1070,12 +954,11 @@ impl<S: SparseTrieTrait> StorageTries<S> {
                 paths.clear();
                 self.cleared_revealed_paths.push(paths);
             }
-            self.modifications.remove(address);
         }
 
         for (address, slots) in &mut retained_slots {
             if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                trie.prune_by_retained_leaves(slots);
+                trie.prune(max_depth, slots);
             }
             if let Some(paths) = self.revealed_paths.get_mut(address) {
                 paths.clear();
@@ -1096,7 +979,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             set.clear();
             set
         }));
-        self.modifications.clear();
     }
 
     /// Shrinks the capacity of all storage tries to the given total sizes.
@@ -1179,21 +1061,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 }
 
-/// Statistics from a storage tries prune operation.
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-struct StorageTriesPruneStats {
-    total_tries_before: usize,
-    total_tries_after: usize,
-    tries_to_keep: usize,
-    tries_to_evict: usize,
-    pruned_count: usize,
-    skipped_small: usize,
-    skipped_recently_pruned: usize,
-    prune_elapsed: core::time::Duration,
-    total_elapsed: core::time::Duration,
-}
-
 /// Key for identifying a storage slot in the global LFU cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct HotSlotKey {
@@ -1261,81 +1128,6 @@ impl HotSlotsLfu {
         }
 
         grouped
-    }
-}
-
-/// Per-trie access tracking and prune state.
-///
-/// Tracks how frequently a storage trie is accessed and when it was last pruned,
-/// enabling smart pruning decisions that preserve frequently-used tries.
-#[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)]
-struct TrieModificationState {
-    /// Access frequency level (0-255). Incremented each cycle the trie is accessed.
-    /// Used for prioritizing which tries to keep during pruning.
-    heat: u8,
-    /// Prune backlog - cycles since last prune. Incremented each cycle,
-    /// reset to 0 when pruned. Used to decide when pruning is needed.
-    prune_backlog: u8,
-}
-
-/// Tracks access patterns and modification state of storage tries for smart pruning decisions.
-///
-/// Access-based tracking is more accurate than simple generation counting because it tracks
-/// actual access patterns rather than administrative operations (take/insert).
-///
-/// - Access frequency is incremented when a storage proof is revealed (accessed)
-/// - Access frequency decays each prune cycle for tries not accessed that cycle
-/// - Tries with higher access frequency are prioritized for preservation during pruning
-#[derive(Debug, Default)]
-struct StorageTrieModifications {
-    /// Access frequency and prune state per storage trie address.
-    state: B256Map<TrieModificationState>,
-    /// Tracks which tries were accessed in the current cycle (between prune calls).
-    accessed_this_cycle: B256Set,
-}
-
-#[allow(dead_code)]
-impl StorageTrieModifications {
-    /// Marks a storage trie as accessed this cycle.
-    /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].
-    #[inline]
-    fn mark_accessed(&mut self, address: B256) {
-        self.accessed_this_cycle.insert(address);
-    }
-
-    /// Returns mutable reference to the heat state for a storage trie.
-    #[inline]
-    fn get_mut(&mut self, address: &B256) -> Option<&mut TrieModificationState> {
-        self.state.get_mut(address)
-    }
-
-    /// Returns the heat level for a storage trie (0 if not tracked).
-    #[inline]
-    fn heat(&self, address: &B256) -> u8 {
-        self.state.get(address).map_or(0, |s| s.heat)
-    }
-
-    /// Updates heat and prune backlog for accessed tries.
-    /// Called at the start of each prune cycle.
-    fn update_and_reset(&mut self) {
-        for address in self.accessed_this_cycle.drain() {
-            let entry = self.state.entry(address).or_default();
-            entry.heat = entry.heat.saturating_add(1);
-            entry.prune_backlog = entry.prune_backlog.saturating_add(1);
-        }
-    }
-
-    /// Removes tracking for a specific address (when trie is evicted).
-    fn remove(&mut self, address: &B256) {
-        self.state.remove(address);
-        self.accessed_this_cycle.remove(address);
-    }
-
-    /// Clears all heat tracking state.
-    fn clear(&mut self) {
-        self.state.clear();
-        self.accessed_this_cycle.clear();
     }
 }
 

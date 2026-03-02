@@ -125,9 +125,6 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
-    /// Tracks heat of lower subtries for smart pruning decisions.
-    /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
-    subtrie_heat: SubtrieModifications,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -151,7 +148,6 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            subtrie_heat: SubtrieModifications::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
             #[cfg(feature = "trie-debug")]
@@ -308,7 +304,6 @@ impl SparseTrie for ParallelSparseTrie {
                     continue;
                 }
                 self.lower_subtries[idx].reveal(&node.path);
-                self.subtrie_heat.mark_modified(idx);
                 self.lower_subtries[idx].as_revealed_mut().expect("just revealed").reveal_node(
                     node.path,
                     &node.node,
@@ -1004,7 +999,6 @@ impl SparseTrie for ParallelSparseTrie {
         }
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
-        self.subtrie_heat.clear();
     }
 
     fn clear(&mut self) {
@@ -1016,7 +1010,6 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.branch_node_masks.clear();
-        self.subtrie_heat.clear();
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
@@ -1153,141 +1146,19 @@ impl SparseTrie for ParallelSparseTrie {
         upper_count + lower_count
     }
 
-    fn prune(&mut self, max_depth: usize) -> usize {
+    fn prune(&mut self, max_depth: usize, retained_leaves: &[Nibbles]) -> usize {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
-
-        // Decay heat for subtries not modified this cycle
-        self.subtrie_heat.decay_and_reset();
-
-        // DFS traversal to find nodes at max_depth that can be pruned.
-        // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
-        // We replace nodes with Hash stubs inline during traversal.
-        let mut effective_pruned_roots = Vec::<Nibbles>::new();
-        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
-        stack.push((Nibbles::default(), 0));
-
-        // DFS traversal: pop path and depth, skip if subtrie or node not found.
-        while let Some((path, depth)) = stack.pop() {
-            // Skip traversal into hot lower subtries beyond max_depth.
-            // At max_depth, we still need to process the node to convert children to hashes.
-            // This keeps frequently-modified subtries revealed to avoid expensive re-reveals.
-            if depth > max_depth &&
-                let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&path) &&
-                self.subtrie_heat.is_hot(idx)
-            {
-                continue;
-            }
-
-            let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path) else { continue };
-            let Some(node) = subtrie.nodes.get_mut(&path) else { continue };
-
-            match node {
-                SparseNode::Empty | SparseNode::Leaf { .. } => {}
-                SparseNode::Extension { key, state, .. } => {
-                    // For extension nodes at max depth, collapse both extension and its child
-                    // branch to preserve invariant of all extension nodes children being revealed.
-                    if depth == max_depth {
-                        let Some(hash) = state.cached_hash() else { continue };
-                        subtrie.nodes.remove(&path);
-
-                        let parent_path = path.slice(0..path.len() - 1);
-                        let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
-                            subtrie.nodes.get_mut(&parent_path).unwrap()
-                        else {
-                            panic!("expected branch node at path {parent_path:?}");
-                        };
-
-                        let nibble = path.last().unwrap();
-                        blinded_mask.set_bit(nibble);
-                        blinded_hashes[nibble as usize] = hash;
-
-                        effective_pruned_roots.push(path);
-                    } else {
-                        let mut child = path;
-                        child.extend(key);
-                        stack.push((child, depth + 1));
-                    }
-                }
-                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
-                    // For branch nodes at max depth, collapse all children onto them,
-                    if depth == max_depth {
-                        let mut blinded_mask = *blinded_mask;
-                        let mut blinded_hashes = blinded_hashes.clone();
-                        for nibble in state_mask.iter() {
-                            if blinded_mask.is_bit_set(nibble) {
-                                continue;
-                            }
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-
-                            let Entry::Occupied(entry) = self
-                                .subtrie_for_path_mut_untracked(&child)
-                                .unwrap()
-                                .nodes
-                                .entry(child)
-                            else {
-                                panic!("expected node at path {child:?}");
-                            };
-
-                            let Some(hash) = entry.get().cached_hash() else {
-                                continue;
-                            };
-                            entry.remove();
-                            blinded_mask.set_bit(nibble);
-                            blinded_hashes[nibble as usize] = hash;
-                            effective_pruned_roots.push(child);
-                        }
-
-                        let SparseNode::Branch {
-                            blinded_mask: old_blinded_mask,
-                            blinded_hashes: old_blinded_hashes,
-                            ..
-                        } = self
-                            .subtrie_for_path_mut_untracked(&path)
-                            .unwrap()
-                            .nodes
-                            .get_mut(&path)
-                            .unwrap()
-                        else {
-                            unreachable!("expected branch node at path {path:?}");
-                        };
-                        *old_blinded_mask = blinded_mask;
-                        *old_blinded_hashes = blinded_hashes;
-                    } else {
-                        for nibble in state_mask.iter() {
-                            if blinded_mask.is_bit_set(nibble) {
-                                continue;
-                            }
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-                            stack.push((child, depth + 1));
-                        }
-                    }
-                }
-            }
-        }
-
-        Self::finalize_pruned_roots(self, effective_pruned_roots)
-    }
-
-    fn prune_by_retained_leaves(&mut self, retained_leaves: &[Nibbles]) -> usize {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.reset();
-
-        if retained_leaves.is_empty() {
-            return self.prune(0)
-        }
 
         let mut retained_leaves = retained_leaves.to_vec();
         retained_leaves.sort_unstable();
         retained_leaves.dedup();
 
         let mut effective_pruned_roots = Vec::<Nibbles>::new();
-        let mut stack: SmallVec<[Nibbles; 32]> = SmallVec::new();
-        stack.push(Nibbles::default());
+        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
+        stack.push((Nibbles::default(), 0));
 
-        while let Some(path) = stack.pop() {
+        while let Some((path, depth)) = stack.pop() {
             let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path) else { continue };
             let Some(node) = subtrie.nodes.get_mut(&path) else { continue };
 
@@ -1297,8 +1168,11 @@ impl SparseTrie for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
 
-                    if has_retained_descendant(&retained_leaves, &child) {
-                        stack.push(child);
+                    // Within the safe zone or on a retained path — keep traversing.
+                    if depth < max_depth ||
+                        has_retained_descendant(&retained_leaves, &child)
+                    {
+                        stack.push((child, depth + 1));
                         continue;
                     }
 
@@ -1332,8 +1206,12 @@ impl SparseTrie for ParallelSparseTrie {
 
                         let mut child = path;
                         child.push_unchecked(nibble);
-                        if has_retained_descendant(&retained_leaves, &child) {
-                            stack.push(child);
+
+                        // Within the safe zone or on a retained path — keep traversing.
+                        if depth < max_depth ||
+                            has_retained_descendant(&retained_leaves, &child)
+                        {
+                            stack.push((child, depth + 1));
                             continue;
                         }
 
@@ -1683,7 +1561,6 @@ impl ParallelSparseTrie {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 self.lower_subtries[idx].reveal(path);
-                self.subtrie_heat.mark_modified(idx);
                 Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
         }
@@ -1717,8 +1594,7 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Returns a mutable reference to a subtrie without marking it as modified.
-    /// Used for internal operations like pruning that shouldn't affect heat tracking.
+    /// Returns a mutable reference to a subtrie without revealing it if blinded.
     fn subtrie_for_path_mut_untracked(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             Some(&mut self.upper_subtrie)
@@ -2286,7 +2162,6 @@ impl ParallelSparseTrie {
             }
 
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
-            self.subtrie_heat.mark_modified(index);
         }
     }
 
@@ -2440,68 +2315,6 @@ impl SubtriesBitmap {
     fn get(&self, idx: usize) -> bool {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
         self.0.bit(idx)
-    }
-
-    /// Clears all modification flags.
-    #[inline]
-    const fn clear(&mut self) {
-        self.0 = U256::ZERO;
-    }
-}
-
-/// Tracks heat (modification frequency) for each of the 256 lower subtries.
-///
-/// Heat is used to avoid pruning frequently-modified subtries, which would cause
-/// expensive re-reveal operations on subsequent updates.
-///
-/// - Heat is incremented by 2 when a subtrie is modified
-/// - Heat decays by 1 each prune cycle for subtries not modified that cycle
-/// - Subtries with heat > 0 are considered "hot" and skipped during pruning
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct SubtrieModifications {
-    /// Heat level (0-255) for each of the 256 lower subtries.
-    heat: [u8; NUM_LOWER_SUBTRIES],
-    /// Tracks which subtries were modified in the current cycle.
-    modified: SubtriesBitmap,
-}
-
-impl Default for SubtrieModifications {
-    fn default() -> Self {
-        Self { heat: [0; NUM_LOWER_SUBTRIES], modified: SubtriesBitmap::default() }
-    }
-}
-
-impl SubtrieModifications {
-    /// Marks a subtrie as modified, incrementing its heat by 1.
-    #[inline]
-    fn mark_modified(&mut self, idx: usize) {
-        debug_assert!(idx < NUM_LOWER_SUBTRIES);
-        self.modified.set(idx);
-        self.heat[idx] = self.heat[idx].saturating_add(1);
-    }
-
-    /// Returns whether a subtrie is currently hot (heat > 0).
-    #[inline]
-    fn is_hot(&self, idx: usize) -> bool {
-        debug_assert!(idx < NUM_LOWER_SUBTRIES);
-        self.heat[idx] > 0
-    }
-
-    /// Decays heat for subtries not modified this cycle and resets modification tracking.
-    /// Called at the start of each prune cycle.
-    fn decay_and_reset(&mut self) {
-        for (idx, heat) in self.heat.iter_mut().enumerate() {
-            if !self.modified.get(idx) {
-                *heat = heat.saturating_sub(1);
-            }
-        }
-        self.modified.clear();
-    }
-
-    /// Clears all heat tracking state.
-    const fn clear(&mut self) {
-        self.heat = [0; NUM_LOWER_SUBTRIES];
-        self.modified.clear();
     }
 }
 
@@ -7845,7 +7658,7 @@ mod tests {
         let root_before = parallel.root();
 
         // Prune at depth 0: the children of root become pruned roots
-        parallel.prune(0);
+        parallel.prune(0, &[]);
 
         let root_after = parallel.root();
         assert_eq!(root_before, root_after, "root hash must be preserved");
@@ -7864,10 +7677,6 @@ mod tests {
 
     #[test]
     fn test_prune_at_various_depths() {
-        // Test depths 0 and 1, which are in the Upper subtrie (no heat tracking).
-        // Depth 2 is the boundary where Lower subtries start (UPPER_TRIE_MAX_DEPTH=2),
-        // and with `depth >= max_depth` heat check, hot Lower subtries at depth 2
-        // are protected from pruning traversal.
         for max_depth in [0, 1] {
             let provider = DefaultTrieNodeProvider;
             let mut trie = ParallelSparseTrie::default();
@@ -7890,12 +7699,7 @@ mod tests {
             let root_before = trie.root();
             let nodes_before = trie.size_hint();
 
-            // Prune multiple times to allow heat to fully decay.
-            // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
-            // so we need 2 prune cycles: 1→0, then actual prune.
-            for _ in 0..2 {
-                trie.prune(max_depth);
-            }
+            trie.prune(max_depth, &[]);
 
             let root_after = trie.root();
             assert_eq!(root_before, root_after, "root hash should be preserved after prune");
@@ -7916,7 +7720,7 @@ mod tests {
     #[test]
     fn test_prune_empty_trie() {
         let mut trie = ParallelSparseTrie::default();
-        trie.prune(2);
+        trie.prune(2, &[]);
         let root = trie.root();
         assert_eq!(root, EMPTY_ROOT_HASH, "empty trie should have empty root hash");
     }
@@ -7940,7 +7744,7 @@ mod tests {
         }
 
         let root_before = trie.root();
-        trie.prune(1);
+        trie.prune(1, &[]);
         let root_after = trie.root();
         assert_eq!(root_before, root_after, "root hash must be preserved after prune");
     }
@@ -7961,7 +7765,7 @@ mod tests {
         let root_before = trie.root();
         let nodes_before = trie.size_hint();
 
-        trie.prune(0);
+        trie.prune(0, &[]);
 
         let root_after = trie.root();
         assert_eq!(root_before, root_after, "root hash should be preserved");
@@ -7987,7 +7791,7 @@ mod tests {
         trie.root();
         let nodes_before = trie.size_hint();
 
-        trie.prune(100);
+        trie.prune(100, &[]);
 
         assert_eq!(nodes_before, trie.size_hint(), "deep prune should have no effect");
     }
@@ -8013,12 +7817,7 @@ mod tests {
         .unwrap();
 
         let root_before = trie.root();
-        // Prune multiple times to allow heat to fully decay.
-        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
-        // so we need 2 prune cycles: 1→0, then actual prune.
-        for _ in 0..2 {
-            trie.prune(1);
-        }
+        trie.prune(1, &[]);
 
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
         // Root + branch
@@ -8040,7 +7839,7 @@ mod tests {
 
         let root_before = trie.root();
 
-        trie.prune(0);
+        trie.prune(0, &[]);
 
         assert_eq!(root_before, trie.root(), "root hash must be preserved after pruning");
     }
@@ -8064,7 +7863,7 @@ mod tests {
         }
 
         let root_before = trie.root();
-        trie.prune(0);
+        trie.prune(0, &[]);
         assert_eq!(root_before, trie.root(), "root hash must be preserved");
     }
 
@@ -8091,12 +7890,7 @@ mod tests {
 
         let root_before = trie.root();
 
-        // Prune multiple times to allow heat to fully decay.
-        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries.
-        let mut total_pruned = 0;
-        for _ in 0..2 {
-            total_pruned += trie.prune(1);
-        }
+        let total_pruned = trie.prune(1, &[]);
 
         assert!(total_pruned > 0, "should have pruned some nodes");
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
@@ -8107,7 +7901,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_by_retained_leaves_keeps_only_hot_paths() {
+    fn test_prune_retained_leaves_keeps_only_hot_paths() {
         let provider = DefaultTrieNodeProvider;
         let mut trie = ParallelSparseTrie::default();
 
@@ -8122,13 +7916,58 @@ mod tests {
 
         let root_before = trie.root();
 
-        let pruned = trie.prune_by_retained_leaves(&[key_keep]);
+        let pruned = trie.prune(0, &[key_keep]);
         assert!(pruned > 0, "expected some nodes to be pruned");
         assert_eq!(root_before, trie.root(), "root hash should be preserved after LFU prune");
 
         assert!(trie.get_leaf_value(&key_keep).is_some(), "retained key must remain revealed");
         assert!(trie.get_leaf_value(&key_drop_1).is_none(), "non-retained key should be pruned");
         assert!(trie.get_leaf_value(&key_drop_2).is_none(), "non-retained key should be pruned");
+    }
+
+    #[test]
+    fn test_prune_depth_plus_retained_leaves() {
+        // Tests the combined behaviour: nodes within max_depth are always kept,
+        // nodes beyond max_depth are kept only on retained paths.
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let value = large_account_value();
+
+        // 4 top-level branches, each with 4 children → depth-2 trie
+        let mut all_keys = Vec::new();
+        for i in 0..4u8 {
+            for j in 0..4u8 {
+                let key = pad_nibbles_right(Nibbles::from_nibbles([i, j, 0x1, 0x2, 0x3, 0x4]));
+                trie.update_leaf(key, value.clone(), &provider).unwrap();
+                all_keys.push(key);
+            }
+        }
+
+        let root_before = trie.root();
+        let nodes_before = trie.size_hint();
+
+        // Retain one key under branch [0] — its full path should survive.
+        // max_depth=1 means depth-0 (root) is the safe zone.
+        // At depth >= 1: only the retained path is kept, everything else is blinded.
+        let retained_key = all_keys[0]; // [0, 0, ...]
+        trie.prune(1, &[retained_key]);
+
+        assert_eq!(root_before, trie.root(), "root hash must be preserved");
+        assert!(trie.size_hint() < nodes_before, "should have pruned nodes");
+
+        // The retained key's value must still be readable.
+        assert!(
+            trie.get_leaf_value(&retained_key).is_some(),
+            "retained leaf must survive"
+        );
+
+        // A sibling key under a different top-level branch must be blinded.
+        let dropped_key = all_keys[4]; // [1, 0, ...]
+        assert!(
+            trie.get_leaf_value(&dropped_key).is_none(),
+            "non-retained leaf beyond max_depth should be pruned"
+        );
     }
 
     #[test]
@@ -8152,7 +7991,7 @@ mod tests {
         let nodes_before = trie.size_hint();
 
         // If depth were truncated to u8, 300 would become 44 and might prune something
-        trie.prune(300);
+        trie.prune(300, &[]);
 
         assert_eq!(
             nodes_before,
@@ -8188,7 +8027,7 @@ mod tests {
         let root_before = trie.root();
 
         // Prune at depth 0 - upper roots become prefixes of lower subtrie paths
-        trie.prune(0);
+        trie.prune(0, &[]);
 
         let root_after = trie.root();
         assert_eq!(root_before, root_after, "root hash should be preserved");

@@ -288,10 +288,17 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    /// Prunes the trie by replacing revealed subtrees with hash stubs.
     ///
+    /// Nodes within `max_depth` are never pruned. Beyond `max_depth`, subtrees are blinded
+    /// unless they are on the path to a retained leaf:
+    ///
+    /// - `depth < max_depth` → always kept
+    /// - `depth >= max_depth` → kept only if `retained_leaves` contains a descendant
+    ///
+    /// When `retained_leaves` is empty, all nodes beyond `max_depth` are blinded.
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
-    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    /// regardless of key length.
     ///
     /// # Preconditions
     ///
@@ -306,23 +313,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, max_depth: usize) -> usize;
-
-    /// Prunes all subtrees that do not contain retained leaves.
-    ///
-    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
-    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
-    /// hash stubs when hashes are available.
-    ///
-    /// # Preconditions
-    ///
-    /// Must be called after `root()` to ensure all nodes have computed hashes.
-    /// Calling on a trie without computed hashes will result in limited or no pruning.
-    ///
-    /// # Returns
-    ///
-    /// The number of nodes converted to hash stubs.
-    fn prune_by_retained_leaves(&mut self, retained_leaves: &[Nibbles]) -> usize;
+    fn prune(&mut self, max_depth: usize, retained_leaves: &[Nibbles]) -> usize;
 
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///
