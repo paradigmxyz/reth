@@ -445,36 +445,35 @@ where
                 let prewarm_tx_par = prewarm_tx.clone();
                 let execute_tx_par = execute_tx.clone();
                 let seq_done_par = seq_done.clone();
+                let executor_par = executor.clone();
 
                 // Start parallel computation on rayon immediately. The map() runs in
-                // parallel right away, but the ordered consumer waits for the
-                // sequential path to finish before yielding.
-                let handle = std::thread::Builder::new()
-                    .name("tx-iterator-parallel".into())
-                    .spawn(move || {
-                        rest.into_par_iter()
-                            .enumerate()
-                            .map(|(i, tx)| {
-                                let idx = i + prefetch;
-                                let tx = convert_par.convert(tx);
-                                (idx, tx)
-                            })
-                            .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                                if idx == prefetch {
-                                    // Block until sequential path finishes yielding.
-                                    seq_done_par.wait();
-                                }
-                                let tx = tx.map(|tx| {
-                                    let (tx_env, tx) = tx.into_parts();
-                                    let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                                    let _ = prewarm_tx_par.send((idx, tx.clone()));
-                                    tx
-                                });
-                                let _ = execute_tx_par.send(tx);
-                                debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                // parallel right away (sending to prewarm as soon as each tx is
+                // converted), but the ordered consumer waits for the sequential path
+                // to finish before yielding to execution.
+                executor.spawn_blocking_named("tx-iterator-parallel", move || {
+                    rest.into_par_iter()
+                        .enumerate()
+                        .map(|(i, tx)| {
+                            let idx = i + prefetch;
+                            let tx = convert_par.convert(tx);
+                            let tx = tx.map(|tx| {
+                                let (tx_env, tx) = tx.into_parts();
+                                let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                                let _ = prewarm_tx_par.send((idx, tx.clone()));
+                                tx
                             });
-                    })
-                    .expect("failed to spawn tx-iterator-parallel thread");
+                            (idx, tx)
+                        })
+                        .for_each_ordered_in(executor_par.cpu_pool(), |(idx, tx)| {
+                            if idx == prefetch {
+                                // Block until sequential path finishes yielding.
+                                seq_done_par.wait();
+                            }
+                            let _ = execute_tx_par.send(tx);
+                            debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        });
+                });
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
@@ -482,9 +481,6 @@ where
 
                 // Signal parallel path that sequential is done.
                 seq_done.wait();
-
-                // Wait for parallel to complete.
-                let _ = handle.join();
             });
         }
 
