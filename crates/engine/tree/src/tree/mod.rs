@@ -1572,28 +1572,25 @@ where
                                 debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
 
                                 let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx =
-                                    if let Some((rx, start_time, _action)) = pending_persistence {
-                                        let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
-                                        self.runtime.spawn_blocking_named(
-                                            "wait-persistence",
-                                            move || {
-                                                let start = Instant::now();
-                                                let result = rx
-                                                    .recv()
-                                                    .expect("persistence state channel closed");
-                                                let _ = persistence_tx.send((
-                                                    result,
-                                                    start_time,
-                                                    start.elapsed(),
-                                                ));
-                                            },
-                                        );
-                                        Some(persistence_rx)
-                                    } else {
-                                        None
-                                    };
+                                let persistence_rx = if let Some((rx, start_time, _action)) =
+                                    pending_persistence
+                                {
+                                    let (persistence_tx, persistence_rx) =
+                                        std::sync::mpsc::channel();
+                                    self.runtime.spawn_blocking_named("wait-persist", move || {
+                                        let start = Instant::now();
+                                        let result =
+                                            rx.recv().expect("persistence state channel closed");
+                                        let _ = persistence_tx.send((
+                                            result,
+                                            start_time,
+                                            start.elapsed(),
+                                        ));
+                                    });
+                                    Some(persistence_rx)
+                                } else {
+                                    None
+                                };
 
                                 let cache_wait = self.payload_validator.wait_for_caches();
 

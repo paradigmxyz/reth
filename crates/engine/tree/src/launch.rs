@@ -100,7 +100,7 @@ where
         evm_config,
         changeset_cache,
         use_hashed_state,
-        runtime.clone(),
+        runtime,
     );
 
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
