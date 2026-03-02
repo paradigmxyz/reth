@@ -76,7 +76,7 @@ jobs:
             *.dockerfile=Dockerfile
 
       - name: Upload reth image
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: ./artifacts
