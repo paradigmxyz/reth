@@ -16,10 +16,10 @@ use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    updates::TrieUpdates, DecodedMultiProof, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargets, ProofTarget};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
@@ -356,7 +356,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
+    fn on_prewarm_targets(&mut self, targets: MultiProofTargets) {
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
             self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
@@ -423,11 +423,8 @@ where
         }
     }
 
-    fn on_proof_result(
-        &mut self,
-        result: DecodedMultiProofV2,
-    ) -> Result<(), ParallelStateRootError> {
-        self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
+    fn on_proof_result(&mut self, result: DecodedMultiProof) -> Result<(), ParallelStateRootError> {
+        self.trie.reveal_decoded_multiproof(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
     }
@@ -509,12 +506,12 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                        targets.push(ProofTarget::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    targets.push(ProofTarget::new(path).with_min_len(min_len));
                 }
             })?;
 
@@ -551,13 +548,13 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofTarget::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofTarget::new(target).with_min_len(min_len));
                 }
             }
         })?;
@@ -674,7 +671,7 @@ where
             self.max_targets_for_chunking,
             self.proof_worker_handle.available_account_workers(),
             self.proof_worker_handle.available_storage_workers(),
-            MultiProofTargetsV2::chunks,
+            MultiProofTargets::chunks,
             |proof_targets| {
                 if let Err(e) =
                     self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
@@ -712,7 +709,7 @@ fn encode_account_leaf_value(
 #[derive(Default)]
 struct PendingTargets {
     /// The proof targets.
-    targets: MultiProofTargetsV2,
+    targets: MultiProofTargets,
     /// Number of account + storage proof targets currently queued.
     len: usize,
 }
@@ -729,18 +726,18 @@ impl PendingTargets {
     }
 
     /// Takes the pending targets, replacing with empty defaults.
-    fn take(&mut self) -> (MultiProofTargetsV2, usize) {
+    fn take(&mut self) -> (MultiProofTargets, usize) {
         (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
     }
 
     /// Adds a target to the account targets.
-    fn push_account_target(&mut self, target: ProofV2Target) {
+    fn push_account_target(&mut self, target: ProofTarget) {
         self.targets.account_targets.push(target);
         self.len += 1;
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofTarget>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
@@ -751,7 +748,7 @@ enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
     /// Prefetch proof targets (passed through directly).
-    PrefetchProofs(MultiProofTargetsV2),
+    PrefetchProofs(MultiProofTargets),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
 }

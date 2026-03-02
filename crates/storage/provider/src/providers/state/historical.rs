@@ -516,7 +516,8 @@ impl<
             let mut input = input;
             input.prepend(self.revert_state()?.into());
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+            let legacy_targets = targets.into_legacy();
+            proof.overlay_multiproof(input, legacy_targets).map_err(ProviderError::from)
         })
     }
 

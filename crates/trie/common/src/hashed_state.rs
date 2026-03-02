@@ -4,7 +4,7 @@ use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_sorted},
-    KeyHasher, MultiProofTargets, Nibbles,
+    KeyHasher, LegacyMultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
@@ -126,9 +126,9 @@ impl HashedPostState {
     }
 
     /// Create multiproof targets for this state.
-    pub fn multi_proof_targets(&self) -> MultiProofTargets {
+    pub fn multi_proof_targets(&self) -> LegacyMultiProofTargets {
         // Pre-allocate minimum capacity for the targets.
-        let mut targets = MultiProofTargets::with_capacity(self.accounts.len());
+        let mut targets = LegacyMultiProofTargets::with_capacity(self.accounts.len());
         for hashed_address in self.accounts.keys() {
             targets.insert(*hashed_address, Default::default());
         }
@@ -142,12 +142,13 @@ impl HashedPostState {
     /// i.e., the targets that are in targets create from `self` but not in `excluded`.
     ///
     /// This method is preferred to first calling `Self::multi_proof_targets` and the calling
-    /// `MultiProofTargets::retain_difference`, because it does not over allocate the targets map.
+    /// `LegacyMultiProofTargets::retain_difference`, because it does not over allocate the targets
+    /// map.
     pub fn multi_proof_targets_difference(
         &self,
-        excluded: &MultiProofTargets,
-    ) -> MultiProofTargets {
-        let mut targets = MultiProofTargets::default();
+        excluded: &LegacyMultiProofTargets,
+    ) -> LegacyMultiProofTargets {
+        let mut targets = LegacyMultiProofTargets::default();
         for hashed_address in self.accounts.keys() {
             if !excluded.contains_key(hashed_address) {
                 targets.insert(*hashed_address, Default::default());
@@ -175,7 +176,7 @@ impl HashedPostState {
     /// are done correctly.
     pub fn partition_by_targets(
         mut self,
-        targets: &MultiProofTargets,
+        targets: &LegacyMultiProofTargets,
         added_removed_keys: &MultiAddedRemovedKeys,
     ) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
@@ -1093,7 +1094,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_empty_state() {
         let state = HashedPostState::default();
-        let excluded = MultiProofTargets::default();
+        let excluded = LegacyMultiProofTargets::default();
 
         let targets = state.multi_proof_targets_difference(&excluded);
         assert!(targets.is_empty());
@@ -1102,7 +1103,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_new_account_targets() {
         let state = create_state_for_multi_proof_targets();
-        let excluded = MultiProofTargets::default();
+        let excluded = LegacyMultiProofTargets::default();
 
         // should return all accounts as targets since excluded is empty
         let targets = state.multi_proof_targets_difference(&excluded);
@@ -1115,7 +1116,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_new_storage_targets() {
         let state = create_state_for_multi_proof_targets();
-        let excluded = MultiProofTargets::default();
+        let excluded = LegacyMultiProofTargets::default();
 
         let targets = state.multi_proof_targets_difference(&excluded);
 
@@ -1133,7 +1134,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_filter_excluded_accounts() {
         let state = create_state_for_multi_proof_targets();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = LegacyMultiProofTargets::default();
 
         // select an account that has no storage updates
         let excluded_addr = state
@@ -1156,7 +1157,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_filter_excluded_storage() {
         let state = create_state_for_multi_proof_targets();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = LegacyMultiProofTargets::default();
 
         // mark one storage slot as excluded
         let (addr, storage) = state.storages.iter().next().unwrap();
@@ -1176,7 +1177,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_mixed_excluded_state() {
         let mut state = HashedPostState::default();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = LegacyMultiProofTargets::default();
 
         let addr1 = B256::random();
         let addr2 = B256::random();
@@ -1205,7 +1206,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_unmodified_account_with_storage() {
         let mut state = HashedPostState::default();
-        let excluded = MultiProofTargets::default();
+        let excluded = LegacyMultiProofTargets::default();
 
         let addr = B256::random();
         let slot1 = B256::random();
@@ -1252,7 +1253,7 @@ mod tests {
                 },
             )]),
         };
-        let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
+        let targets = LegacyMultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
 
         let (with_targets, without_targets) =
             state.partition_by_targets(&targets, &MultiAddedRemovedKeys::new());

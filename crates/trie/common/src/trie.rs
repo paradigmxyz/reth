@@ -35,8 +35,10 @@ impl BranchNodeMasks {
 pub type BranchNodeMasksMap = HashMap<Nibbles, BranchNodeMasks>;
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
+///
+/// This is the legacy type that uses alloy's [`TrieNode`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProofTrieNode {
+pub struct LegacyProofTrieNode {
     /// Path of the node.
     pub path: Nibbles,
     /// The node itself.

@@ -1,4 +1,4 @@
-//! V2 proof targets and chunking.
+//! Proof targets and chunking.
 
 use crate::Nibbles;
 use alloc::vec::Vec;
@@ -7,15 +7,15 @@ use alloy_primitives::{map::B256Map, B256};
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
 #[derive(Debug, Copy, Clone)]
-pub struct ProofV2Target {
+pub struct ProofTarget {
     /// The key of the proof target, as nibbles.
     pub key_nibbles: Nibbles,
     /// The minimum length of a node's path for it to be retained.
     pub min_len: u8,
 }
 
-impl ProofV2Target {
-    /// Returns a new [`ProofV2Target`] which matches all trie nodes whose path is a prefix of this
+impl ProofTarget {
+    /// Returns a new [`ProofTarget`] which matches all trie nodes whose path is a prefix of this
     /// key.
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
@@ -40,23 +40,23 @@ impl ProofV2Target {
     }
 }
 
-impl From<B256> for ProofV2Target {
+impl From<B256> for ProofTarget {
     fn from(key: B256) -> Self {
         Self::new(key)
     }
 }
 
-/// A set of account and storage V2 proof targets. The account and storage targets do not need to
+/// A set of account and storage proof targets. The account and storage targets do not need to
 /// necessarily overlap.
 #[derive(Debug, Default)]
-pub struct MultiProofTargetsV2 {
+pub struct MultiProofTargets {
     /// The set of account proof targets to generate proofs for.
-    pub account_targets: Vec<ProofV2Target>,
+    pub account_targets: Vec<ProofTarget>,
     /// The sets of storage proof targets to generate proofs for.
-    pub storage_targets: B256Map<Vec<ProofV2Target>>,
+    pub storage_targets: B256Map<Vec<ProofTarget>>,
 }
 
-impl MultiProofTargetsV2 {
+impl MultiProofTargets {
     /// Returns true is there are no account or storage targets.
     pub fn is_empty(&self) -> bool {
         self.account_targets.is_empty() && self.storage_targets.is_empty()
@@ -70,32 +70,46 @@ impl MultiProofTargetsV2 {
 
     /// Returns an iterator that yields chunks of the specified size.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
-        ChunkedMultiProofTargetsV2::new(self, chunk_size)
+        ChunkedMultiProofTargets::new(self, chunk_size)
+    }
+
+    /// Converts into the legacy `LegacyMultiProofTargets` format, discarding `min_len` metadata.
+    pub fn into_legacy(self) -> crate::LegacyMultiProofTargets {
+        use alloy_primitives::map::B256Set;
+        let mut targets = crate::LegacyMultiProofTargets::with_capacity(self.account_targets.len());
+        for target in &self.account_targets {
+            targets.entry(target.key()).or_default();
+        }
+        for (account, slots) in self.storage_targets {
+            let slot_set: B256Set = slots.iter().map(|t| t.key()).collect();
+            targets.entry(account).or_default().extend(slot_set);
+        }
+        targets
     }
 }
 
-/// An iterator that yields chunks of V2 proof targets of at most `size` account and storage
+/// An iterator that yields chunks of proof targets of at most `size` account and storage
 /// targets.
 ///
-/// Unlike legacy chunking, V2 preserves account targets exactly as they were (with their `min_len`
-/// metadata). Account targets must appear in a chunk. Storage targets for those accounts are
-/// chunked together, but if they exceed the chunk size, subsequent chunks contain only the
-/// remaining storage targets without repeating the account target.
+/// Preserves account targets exactly as they were (with their `min_len` metadata). Account targets
+/// must appear in a chunk. Storage targets for those accounts are chunked together, but if they
+/// exceed the chunk size, subsequent chunks contain only the remaining storage targets without
+/// repeating the account target.
 #[derive(Debug)]
-pub struct ChunkedMultiProofTargetsV2 {
+pub struct ChunkedMultiProofTargets {
     /// Remaining account targets to process
-    account_targets: alloc::vec::IntoIter<ProofV2Target>,
+    account_targets: alloc::vec::IntoIter<ProofTarget>,
     /// Storage targets by account address
-    storage_targets: B256Map<Vec<ProofV2Target>>,
+    storage_targets: B256Map<Vec<ProofTarget>>,
     /// Current account being processed (if any storage slots remain)
-    current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofV2Target>)>,
+    current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofTarget>)>,
     /// Chunk size
     size: usize,
 }
 
-impl ChunkedMultiProofTargetsV2 {
+impl ChunkedMultiProofTargets {
     /// Creates a new chunked iterator for the given targets.
-    pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+    pub fn new(targets: MultiProofTargets, size: usize) -> Self {
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
@@ -105,11 +119,11 @@ impl ChunkedMultiProofTargetsV2 {
     }
 }
 
-impl Iterator for ChunkedMultiProofTargetsV2 {
-    type Item = MultiProofTargetsV2;
+impl Iterator for ChunkedMultiProofTargets {
+    type Item = MultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut chunk = MultiProofTargetsV2::default();
+        let mut chunk = MultiProofTargets::default();
         let mut count = 0;
 
         // First, finish any remaining storage slots from previous account

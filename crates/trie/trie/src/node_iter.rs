@@ -323,13 +323,13 @@ mod tests {
         map::{B256Map, HashMap},
     };
     use alloy_trie::{
-        BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
+        nodes::BranchNode as AlloyBranchNode, BranchNodeCompact, HashBuilder, Nibbles, TrieAccount,
+        TrieMask, EMPTY_ROOT_HASH,
     };
     use itertools::Itertools;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
-        prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
-        RlpNode,
+        prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, LeafNode, RlpNode,
     };
     use std::collections::BTreeMap;
 
@@ -416,7 +416,7 @@ mod tests {
             (Nibbles::unpack(account_5), empty_account),
         ]);
 
-        let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(AlloyBranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
                 empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
@@ -424,7 +424,7 @@ mod tests {
             TrieMask::new(0b11),
         )));
 
-        let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(AlloyBranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::default()),
                 empty_leaf_rlp_for_key(Nibbles::default()),
@@ -442,7 +442,7 @@ mod tests {
                 None,
             ),
         );
-        let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(AlloyBranchNode::new(
             vec![branch_node_3_rlp, empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
             TrieMask::new(0b11),
         )));

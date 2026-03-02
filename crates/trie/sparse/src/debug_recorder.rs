@@ -6,7 +6,7 @@
 
 use alloc::{string::String, vec::Vec};
 use alloy_primitives::{hex, Bytes, B256};
-use alloy_trie::nodes::TrieNode;
+use alloy_trie::nodes::TrieNode as AlloyTrieNode;
 use reth_trie_common::Nibbles;
 use serde::Serialize;
 
@@ -89,8 +89,8 @@ pub struct ProofTrieNodeRecord {
 }
 
 impl ProofTrieNodeRecord {
-    /// Creates a record from a [`reth_trie_common::ProofTrieNode`].
-    pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
+    /// Creates a record from a [`reth_trie_common::LegacyProofTrieNode`].
+    pub fn from_legacy_proof_trie_node(node: &reth_trie_common::LegacyProofTrieNode) -> Self {
         Self {
             path: node.path,
             node: TrieNodeRecord(node.node.clone()),
@@ -98,14 +98,14 @@ impl ProofTrieNodeRecord {
         }
     }
 
-    /// Creates a record from a [`reth_trie_common::ProofTrieNodeV2`].
-    pub fn from_proof_trie_node_v2(node: &reth_trie_common::ProofTrieNodeV2) -> Self {
-        use reth_trie_common::TrieNodeV2;
+    /// Creates a record from a [`reth_trie_common::ProofTrieNode`].
+    pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
+        use reth_trie_common::TrieNode;
         let trie_node = match &node.node {
-            TrieNodeV2::EmptyRoot => TrieNode::EmptyRoot,
-            TrieNodeV2::Leaf(leaf) => TrieNode::Leaf(leaf.clone()),
-            TrieNodeV2::Extension(ext) => TrieNode::Extension(ext.clone()),
-            TrieNodeV2::Branch(branch) => TrieNode::Branch(alloy_trie::nodes::BranchNode::new(
+            TrieNode::EmptyRoot => AlloyTrieNode::EmptyRoot,
+            TrieNode::Leaf(leaf) => AlloyTrieNode::Leaf(leaf.clone()),
+            TrieNode::Extension(ext) => AlloyTrieNode::Extension(ext.clone()),
+            TrieNode::Branch(branch) => AlloyTrieNode::Branch(alloy_trie::nodes::BranchNode::new(
                 branch.stack.clone(),
                 branch.state_mask,
             )),
@@ -118,14 +118,14 @@ impl ProofTrieNodeRecord {
     }
 }
 
-/// A newtype wrapper around [`TrieNode`] with custom serialization that hex-encodes byte fields
-/// (leaf values, branch stack entries, extension child pointers) instead of serializing them as
-/// raw integer arrays.
+/// A newtype wrapper around [`AlloyTrieNode`] with custom serialization that hex-encodes byte
+/// fields (leaf values, branch stack entries, extension child pointers) instead of serializing
+/// them as raw integer arrays.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrieNodeRecord(pub TrieNode);
+pub struct TrieNodeRecord(pub AlloyTrieNode);
 
-impl From<TrieNode> for TrieNodeRecord {
-    fn from(node: TrieNode) -> Self {
+impl From<AlloyTrieNode> for TrieNodeRecord {
+    fn from(node: AlloyTrieNode) -> Self {
         Self(node)
     }
 }
@@ -134,8 +134,10 @@ impl Serialize for TrieNodeRecord {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStructVariant;
         match &self.0 {
-            TrieNode::EmptyRoot => serializer.serialize_unit_variant("TrieNode", 0, "EmptyRoot"),
-            TrieNode::Branch(branch) => {
+            AlloyTrieNode::EmptyRoot => {
+                serializer.serialize_unit_variant("TrieNode", 0, "EmptyRoot")
+            }
+            AlloyTrieNode::Branch(branch) => {
                 let stack_hex: Vec<String> =
                     branch.stack.iter().map(|n| hex::encode(n.as_ref())).collect();
                 let mut sv = serializer.serialize_struct_variant("TrieNode", 1, "Branch", 2)?;
@@ -143,13 +145,13 @@ impl Serialize for TrieNodeRecord {
                 sv.serialize_field("state_mask", &branch.state_mask.get())?;
                 sv.end()
             }
-            TrieNode::Extension(ext) => {
+            AlloyTrieNode::Extension(ext) => {
                 let mut sv = serializer.serialize_struct_variant("TrieNode", 2, "Extension", 2)?;
                 sv.serialize_field("key", &ext.key)?;
                 sv.serialize_field("child", &hex::encode(ext.child.as_ref()))?;
                 sv.end()
             }
-            TrieNode::Leaf(leaf) => {
+            AlloyTrieNode::Leaf(leaf) => {
                 let mut sv = serializer.serialize_struct_variant("TrieNode", 3, "Leaf", 2)?;
                 sv.serialize_field("key", &leaf.key)?;
                 sv.serialize_field("value", &hex::encode(&leaf.value))?;

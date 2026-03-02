@@ -19,8 +19,8 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProofV2,
-    MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof,
+    proof::ProofRetainer, AccountProof, BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof,
+    LegacyMultiProofTargets, MultiProof, MultiProofTargets, StorageMultiProof,
 };
 
 mod trie_node;
@@ -132,24 +132,24 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .multiproof(MultiProofTargets::from_iter([(
+            .multiproof(LegacyMultiProofTargets::from_iter([(
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))?
             .account_proof(address, slots)?)
     }
 
-    /// Generate a state multiproof using the V2 proof calculator.
+    /// Generate a state multiproof using the `proof_v2` proof calculator.
     ///
     /// This method uses `ProofCalculator` with `SyncAccountValueEncoder` for account proofs
     /// and `StorageProofCalculator` for storage proofs.
-    pub fn multiproof_v2(
+    pub fn multiproof_leaf_only(
         self,
-        targets: MultiProofTargetsV2,
-    ) -> Result<DecodedMultiProofV2, StateProofError> {
-        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+        targets: MultiProofTargets,
+    ) -> Result<DecodedMultiProof, StateProofError> {
+        let MultiProofTargets { mut account_targets, storage_targets } = targets;
 
-        // Compute account proofs using the V2 proof calculator with sync account encoding.
+        // Compute account proofs using the proof calculator with sync account encoding.
         let account_trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let mut account_value_encoder = SyncAccountValueEncoder::new(
@@ -177,13 +177,13 @@ where
             storage_proofs.insert(hashed_address, proofs);
         }
 
-        Ok(DecodedMultiProofV2 { account_proofs, storage_proofs })
+        Ok(DecodedMultiProof { account_proofs, storage_proofs })
     }
 
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         mut self,
-        mut targets: MultiProofTargets,
+        mut targets: LegacyMultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;

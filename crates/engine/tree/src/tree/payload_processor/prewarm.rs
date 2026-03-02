@@ -33,7 +33,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargets, ProofTarget};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -631,10 +631,10 @@ where
     }
 }
 
-/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
+/// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2::default();
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+    let mut targets = MultiProofTargets::default();
     let mut storage_target_count = 0;
     for (addr, account) in state {
         // if the account was not touched, or if the account was selfdestructed, do not
@@ -659,7 +659,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(ProofV2Target::from(hashed_slot));
+            storage_slots.push(ProofTarget::from(hashed_slot));
         }
 
         storage_target_count += storage_slots.len();
@@ -671,12 +671,12 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
     (targets, storage_target_count)
 }
 
-/// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
+/// Returns [`MultiProofTargets`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
-    MultiProofTargetsV2 {
+fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargets {
+    MultiProofTargets {
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
         ..Default::default()
     }

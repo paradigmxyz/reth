@@ -33,9 +33,9 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
-/// V2 proof targets and chunking.
-pub mod target_v2;
-pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};
+/// Proof targets and chunking.
+pub mod target;
+pub use target::{ChunkedMultiProofTargets, MultiProofTargets, ProofTarget};
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
@@ -53,10 +53,10 @@ mod subnode;
 pub use subnode::StoredSubNode;
 
 mod trie;
-pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
+pub use trie::{BranchNodeMasks, BranchNodeMasksMap, LegacyProofTrieNode};
 
-mod trie_node_v2;
-pub use trie_node_v2::*;
+mod trie_node;
+pub use trie_node::*;
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -96,5 +96,6 @@ pub mod serde_bincode_compat {
 
 /// Re-export
 pub use alloy_trie::{
-    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
+    nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, LeafNodeRef, RlpNode},
+    proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
 };
