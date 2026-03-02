@@ -424,7 +424,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_metrics_endpoint() {
-        let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
+        let chain_spec_info = ChainSpecInfo { name: "test".to_string(), forks: vec![] };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",

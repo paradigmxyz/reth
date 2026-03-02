@@ -1,6 +1,6 @@
 use clap::Parser;
 use metrics::{self, Counter};
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{EthChainSpec, ForkCondition, Hardforks};
 use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -53,7 +53,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
+    pub fn execute<N: ProviderNodeTypes<ChainSpec: Hardforks>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -61,7 +61,23 @@ impl Command {
     ) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
-            let chain_name = tool.provider_factory.chain_spec().chain().to_string();
+            let spec = tool.provider_factory.chain_spec();
+            let chain_name = spec.chain().to_string();
+            let chain_spec_info = {
+                use reth_node_metrics::chain::ForkActivation;
+                ChainSpecInfo {
+                    name: chain_name,
+                    forks: spec.forks_iter().map(|(fork, condition)| {
+                        let (condition_type, activation_value) = match condition {
+                            ForkCondition::Block(block) => ("block".to_string(), Some(block)),
+                            ForkCondition::TTD { activation_block_number, .. } => ("ttd".to_string(), Some(activation_block_number)),
+                            ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
+                            ForkCondition::Never => ("never".to_string(), None),
+                        };
+                        ForkActivation { name: fork.name().to_string(), condition_type, activation_value }
+                    }).collect(),
+                }
+            };
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 
@@ -76,7 +92,7 @@ impl Command {
                         target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                         build_profile: version_metadata().build_profile_name.as_ref(),
                     },
-                    ChainSpecInfo { name: chain_name },
+                    chain_spec_info,
                     executor,
                     Hooks::builder().build(),
                     pprof_dump_dir,

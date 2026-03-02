@@ -30,7 +30,7 @@ use jsonrpsee::{
     server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
     Methods, RpcModule,
 };
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
@@ -318,6 +318,7 @@ where
         + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
+    Provider::ChainSpec: Hardforks,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
@@ -762,7 +763,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn register_reth(&mut self) -> &mut Self {
+    pub fn register_reth(&mut self) -> &mut Self
+    where
+        Provider::ChainSpec: Hardforks,
+    {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
@@ -871,6 +875,7 @@ where
         + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
+    Provider::ChainSpec: Hardforks,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,

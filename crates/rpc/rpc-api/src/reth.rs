@@ -1,9 +1,25 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use serde::{Deserialize, Serialize};
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
+
+/// Information about a single hardfork in the chain's fork schedule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkInfo {
+    /// Name of the hardfork.
+    pub name: String,
+    /// The type of activation condition.
+    pub condition_type: String,
+    /// The activation value (block number, timestamp, or TTD). None for never-activated forks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_value: Option<U256>,
+    /// Whether the fork is currently active at the chain head.
+    pub active: bool,
+}
 
 /// Reth API namespace for reth-specific methods
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
@@ -58,4 +74,9 @@ pub trait RethApi {
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
     ) -> jsonrpsee::core::SubscriptionResult;
+
+    /// Returns the fork schedule showing all hardforks, their activation conditions, and
+    /// whether they are currently active.
+    #[method(name = "forkSchedule")]
+    async fn reth_fork_schedule(&self) -> RpcResult<Vec<ForkInfo>>;
 }

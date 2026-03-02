@@ -1,7 +1,7 @@
 //! Command that runs pruning.
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
@@ -30,7 +30,7 @@ pub struct PruneCommand<C: ChainSpecParser> {
     metrics: MetricArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks + Hardforks>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
@@ -52,7 +52,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                {
+                    let spec = provider_factory.chain_spec();
+                    ChainSpecInfo {
+                        name: spec.chain().to_string(),
+                        forks: spec.forks_iter().map(|(fork, condition)| {
+                            use reth_chainspec::ForkCondition;
+                            use reth_node_metrics::chain::ForkActivation;
+                            let (condition_type, activation_value) = match condition {
+                                ForkCondition::Block(block) => ("block".to_string(), Some(block)),
+                                ForkCondition::TTD { activation_block_number, .. } => ("ttd".to_string(), Some(activation_block_number)),
+                                ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
+                                ForkCondition::Never => ("never".to_string(), None),
+                            };
+                            ForkActivation { name: fork.name().to_string(), condition_type, activation_value }
+                        }).collect(),
+                    }
+                },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),
