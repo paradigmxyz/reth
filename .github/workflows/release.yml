@@ -112,7 +112,7 @@ jobs:
           DATADIR="$SCHELK_MOUNT/datadir" \
           RPC_URL="$BENCH_RPC_URL" \
           PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
-          PROFILE=maxperf \
+          PROFILE=maxperf-symbols \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
             .github/scripts/pgo-profile.sh
@@ -250,7 +250,7 @@ jobs:
           sudo apt-get install -y lsb-release wget
 
           BINARY=reth \
-          PROFILE=maxperf \
+          PROFILE=maxperf-symbols \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           TARGET=x86_64-unknown-linux-gnu \
           EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
@@ -260,7 +260,7 @@ jobs:
       - name: Move binary
         run: |
           mkdir artifacts
-          mv target/x86_64-unknown-linux-gnu/maxperf/reth ./artifacts
+          mv target/x86_64-unknown-linux-gnu/maxperf-symbols/reth ./artifacts
 
       - name: Configure GPG and create artifacts
         env:

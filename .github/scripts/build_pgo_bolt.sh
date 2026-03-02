@@ -3,7 +3,7 @@
 #
 # Environment variables:
 #   BINARY       - Binary to build: reth (default) or op-reth
-#   PROFILE      - Cargo profile (default: maxperf)
+#   PROFILE      - Cargo profile (default: maxperf-symbols)
 #   FEATURES     - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET       - Target triple (default: auto-detected from rustc)
 #   PGO_PROFDATA   - Path to a pre-collected .profdata file (optional).
@@ -16,7 +16,7 @@ cd "$(dirname "$0")/../.."
 
 # Configuration from environment
 BINARY="${BINARY:-reth}"
-PROFILE="${PROFILE:-maxperf}"
+PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
 
@@ -44,7 +44,7 @@ LLVM_VERSION=$(rustc -Vv | grep -oP 'LLVM version: \K\d+')
 
 # Enable debug symbols for BOLT (requires symbols to reorder code)
 # Convert profile name to uppercase for Cargo env var
-PROFILE_UPPER=$(echo "$PROFILE" | tr '[:lower:]' '[:upper:]')
+PROFILE_UPPER=$(echo "$PROFILE" | tr '[:lower:]-' '[:upper:]_')
 export "CARGO_PROFILE_${PROFILE_UPPER}_STRIP=debuginfo"
 
 if [ -n "${EXTRA_RUSTFLAGS:-}" ]; then

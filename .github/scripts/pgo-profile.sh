@@ -15,7 +15,7 @@
 #
 # Optional environment variables:
 #   PGO_BLOCKS - Number of blocks to execute for profiling (default: 10)
-#   PROFILE    - Cargo profile (default: maxperf)
+#   PROFILE    - Cargo profile (default: maxperf-symbols)
 #   FEATURES   - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET     - Target triple (default: auto-detected from rustc)
 #   EXTRA_RUSTFLAGS - Additional RUSTFLAGS (e.g. -C target-cpu=x86-64-v3)
@@ -30,7 +30,7 @@ cd "$(dirname "$0")/../.."
 : "${RPC_URL:?RPC_URL must be set}"
 
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
-PROFILE="${PROFILE:-maxperf}"
+PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
 PGO_DIR="$PWD/target/pgo-profiles"
