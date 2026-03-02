@@ -29,7 +29,7 @@ use reth_rpc_eth_types::{
     FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
     TransactionsProvider,
 };
 use reth_transaction_pool::{
@@ -256,23 +256,32 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        self.spawn_blocking_io(move |this| {
-            let provider = this.provider();
-            let (tx, meta) = match provider
-                .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_eth_err)?
+        async move {
+            let (tx, meta) = match self
+                .spawn_blocking_io(move |this| {
+                    this.provider()
+                        .transaction_by_hash_with_meta(hash)
+                        .map_err(Self::Error::from_eth_err)
+                })
+                .await?
             {
-                Some((tx, meta)) => (tx, meta),
+                Some(res) => res,
                 None => return Ok(None),
             };
 
-            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+            // Get the receipt from the block receipts cache
+            let receipt = self
+                .cache()
+                .get_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .and_then(|receipts| receipts.get(meta.index as usize).cloned());
 
-            Ok(Some((tx, meta, receipt)))
-        })
+            match receipt {
+                Some(receipt) => Ok(Some((tx, meta, receipt))),
+                None => Ok(None),
+            }
+        }
     }
 
     /// Get transaction by [`BlockId`] and index of transaction within that block.
