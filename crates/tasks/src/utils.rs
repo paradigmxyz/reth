@@ -28,7 +28,7 @@ pub fn increase_thread_priority() {
 /// thread initialization or expose the TIDs, so we have to discover them after the fact by
 /// reading `/proc`.
 ///
-/// Intended to be called exactly once via [`std::sync::Once`] after tracing is initialized.
+/// Should be called once after tracing is initialized.
 ///
 /// No-op on non-Linux platforms.
 pub fn deprioritize_background_threads() {

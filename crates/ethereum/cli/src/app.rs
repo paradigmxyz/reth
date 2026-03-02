@@ -128,8 +128,7 @@ where
         self.init_tracing(&runner)?;
 
         // Deprioritize background threads spawned by tracing/OTel libraries.
-        static DEPRIORITIZE: std::sync::Once = std::sync::Once::new();
-        DEPRIORITIZE.call_once(reth_tasks::utils::deprioritize_background_threads);
+        reth_tasks::utils::deprioritize_background_threads();
 
         // Install the prometheus recorder to be sure to record all metrics
         install_prometheus_recorder();
