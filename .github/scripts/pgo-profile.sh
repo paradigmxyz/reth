@@ -18,6 +18,7 @@
 #   PROFILE    - Cargo profile (default: maxperf)
 #   FEATURES   - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET     - Target triple (default: auto-detected from rustc)
+#   EXTRA_RUSTFLAGS - Additional RUSTFLAGS (e.g. -C target-cpu=x86-64-v3)
 #
 # Output:
 #   target/pgo-profiles/merged.profdata
@@ -55,7 +56,7 @@ mkdir -p "$PGO_DIR"
 # Build instrumented binary
 echo "=== Building PGO-instrumented binary ==="
 rustup component add llvm-tools-preview
-RUSTFLAGS="-Cprofile-generate=$PGO_DIR" \
+RUSTFLAGS="-Cprofile-generate=$PGO_DIR ${EXTRA_RUSTFLAGS:-}" \
     cargo build --profile "$PROFILE" --features "$FEATURES" \
     --manifest-path bin/reth/Cargo.toml --bin reth --locked \
     --target "$TARGET"

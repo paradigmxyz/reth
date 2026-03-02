@@ -114,6 +114,7 @@ jobs:
           PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
           PROFILE=maxperf \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
+          EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
             .github/scripts/pgo-profile.sh
 
       - name: Recover snapshot
