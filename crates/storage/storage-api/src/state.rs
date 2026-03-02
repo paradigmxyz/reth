@@ -8,7 +8,7 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Bytecode, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
@@ -29,6 +29,43 @@ pub trait StateReader: Send {
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
+/// Iterator over storage entries for [`StateProvider::storage_range_iter`].
+///
+/// Wraps a boxed, type-erased iterator that yields `(hashed_slot, StorageEntry)` pairs
+/// sorted by `hashed_slot`. The `B256` key is `keccak256(plain_slot)` and the
+/// [`StorageEntry`] contains the original plain slot key and its value.
+pub struct StorageRangeIter {
+    inner: Box<dyn Iterator<Item = ProviderResult<(B256, StorageEntry)>> + Send + 'static>,
+}
+
+impl StorageRangeIter {
+    /// Creates a new iterator from any compatible iterator.
+    pub fn new(
+        iter: impl Iterator<Item = ProviderResult<(B256, StorageEntry)>> + Send + 'static,
+    ) -> Self {
+        Self { inner: Box::new(iter) }
+    }
+
+    /// Creates an empty iterator that yields no items.
+    pub fn empty() -> Self {
+        Self { inner: Box::new(core::iter::empty()) }
+    }
+}
+
+impl Iterator for StorageRangeIter {
+    type Item = ProviderResult<(B256, StorageEntry)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+impl core::fmt::Debug for StorageRangeIter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StorageRangeIter").finish_non_exhaustive()
+    }
+}
+
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
@@ -46,6 +83,21 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Returns an iterator over storage entries for `address` whose hashed slot
+    /// is greater than or equal to `key_start`, ordered by hashed slot.
+    ///
+    /// Each yielded item is `(keccak256(slot), StorageEntry)` where
+    /// [`StorageEntry`] contains both the plain slot key and its value.
+    /// Zero-valued slots are excluded.
+    fn storage_range_iter(
+        &self,
+        _address: Address,
+        _key_start: B256,
+        _limit: usize,
+    ) -> ProviderResult<StorageRangeIter> {
+        Ok(StorageRangeIter::empty())
+    }
 
     /// Get account code by its address.
     ///

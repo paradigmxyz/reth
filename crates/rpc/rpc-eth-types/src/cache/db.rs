@@ -154,6 +154,15 @@ impl StateProvider for StateProviderTraitObjWrapper {
         self.0.storage(account, storage_key)
     }
 
+    fn storage_range_iter(
+        &self,
+        address: Address,
+        key_start: B256,
+        limit: usize,
+    ) -> reth_errors::ProviderResult<reth_storage_api::StorageRangeIter> {
+        self.0.storage_range_iter(address, key_start, limit)
+    }
+
     fn account_code(
         &self,
         addr: &Address,
