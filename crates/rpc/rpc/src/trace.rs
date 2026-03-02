@@ -260,8 +260,8 @@ where
         self.eth_api()
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
-                OpcodeGasInspector::default(),
-                move |_tx_info, inspector, _res, _| {
+                move || Ok(OpcodeGasInspector::default()),
+                move |_tx_info, inspector, _res, _, _, _| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_hash,
                         opcode_gas: inspector.opcode_gas_iter().collect(),

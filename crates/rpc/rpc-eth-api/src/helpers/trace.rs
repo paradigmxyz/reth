@@ -132,7 +132,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+        self.spawn_trace_transaction_in_block_with_inspector(
+            hash,
+            move || Ok(TracingInspector::new(config)),
+            move |tx_info, inspector, res, db, _evm_env, _tx_env| f(tx_info, inspector, res, db),
+        )
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -142,12 +146,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
     /// and the database that points to the beginning of the transaction.
     ///
+    /// The inspector is created inside the blocking task via `inspector_setup`, avoiding `Send`
+    /// constraints on the inspector type itself.
+    ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
-    fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
+    fn spawn_trace_transaction_in_block_with_inspector<Setup, Insp, F, R>(
         &self,
         hash: B256,
-        mut inspector: Insp,
+        inspector_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
@@ -157,10 +164,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 Insp,
                 ResultAndState<HaltReasonFor<Self::Evm>>,
                 StateCacheDb,
+                EvmEnvFor<Self::Evm>,
+                TxEnvFor<Self::Evm>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp: for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb> + Send + 'static,
+        Setup: FnOnce() -> Result<Insp, Self::Error> + Send + 'static,
+        Insp: for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
         R: Send + 'static,
     {
         async move {
@@ -179,14 +189,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
+                let mut inspector = inspector_setup()?;
+
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
-
                 let tx_env = this.evm_config().tx_env(tx);
-                let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
-                f(tx_info, inspector, res, db)
+                let res = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                f(tx_info, inspector, res, db, evm_env, tx_env)
             })
             .await
             .map(Some)
