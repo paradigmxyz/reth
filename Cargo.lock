@@ -10309,6 +10309,7 @@ dependencies = [
  "crossbeam-utils",
  "dashmap",
  "futures-util",
+ "libc",
  "metrics",
  "parking_lot",
  "pin-project",

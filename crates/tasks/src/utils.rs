@@ -19,3 +19,81 @@ pub fn increase_thread_priority() {
         }
     }
 }
+
+/// Deprioritizes known background threads spawned by third-party libraries (OpenTelemetry,
+/// tracing-appender) by scanning `/proc/<pid>/task/` for matching thread names and setting
+/// `SCHED_BATCH` scheduling policy + maximum niceness on them.
+///
+/// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
+/// thread initialization or expose the TIDs, so we have to discover them after the fact by
+/// reading `/proc`.
+///
+/// Intended to be called exactly once via [`std::sync::Once`] after tracing is initialized.
+///
+/// No-op on non-Linux platforms.
+pub fn deprioritize_background_threads() {
+    #[cfg(target_os = "linux")]
+    _deprioritize_background_threads();
+}
+
+/// Thread name prefixes to deprioritize.
+#[cfg(target_os = "linux")]
+const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["OpenTelemetry.T", "tracing-appende"];
+
+#[cfg(target_os = "linux")]
+fn _deprioritize_background_threads() {
+    let pid = std::process::id();
+    let task_dir = format!("/proc/{pid}/task");
+
+    let entries = match std::fs::read_dir(&task_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            tracing::debug!(%err, "failed to read /proc task directory");
+            return;
+        }
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let tid_str = entry.file_name();
+        let Some(tid_str) = tid_str.to_str() else { continue };
+        let Ok(tid) = tid_str.parse::<i32>() else { continue };
+
+        let comm_path = format!("{task_dir}/{tid_str}/comm");
+        let comm = match std::fs::read_to_string(&comm_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let comm = comm.trim();
+
+        if !DEPRIORITIZE_THREAD_PREFIXES.iter().any(|prefix| comm.starts_with(prefix)) {
+            continue;
+        }
+
+        // SCHED_BATCH signals to the scheduler that this is a CPU-bound non-interactive thread,
+        // allowing the kernel to apply longer timeslices and less aggressive preemption.
+        // SAFETY: sched_setscheduler and setpriority are safe to call with valid TIDs.
+        unsafe {
+            let param = libc::sched_param { sched_priority: 0 };
+            if libc::sched_setscheduler(tid, libc::SCHED_BATCH, &param) != 0 {
+                tracing::debug!(
+                    tid,
+                    comm,
+                    err = std::io::Error::last_os_error().to_string(),
+                    "failed to set SCHED_BATCH"
+                );
+            }
+
+            // PRIO_PROCESS + max niceness (19) to yield CPU to everything else.
+            if libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 19) != 0 {
+                tracing::debug!(
+                    tid,
+                    comm,
+                    err = std::io::Error::last_os_error().to_string(),
+                    "failed to set niceness"
+                );
+            }
+        }
+
+        tracing::debug!(tid, comm, "deprioritized background thread (SCHED_BATCH, nice 19)");
+    }
+}

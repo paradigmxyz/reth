@@ -518,6 +518,7 @@ humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
+libc = "0.2"
 lz4 = "1.28.1"
 modular-bitfield = "0.13.1"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
