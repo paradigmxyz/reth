@@ -134,17 +134,12 @@ jobs:
   build:
     name: build release
     runs-on: ${{ matrix.configs.os }}
-    needs: [extract-version, pgo-profile]
+    needs: extract-version
     continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
       fail-fast: true
       matrix:
         configs:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
-            profile: maxperf
-            allow_fail: false
-            rustflags: "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             profile: maxperf
@@ -184,28 +179,7 @@ jobs:
           echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
-      - name: Download PGO profile
-        if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/download-artifact@v7
-        with:
-          name: pgo-profdata
-          path: pgo-profiles
-
-      - name: Build Reth with PGO+BOLT
-        if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lsb-release wget
-
-          BINARY=${{ matrix.build.binary }} \
-          PROFILE=${{ matrix.configs.profile }} \
-          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
-          TARGET=${{ matrix.configs.target }} \
-          PGO_PROFDATA="$PWD/pgo-profiles/merged.profdata" \
-            .github/scripts/build_pgo_bolt.sh
-
       - name: Build Reth
-        if: matrix.configs.target != 'x86_64-unknown-linux-gnu'
         run: make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-${{ matrix.configs.target }}
       - name: Move binary
         run: |
@@ -239,10 +213,77 @@ jobs:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
 
+  build-pgo:
+    name: build release (x86_64-linux PGO+BOLT)
+    runs-on: ubuntu-24.04
+    needs: [extract-version, pgo-profile]
+    env:
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Download PGO profile
+        uses: actions/download-artifact@v7
+        with:
+          name: pgo-profdata
+          path: pgo-profiles
+
+      - name: Build Reth with PGO+BOLT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lsb-release wget
+
+          BINARY=reth \
+          PROFILE=maxperf \
+          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
+          TARGET=x86_64-unknown-linux-gnu \
+          PGO_PROFDATA="$PWD/pgo-profiles/merged.profdata" \
+            .github/scripts/build_pgo_bolt.sh
+
+      - name: Move binary
+        run: |
+          mkdir artifacts
+          mv target/x86_64-unknown-linux-gnu/maxperf/reth ./artifacts
+
+      - name: Configure GPG and create artifacts
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          export GPG_TTY=$(tty)
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
+          cd artifacts
+          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth*
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+          mv *tar.gz* ..
+        shell: bash
+
+      - name: Upload artifact
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+
+      - name: Upload signature
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
+
   draft-release:
     name: draft release
     runs-on: ubuntu-latest
-    needs: [build, extract-version]
+    needs: [build, build-pgo, extract-version]
     if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
