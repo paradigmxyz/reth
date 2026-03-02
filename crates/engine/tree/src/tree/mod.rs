@@ -427,6 +427,14 @@ where
         (incoming, outgoing)
     }
 
+    /// Returns a [`TreeOutcome`] indicating the forkchoice head is valid and canonical.
+    fn valid_outcome(state: ForkchoiceState) -> TreeOutcome<OnForkChoiceUpdated> {
+        TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+            PayloadStatusEnum::Valid,
+            Some(state.head_block_hash),
+        )))
+    }
+
     /// Returns a new [`Sender`] to send messages to this type.
     pub fn sender(&self) -> Sender<FromEngine<EngineApiRequest<T, N>, N::Block>> {
         self.incoming_tx.clone()
@@ -1118,11 +1126,7 @@ where
         }
 
         // The head block is already canonical
-        let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-            PayloadStatusEnum::Valid,
-            Some(state.head_block_hash),
-        )));
-        Ok(Some(outcome))
+        Ok(Some(Self::valid_outcome(state)))
     }
 
     /// Applies chain update for the new head block and processes payload attributes.
@@ -1183,12 +1187,7 @@ where
 
             // The head block is already canonical and we're not processing payload attributes,
             // so we're not triggering a payload job and can return right away
-
-            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(state.head_block_hash),
-            )));
-            return Ok(Some(outcome));
+            return Ok(Some(Self::valid_outcome(state)));
         }
 
         // Ensure we can apply a new chain update for the head block
@@ -1208,11 +1207,7 @@ where
                 return Ok(Some(TreeOutcome::new(updated)));
             }
 
-            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(state.head_block_hash),
-            )));
-            return Ok(Some(outcome));
+            return Ok(Some(Self::valid_outcome(state)));
         }
 
         Ok(None)

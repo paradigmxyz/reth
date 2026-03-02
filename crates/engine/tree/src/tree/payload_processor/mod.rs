@@ -44,7 +44,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
         Arc,
     },
@@ -429,6 +429,7 @@ where
             // few transactions are recovered sequentially and sent immediately before
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+            let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
@@ -444,15 +445,15 @@ where
                     .map(|(i, tx)| {
                         let idx = i + prefetch;
                         let tx = convert.convert(tx);
+                        (idx, tx)
+                    })
+                    .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         });
-                        (idx, tx)
-                    })
-                    .for_each_ordered(|(idx, tx)| {
                         let _ = execute_tx.send(tx);
                         debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
@@ -485,6 +486,8 @@ where
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
+        let executed_tx_index = Arc::new(AtomicUsize::new(0));
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -493,6 +496,7 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
         };
@@ -518,7 +522,7 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task), executed_tx_index }
     }
 
     /// Returns the cache for the given parent hash.
@@ -867,6 +871,14 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
+    /// Returns a reference to the shared executed transaction index counter.
+    ///
+    /// The main execution loop should store `index + 1` after executing each transaction so that
+    /// prewarm workers can skip transactions that have already been processed.
+    pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+        &self.prewarm_handle.executed_tx_index
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -904,6 +916,9 @@ pub struct CacheTaskHandle<R> {
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    /// Shared counter tracking the next transaction index to be executed by the main execution
+    /// loop. Prewarm workers skip transactions below this index.
+    executed_tx_index: Arc<AtomicUsize>,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {

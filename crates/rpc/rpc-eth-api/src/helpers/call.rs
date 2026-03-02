@@ -359,13 +359,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let block_transactions = block.transactions_recovered().take(num_txs);
-                    for tx in block_transactions {
-                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                        let res = this.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit(res.state);
+                    let mut executor = RpcNodeCore::evm_config(&this)
+                        .executor_for_block(&mut db, block.sealed_block())
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
+                    executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                    for tx in block.transactions_recovered().take(num_txs) {
+                        executor.execute_transaction(tx).map_err(Self::Error::from_eth_err)?;
                     }
                 }
 
@@ -737,8 +737,6 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
@@ -746,20 +744,24 @@ pub trait Call:
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
-                // apply pre-execution changes (e.g. EIP-4788 beacon root, EIP-2935 blockhashes)
-                RpcNodeCore::evm_config(&this)
+                let mut executor = RpcNodeCore::evm_config(&this)
                     .executor_for_block(&mut db, block.sealed_block())
                     .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?
-                    .apply_pre_execution_changes()
                     .map_err(Self::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                for block_tx in block_txs {
+                    if block_tx.tx_hash() == tx.tx_hash() {
+                        break;
+                    }
+                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
-                let res = this.transact(&mut db, evm_env, tx_env)?;
+                let res = executor.evm_mut().transact(tx_env).map_err(Self::Error::from_evm_err)?;
+                drop(executor);
                 f(tx_info, res, db)
             })
             .await

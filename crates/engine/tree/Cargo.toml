@@ -98,21 +98,12 @@ reth-e2e-test-utils.workspace = true
 revm-state.workspace = true
 
 assert_matches.workspace = true
-criterion.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
 crossbeam-channel.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
-
-[[bench]]
-name = "channel_perf"
-harness = false
-
-[[bench]]
-name = "state_root_task"
-harness = false
 
 [features]
 test-utils = [
