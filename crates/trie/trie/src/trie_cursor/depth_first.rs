@@ -118,6 +118,7 @@ impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
             }
 
             if let Err(err) = self.fill_next() {
+                self.complete = true;
                 return Some(Err(err))
             }
         }
