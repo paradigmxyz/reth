@@ -1,0 +1,30 @@
+name: Pull request audit
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'agentic-audit'
+    steps:
+      - name: Publish event
+        run: |
+          set -euo pipefail
+
+          echo "${{ secrets.EVENTS_KEY }}" > ${{ runner.temp }}/key
+          echo "${{ secrets.EVENTS_CERT }}" > ${{ runner.temp }}/cert
+
+          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
+            -H "Content-Type: application/json" \
+            --key ${{ runner.temp }}/key \
+            --cert ${{ runner.temp }}/cert \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "event": "pr_audit",
+              "data": {
+                "pr_number": ${{ github.event.pull_request.number }},
+                "sha": "${{ github.event.pull_request.head.sha }}"
+              }
+            }'
