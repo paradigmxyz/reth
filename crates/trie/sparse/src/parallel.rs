@@ -1153,6 +1153,10 @@ impl SparseTrie for ParallelSparseTrie {
         upper_count + lower_count
     }
 
+    fn memory_size(&self) -> usize {
+        self.memory_size()
+    }
+
     fn prune(&mut self, max_depth: usize) -> usize {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();

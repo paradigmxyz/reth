@@ -214,6 +214,7 @@ impl TestHarness {
             evm_config,
             changeset_cache,
             provider.cached_storage_settings().use_hashed_state(),
+            reth_tasks::Runtime::test(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
