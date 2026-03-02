@@ -73,7 +73,7 @@ where
             (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
         };
 
-        self.run_with_components::<EthereumNode>(components, |builder, ext| async move {
+        self.run_with_components::<EthereumNode>(components, async move |builder, ext| {
             launcher.entrypoint(builder, ext).await
         })
     }

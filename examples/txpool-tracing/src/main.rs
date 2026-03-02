@@ -25,7 +25,7 @@ mod submit;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
-        .run(|builder, args| async move {
+        .run(async move |builder, args| {
             // launch the node
             let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;

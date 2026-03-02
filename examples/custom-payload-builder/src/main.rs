@@ -90,7 +90,7 @@ where
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 .with_types::<EthereumNode>()
                 // Configure the components of the node

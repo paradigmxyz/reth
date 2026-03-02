@@ -34,7 +34,7 @@ use reth_ethereum::{
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
-        .run(|builder, args| async move {
+        .run(async move |builder, args| {
             // launch the node
             let handle = builder.node(EthereumNode::default()).launch().await?;
 

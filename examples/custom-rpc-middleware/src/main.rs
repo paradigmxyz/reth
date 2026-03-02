@@ -36,7 +36,7 @@ use tower::Layer;
 
 fn main() {
     Cli::<EthereumChainSpecParser>::parse()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 .with_types::<EthereumNode>()
                 .with_components(EthereumNode::components())
