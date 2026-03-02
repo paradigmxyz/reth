@@ -16,7 +16,7 @@ on:
       pgo_blocks:
         description: "Number of blocks to execute for PGO profiling on self-hosted runner"
         type: string
-        default: "10"
+        default: "100"
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
