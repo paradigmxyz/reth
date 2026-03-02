@@ -20,9 +20,9 @@ pub fn increase_thread_priority() {
     }
 }
 
-/// Deprioritizes known background threads spawned by third-party libraries (OpenTelemetry,
-/// tracing-appender) by scanning `/proc/<pid>/task/` for matching thread names and setting
-/// `SCHED_BATCH` scheduling policy + maximum niceness on them.
+/// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
+/// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
+/// setting `SCHED_BATCH` scheduling policy + maximum niceness on them.
 ///
 /// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
 /// thread initialization or expose the TIDs, so we have to discover them after the fact by
@@ -38,7 +38,8 @@ pub fn deprioritize_background_threads() {
 
 /// Thread name prefixes to deprioritize.
 #[cfg(target_os = "linux")]
-const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["OpenTelemetry.T", "tracing-appende"];
+const DEPRIORITIZE_THREAD_PREFIXES: &[&str] =
+    &["OpenTelemetry.T", "tracing-appende", "reqwest-interna"];
 
 #[cfg(target_os = "linux")]
 fn _deprioritize_background_threads() {
@@ -74,7 +75,7 @@ fn _deprioritize_background_threads() {
         // SAFETY: sched_setscheduler and setpriority are safe to call with valid TIDs.
         unsafe {
             let param = libc::sched_param { sched_priority: 0 };
-            if libc::sched_setscheduler(tid, libc::SCHED_BATCH, &param) != 0 {
+            if libc::sched_setscheduler(tid, libc::SCHED_BATCH, std::ptr::from_ref(&param)) != 0 {
                 tracing::debug!(
                     tid,
                     comm,
@@ -83,8 +84,10 @@ fn _deprioritize_background_threads() {
                 );
             }
 
-            // PRIO_PROCESS + max niceness (19) to yield CPU to everything else.
-            if libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 19) != 0 {
+            // PRIO_PROCESS + max niceness to yield CPU to everything else.
+            if libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, NICENESS_MIN as libc::c_int) !=
+                0
+            {
                 tracing::debug!(
                     tid,
                     comm,
@@ -94,6 +97,11 @@ fn _deprioritize_background_threads() {
             }
         }
 
-        tracing::debug!(tid, comm, "deprioritized background thread (SCHED_BATCH, nice 19)");
+        tracing::debug!(
+            tid,
+            comm,
+            "deprioritized background thread (SCHED_BATCH, nice {})",
+            NICENESS_MIN
+        );
     }
 }
