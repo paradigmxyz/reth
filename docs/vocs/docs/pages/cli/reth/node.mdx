@@ -927,6 +927,11 @@ Engine:
 
           [default: 0]
 
+      --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
+          Configure the maximum number of in-memory blocks before applying backpressure to newPayload processing by waiting for persistence to complete.
+
+          When set, if the number of in-memory blocks exceeds this threshold, incoming newPayload requests will be delayed until persistence catches up. This prevents unbounded memory growth when block production outpaces persistence.
+
       --engine.legacy-state-root
           Enable legacy state root
 

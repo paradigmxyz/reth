@@ -505,6 +505,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             memory_block_buffer_target: 50,
+            persistence_backpressure_threshold: Some(36),
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
@@ -538,6 +539,8 @@ mod tests {
             "100",
             "--engine.memory-block-buffer-target",
             "50",
+            "--engine.persistence-backpressure-threshold",
+            "36",
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
