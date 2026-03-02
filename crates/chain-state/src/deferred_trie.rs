@@ -9,7 +9,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
-use tracing::instrument;
+use tracing::{debug, instrument, trace};
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -119,6 +119,13 @@ impl DeferredTrieData {
         anchor_hash: B256,
         ancestors: Vec<Self>,
     ) -> Self {
+        trace!(
+            target: "engine::tree::deferred_trie",
+            %anchor_hash,
+            num_ancestors = ancestors.len(),
+            hashed_state_empty = hashed_state.is_empty(),
+            "Creating pending deferred trie data"
+        );
         Self {
             state: Arc::new(Mutex::new(DeferredState::Pending(Some(PendingInputs {
                 hashed_state,
@@ -199,6 +206,16 @@ impl DeferredTrieData {
                 Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
                     if *parent_anchor == anchor_hash =>
                 {
+                    debug!(
+                        target: "engine::tree::deferred_trie",
+                        %anchor_hash,
+                        parent_overlay_accounts = trie_input.state.accounts.len(),
+                        parent_overlay_storages = trie_input.state.storages.len(),
+                        parent_overlay_nodes = trie_input.nodes.account_nodes_ref().len(),
+                        hashed_state_empty = sorted_hashed_state.is_empty(),
+                        trie_updates_empty = sorted_trie_updates.is_empty(),
+                        "Reusing parent overlay (anchor match)"
+                    );
                     // O(1): Reuse parent's overlay, extend with current block's data.
                     let mut overlay = TrieInputSorted::new(
                         Arc::clone(&trie_input.nodes),
@@ -238,15 +255,30 @@ impl DeferredTrieData {
                 }
                 // Case 2: Parent exists but anchor mismatch or no cached overlay.
                 // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => Self::merge_ancestors_into_overlay(
-                    ancestors,
-                    &sorted_hashed_state,
-                    &sorted_trie_updates,
-                ),
+                _ => {
+                    debug!(
+                        target: "engine::tree::deferred_trie",
+                        %anchor_hash,
+                        parent_anchor = ?parent_data.anchor_hash(),
+                        has_parent_overlay = parent_data.anchored_trie_input.is_some(),
+                        num_ancestors = ancestors.len(),
+                        "Rebuilding overlay from ancestors (anchor mismatch or no parent overlay)"
+                    );
+                    Self::merge_ancestors_into_overlay(
+                        ancestors,
+                        &sorted_hashed_state,
+                        &sorted_trie_updates,
+                    )
+                }
             }
         } else {
             // Case 3: No in-memory ancestors (first block after persisted anchor).
             // Build overlay with just this block's data.
+            debug!(
+                target: "engine::tree::deferred_trie",
+                %anchor_hash,
+                "No in-memory ancestors, building overlay from current block only"
+            );
             Self::merge_ancestors_into_overlay(&[], &sorted_hashed_state, &sorted_trie_updates)
         };
 
@@ -272,6 +304,11 @@ impl DeferredTrieData {
         sorted_hashed_state: &HashedPostStateSorted,
         sorted_trie_updates: &TrieUpdatesSorted,
     ) -> TrieInputSorted {
+        trace!(
+            target: "engine::tree::deferred_trie",
+            num_ancestors = ancestors.len(),
+            "Merging ancestors into overlay"
+        );
         let mut overlay = TrieInputSorted::default();
 
         let state_mut = Arc::make_mut(&mut overlay.state);
@@ -317,6 +354,12 @@ impl DeferredTrieData {
             // If the deferred trie data is ready, return the cached result.
             DeferredState::Ready(bundle) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                debug!(
+                    target: "engine::tree::deferred_trie",
+                    has_anchored_input = bundle.anchored_trie_input.is_some(),
+                    anchor_hash = ?bundle.anchor_hash(),
+                    "Deferred trie data already ready (async completed first)"
+                );
                 bundle.clone()
             }
             // If the deferred trie data is pending, compute the trie data synchronously and return
@@ -325,6 +368,14 @@ impl DeferredTrieData {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
                 let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
+
+                debug!(
+                    target: "engine::tree::deferred_trie",
+                    anchor_hash = %inputs.anchor_hash,
+                    num_ancestors = inputs.ancestors.len(),
+                    hashed_state_empty = inputs.hashed_state.is_empty(),
+                    "Deferred trie data pending, computing synchronously (fallback)"
+                );
 
                 let computed = Self::sort_and_build_trie_input(
                     inputs.hashed_state,
