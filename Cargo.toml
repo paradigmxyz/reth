@@ -766,23 +766,23 @@ ipnet = "2.11"
 # =============================================================================
 
 # revm staging patches
-revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-database = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-state = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-context = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-handler = { git = "https://github.com/bluealloy/revm", branch = "main" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "main" }
-op-revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-handler = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
-alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", branch = "devnet3" }
 
 # alloy bal-devnet2 patches
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
