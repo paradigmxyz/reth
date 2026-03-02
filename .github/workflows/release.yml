@@ -88,11 +88,14 @@ jobs:
             dmsetup linux-tools-"$(uname -r)" || \
             sudo apt-get install -y --no-install-recommends linux-tools-generic
 
-      - name: Check snapshot is available
+      - name: Download snapshot if needed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
         run: |
           if ! .github/scripts/bench-reth-snapshot.sh --check; then
-            echo "::error::Snapshot not available on this runner"
-            exit 1
+            echo "Snapshot outdated or missing, downloading..."
+            .github/scripts/bench-reth-snapshot.sh
           fi
 
       - name: Mount snapshot
