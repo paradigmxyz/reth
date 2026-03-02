@@ -89,13 +89,14 @@ cargo pgo info
 
 # PGO phase: use pre-collected profile or fall back to instrumentation
 echo "=== PGO Phase ==="
+USE_PRECOLLECTED_PGO=false
 if [ -n "${PGO_PROFDATA:-}" ] && [ -f "$PGO_PROFDATA" ]; then
     echo "Using pre-collected PGO profile: $PGO_PROFDATA"
     ls -lh "$PGO_PROFDATA"
-    # Place the profdata where cargo-pgo expects it
-    PGO_MERGED_DIR="$PWD/target/pgo-profiles"
-    mkdir -p "$PGO_MERGED_DIR"
-    cp "$PGO_PROFDATA" "$PGO_MERGED_DIR/merged.profdata"
+    USE_PRECOLLECTED_PGO=true
+    # Pass PGO profile directly via RUSTFLAGS since cargo-pgo's --with-pgo
+    # scans for .profraw files and can't use a pre-merged .profdata
+    export RUSTFLAGS="${RUSTFLAGS:-} -Cprofile-use=$PGO_PROFDATA -Cllvm-args=-pgo-warn-missing-function"
 else
     echo "No pre-collected profile, running instrumentation..."
     export LLVM_PROFILE_FILE=$PWD/target/pgo-profiles/${BINARY}_%m_%p.profraw
@@ -107,12 +108,21 @@ fi
 
 # BOLT: build instrumented with PGO, run, optimize
 echo "=== BOLT Phase ==="
-echo "Building BOLT-instrumented binary with PGO..."
-cargo pgo bolt build --with-pgo -- "${CARGO_ARGS[@]}"
-echo "Running BOLT-instrumented binary..."
-run "target/$TARGET/$PROFILE_DIR/$BINARY-bolt-instrumented"
-echo "Optimizing with BOLT..."
-cargo pgo bolt optimize --with-pgo -- "${CARGO_ARGS[@]}"
+if [ "$USE_PRECOLLECTED_PGO" = true ]; then
+    echo "Building BOLT-instrumented binary (PGO via RUSTFLAGS)..."
+    cargo pgo bolt build -- "${CARGO_ARGS[@]}"
+    echo "Running BOLT-instrumented binary..."
+    run "target/$TARGET/$PROFILE_DIR/$BINARY-bolt-instrumented"
+    echo "Optimizing with BOLT..."
+    cargo pgo bolt optimize -- "${CARGO_ARGS[@]}"
+else
+    echo "Building BOLT-instrumented binary with PGO..."
+    cargo pgo bolt build --with-pgo -- "${CARGO_ARGS[@]}"
+    echo "Running BOLT-instrumented binary..."
+    run "target/$TARGET/$PROFILE_DIR/$BINARY-bolt-instrumented"
+    echo "Optimizing with BOLT..."
+    cargo pgo bolt optimize --with-pgo -- "${CARGO_ARGS[@]}"
+fi
 
 # Strip and copy optimized binary to expected locations
 OPTIMIZED_BIN="target/$TARGET/$PROFILE_DIR/$BINARY-bolt-optimized"
