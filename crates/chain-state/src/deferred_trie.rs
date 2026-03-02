@@ -157,6 +157,7 @@ impl DeferredTrieData {
     /// * `trie_updates` - Unsorted trie node updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
     /// * `ancestors` - Deferred trie data from ancestor blocks for merging (oldest -> newest)
+    #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn sort_and_build_trie_input(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
