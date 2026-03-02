@@ -59,11 +59,6 @@ impl ArenaSparseNodeState {
         }
     }
 
-    /// Returns true if self is the [`Self::Dirty`] variant.
-    const fn is_dirty(&self) -> bool {
-        matches!(self, Self::Dirty { .. })
-    }
-
     const fn num_leaves(&self) -> u64 {
         match self {
             Self::Revealed { num_leaves } |
@@ -84,11 +79,11 @@ impl ArenaSparseNodeState {
         }
     }
 
-    /// Returns the `num_dirty_leaves` count, or 0 if not dirty.
-    const fn num_dirty_leaves(&self) -> u64 {
+    /// Returns the `num_dirty_leaves` count if dirty, `None` otherwise.
+    const fn num_dirty_leaves(&self) -> Option<u64> {
         match self {
-            Self::Dirty { num_dirty_leaves, .. } => *num_dirty_leaves,
-            _ => 0,
+            Self::Dirty { num_dirty_leaves, .. } => Some(*num_dirty_leaves),
+            _ => None,
         }
     }
 
@@ -189,22 +184,35 @@ enum ArenaSparseNode {
     /// A subtrie that can be taken for parallel processing.
     Subtrie(Box<ArenaSparseSubtrie>),
     /// Placeholder for a subtrie that has been temporarily taken for parallel operations.
-    TakenSubtrie,
+    TakenSubtrie {
+        /// The subtrie's `num_leaves` at the time it was taken.
+        prev_num_leaves: u64,
+        /// The subtrie's `num_dirty_leaves` at the time it was taken.
+        prev_num_dirty_leaves: u64,
+    },
 }
 
 impl ArenaSparseNode {
     fn num_leaves(&self) -> u64 {
         match self {
-            Self::EmptyRoot | Self::TakenSubtrie => 0,
+            Self::EmptyRoot => 0,
+            Self::TakenSubtrie { prev_num_leaves, .. } => *prev_num_leaves,
             Self::Branch(b) => b.state.num_leaves(),
             Self::Leaf { state, .. } => state.num_leaves(),
             Self::Subtrie(s) => s.arena[s.root].num_leaves(),
         }
     }
 
-    fn num_dirty_leaves(&self) -> u64 {
+    fn num_dirty_leaves(&self) -> Option<u64> {
         match self {
-            Self::EmptyRoot | Self::TakenSubtrie => 0,
+            Self::EmptyRoot => None,
+            Self::TakenSubtrie { prev_num_dirty_leaves, .. } => {
+                if *prev_num_dirty_leaves > 0 {
+                    Some(*prev_num_dirty_leaves)
+                } else {
+                    None
+                }
+            }
             Self::Branch(b) => b.state.num_dirty_leaves(),
             Self::Leaf { state, .. } => state.num_dirty_leaves(),
             Self::Subtrie(s) => s.arena[s.root].num_dirty_leaves(),
@@ -216,17 +224,6 @@ impl ArenaSparseNode {
             Self::Branch(b) => &mut b.state,
             Self::Leaf { state, .. } => state,
             _ => panic!("state_mut called on non-Branch/Leaf node"),
-        }
-    }
-
-    /// Returns true if the node's state is the `Dirty` variant.
-    fn is_dirty(&self) -> bool {
-        match self {
-            Self::EmptyRoot => false,
-            Self::TakenSubtrie => panic!("is_dirty called on TakenSubtrie"),
-            Self::Branch(b) => b.state.is_dirty(),
-            Self::Leaf { state, .. } => state.is_dirty(),
-            Self::Subtrie(s) => s.arena[s.root].is_dirty(),
         }
     }
 
@@ -492,22 +489,11 @@ fn child_path(
 
 /// Assert that the popped branch's leaf counts are consistent with its revealed children.
 /// No-op for non-branch nodes (e.g. leaves on the stack).
-/// Skips the check if any child is [`ArenaSparseNode::TakenSubtrie`], since counts are
-/// temporarily stale until [`recompute_upper_counts`] runs.
 #[cfg(debug_assertions)]
 fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: Index) {
     let ArenaSparseNode::Branch(b) = &arena[branch_idx] else {
         return;
     };
-
-    // If any child has been taken for parallel processing, counts are temporarily
-    // inconsistent and will be fixed by recompute_upper_counts.
-    let has_taken = b.children.iter().any(|c| {
-        matches!(c, ArenaSparseNodeBranchChild::Revealed(idx) if matches!(arena[*idx], ArenaSparseNode::TakenSubtrie))
-    });
-    if has_taken {
-        return;
-    }
 
     let revealed_num_leaves: u64 = b
         .children
@@ -523,38 +509,49 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
         .children
         .iter()
         .filter_map(|c| match c {
-            ArenaSparseNodeBranchChild::Revealed(idx) => Some(arena[*idx].num_dirty_leaves()),
+            ArenaSparseNodeBranchChild::Revealed(idx) => {
+                Some(arena[*idx].num_dirty_leaves().unwrap_or(0))
+            }
             ArenaSparseNodeBranchChild::Blinded(_) => None,
         })
         .sum();
     debug_assert_eq!(
-        b.state.num_dirty_leaves(),
+        b.state.num_dirty_leaves().unwrap_or(0),
         revealed_dirty_leaves,
         "branch num_dirty_leaves mismatch",
     );
 }
 
 /// Pops the top entry from the stack and propagates `num_leaves` and dirty state/count
-/// deltas to the new top (its parent). Returns the popped entry.
+/// deltas to the new top (its parent). Returns the popped entry's path.
 #[instrument(level = "trace", target = "trie::arena", skip(arena, stack))]
 fn pop_and_propagate_stack(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
-) -> ArenaStackEntry {
+) -> Nibbles {
     let entry = stack.pop().expect("pop_and_propagate_stack can't be called on empty stack");
     trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
 
     #[cfg(debug_assertions)]
     debug_assert_branch_consistency(arena, entry.index);
 
+    #[cfg(debug_assertions)]
+    if let ArenaSparseNode::Subtrie(s) = &arena[entry.index] {
+        debug_assert_eq!(
+            s.path, entry.path,
+            "subtrie cached path {:?} does not match stack entry path {:?}",
+            s.path, entry.path,
+        );
+    }
+
     if let Some(parent) = stack.last() {
         let node = &arena[entry.index];
         let cur_num_leaves = node.num_leaves();
         let cur_dirty_leaves = node.num_dirty_leaves();
-        let child_is_dirty = node.is_dirty();
 
         let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
-        let leaves_dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
+        let leaves_dirty_delta =
+            cur_dirty_leaves.unwrap_or(0) as i64 - entry.prev_dirty_leaves as i64;
 
         // If the child's dirty leaf count changed (increased or decreased), or the child
         // itself is dirty (e.g. structurally modified with 0 dirty leaves), propagate
@@ -562,11 +559,11 @@ fn pop_and_propagate_stack(
         // and structural changes like child removal in collapse_branch.
         let parent_state = arena[parent.index].state_mut();
 
-        if leaves_dirty_delta != 0 || child_is_dirty {
+        if leaves_dirty_delta != 0 || cur_dirty_leaves.is_some() {
             *parent_state = ArenaSparseNodeState::Dirty {
                 num_leaves: (parent_state.num_leaves() as i64 + leaves_delta) as u64,
-                num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + leaves_dirty_delta)
-                    as u64,
+                num_dirty_leaves: (parent_state.num_dirty_leaves().unwrap_or(0) as i64 +
+                    leaves_dirty_delta) as u64,
             };
             trace!(
                 target: TRACE_TARGET,
@@ -590,7 +587,7 @@ fn pop_and_propagate_stack(
         }
     }
 
-    entry
+    entry.path
 }
 
 /// Pushes an entry onto the stack for the node of the given index and path.
@@ -609,7 +606,7 @@ fn push_stack(
         index: idx,
         path,
         prev_num_leaves: if is_new { 0 } else { node.num_leaves() },
-        prev_dirty_leaves: if is_new { 0 } else { node.num_dirty_leaves() },
+        prev_dirty_leaves: if is_new { 0 } else { node.num_dirty_leaves().unwrap_or(0) },
     });
     trace!(target: TRACE_TARGET, entry = ?stack.last().unwrap(), "Pushed stack entry");
 }
@@ -622,66 +619,6 @@ fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEnt
     }
 }
 
-/// Recomputes `num_leaves` and `num_dirty_leaves` for all branch nodes reachable from `root`
-/// by summing their revealed children's counts bottom-up. This is used after subtries have been
-/// taken out for parallel processing and put back, so the upper trie's counters reflect the
-/// subtries' post-processing state.
-///
-/// Only walks the upper trie (at most `UPPER_TRIE_MAX_DEPTH` levels deep), so cost is bounded.
-fn recompute_upper_counts(arena: &mut Arena<ArenaSparseNode>, root: Index) {
-    recompute_counts_recursive(arena, root);
-}
-
-/// Recursively recomputes counts for a node, returning `(num_leaves, num_dirty_leaves, is_dirty)`.
-fn recompute_counts_recursive(arena: &mut Arena<ArenaSparseNode>, idx: Index) -> (u64, u64, bool) {
-    // Collect child indices first to avoid borrowing conflicts.
-    let child_indices: SmallVec<[Index; 16]> = match &arena[idx] {
-        ArenaSparseNode::Branch(b) => b
-            .children
-            .iter()
-            .filter_map(|c| match c {
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => Some(*child_idx),
-                ArenaSparseNodeBranchChild::Blinded(_) => None,
-            })
-            .collect(),
-        ArenaSparseNode::Leaf { state, .. } => {
-            return (state.num_leaves(), state.num_dirty_leaves(), state.is_dirty());
-        }
-        ArenaSparseNode::Subtrie(s) => {
-            let root = s.root;
-            let num_leaves = s.arena[root].num_leaves();
-            let num_dirty_leaves = s.arena[root].num_dirty_leaves();
-            let is_dirty = s.arena[root].is_dirty();
-            return (num_leaves, num_dirty_leaves, is_dirty);
-        }
-        ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return (0, 0, false),
-    };
-
-    // Recurse into children (only branches can have children that need recomputation).
-    let mut total_leaves: u64 = 0;
-    let mut total_dirty_leaves: u64 = 0;
-    let mut any_child_dirty = false;
-    for child_idx in child_indices {
-        let (leaves, dirty, is_dirty) = recompute_counts_recursive(arena, child_idx);
-        total_leaves += leaves;
-        total_dirty_leaves += dirty;
-        any_child_dirty |= is_dirty;
-    }
-
-    // Update this branch's state with the recomputed counts.
-    let state = arena[idx].state_mut();
-    if state.is_dirty() || any_child_dirty || total_dirty_leaves > 0 {
-        *state = ArenaSparseNodeState::Dirty {
-            num_leaves: total_leaves,
-            num_dirty_leaves: total_dirty_leaves,
-        };
-    } else {
-        state.add_num_leaves(total_leaves as i64 - state.num_leaves() as i64);
-    }
-
-    (total_leaves, total_dirty_leaves, arena[idx].is_dirty())
-}
-
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
@@ -691,6 +628,9 @@ struct ArenaSparseSubtrie {
     arena: Arena<ArenaSparseNode>,
     /// The root node of this subtrie.
     root: Index,
+    /// The absolute path of this subtrie's root in the full trie.
+    /// Persists across reuse (not reset by [`Self::clear`]).
+    path: Nibbles,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Reusable buffer for collecting required proofs during leaf updates.
@@ -912,7 +852,7 @@ fn update_cached_rlp(
             }
             push_stack(arena, stack, root, base_path, false);
         }
-        ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
+        ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie { .. } => {
             unreachable!("Subtrie/TakenSubtrie should not appear inside a subtrie's own arena");
         }
     }
@@ -993,7 +933,7 @@ fn update_cached_rlp(
                                 _ => panic!("subtrie root must be a cached Branch or Leaf"),
                             }
                         }
-                        ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot => {
+                        ArenaSparseNode::TakenSubtrie { .. } | ArenaSparseNode::EmptyRoot => {
                             unreachable!("Unexpected child {:?}", arena[child_idx]);
                         }
                     }
@@ -1077,7 +1017,7 @@ fn update_cached_rlp(
         // branch_masks to the parent. If the stack is now empty, the root is done.
         // Otherwise resume the parent branch from the nibble after the child that was
         // just completed.
-        let popped_path = pop_and_propagate_stack(arena, stack).path;
+        let popped_path = pop_and_propagate_stack(arena, stack);
         if stack.is_empty() {
             break;
         }
@@ -1097,7 +1037,7 @@ fn get_leaf_value_in_arena<'a>(
 ) -> Option<&'a Vec<u8>> {
     loop {
         match &arena[current] {
-            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
+            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie { .. } => return None,
             ArenaSparseNode::Leaf { key, value, .. } => {
                 let remaining = full_path.slice(path_offset..);
                 return (remaining == *key).then_some(value);
@@ -1145,7 +1085,7 @@ fn find_leaf_in_arena(
 ) -> Result<LeafLookup, LeafLookupError> {
     loop {
         match &arena[current] {
-            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
+            ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie { .. } => {
                 return Ok(LeafLookup::NonExistent);
             }
             ArenaSparseNode::Leaf { key, value, .. } => {
@@ -1284,7 +1224,7 @@ fn split_and_insert_leaf(
     }
 
     let old_child_num_leaves = arena[old_child_idx].num_leaves();
-    let old_child_dirty_leaves = arena[old_child_idx].num_dirty_leaves();
+    let old_child_dirty_leaves = arena[old_child_idx].num_dirty_leaves().unwrap_or(0);
 
     let short_key = new_leaf_path.slice(..diverge_len);
     let new_leaf_nibble = new_leaf_path.get_unchecked(diverge_len);
@@ -1592,7 +1532,7 @@ fn remove_leaf(
 
             // Capture the leaf's dirty count before popping/removing, so we only
             // decrement the parent's num_dirty_leaves if the leaf was actually dirty.
-            let leaf_dirty_count = arena[head_idx].num_dirty_leaves();
+            let leaf_dirty_count = arena[head_idx].num_dirty_leaves().unwrap_or(0);
 
             // Pop the leaf entry, propagating any pending num_leaves delta to the
             // parent. This is important when collapse_branch has replaced the stack
@@ -1618,7 +1558,7 @@ fn remove_leaf(
                 .expect("leaf nibble not found in parent state_mask");
 
             let old_num_leaves = parent_branch.state.num_leaves();
-            let old_dirty_leaves = parent_branch.state.num_dirty_leaves();
+            let old_dirty_leaves = parent_branch.state.num_dirty_leaves().unwrap_or(0);
 
             // Remove the leaf from the arena and from the parent's children.
             arena.remove(head_idx);
@@ -1761,21 +1701,24 @@ fn collapse_branch(
             b.short_key = new_short_key;
             b.state = b.state.to_dirty();
         }
-        ArenaSparseNode::Subtrie(subtrie) => match &mut subtrie.arena[subtrie.root] {
-            ArenaSparseNode::Branch(b) => {
-                let mut new_short_key = prefix;
-                new_short_key.extend(&b.short_key);
-                b.short_key = new_short_key;
-                b.state = b.state.to_dirty();
+        ArenaSparseNode::Subtrie(subtrie) => {
+            subtrie.path = branch_entry.path;
+            match &mut subtrie.arena[subtrie.root] {
+                ArenaSparseNode::Branch(b) => {
+                    let mut new_short_key = prefix;
+                    new_short_key.extend(&b.short_key);
+                    b.short_key = new_short_key;
+                    b.state = b.state.to_dirty();
+                }
+                ArenaSparseNode::Leaf { key, state, .. } => {
+                    let mut new_key = prefix;
+                    new_key.extend(key);
+                    *key = new_key;
+                    *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+                }
+                _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
             }
-            ArenaSparseNode::Leaf { key, state, .. } => {
-                let mut new_key = prefix;
-                new_key.extend(key);
-                *key = new_key;
-                *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
-            }
-            _ => unreachable!("subtrie root must be a Branch or Leaf during collapse_branch"),
-        },
+        }
         _ => unreachable!("remaining child must be Leaf, Branch, or Subtrie"),
     }
 
@@ -2114,6 +2057,7 @@ impl ArenaParallelSparseTrie {
             ArenaSparseSubtrie {
                 arena: Arena::new(),
                 root: Index::DANGLING,
+                path: Nibbles::default(),
                 buffers: ArenaTrieBuffers::default(),
                 required_proofs: Vec::new(),
             }
@@ -2155,8 +2099,11 @@ impl ArenaParallelSparseTrie {
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
         let mut subtrie = self.take_or_create_cleared_subtrie();
-        let mut root_node =
-            mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
+        subtrie.path = child_path;
+        let mut root_node = mem::replace(
+            &mut self.upper_arena[child_idx],
+            ArenaSparseNode::TakenSubtrie { prev_num_leaves: 0, prev_num_dirty_leaves: 0 },
+        );
 
         // Migrate any revealed children from the upper arena into the subtrie arena.
         if let ArenaSparseNode::Branch(b) = &mut root_node {
@@ -2243,9 +2190,10 @@ impl ArenaParallelSparseTrie {
             // made the path shorter, the subtrie is no longer eligible — unwrap it.
             let child_idx = stack.last().unwrap().index;
             if let ArenaSparseNode::Subtrie(_) = &self.upper_arena[child_idx] {
-                let ArenaSparseNode::Subtrie(mut subtrie) =
-                    mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie)
-                else {
+                let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
+                    &mut self.upper_arena[child_idx],
+                    ArenaSparseNode::TakenSubtrie { prev_num_leaves: 0, prev_num_dirty_leaves: 0 },
+                ) else {
                     unreachable!()
                 };
                 migrate_nodes(
@@ -2427,7 +2375,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
                         &mut self.upper_arena[child_idx],
-                        ArenaSparseNode::TakenSubtrie,
+                        ArenaSparseNode::TakenSubtrie {
+                            prev_num_leaves: 0,
+                            prev_num_dirty_leaves: 0,
+                        },
                     ) else {
                         unreachable!()
                     };
@@ -2506,14 +2457,59 @@ impl SparseTrie for ArenaParallelSparseTrie {
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
-        self.buffers.stack.clear();
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
             return;
         }
 
         let threshold = self.parallelism_thresholds.min_dirty_leaves;
-        let mut taken: Vec<(Index, Nibbles, Box<ArenaSparseSubtrie>)> = Vec::new();
 
+        // Take qualifying subtries from the upper arena and hash them in parallel.
+        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
+        for (idx, node) in self.upper_arena.iter_mut() {
+            let ArenaSparseNode::Subtrie(s) = node else { continue };
+            let root_node = &s.arena[s.root];
+            let Some(dirty_leaves) = root_node.num_dirty_leaves() else { continue };
+            if dirty_leaves < threshold {
+                continue;
+            }
+            let num_leaves = root_node.num_leaves();
+            let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                node,
+                ArenaSparseNode::TakenSubtrie {
+                    prev_num_leaves: num_leaves,
+                    prev_num_dirty_leaves: dirty_leaves,
+                },
+            ) else {
+                unreachable!()
+            };
+            taken.push((idx, subtrie));
+        }
+
+        // Hash taken subtries (in parallel if more than one), then sort by path
+        // reversed so we can pop them in lexicographic order during the walk.
+        if !taken.is_empty() {
+            if taken.len() == 1 {
+                let (_, subtrie) = &mut taken[0];
+                subtrie.update_cached_rlp(subtrie.path);
+            } else {
+                use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+                taken = taken
+                    .into_par_iter()
+                    .map(|(idx, mut subtrie)| {
+                        subtrie.update_cached_rlp(subtrie.path);
+                        (idx, subtrie)
+                    })
+                    .collect();
+            }
+            taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
+        }
+
+        // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
+        // any remaining dirty subtries. push_stack records prev counts from TakenSubtrie
+        // (which stores the pre-hash values) and pop reads post-hash counts from the
+        // restored Subtrie, so pop_and_propagate_stack computes correct deltas.
+        self.buffers.stack.clear();
         push_stack(
             &self.upper_arena,
             &mut self.buffers.stack,
@@ -2528,61 +2524,59 @@ impl SparseTrie for ArenaParallelSparseTrie {
         loop {
             let head_idx = self.buffers.stack.last().unwrap().index;
 
-            // If the current head is a subtrie, either take it for parallel hashing
-            // (if dirty and above threshold) or hash it inline.
-            if let ArenaSparseNode::Subtrie(_) = &self.upper_arena[head_idx] {
-                let head_path = self.buffers.stack.last().unwrap().path;
+            match &self.upper_arena[head_idx] {
+                ArenaSparseNode::TakenSubtrie { .. } => {
+                    // Restore the hashed subtrie. push_stack already recorded prev counts
+                    // from the TakenSubtrie's stored values.
+                    let (_, mut subtrie) =
+                        taken.pop().expect("taken subtries must not be exhausted");
+                    debug_assert_eq!(
+                        subtrie.path,
+                        self.buffers.stack.last().unwrap().path,
+                        "taken subtrie path mismatch",
+                    );
 
-                // Check if this subtrie qualifies for parallel hashing.
-                let subtrie_ref = match &self.upper_arena[head_idx] {
-                    ArenaSparseNode::Subtrie(s) => s,
-                    _ => unreachable!(),
-                };
-                let is_dirty = subtrie_ref.arena[subtrie_ref.root].is_dirty();
-                let dirty_leaves = subtrie_ref.arena[subtrie_ref.root].num_dirty_leaves();
+                    if let Some(actions) = update_actions.as_mut() &&
+                        let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
+                    {
+                        actions.append(subtrie_actions);
+                    }
 
-                if is_dirty && dirty_leaves >= threshold {
-                    // Take the subtrie for parallel hashing.
-                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                        &mut self.upper_arena[head_idx],
-                        ArenaSparseNode::TakenSubtrie,
-                    ) else {
-                        unreachable!()
-                    };
-                    taken.push((head_idx, head_path, subtrie));
+                    self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
 
-                    // Just pop the stack entry without propagation — counts will be
-                    // recomputed after all taken subtries are put back.
-                    self.buffers.stack.pop();
+                    let popped_path =
+                        pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
                     if self.buffers.stack.is_empty() {
                         break;
                     }
-                    start_nibble = head_path.last().unwrap() + 1;
+                    start_nibble = popped_path.last().unwrap() + 1;
                     continue;
                 }
+                ArenaSparseNode::Subtrie(_) => {
+                    let head_path = self.buffers.stack.last().unwrap().path;
 
-                // Hash inline (below threshold or not dirty).
-                let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
-                    unreachable!()
-                };
-                subtrie.update_cached_rlp(head_path);
+                    // Hash inline (below threshold or not dirty).
+                    let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
+                        unreachable!()
+                    };
+                    subtrie.update_cached_rlp(head_path);
 
-                // Drain update actions from the subtrie into the main buffer.
-                if let Some(actions) = update_actions.as_mut() &&
-                    let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
-                {
-                    actions.append(subtrie_actions);
+                    if let Some(actions) = update_actions.as_mut() &&
+                        let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
+                    {
+                        actions.append(subtrie_actions);
+                    }
+
+                    let popped_path =
+                        pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
+                    if self.buffers.stack.is_empty() {
+                        break;
+                    }
+                    start_nibble = popped_path.last().unwrap() + 1;
+                    continue;
                 }
-
-                // Pop subtrie; pop_and_propagate_stack handles the dirty delta propagation to the
-                // parent.
-                let popped_path =
-                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
-                if self.buffers.stack.is_empty() {
-                    break;
-                }
-                start_nibble = popped_path.last().unwrap() + 1;
-                continue;
+                ArenaSparseNode::Branch(_) => {}
+                _ => unreachable!("unexpected node on stack: {:?}", self.upper_arena[head_idx]),
             }
 
             // Head is a branch — iterate its children looking for branches/subtries
@@ -2601,7 +2595,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 };
 
                 match &self.upper_arena[child_idx] {
-                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => {
+                    ArenaSparseNode::Branch(_) |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie { .. } => {
                         let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
                         push_stack(
                             &self.upper_arena,
@@ -2624,43 +2620,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             // All children processed; pop and propagate dirty/leaf deltas to parent.
             let popped_path =
-                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
+                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
             if self.buffers.stack.is_empty() {
                 break;
             }
             start_nibble = popped_path.last().unwrap() + 1;
-        }
-
-        // Process taken subtries: hash via rayon (or serially if only one), then put back.
-        if !taken.is_empty() {
-            if taken.len() == 1 {
-                let (idx, path, mut subtrie) = taken.pop().unwrap();
-                subtrie.update_cached_rlp(path);
-                self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
-            } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-                let results: Vec<_> = taken
-                    .into_par_iter()
-                    .map(|(idx, path, mut subtrie)| {
-                        subtrie.update_cached_rlp(path);
-                        (idx, subtrie)
-                    })
-                    .collect();
-
-                for (idx, mut subtrie) in results {
-                    if let Some(actions) = update_actions.as_mut() &&
-                        let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
-                    {
-                        actions.append(subtrie_actions);
-                    }
-
-                    self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
-                }
-            }
-
-            // Recompute upper trie counts now that all taken subtries are back.
-            recompute_upper_counts(&mut self.upper_arena, self.root);
         }
 
         self.buffers.update_actions = update_actions;
@@ -2756,7 +2720,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 pruned += subtrie.prune(max_depth);
 
                 let popped_path =
-                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
+                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
                 if self.buffers.stack.is_empty() {
                     break;
                 }
@@ -2802,7 +2766,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             // All children processed; pop.
             let popped_path =
-                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack).path;
+                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
             if self.buffers.stack.is_empty() {
                 break;
             }
@@ -2887,7 +2851,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
                         &mut self.upper_arena[child_idx],
-                        ArenaSparseNode::TakenSubtrie,
+                        ArenaSparseNode::TakenSubtrie {
+                            prev_num_leaves: 0,
+                            prev_num_dirty_leaves: 0,
+                        },
                     ) else {
                         unreachable!()
                     };
