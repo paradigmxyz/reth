@@ -46,7 +46,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
-        Arc, Barrier,
+        Arc,
     },
     time::Duration,
 };
@@ -438,13 +438,12 @@ where
                 let rest = all.split_off(prefetch.min(all.len()));
 
                 let convert = Arc::new(convert);
-                let seq_done = Arc::new(Barrier::new(2));
+                let (seq_done_tx, seq_done_rx) = tokio::sync::oneshot::channel::<()>();
 
                 // Clone for parallel path.
                 let convert_par = convert.clone();
                 let prewarm_tx_par = prewarm_tx.clone();
                 let execute_tx_par = execute_tx.clone();
-                let seq_done_par = seq_done.clone();
                 let executor_par = executor.clone();
 
                 // Start parallel computation on rayon immediately. The map() runs in
@@ -452,6 +451,7 @@ where
                 // converted), but the ordered consumer waits for the sequential path
                 // to finish before yielding to execution.
                 executor.spawn_blocking_named("tx-iterator-par", move || {
+                    let mut seq_done_rx = Some(seq_done_rx);
                     rest.into_par_iter()
                         .enumerate()
                         .map(|(i, tx)| {
@@ -466,9 +466,9 @@ where
                             (idx, tx)
                         })
                         .for_each_ordered_in(executor_par.cpu_pool(), |(idx, tx)| {
-                            if idx == prefetch {
+                            if let Some(rx) = seq_done_rx.take() {
                                 // Block until sequential path finishes yielding.
-                                seq_done_par.wait();
+                                let _ = rx.blocking_recv();
                             }
                             let _ = execute_tx_par.send(tx);
                             debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
@@ -480,7 +480,7 @@ where
                 convert_serial(all.into_iter(), &*convert, &prewarm_tx, &execute_tx);
 
                 // Signal parallel path that sequential is done.
-                seq_done.wait();
+                let _ = seq_done_tx.send(());
             });
         }
 
