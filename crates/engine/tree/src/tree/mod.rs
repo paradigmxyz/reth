@@ -1523,6 +1523,15 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
+                                // Apply backpressure if too many blocks are in memory
+                                if let Err(err) = self.apply_persistence_backpressure() {
+                                    error!(target: "engine::tree", %err, "Persistence backpressure failed");
+                                    let _ = tx.send(Err(BeaconOnNewPayloadError::Internal(
+                                        Box::new(err),
+                                    )));
+                                    return Ok(ops::ControlFlow::Continue(()));
+                                }
+
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
@@ -1880,6 +1889,68 @@ where
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
+    }
+
+    /// Returns the number of canonical blocks currently held in memory
+    /// (i.e., not yet persisted to disk).
+    const fn num_in_memory_blocks(&self) -> u64 {
+        self.state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    }
+
+    /// Returns `true` if the number of in-memory blocks exceeds the configured
+    /// persistence backpressure threshold.
+    const fn exceeds_backpressure_threshold(&self) -> bool {
+        if let Some(threshold) = self.config.persistence_backpressure_threshold() {
+            self.num_in_memory_blocks() > threshold
+        } else {
+            false
+        }
+    }
+
+    /// Applies persistence backpressure by waiting for any in-progress persistence to complete
+    /// and triggering a new one if the in-memory block count still exceeds the threshold.
+    ///
+    /// This is called before processing `newPayload` to prevent unbounded in-memory block
+    /// accumulation when persistence can't keep up.
+    fn apply_persistence_backpressure(&mut self) -> Result<(), AdvancePersistenceError> {
+        if !self.exceeds_backpressure_threshold() {
+            return Ok(());
+        }
+
+        let start = Instant::now();
+        let in_memory = self.num_in_memory_blocks();
+        debug!(
+            target: "engine::tree",
+            in_memory_blocks = in_memory,
+            threshold = ?self.config.persistence_backpressure_threshold(),
+            "Persistence backpressure triggered, waiting for persistence"
+        );
+
+        // If persistence is not in progress, trigger it now
+        if !self.persistence_state.in_progress() {
+            self.advance_persistence()?;
+        }
+
+        // Wait for the in-progress persistence to complete (blocking)
+        if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
+            let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+            self.on_persistence_complete(result, persistence_start_time)?;
+        }
+
+        let wait_duration = start.elapsed();
+        self.metrics.engine.persistence_backpressure_count.increment(1);
+        self.metrics.engine.persistence_backpressure_duration.record(wait_duration);
+        debug!(
+            target: "engine::tree",
+            elapsed = ?wait_duration,
+            in_memory_blocks_after = self.num_in_memory_blocks(),
+            "Persistence backpressure resolved"
+        );
+
+        Ok(())
     }
 
     /// Returns true if the canonical chain length minus the last persisted

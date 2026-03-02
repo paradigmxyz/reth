@@ -245,6 +245,15 @@ pub struct EngineArgs {
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
     pub memory_block_buffer_target: u64,
 
+    /// Configure the maximum number of in-memory blocks before applying backpressure to
+    /// newPayload processing by waiting for persistence to complete.
+    ///
+    /// When set, if the number of in-memory blocks exceeds this threshold, incoming newPayload
+    /// requests will be delayed until persistence catches up. This prevents unbounded memory
+    /// growth when block production outpaces persistence.
+    #[arg(long = "engine.persistence-backpressure-threshold")]
+    pub persistence_backpressure_threshold: Option<u64>,
+
     /// Enable legacy state root
     #[arg(long = "engine.legacy-state-root", default_value_t = DefaultEngineValues::get_global().legacy_state_root_task_enabled)]
     pub legacy_state_root_task_enabled: bool,
@@ -410,6 +419,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold,
             memory_block_buffer_target,
+            persistence_backpressure_threshold: None,
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
             caching_and_prewarming_enabled: true,
@@ -447,6 +457,7 @@ impl EngineArgs {
         TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
