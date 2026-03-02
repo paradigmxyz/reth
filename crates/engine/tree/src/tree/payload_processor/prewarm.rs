@@ -207,7 +207,7 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some((evm, metrics)) =
+            let Some(evm) =
                 worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
             else {
                 return;
@@ -235,11 +235,11 @@ where
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
-                    metrics.transaction_errors.increment(1);
+                    ctx.metrics.transaction_errors.increment(1);
                     return;
                 }
             };
-            metrics.execution_duration.record(start.elapsed());
+            ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {
                 return;
@@ -247,13 +247,13 @@ where
 
             if index > 0 {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-                metrics.prefetch_storage_targets.record(storage_targets as f64);
+                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = to_multi_proof {
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
             }
 
-            metrics.total_runtime.record(start.elapsed());
+            ctx.metrics.total_runtime.record(start.elapsed());
         });
     }
 
@@ -520,7 +520,7 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<(EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>, PrewarmMetrics)>;
+    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -528,7 +528,7 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Creates a per-thread EVM, metrics handle, and termination flag for prewarming.
+    /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.build() {
@@ -579,7 +579,7 @@ where
             });
         }
 
-        Some((evm, self.metrics.clone()))
+        Some(evm)
     }
 
     /// Returns `true` if prewarming should stop.
