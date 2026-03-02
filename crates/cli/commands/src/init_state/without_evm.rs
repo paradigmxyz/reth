@@ -109,7 +109,7 @@ where
     N: NodePrimitives,
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = reth_tasks::channel::unbounded();
 
     // Spawn jobs for incrementing the block end range of transactions, receipts, and senders.
     for segment in [

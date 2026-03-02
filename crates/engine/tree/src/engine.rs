@@ -6,13 +6,13 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
 use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::Sender;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
+use reth_tasks::channel::Sender;
 use std::{
     fmt::Display,
     task::{ready, Context, Poll},

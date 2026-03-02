@@ -31,6 +31,7 @@ use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
     StageCheckpointWriter,
 };
+use reth_tasks::channel;
 use std::{
     collections::Bound,
     error::Error,
@@ -38,7 +39,6 @@ use std::{
     io::{Read, Seek},
     iter::Map,
     ops::RangeBounds,
-    sync::mpsc,
 };
 use tracing::info;
 
@@ -66,7 +66,7 @@ where
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
 {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
 
     // Handle IO-bound async download in a background tokio task
     tokio::spawn(async move {

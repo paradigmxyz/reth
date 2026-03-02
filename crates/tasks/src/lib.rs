@@ -30,6 +30,7 @@ use tokio::{
 };
 use tracing::debug;
 
+pub mod channel;
 pub mod lazy;
 pub mod metrics;
 pub mod runtime;

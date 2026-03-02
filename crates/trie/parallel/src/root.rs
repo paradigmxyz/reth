@@ -7,7 +7,7 @@ use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
+use reth_tasks::{channel, Runtime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
@@ -17,7 +17,7 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::HashMap, sync::mpsc};
+use std::collections::HashMap;
 use thiserror::Error;
 use tracing::*;
 
@@ -105,7 +105,7 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = mpsc::sync_channel(1);
+            let (tx, rx) = channel::bounded(1);
 
             // Spawn a blocking task to calculate account's storage root from database I/O
             drop(handle.spawn_blocking(move || {

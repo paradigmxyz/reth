@@ -32,6 +32,7 @@ parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
 [dev-dependencies]
 reth-stages = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 
 assert_matches.workspace = true

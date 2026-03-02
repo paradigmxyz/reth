@@ -17,10 +17,8 @@ use reth_stages_api::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    fmt::Debug,
-    sync::mpsc::{self, Receiver},
-};
+use reth_tasks::channel;
+use std::fmt::Debug;
 use tracing::*;
 
 /// Maximum number of channels that can exist in memory.
@@ -111,7 +109,7 @@ where
             for chunk in &storage_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
                 // An _unordered_ channel to receive results from a rayon job
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                let (tx, rx) = mpsc::sync_channel(chunk.len());
+                let (tx, rx) = channel::bounded(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
@@ -210,7 +208,7 @@ where
 
 /// Flushes channels hashes to ETL collector.
 fn collect(
-    channels: &mut Vec<Receiver<(Vec<u8>, CompactU256)>>,
+    channels: &mut Vec<channel::Receiver<(Vec<u8>, CompactU256)>>,
     collector: &mut Collector<Vec<u8>, CompactU256>,
 ) -> Result<(), StageError> {
     for channel in channels.iter_mut() {

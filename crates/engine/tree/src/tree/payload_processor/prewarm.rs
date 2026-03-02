@@ -21,7 +21,6 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, StorageKey, B256};
-use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -32,11 +31,14 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::{
+    channel::{self, Receiver, Sender},
+    pool::WorkerPool,
+    Runtime,
+};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
     Arc,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
@@ -70,7 +72,7 @@ where
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+    to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
@@ -88,9 +90,9 @@ where
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
-        let (actions_tx, actions_rx) = channel();
+        let (actions_tx, actions_rx) = channel::unbounded();
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
@@ -120,9 +122,9 @@ where
     /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
-        pending: mpsc::Receiver<(usize, Tx)>,
+        pending: Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
@@ -202,7 +204,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
-        to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<&Sender<MultiProofMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -272,7 +274,7 @@ where
     fn save_cache(
         self,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-        valid_block_rx: mpsc::Receiver<()>,
+        valid_block_rx: Receiver<()>,
     ) {
         let start = Instant::now();
 
@@ -709,7 +711,7 @@ pub enum PrewarmTaskEvent<R> {
         ///
         /// Cache saving is racing the state root validation. We optimistically construct the
         /// updated cache but only save it once we know the block is valid.
-        valid_block_rx: mpsc::Receiver<()>,
+        valid_block_rx: Receiver<()>,
     },
     /// Finished executing all transactions
     FinishedTxExecution {

@@ -14,7 +14,6 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Histogram};
 use multiproof::*;
 use parking_lot::RwLock;
@@ -32,7 +31,11 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
+use reth_tasks::{
+    channel::{self, Receiver, Sender},
+    utils::increase_thread_priority,
+    ForEachOrdered, Runtime,
+};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -45,7 +48,6 @@ use std::{
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
-        mpsc::{self, channel},
         Arc,
     },
     time::Duration,
@@ -189,8 +191,8 @@ where
         let sparse_trie = self.sparse_state_trie.clone();
 
         // Use channels and spawn_blocking instead of std::thread::spawn
-        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
+        let (execution_tx, execution_rx) = channel::unbounded();
+        let (sparse_trie_tx, sparse_trie_rx) = channel::unbounded();
 
         self.executor.spawn_blocking(move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
@@ -348,13 +350,13 @@ where
             + Sync
             + 'static,
     {
-        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
+        let (to_multi_proof, from_multi_proof) = channel::unbounded();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
-        let (state_root_tx, state_root_rx) = channel();
+        let (state_root_tx, state_root_rx) = channel::unbounded();
 
         self.spawn_sparse_trie_task(
             proof_handle,
@@ -401,11 +403,11 @@ where
         transactions: I,
         transaction_count: usize,
     ) -> (
-        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+        Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
+        Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
+        let (prewarm_tx, prewarm_rx) = channel::bounded(transaction_count);
+        let (execute_tx, execute_rx) = channel::bounded(transaction_count);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -473,9 +475,9 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+        transactions: Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<Sender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
@@ -551,8 +553,8 @@ where
     fn spawn_sparse_trie_task(
         &self,
         proof_worker_handle: ProofWorkerHandle,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-        from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
+        state_root_tx: Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        from_multi_proof: Receiver<MultiProofMessage>,
         parent_state_root: B256,
         chunk_size: usize,
     ) {
@@ -728,8 +730,8 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+    prewarm_tx: &Sender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &Sender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -759,16 +761,16 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// Channel for evm state updates to the multiproof pipeline.
-    to_multi_proof: CrossbeamSender<MultiProofMessage>,
+    to_multi_proof: Sender<MultiProofMessage>,
     /// Receiver for the computed state root.
-    state_root_rx: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    state_root_rx: Option<Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
 }
 
 impl StateRootHandle {
     /// Creates a new state root handle.
     pub const fn new(
-        to_multi_proof: CrossbeamSender<MultiProofMessage>,
-        state_root_rx: mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        to_multi_proof: Sender<MultiProofMessage>,
+        state_root_rx: Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) -> Self {
         Self { to_multi_proof, state_root_rx: Some(state_root_rx) }
     }
@@ -805,7 +807,7 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+    ) -> Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         self.state_root_rx.take().expect("state_root already taken")
     }
 }
@@ -821,7 +823,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
-    transactions: mpsc::Receiver<Result<Tx, Err>>,
+    transactions: Receiver<Result<Tx, Err>>,
     /// Span for tracing
     _span: Span,
 }
@@ -850,7 +852,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// If payload processing was started without background tasks.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+    ) -> Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
@@ -896,7 +898,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) -> Option<mpsc::Sender<()>> {
+    ) -> Option<Sender<()>> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -915,7 +917,7 @@ pub struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    to_prewarm_task: Option<Sender<PrewarmTaskEvent<R>>>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
@@ -939,9 +941,9 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) -> Option<mpsc::Sender<()>> {
+    ) -> Option<Sender<()>> {
         if let Some(tx) = self.to_prewarm_task.take() {
-            let (valid_block_tx, valid_block_rx) = mpsc::channel();
+            let (valid_block_tx, valid_block_rx) = channel::unbounded();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
 
@@ -958,7 +960,7 @@ impl<R> Drop for CacheTaskHandle<R> {
         if let Some(tx) = self.to_prewarm_task.take() {
             let _ = tx.send(PrewarmTaskEvent::Terminate {
                 execution_outcome: None,
-                valid_block_rx: mpsc::channel().1,
+                valid_block_rx: channel::unbounded().1,
             });
         }
     }

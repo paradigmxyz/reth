@@ -33,7 +33,6 @@ thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
-crossbeam-channel.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

@@ -2,11 +2,11 @@
 
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
-use crossbeam_channel::Sender as CrossbeamSender;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
+use reth_tasks::channel::Sender;
 use reth_trie::{HashedPostState, HashedStorage};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::Arc;
@@ -77,11 +77,11 @@ pub enum MultiProofMessage {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
+pub struct StateHookSender(Sender<MultiProofMessage>);
 
 impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
-    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
+    pub const fn new(inner: Sender<MultiProofMessage>) -> Self {
         Self(inner)
     }
 }

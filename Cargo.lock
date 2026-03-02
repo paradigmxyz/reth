@@ -8319,7 +8319,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
- "crossbeam-channel",
  "derive_more",
  "eyre",
  "fixed-cache",
@@ -8465,6 +8464,7 @@ dependencies = [
  "reth-provider",
  "reth-stages-types",
  "reth-storage-api",
+ "reth-tasks",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -8754,6 +8754,7 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives-traits",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-testing-utils",
  "revm",
  "secp256k1 0.30.0",
@@ -10210,6 +10211,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-testing-utils",
  "reth-tokio-util",
  "tempfile",
@@ -10306,6 +10308,7 @@ dependencies = [
 name = "reth-tasks"
 version = "1.11.1"
 dependencies = [
+ "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "futures-util",
@@ -10456,6 +10459,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-stages-types",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
@@ -10534,7 +10538,6 @@ version = "1.11.1"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "crossbeam-channel",
  "derive_more",
  "itertools 0.14.0",
  "metrics",

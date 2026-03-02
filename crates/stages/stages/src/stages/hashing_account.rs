@@ -17,10 +17,10 @@ use reth_stages_api::{
     StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_tasks::channel;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 
@@ -184,7 +184,7 @@ where
             for chunk in &accounts_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
                 // An _unordered_ channel to receive results from a rayon job
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                let (tx, rx) = mpsc::sync_channel(chunk.len());
+                let (tx, rx) = channel::bounded(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
@@ -273,7 +273,7 @@ where
 
 /// Flushes channels hashes to ETL collector.
 fn collect(
-    channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
+    channels: &mut Vec<channel::Receiver<(RawKey<B256>, RawValue<Account>)>>,
     collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
 ) -> Result<(), StageError> {
     for channel in channels.iter_mut() {

@@ -275,7 +275,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn watch_directory(&self) {
         let provider = self.clone();
         reth_tasks::spawn_os_thread("sf-watch", move || {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = reth_tasks::channel::unbounded();
             let mut watcher = RecommendedWatcher::new(
                 move |res| tx.send(res).unwrap(),
                 notify::Config::default(),

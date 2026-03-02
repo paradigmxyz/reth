@@ -11,10 +11,12 @@ use crate::tree::{
 };
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
-use reth_tasks::Runtime;
+use reth_tasks::{
+    channel::{self, Receiver, Sender},
+    Runtime,
+};
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -41,11 +43,11 @@ const MAX_PENDING_UPDATES: usize = 100;
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
-    proof_result_tx: CrossbeamSender<ProofResultMessage>,
+    proof_result_tx: Sender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
-    proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+    proof_result_rx: Receiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
-    updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    updates: Receiver<SparseTrieTaskMessage>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// Handle to the proof worker pools (storage and account).
@@ -110,14 +112,14 @@ where
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
         executor: &Runtime,
-        updates: CrossbeamReceiver<MultiProofMessage>,
+        updates: Receiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
         chunk_size: usize,
     ) -> Self {
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+        let (proof_result_tx, proof_result_rx) = channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = channel::unbounded();
 
         let parent_span = tracing::Span::current();
         executor.spawn_blocking_named("trie-hashing", move || {
@@ -151,8 +153,8 @@ where
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
-        updates: CrossbeamReceiver<MultiProofMessage>,
-        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        updates: Receiver<MultiProofMessage>,
+        hashed_state_tx: Sender<SparseTrieTaskMessage>,
     ) {
         while let Ok(message) = updates.recv() {
             let msg = match message {
@@ -239,7 +241,7 @@ where
 
         loop {
             let mut t = Instant::now();
-            crossbeam_channel::select_biased! {
+            reth_tasks::channel::select_biased! {
                 recv(self.updates) -> message => {
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -778,8 +780,8 @@ mod tests {
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = channel::unbounded();
 
         let address = keccak256(Address::random());
         let slot = keccak256(U256::from(42).to_be_bytes::<32>());

@@ -43,6 +43,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
+use reth_tasks::channel::RecvTimeoutError;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -52,7 +53,6 @@ use std::{
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::RecvTimeoutError,
         Arc,
     },
 };
@@ -862,7 +862,7 @@ where
         // Spawn background task to compute receipt root and logs bloom incrementally.
         // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, receipt_rx) = reth_tasks::channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor
@@ -922,7 +922,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: &reth_tasks::channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -1084,7 +1084,7 @@ where
                 self.metrics.block_validation.state_root_task_timeout_total.increment(1);
 
                 let (seq_tx, seq_rx) =
-                    std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
+                    reth_tasks::channel::unbounded::<ProviderResult<(B256, TrieUpdates)>>();
 
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();

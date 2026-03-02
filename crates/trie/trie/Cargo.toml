@@ -19,6 +19,7 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie-common = { workspace = true, features = ["rayon"] }
+reth-tasks.workspace = true
 
 revm-database.workspace = true
 
@@ -92,6 +93,7 @@ test-utils = [
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
+    "reth-tasks/test-utils",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",

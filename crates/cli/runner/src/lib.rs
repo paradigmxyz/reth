@@ -10,8 +10,8 @@
 
 //! Entrypoint for running commands.
 
-use reth_tasks::{PanickedTaskError, TaskExecutor};
-use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use reth_tasks::{channel, PanickedTaskError, TaskExecutor};
+use std::{future::Future, pin::pin, time::Duration};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -291,7 +291,7 @@ const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Dropping the runtime on the current thread could block due to tokio pool teardown.
 /// Instead, we drop it on a separate thread and optionally wait for completion.
 fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
     std::thread::Builder::new()
         .name("rt-shutdown".to_string())
         .spawn(move || {

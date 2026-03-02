@@ -36,12 +36,14 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
 };
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
+use reth_tasks::{
+    channel::{oneshot, unbounded, Receiver, Sender},
+    Runtime,
+};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
@@ -56,7 +58,6 @@ use std::{
     rc::Rc,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Duration,
@@ -94,9 +95,9 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
 #[derive(Debug, Clone)]
 pub struct ProofWorkerHandle {
     /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    storage_work_tx: Sender<StorageWorkerJob>,
     /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountWorkerJob>,
+    account_work_tx: Sender<AccountWorkerJob>,
     /// Counter tracking available storage workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     storage_available_workers: Arc<AtomicUsize>,
@@ -299,7 +300,7 @@ impl ProofWorkerHandle {
     pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: Sender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
         self.storage_work_tx
@@ -353,7 +354,7 @@ impl ProofWorkerHandle {
         account: B256,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
-        let (tx, rx) = channel();
+        let (tx, rx) = oneshot();
         self.storage_work_tx
             .send(StorageWorkerJob::BlindedStorageNode { account, path, result_sender: tx })
             .map_err(|_| {
@@ -368,7 +369,7 @@ impl ProofWorkerHandle {
         &self,
         path: Nibbles,
     ) -> Result<Receiver<TrieNodeProviderResult>, ProviderError> {
-        let (tx, rx) = channel();
+        let (tx, rx) = oneshot();
         self.account_work_tx
             .send(AccountWorkerJob::BlindedAccountNode { path, result_sender: tx })
             .map_err(|_| {
@@ -521,7 +522,7 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
 /// `MultiProofTask`.
 ///
 /// Workers use this sender to deliver proof results directly to `MultiProofTask`.
-pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
+pub type ProofResultSender = Sender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `MultiProofTask`.
@@ -596,7 +597,7 @@ pub(crate) enum StorageWorkerJob {
         /// Storage proof input parameters
         input: StorageProofInput,
         /// Context for sending the proof result.
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: Sender<StorageProofResultMessage>,
     },
     /// Blinded storage node retrieval request
     BlindedStorageNode {
@@ -617,7 +618,7 @@ struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
     /// Channel for receiving work
-    work_rx: CrossbeamReceiver<StorageWorkerJob>,
+    work_rx: Receiver<StorageWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Counter tracking worker availability
@@ -639,7 +640,7 @@ where
     /// Creates a new storage proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
-        work_rx: CrossbeamReceiver<StorageWorkerJob>,
+        work_rx: Receiver<StorageWorkerJob>,
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -764,7 +765,7 @@ where
             <Provider as HashedCursorFactory>::StorageCursor<'_>,
         >,
         input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: Sender<StorageProofResultMessage>,
         storage_proofs_processed: &mut u64,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
@@ -868,11 +869,11 @@ struct AccountProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
     /// Channel for receiving work
-    work_rx: CrossbeamReceiver<AccountWorkerJob>,
+    work_rx: Receiver<AccountWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Channel for dispatching storage proof work (for pre-dispatched target proofs)
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    storage_work_tx: Sender<StorageWorkerJob>,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
     /// Cached storage roots
@@ -893,9 +894,9 @@ where
     #[allow(clippy::too_many_arguments)]
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
-        work_rx: CrossbeamReceiver<AccountWorkerJob>,
+        work_rx: Receiver<AccountWorkerJob>,
         worker_id: usize,
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        storage_work_tx: Sender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
@@ -1195,10 +1196,10 @@ where
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
-    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    storage_work_tx: &Sender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<B256Map<Receiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
@@ -1224,7 +1225,7 @@ fn dispatch_v2_storage_proofs(
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
 
         storage_work_tx

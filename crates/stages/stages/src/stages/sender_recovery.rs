@@ -23,7 +23,8 @@ use reth_stages_api::{
     StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc};
+use reth_tasks::channel;
+use std::{fmt::Debug, ops::Range};
 use thiserror::Error;
 use tracing::*;
 
@@ -36,7 +37,7 @@ const BATCH_SIZE: usize = 100_000;
 const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Type alias for a sender that transmits the result of sender recovery.
-type RecoveryResultSender = mpsc::SyncSender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
+type RecoveryResultSender = channel::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -226,7 +227,7 @@ fn recover_range<Provider, CURSOR>(
     tx_range: Range<TxNumber>,
     block_numbers: Vec<BlockNumber>,
     provider: &Provider,
-    tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
+    tx_batch_sender: channel::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
@@ -247,7 +248,7 @@ where
         .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
             let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
-            let (tx, rx) = mpsc::sync_channel((range.end - range.start) as usize);
+            let (tx, rx) = channel::bounded((range.end - range.start) as usize);
             // Range and channel sender will be sent to rayon worker
             ((range, tx), rx)
         })
@@ -328,13 +329,13 @@ where
 /// transactions in parallel using global rayon pool
 fn setup_range_recovery<Provider>(
     provider: &Provider,
-) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
+) -> channel::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
 where
     Provider: DBProvider
         + HeaderProvider
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
 {
-    let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
+    let (tx_sender, tx_receiver) = channel::unbounded::<Vec<(Range<u64>, RecoveryResultSender)>>();
     let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,

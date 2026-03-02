@@ -8,8 +8,8 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{Bloom, B256};
-use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
+use reth_tasks::channel::Receiver;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
@@ -124,8 +124,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
     use alloy_primitives::{b256, hex, Address, Bytes, Log};
-    use crossbeam_channel::bounded;
     use reth_ethereum_primitives::{Receipt, TxType};
+    use reth_tasks::channel::bounded;
 
     #[tokio::test]
     async fn test_receipt_root_task_empty() {

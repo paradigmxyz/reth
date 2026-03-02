@@ -2,10 +2,10 @@ use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, Account};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::channel::Receiver;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
     proof_v2::{DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
@@ -56,8 +56,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+        proof_result_rx: Option<Result<Receiver<StorageProofResultMessage>, DatabaseError>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -212,7 +211,7 @@ where
 /// multiple accounts.
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
-    dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    dispatched: B256Map<Receiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -235,7 +234,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
-        dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        dispatched: B256Map<Receiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {

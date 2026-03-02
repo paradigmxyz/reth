@@ -243,10 +243,11 @@ mod tests {
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
+    use reth_tasks::channel::unbounded;
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
-    use std::{sync::mpsc::channel, time::Duration};
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn setup() -> (ProviderFactory<MockNodeTypesWithDB>, TempDir) {
@@ -334,7 +335,7 @@ mod tests {
 
         let static_file_producer = StaticFileProducer::new(provider_factory, PruneModes::default());
 
-        let (tx, rx) = channel();
+        let (tx, rx) = unbounded();
 
         for i in 0..5 {
             let producer = static_file_producer.clone();

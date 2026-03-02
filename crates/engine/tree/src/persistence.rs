@@ -1,6 +1,5 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
-use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
@@ -11,14 +10,11 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
-use std::{
-    sync::{
-        mpsc::{Receiver, SendError, Sender},
-        Arc,
-    },
-    thread::JoinHandle,
+use reth_tasks::{
+    channel::{self, Receiver, SendError, Sender},
+    spawn_os_thread,
 };
+use std::{sync::Arc, thread::JoinHandle};
 use thiserror::Error;
 use tracing::{debug, error, instrument};
 
@@ -202,13 +198,13 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, Sender<Option<BlockNumHash>>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<Option<BlockNumHash>>),
+    RemoveBlocksAbove(u64, Sender<Option<BlockNumHash>>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -250,7 +246,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         N: ProviderNodeTypes,
     {
         // create the initial channels
-        let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (db_service_tx, db_service_rx) = channel::unbounded();
 
         // spawn the persistence service
         let db_service =
@@ -287,7 +283,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<T>>,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
@@ -322,7 +318,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
@@ -378,7 +374,7 @@ mod tests {
         let handle = default_persistence_handle();
 
         let blocks = vec![];
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -397,7 +393,7 @@ mod tests {
         let block_hash = executed.recovered_block().hash();
 
         let blocks = vec![executed];
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -417,7 +413,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
         let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
@@ -434,7 +430,7 @@ mod tests {
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            let (tx, rx) = channel::bounded(1);
 
             handle.save_blocks(blocks, tx).unwrap();
 

@@ -28,15 +28,11 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::test_utils::MockEthProvider;
-use reth_tasks::spawn_os_thread;
-use std::{
-    collections::BTreeMap,
-    str::FromStr,
-    sync::{
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
+use reth_tasks::{
+    channel::{self, Receiver, Sender},
+    spawn_os_thread,
 };
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::oneshot;
 
 /// Mock engine validator for tests
@@ -99,10 +95,9 @@ struct TestChannel<T> {
 impl<T: Send + 'static> TestChannel<T> {
     /// Creates a new test channel
     fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
-        use std::sync::mpsc::channel;
-        let (original_tx, original_rx) = channel();
-        let (wrapped_tx, wrapped_rx) = channel();
-        let (release_tx, release_rx) = channel();
+        let (original_tx, original_rx) = channel::unbounded();
+        let (wrapped_tx, wrapped_rx) = channel::unbounded();
+        let (release_tx, release_rx) = channel::unbounded();
         let handle = TestChannelHandle::new(release_tx);
         let test_channel = Self { release: release_rx, tx: wrapped_tx, rx: original_rx };
         // spawn the task that listens and releases stuff
@@ -146,9 +141,7 @@ struct TestHarness {
         BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
-    to_tree_tx: crossbeam_channel::Sender<
-        FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
-    >,
+    to_tree_tx: channel::Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
@@ -158,8 +151,7 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        use std::sync::mpsc::channel;
-        let (action_tx, action_rx) = channel();
+        let (action_tx, action_rx) = channel::unbounded();
         Self::with_persistence_channel(chain_spec, action_tx, action_rx)
     }
 
@@ -415,7 +407,7 @@ impl ValidatorTestHarness {
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = crossbeam_channel::bounded(1);
+        let (_tx, rx) = channel::bounded(1);
 
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {

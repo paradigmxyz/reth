@@ -21,6 +21,7 @@ use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
 };
+use reth_tasks::channel;
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use revm::{
     database::{CacheDB, EmptyDB, TransitionState},
@@ -28,7 +29,7 @@ use revm::{
     state::{AccountInfo, Bytecode, EvmState},
     Database,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
@@ -807,7 +808,7 @@ fn test_balance_increment_not_duplicated() {
     let provider = EthEvmConfig::new(chain_spec);
     let executor = provider.batch_executor(db);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
     let tx_clone = tx.clone();
 
     let _output = executor

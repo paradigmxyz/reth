@@ -44,7 +44,7 @@ use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
-use crossbeam_channel::{Receiver, Sender};
+use reth_tasks::channel::{self, Receiver, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -343,7 +343,7 @@ where
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
     ) -> Self {
-        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = channel::unbounded();
 
         Self {
             provider,
@@ -492,7 +492,7 @@ where
         if let Some((persistence_rx, start_time, action)) = maybe_persistence {
             // Biased select prioritizes persistence completion to update in memory state and
             // unblock further writes
-            crossbeam_channel::select_biased! {
+            reth_tasks::channel::select_biased! {
                 recv(persistence_rx) -> result => {
                     // Don't put it back - consumed (oneshot-like behavior)
                     match result {
@@ -1253,7 +1253,7 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            let (tx, rx) = channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
@@ -1275,7 +1275,7 @@ where
             .expect("Checked non-empty persisting blocks");
 
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
@@ -1348,14 +1348,12 @@ where
                 self.on_persistence_complete(result, start_time)?;
                 Ok(true)
             }
-            Err(crossbeam_channel::TryRecvError::Empty) => {
+            Err(channel::TryRecvError::Empty) => {
                 // Not ready yet, put it back
                 self.persistence_state.rx = Some((rx, start_time, action));
                 Ok(false)
             }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                Err(AdvancePersistenceError::ChannelClosed)
-            }
+            Err(channel::TryRecvError::Disconnected) => Err(AdvancePersistenceError::ChannelClosed),
         }
     }
 
@@ -1568,8 +1566,7 @@ where
                                 let persistence_rx = if let Some((rx, start_time, _action)) =
                                     pending_persistence
                                 {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
+                                    let (persistence_tx, persistence_rx) = channel::unbounded();
                                     tokio::task::spawn_blocking(move || {
                                         let start = Instant::now();
                                         let result =

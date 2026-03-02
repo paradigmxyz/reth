@@ -19,12 +19,12 @@ use reth_execution_errors::{
     SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
     TrieWitnessError,
 };
+use reth_tasks::channel;
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SparseStateTrie,
 };
-use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -146,7 +146,7 @@ where
             }
         }
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = channel::unbounded();
         let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
             ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
@@ -239,11 +239,11 @@ struct WitnessTrieNodeProviderFactory<F> {
     /// Trie node provider factory.
     provider_factory: F,
     /// Sender for forwarding fetched trie node.
-    tx: mpsc::Sender<Bytes>,
+    tx: channel::Sender<Bytes>,
 }
 
 impl<F> WitnessTrieNodeProviderFactory<F> {
-    const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
+    const fn new(provider_factory: F, tx: channel::Sender<Bytes>) -> Self {
         Self { provider_factory, tx }
     }
 }
@@ -273,11 +273,11 @@ struct WitnessTrieNodeProvider<P> {
     /// Proof-based blinded.
     provider: P,
     /// Sender for forwarding fetched blinded node.
-    tx: mpsc::Sender<Bytes>,
+    tx: channel::Sender<Bytes>,
 }
 
 impl<P> WitnessTrieNodeProvider<P> {
-    const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
+    const fn new(provider: P, tx: channel::Sender<Bytes>) -> Self {
         Self { provider, tx }
     }
 }
