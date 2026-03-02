@@ -211,6 +211,18 @@ impl Capabilities {
             inner: value,
         }
     }
+    /// Returns true if this peer supports the given eth protocol version.
+    pub fn supports_eth_version(&self, version: EthVersion) -> bool {
+        match version {
+            EthVersion::Eth66 => self.eth_66,
+            EthVersion::Eth67 => self.eth_67,
+            EthVersion::Eth68 => self.eth_68,
+            EthVersion::Eth69 => self.eth_69,
+            EthVersion::Eth70 => self.eth_70,
+            EthVersion::Eth71 => self.eth_71,
+        }
+    }
+
     /// Returns all capabilities.
     #[inline]
     pub fn capabilities(&self) -> &[Capability] {

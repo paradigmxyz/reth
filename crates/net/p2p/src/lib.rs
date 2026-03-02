@@ -17,6 +17,9 @@ pub mod download;
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
+/// Traits for implementing P2P block access lists clients.
+pub mod block_access_lists;
+
 /// A downloader that combines two different downloaders/client implementations.
 pub mod either;
 

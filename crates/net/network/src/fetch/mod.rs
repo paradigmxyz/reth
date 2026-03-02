@@ -8,7 +8,8 @@ use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
-    Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
+    BlockAccessLists, Capabilities, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -32,6 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
+type InflightBlockAccessListsRequest = Request<(), PeerRequestResult<BlockAccessLists>>;
 
 /// Manages data fetching operations.
 ///
@@ -45,6 +47,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+    /// Currently active [`GetBlockAccessLists`] requests
+    inflight_bals_requests: HashMap<PeerId, InflightBlockAccessListsRequest>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -57,6 +61,10 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Waker to notify when a new peer might satisfy queued requests.
+    ///
+    /// Stored so that `new_active_peer` can wake the fetcher when a peer is added.
+    waker: Option<std::task::Waker>,
 }
 
 // === impl StateSyncer ===
@@ -67,12 +75,14 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
+            inflight_bals_requests: Default::default(),
             peers: Default::default(),
             peers_handle,
             num_active_peers,
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            waker: None,
         }
     }
 
@@ -98,6 +108,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 range_info,
             },
         );
+        // waking the fetcher ensures any queued request will be retried
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     /// Removes the peer from the peer list, after which it is no longer available for future
@@ -142,7 +156,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
     /// full history available
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
-        let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
+        // filter out peers that aren't idle or don't meet the requirement
+        let mut idle = self.peers.iter().filter(|(_, peer)| {
+            peer.state.is_idle() &&
+                match &requirement {
+                    BestPeerRequirements::EthVersion(ver) => {
+                        peer.capabilities.supports_eth_version(*ver)
+                    }
+                    _ => true,
+                }
+        });
 
         let mut best_peer = idle.next()?;
 
@@ -150,13 +173,13 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer meets the requirements better
             if maybe_better.1.is_better(best_peer.1, &requirement) {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer has better rtt and both have same range quality
@@ -255,6 +278,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 let inflight = Request { request: (), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
+            }
+            DownloadRequest::GetBlockAccessLists { request, response, .. } => {
+                let inflight = Request { request: (), response };
+                self.inflight_bals_requests.insert(peer_id, inflight);
+                BlockRequest::GetBlockAccessLists(GetBlockAccessLists(request))
             }
         }
     }
@@ -440,6 +468,7 @@ impl Peer {
             BestPeerRequirements::None => false,
             BestPeerRequirements::FullBlockRange(range) => self.has_better_range(other, range),
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
+            BestPeerRequirements::EthVersion(_) => false,
         }
     }
 }
@@ -453,6 +482,8 @@ enum PeerState {
     GetBlockHeaders,
     /// Peer is handling a `GetBlockBodies` request.
     GetBlockBodies,
+    /// Peer is handling a `GetBlockAccessLists` request.
+    GetBlockAccessLists,
     /// Peer session is about to close
     Closing,
 }
@@ -505,6 +536,12 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         priority: Priority,
         range_hint: Option<RangeInclusive<u64>>,
     },
+    /// Download the requested access lists and send response through channel
+    GetBlockAccessLists {
+        request: Vec<B256>,
+        response: oneshot::Sender<PeerRequestResult<BlockAccessLists>>,
+        priority: Priority,
+    },
 }
 
 // === impl DownloadRequest ===
@@ -515,15 +552,16 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         match self {
             Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockAccessLists { .. } => PeerState::GetBlockAccessLists,
         }
     }
 
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
-                priority
-            }
+            Self::GetBlockHeaders { priority, .. } |
+            Self::GetBlockBodies { priority, .. } |
+            Self::GetBlockAccessLists { priority, .. } => priority,
         }
     }
 
@@ -536,6 +574,7 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
             Self::GetBlockHeaders { .. } => BestPeerRequirements::None,
+            Self::GetBlockAccessLists { .. } => BestPeerRequirements::EthVersion(EthVersion::Eth71),
             Self::GetBlockBodies { range_hint, .. } => {
                 if let Some(range) = range_hint {
                     BestPeerRequirements::FullBlockRange(range.clone())
@@ -577,6 +616,8 @@ enum BestPeerRequirements {
     FullBlockRange(RangeInclusive<u64>),
     /// Peer must have full range.
     FullBlock,
+    /// Peer must support at least this eth protocol version.
+    EthVersion(EthVersion),
 }
 
 #[cfg(test)]
@@ -585,6 +626,7 @@ mod tests {
     use crate::{peers::PeersManager, PeersConfig};
     use alloy_consensus::Header;
     use alloy_primitives::B512;
+    use reth_eth_wire::Capability;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1145,5 +1187,162 @@ mod tests {
         assert!(
             !peer_short_end.is_better(&peer_exact, &BestPeerRequirements::FullBlockRange(range))
         );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_no_support() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+
+        // Capabilities WITHOUT eth71
+        let capabilities = Arc::new(Capabilities::new(vec![]));
+
+        fetcher.new_active_peer(
+            peer,
+            B256::random(),
+            100,
+            capabilities,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Should return None because peer doesn't support eth71
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_supported() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+
+        // Build capability list that includes Eth71
+        let capabilities = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer,
+            B256::random(),
+            100,
+            capabilities,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            Some(peer)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_eth71_filters_correctly() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_no_71 = B512::random();
+        let peer_with_71 = B512::random();
+
+        // Peer without eth71
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+
+        // Peer with eth71
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer_no_71,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(5)),
+            None,
+        );
+
+        fetcher.new_active_peer(
+            peer_with_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(50)),
+            None,
+        );
+
+        // Even though peer_no_71 has lower timeout,
+        // it must NOT be selected.
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::EthVersion(EthVersion::Eth71)),
+            Some(peer_with_71)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wakes_when_eth71_peer_connects() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        // Queue Eth71-required request
+        let (tx, _rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![],
+            response: tx,
+            priority: Priority::Normal,
+        });
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // No peers -> must be Pending
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+
+        // Add peer WITHOUT Eth71 support
+        let peer_old = B512::random();
+        let caps_old = Arc::new(Capabilities::new(vec![]));
+
+        fetcher.new_active_peer(
+            peer_old,
+            B256::random(),
+            100,
+            caps_old,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Still Pending
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+
+        // Add peer WITH Eth71 support
+        let peer_71 = B512::random();
+        let caps_71 = Arc::new(Capabilities::from(vec![Capability::new("eth".into(), 71)]));
+
+        fetcher.new_active_peer(
+            peer_71,
+            B256::random(),
+            100,
+            caps_71,
+            Arc::new(AtomicU64::new(10)),
+            None,
+        );
+
+        // Now we must get Ready(BlockRequest)
+        match fetcher.poll(&mut cx) {
+            Poll::Ready(FetchAction::BlockRequest { peer_id, .. }) => {
+                assert_eq!(peer_id, peer_71);
+            }
+            _ => {
+                assert!(false, "Expected Ready(BlockRequest)");
+            }
+        }
     }
 }
