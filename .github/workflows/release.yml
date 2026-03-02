@@ -245,6 +245,7 @@ jobs:
           PROFILE=maxperf \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           TARGET=x86_64-unknown-linux-gnu \
+          EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
           PGO_PROFDATA="$PWD/pgo-profiles/merged.profdata" \
             .github/scripts/build_pgo_bolt.sh
 

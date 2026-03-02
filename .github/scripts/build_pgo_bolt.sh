@@ -6,9 +6,10 @@
 #   PROFILE      - Cargo profile (default: maxperf)
 #   FEATURES     - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET       - Target triple (default: auto-detected from rustc)
-#   PGO_PROFDATA - Path to a pre-collected .profdata file (optional).
-#                  When set, the PGO instrumentation phase is skipped and this
-#                  profile is used directly for the optimized build.
+#   PGO_PROFDATA   - Path to a pre-collected .profdata file (optional).
+#                    When set, the PGO instrumentation phase is skipped and this
+#                    profile is used directly for the optimized build.
+#   EXTRA_RUSTFLAGS - Additional RUSTFLAGS to pass to cargo (optional).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -46,6 +47,10 @@ LLVM_VERSION=$(rustc -Vv | grep -oP 'LLVM version: \K\d+')
 PROFILE_UPPER=$(echo "$PROFILE" | tr '[:lower:]' '[:upper:]')
 export "CARGO_PROFILE_${PROFILE_UPPER}_STRIP=debuginfo"
 
+if [ -n "${EXTRA_RUSTFLAGS:-}" ]; then
+    export RUSTFLAGS="${RUSTFLAGS:-} $EXTRA_RUSTFLAGS"
+fi
+
 echo "=== PGO+BOLT Build ==="
 echo "Binary: $BINARY"
 echo "Manifest: $MANIFEST_PATH"
@@ -53,6 +58,7 @@ echo "Target: $TARGET"
 echo "Profile: $PROFILE"
 echo "Features: $FEATURES"
 echo "LLVM Version: $LLVM_VERSION"
+echo "RUSTFLAGS: ${RUSTFLAGS:-<unset>}"
 
 CARGO_ARGS=(--profile "$PROFILE" --features "$FEATURES" --manifest-path "$MANIFEST_PATH/Cargo.toml" --bin "$BINARY" --locked)
 
