@@ -1566,9 +1566,17 @@ where
         let block_number = block.number();
         let changeset_cache = self.changeset_cache.clone();
 
+        // Register a pending changeset entry so that concurrent readers will wait for
+        // this computation to finish rather than falling back to the expensive DB path.
+        // The guard ensures the pending entry is cancelled if the task panics.
+        let pending_guard = changeset_cache.register_pending(block_hash);
+
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
+            // Move the guard into the task so it's dropped (and cancelled) on panic.
+            let _pending_guard = pending_guard;
+
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
                 "compute_trie_input_task",
