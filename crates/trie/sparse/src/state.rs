@@ -745,11 +745,6 @@ where
             };
         }
 
-        size += self.revealed_account_paths.capacity() * core::mem::size_of::<Nibbles>();
-        for paths in self.storage.revealed_paths.values() {
-            size += paths.capacity() * core::mem::size_of::<Nibbles>();
-        }
-
         size
     }
 
