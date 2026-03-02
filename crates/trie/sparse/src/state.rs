@@ -1104,18 +1104,6 @@ impl HotSlotsLfu {
             return;
         }
 
-        if self.capacity != 0 && self.frequencies.len() >= self.capacity {
-            let Some(evict_key) = self
-                .frequencies
-                .iter()
-                .min_by_key(|(existing_key, frequency)| (**frequency, **existing_key))
-                .map(|(existing_key, _)| *existing_key)
-            else {
-                return;
-            };
-            self.frequencies.remove(&evict_key);
-        }
-
         self.frequencies.insert(key, 1);
     }
 
