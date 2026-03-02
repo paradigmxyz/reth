@@ -23,7 +23,7 @@ use reth_tracing::tracing::{debug, info};
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 // use the default ethereum node types
                 .with_types::<EthereumNode>()

@@ -97,9 +97,6 @@ alloy-genesis.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
-## Benchmarks
-criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
-
 [features]
 serde = [
     "dep:serde",
@@ -141,13 +138,3 @@ test-utils = [
     "reth-evm-ethereum?/test-utils",
     "reth-tasks/test-utils",
 ]
-
-[[bench]]
-name = "broadcast"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "tx_manager_hash_fetching"
-required-features = ["test-utils"]
-harness = false

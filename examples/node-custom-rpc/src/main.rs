@@ -30,7 +30,7 @@ use tokio::time::sleep;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
-        .run(|builder, args| async move {
+        .run(async move |builder, args| {
             let handle = builder
                 // configure default ethereum node
                 .node(EthereumNode::default())

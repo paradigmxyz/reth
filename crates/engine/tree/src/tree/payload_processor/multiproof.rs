@@ -8,7 +8,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -77,10 +77,11 @@ pub enum MultiProofMessage {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub(super) struct StateHookSender(CrossbeamSender<MultiProofMessage>);
+pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
 
 impl StateHookSender {
-    pub(crate) const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
+    /// Creates a new [`StateHookSender`] wrapping the given channel sender.
+    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
         Self(inner)
     }
 }
@@ -189,6 +190,11 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+
+    /// Retained memory of the preserved sparse trie cache in bytes.
+    pub sparse_trie_retained_memory_bytes: Gauge,
+    /// Number of storage tries retained in the preserved sparse trie cache.
+    pub sparse_trie_retained_storage_tries: Gauge,
 }
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker

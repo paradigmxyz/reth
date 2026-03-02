@@ -16,7 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
+    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target, RlpNode,
+    TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -28,7 +29,7 @@ mod node;
 use node::*;
 
 mod target;
-pub use target::*;
+pub(crate) use target::*;
 
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
@@ -226,22 +227,24 @@ where
             // forward to 0xabc2 (because all children will have been visited already). At this
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
-            if lower.key.starts_with(path) {
+            if lower.key_nibbles.starts_with(path) {
                 return !check_min_len ||
                     (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
-                            .take_while(|target| target.key.starts_with(path))
+                            .take_while(|target| target.key_nibbles.starts_with(path))
                             .any(|target| path.len() >= target.min_len as usize) ||
                         targets
                             .rev_iter()
-                            .take_while(|target| target.key.starts_with(path))
+                            .take_while(|target| target.key_nibbles.starts_with(path))
                             .any(|target| path.len() >= target.min_len as usize))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
-            if upper.is_some_and(|upper| depth_first::cmp(path, &upper.key) != Ordering::Less) {
+            if upper
+                .is_some_and(|upper| depth_first::cmp(path, &upper.key_nibbles) != Ordering::Less)
+            {
                 (lower, upper) = targets.next();
                 trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
@@ -1291,7 +1294,7 @@ where
     fn proof_inner(
         &mut self,
         value_encoder: &mut VE,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
@@ -1325,7 +1328,7 @@ where
 
     /// Generate a proof for the given targets.
     ///
-    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
@@ -1335,7 +1338,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &mut VE,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1381,7 +1384,7 @@ where
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
-        static EMPTY_TARGETS: [Target; 0] = [];
+        static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
             SubTrieTargets { prefix: Nibbles::new(), targets: &EMPTY_TARGETS, retain_root: true };
 
@@ -1430,7 +1433,7 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
@@ -1440,7 +1443,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
@@ -1492,29 +1495,29 @@ where
     }
 }
 
-/// Helper type wrapping a slice of [`Target`]s, primarily used to iterate through targets in
+/// Helper type wrapping a slice of [`ProofV2Target`]s, primarily used to iterate through targets in
 /// [`ProofCalculator::should_retain`].
 ///
 /// It is assumed that the underlying slice is never empty, and that the iterator is never
 /// exhausted.
 struct TargetsCursor<'a> {
-    targets: &'a [Target],
+    targets: &'a [ProofV2Target],
     i: usize,
 }
 
 impl<'a> TargetsCursor<'a> {
-    /// Wraps a slice of [`Target`]s with the `TargetsCursor`.
+    /// Wraps a slice of [`ProofV2Target`]s with the `TargetsCursor`.
     ///
     /// # Panics
     ///
     /// Will panic in debug mode if called with an empty slice.
-    fn new(targets: &'a [Target]) -> Self {
+    fn new(targets: &'a [ProofV2Target]) -> Self {
         debug_assert!(!targets.is_empty());
         Self { targets, i: 0 }
     }
 
-    /// Returns the current and next [`Target`] that the cursor is pointed at.
-    fn current(&self) -> (&'a Target, Option<&'a Target>) {
+    /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
+    fn current(&self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         (&self.targets[self.i], self.targets.get(self.i + 1))
     }
 
@@ -1523,19 +1526,20 @@ impl<'a> TargetsCursor<'a> {
     /// # Panics
     ///
     /// Will panic if the cursor is exhausted.
-    fn next(&mut self) -> (&'a Target, Option<&'a Target>) {
+    fn next(&mut self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         self.i += 1;
         debug_assert!(self.i < self.targets.len());
         self.current()
     }
 
-    // Iterate forwards over the slice, starting from the [`Target`] after the current.
-    fn skip_iter(&self) -> impl Iterator<Item = &'a Target> {
+    // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
+    fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[self.i + 1..].iter()
     }
 
-    /// Iterated backwards over the slice, starting from the [`Target`] previous to the current.
-    fn rev_iter(&self) -> impl Iterator<Item = &'a Target> {
+    /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
+    /// current.
+    fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[..self.i].iter().rev()
     }
 }
@@ -1738,16 +1742,16 @@ mod tests {
         /// the results.
         fn assert_proof(
             &self,
-            targets: impl IntoIterator<Item = Target>,
+            targets: impl IntoIterator<Item = ProofV2Target>,
         ) -> Result<(), StateProofError> {
             let targets_vec = targets.into_iter().collect::<Vec<_>>();
 
-            // Convert Target keys to MultiProofTargets for legacy implementation
+            // Convert ProofV2Target keys to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
             // Legacy implementation only uses the keys, not the prefix
             let legacy_targets = targets_vec
                 .iter()
-                .map(|target| (B256::from_slice(&target.key.pack()), B256Set::default()))
+                .map(|target| (B256::from_slice(&target.key_nibbles.pack()), B256Set::default()))
                 .collect::<MultiProofTargets>();
 
             // Create ProofCalculator (proof_v2) with account cursors
@@ -1790,7 +1794,7 @@ mod tests {
             let node_matches_target = |node_path: &Nibbles| -> bool {
                 targets_vec.iter().any(|target| {
                     // Node path must be a prefix of the target's key
-                    target.key.starts_with(node_path) &&
+                    target.key_nibbles.starts_with(node_path) &&
                     // Node path must be at least `min_len` long
                     node_path.len() >= target.min_len as usize
                 })
@@ -1888,7 +1892,9 @@ mod tests {
 
         /// Generate a strategy for proof targets that are 80% from the `HashedPostState` accounts
         /// and 20% random keys. Each target has a random `min_len` of 0..16.
-        fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<Target>> {
+        fn proof_targets_strategy(
+            account_keys: Vec<B256>,
+        ) -> impl Strategy<Value = Vec<ProofV2Target>> {
             let num_accounts = account_keys.len();
 
             // Generate between 0 and (num_accounts + 5) targets
@@ -1909,7 +1915,7 @@ mod tests {
                         }),
                         0u8..16u8, // Random min_len from 0 to 15
                     )
-                        .prop_map(|(key, min_len)| Target::new(key).with_min_len(min_len)),
+                        .prop_map(|(key, min_len)| ProofV2Target::new(key).with_min_len(min_len)),
                     count,
                 )
             })
@@ -1977,9 +1983,9 @@ mod tests {
         // Create test harness
         let harness = ProofTestHarness::new(post_state);
 
-        // Assert the proof (convert B256 to Target with no min_len for this test)
+        // Assert the proof (convert B256 to ProofV2Target with no min_len for this test)
         harness
-            .assert_proof(targets.into_iter().map(Target::new))
+            .assert_proof(targets.into_iter().map(ProofV2Target::new))
             .expect("Proof generation failed");
     }
 
@@ -2384,12 +2390,18 @@ mod tests {
 
         // Create targets from test case input - these are Nibbles in hex form
         let targets = vec![
-            Target::new(b256("0153000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
-            Target::new(b256("0000000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
-            Target::new(b256("2300000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
+            ProofV2Target::new(b256(
+                "0153000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
+            ProofV2Target::new(b256(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
+            ProofV2Target::new(b256(
+                "2300000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
         ];
 
         // Test proof generation

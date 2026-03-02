@@ -603,7 +603,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program
@@ -651,7 +651,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+    /// executor.spawn_with_graceful_shutdown_signal(async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program
@@ -802,7 +802,7 @@ impl RuntimeBuilder {
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
             let proof_storage_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_storage_worker_threads)
@@ -810,7 +810,7 @@ impl RuntimeBuilder {
             )?;
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
             let proof_account_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_account_worker_threads)
