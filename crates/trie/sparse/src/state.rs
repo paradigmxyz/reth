@@ -826,35 +826,31 @@ where
     pub fn memory_size(&self) -> usize {
         let mut size = core::mem::size_of::<Self>();
 
-        // Account trie
         size += match &self.state {
-            RevealableSparseTrie::Revealed(trie) => trie.memory_size(),
-            RevealableSparseTrie::Blind(Some(trie)) => trie.memory_size(),
+            RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                t.memory_size()
+            }
             RevealableSparseTrie::Blind(None) => 0,
         };
 
-        // Active storage tries
         for trie in self.storage.tries.values() {
             size += match trie {
-                RevealableSparseTrie::Revealed(t) => t.memory_size(),
-                RevealableSparseTrie::Blind(Some(t)) => t.memory_size(),
+                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                    t.memory_size()
+                }
                 RevealableSparseTrie::Blind(None) => 0,
             };
         }
-
-        // Cleared storage tries retained for allocation reuse
         for trie in &self.storage.cleared_tries {
             size += match trie {
-                RevealableSparseTrie::Revealed(t) => t.memory_size(),
-                RevealableSparseTrie::Blind(Some(t)) => t.memory_size(),
+                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                    t.memory_size()
+                }
                 RevealableSparseTrie::Blind(None) => 0,
             };
         }
 
-        // Revealed account paths
         size += self.revealed_account_paths.capacity() * core::mem::size_of::<Nibbles>();
-
-        // Revealed storage paths
         for paths in self.storage.revealed_paths.values() {
             size += paths.capacity() * core::mem::size_of::<Nibbles>();
         }
