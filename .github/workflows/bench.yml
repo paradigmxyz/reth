@@ -7,10 +7,6 @@
 # same block range (snapshot recovered between runs) to compare performance.
 
 on:
-  # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
-  # merge_group:
-  push:
-    branches: [main]
   issue_comment:
     types: [created, edited]
   workflow_dispatch:
@@ -40,6 +36,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      cores:
+        description: "Limit reth to N CPU cores (0 = all available)"
+        required: false
+        default: "0"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,46 +56,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  codspeed:
-    if: github.event_name == 'push'
-    runs-on: depot-ubuntu-latest
-    concurrency:
-      group: bench-codspeed-${{ github.head_ref || github.run_id }}
-      cancel-in-progress: true
-    strategy:
-      matrix:
-        partition: [1, 2]
-        total_partitions: [2]
-        include:
-          - partition: 1
-            crates: "-p reth-primitives -p reth-trie-common -p reth-trie-sparse"
-          - partition: 2
-            crates: "-p reth-trie"
-    name: codspeed (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/merge', github.event.issue.number) || '' }}
-      - uses: rui314/setup-mold@v1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Install cargo-codspeed
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-codspeed
-      - name: Build the benchmark target(s)
-        run: cargo codspeed build --profile profiling --features test-utils ${{ matrix.crates }}
-      - name: Run the benchmarks
-        uses: CodSpeedHQ/action@v4
-        with:
-          run: cargo codspeed run ${{ matrix.crates }}
-          mode: instrumentation
-          token: ${{ secrets.CODSPEED_TOKEN }}
-
   reth-bench-ack:
     if: |
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
@@ -111,6 +72,7 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
+      cores: ${{ steps.args.outputs.cores }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -138,7 +100,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature, samply;
+            let pr, actor, blocks, warmup, baseline, feature, samply, cores;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -147,6 +109,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+              cores = '${{ github.event.inputs.cores }}' || '0';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -166,10 +129,10 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['blocks', 'warmup']);
+              const intArgs = new Set(['blocks', 'warmup', 'cores']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -205,7 +168,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -220,6 +183,7 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
+              cores = defaults.cores;
             }
 
             // Resolve display names for baseline/feature
@@ -247,6 +211,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
+            core.setOutput('cores', cores);
 
       - name: Acknowledge request
         id: ack
@@ -286,7 +251,6 @@ jobs:
                 });
                 allRuns.push(...r);
               }
-              // Only count runs that trigger reth-bench (not push-triggered codspeed runs)
               const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
               const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
@@ -306,7 +270,9 @@ jobs:
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+            const cores = '${{ steps.args.outputs.cores }}';
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -332,7 +298,9 @@ jobs:
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
+            const cores = '${{ steps.args.outputs.cores }}';
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -395,8 +363,12 @@ jobs:
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
+      BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
+      - name: Clean up previous bench-work
+        run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
+
       - name: Resolve checkout ref
         id: checkout-ref
         uses: actions/github-script@v8
@@ -446,7 +418,9 @@ jobs:
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
+            const cores = process.env.BENCH_CORES || '0';
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({

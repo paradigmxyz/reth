@@ -30,6 +30,6 @@ pub use peers::{
         DEFAULT_REPUTATION,
     },
     state::PeerConnectionState,
-    ConnectionsConfig, Peer, PeersConfig,
+    ConnectionsConfig, Peer, PeersConfig, PersistedPeerInfo,
 };
 pub use session::{SessionLimits, SessionsConfig};

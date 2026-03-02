@@ -1,5 +1,7 @@
 //! Sparse Trie task related functionality.
 
+use std::sync::Arc;
+
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
@@ -14,15 +16,15 @@ use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
 };
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -192,8 +194,10 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         disable_pruning: bool,
+        updates: &TrieUpdates,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
+        trie.commit_updates(updates);
         if !disable_pruning {
             trie.prune(prune_depth, max_storage_tries);
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
@@ -330,7 +334,7 @@ where
 
         Ok(StateRootComputeOutcome {
             state_root,
-            trie_updates,
+            trie_updates: Arc::new(trie_updates),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -505,12 +509,12 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
+                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(Target::new(path).with_min_len(min_len));
+                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
 
@@ -547,13 +551,13 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .push_account_target(Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .push_account_target(Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                 }
             }
         })?;
@@ -677,7 +681,6 @@ where
                         targets: proof_targets,
                         proof_result_sender: ProofResultContext::new(
                             self.proof_result_tx.clone(),
-                            0,
                             HashedPostState::default(),
                             Instant::now(),
                         ),
@@ -731,13 +734,13 @@ impl PendingTargets {
     }
 
     /// Adds a target to the account targets.
-    fn push_account_target(&mut self, target: Target) {
+    fn push_account_target(&mut self, target: ProofV2Target) {
         self.targets.account_targets.push(target);
         self.len += 1;
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<Target>) {
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
@@ -755,12 +758,12 @@ enum SparseTrieTaskMessage {
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
-    pub trie_updates: TrieUpdates,
+    pub trie_updates: Arc<TrieUpdates>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]

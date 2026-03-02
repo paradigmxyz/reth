@@ -87,7 +87,7 @@ impl RocksDBProvider {
 
     /// Heals the `TransactionHashNumbers` table.
     ///
-    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clear everything
+    /// - Fast path: if checkpoint == 0, clear any stale data and return
     /// - If `sf_tip` < checkpoint, return unwind target (static files behind)
     /// - If `sf_tip` == checkpoint, nothing to do
     /// - If `sf_tip` > checkpoint, heal via transaction ranges in batches
@@ -112,11 +112,11 @@ impl RocksDBProvider {
             .get_highest_static_file_block(StaticFileSegment::Transactions)
             .unwrap_or(0);
 
-        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
-        if checkpoint == 0 && self.first::<tables::TransactionHashNumbers>()?.is_some() {
+        // Fast path: clear any stale data and return.
+        if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "TransactionHashNumbers has data but checkpoint is 0, clearing all"
+                "TransactionHashNumbers: checkpoint is 0, clearing stale data"
             );
             self.clear::<tables::TransactionHashNumbers>()?;
             return Ok(None);
@@ -264,11 +264,11 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
-        if checkpoint == 0 && self.first::<tables::StoragesHistory>()?.is_some() {
+        // Fast path: clear any stale data and return.
+        if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "StoragesHistory has data but checkpoint is 0, clearing all"
+                "StoragesHistory: checkpoint is 0, clearing stale data"
             );
             self.clear::<tables::StoragesHistory>()?;
             return Ok(None);
@@ -358,11 +358,11 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
-        if checkpoint == 0 && self.first::<tables::AccountsHistory>()?.is_some() {
+        // Fast path: clear any stale data and return.
+        if checkpoint == 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "AccountsHistory has data but checkpoint is 0, clearing all"
+                "AccountsHistory: checkpoint is 0, clearing stale data"
             );
             self.clear::<tables::AccountsHistory>()?;
             return Ok(None);
@@ -504,6 +504,35 @@ mod tests {
         // Empty RocksDB and no checkpoints - should be consistent (None = no unwind needed)
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, None);
+    }
+
+    /// Tests that `checkpoint=0` with empty `RocksDB` returns early without attempting
+    /// an expensive healing loop. Previously, when `sf_tip` > `checkpoint=0`, the healer
+    /// would iterate billions of transactions from static files for no effect, causing
+    /// the node to hang on startup with MDBX read transaction timeouts.
+    #[test]
+    fn test_check_consistency_checkpoint_zero_empty_rocksdb_returns_early() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // No checkpoints set — all default to 0 via unwrap_or(0).
+        // RocksDB tables are empty.
+        let provider = factory.database_provider_ro().unwrap();
+
+        let result = rocksdb.heal_transaction_hash_numbers(&provider).unwrap();
+        assert_eq!(result, None, "TransactionHashNumbers should return early at checkpoint 0");
+        assert!(rocksdb.first::<tables::TransactionHashNumbers>().unwrap().is_none());
+
+        let result = rocksdb.heal_storages_history(&provider).unwrap();
+        assert_eq!(result, None, "StoragesHistory should return early at checkpoint 0");
+        assert!(rocksdb.first::<tables::StoragesHistory>().unwrap().is_none());
+
+        let result = rocksdb.heal_accounts_history(&provider).unwrap();
+        assert_eq!(result, None, "AccountsHistory should return early at checkpoint 0");
+        assert!(rocksdb.first::<tables::AccountsHistory>().unwrap().is_none());
     }
 
     #[test]

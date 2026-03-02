@@ -78,6 +78,10 @@ pub struct BenchmarkArgs {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
+
+    /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    pub rlp_blocks: bool,
 }
 
 #[cfg(test)]

@@ -288,6 +288,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
+    /// Returns a heuristic for the in-memory size of this trie in bytes.
+    ///
+    /// This is an approximation that accounts for the trie's nodes, values,
+    /// and auxiliary data structures.
+    fn memory_size(&self) -> usize;
+
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
@@ -339,6 +345,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
+
+    /// Commits the updated nodes to internal trie state.
+    fn commit_updates(
+        &mut self,
+        updated: &HashMap<Nibbles, BranchNodeCompact>,
+        removed: &HashSet<Nibbles>,
+    );
 }
 
 /// Tracks modifications to the sparse trie structure.

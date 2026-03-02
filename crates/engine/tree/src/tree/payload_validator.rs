@@ -27,7 +27,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    OnStateHook, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -50,7 +50,11 @@ use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
+        Arc,
+    },
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
@@ -619,7 +623,7 @@ where
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
-                                trie_updates.clone(),
+                                trie_updates.as_ref().clone(),
                             );
                             #[cfg(feature = "trie-debug")]
                             if _has_diff {
@@ -665,7 +669,7 @@ where
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, elapsed));
+                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -700,7 +704,7 @@ where
                 self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
             }
 
-            (root, updates, root_time.elapsed())
+            (root, Arc::new(updates), root_time.elapsed())
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -838,19 +842,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -864,7 +870,10 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
+        let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let executor = executor.with_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        );
 
         let execution_start = Instant::now();
 
@@ -874,6 +883,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
+            &executed_tx_index,
         )?;
         drop(receipt_tx);
 
@@ -913,6 +923,7 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
@@ -958,6 +969,9 @@ where
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            // advance the shared counter so prewarm workers skip already-executed txs
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -1104,7 +1118,7 @@ where
                             let (state_root, trie_updates) = result?;
                             return Ok(Ok(StateRootComputeOutcome {
                                 state_root,
-                                trie_updates,
+                                trie_updates: Arc::new(trie_updates),
                                 #[cfg(feature = "trie-debug")]
                                 debug_recorders: Vec::new(),
                             }));
@@ -1121,7 +1135,7 @@ where
                         let (state_root, trie_updates) = result?;
                         return Ok(Ok(StateRootComputeOutcome {
                             state_root,
-                            trie_updates,
+                            trie_updates: Arc::new(trie_updates),
                             #[cfg(feature = "trie-debug")]
                             debug_recorders: Vec::new(),
                         }));
@@ -1520,7 +1534,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: LazyHashedPostState,
-        trie_output: TrieUpdates,
+        trie_output: Arc<TrieUpdates>,
         overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
@@ -1543,7 +1557,7 @@ where
             Err(handle) => Arc::new(handle.get().clone()),
         };
         let deferred_trie_data =
-            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
+            DeferredTrieData::pending(hashed_state, trie_output, anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
