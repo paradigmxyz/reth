@@ -71,6 +71,7 @@ jobs:
     timeout-minutes: 120
     env:
       SCHELK_MOUNT: /reth-bench
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@v6
@@ -94,12 +95,34 @@ jobs:
             exit 1
           fi
 
+      - name: Mount snapshot
+        run: |
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          sudo schelk mount -y
+          sync
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
       - name: Collect PGO profiles
         run: |
+          DATADIR="$SCHELK_MOUNT/datadir" \
+          RPC_URL="$BENCH_RPC_URL" \
           PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
           PROFILE=maxperf \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
             .github/scripts/pgo-profile.sh
+
+      - name: Recover snapshot
+        if: always()
+        run: |
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
 
       - name: Upload PGO profile
         uses: actions/upload-artifact@v6

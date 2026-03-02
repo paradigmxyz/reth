@@ -2,16 +2,22 @@
 #
 # Collects PGO profiles by running reth with real block execution via reth-bench.
 #
-# Builds an instrumented reth binary, starts a node against the local
-# snapshot, runs reth-bench to execute blocks, then merges the resulting
-# .profraw files into a single .profdata for use with -Cprofile-use.
+# Builds an instrumented reth binary, starts a node, runs reth-bench to
+# execute blocks, then merges the resulting .profraw files into a single
+# .profdata for use with -Cprofile-use.
 #
-# Environment variables:
-#   PGO_BLOCKS   - Number of blocks to execute for profiling (default: 10)
-#   SCHELK_MOUNT - Mount point for schelk snapshot (default: /reth-bench)
-#   RPC_URL      - Source RPC URL for reth-bench (default: https://ethereum.reth.rs/rpc)
-#   PROFILE      - Cargo profile (default: maxperf)
-#   FEATURES     - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
+# This script is runner-agnostic — all environment setup (snapshots, mounts,
+# datadir paths) must be done by the caller.
+#
+# Required environment variables:
+#   DATADIR    - Path to reth datadir (must already contain chain data)
+#   RPC_URL    - Source RPC URL for reth-bench to fetch payloads from
+#
+# Optional environment variables:
+#   PGO_BLOCKS - Number of blocks to execute for profiling (default: 10)
+#   PROFILE    - Cargo profile (default: maxperf)
+#   FEATURES   - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
+#   TARGET     - Target triple (default: auto-detected from rustc)
 #
 # Output:
 #   target/pgo-profiles/merged.profdata
@@ -19,13 +25,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+: "${DATADIR:?DATADIR must be set to the reth data directory}"
+: "${RPC_URL:?RPC_URL must be set}"
+
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
-SCHELK_MOUNT="${SCHELK_MOUNT:-/reth-bench}"
-RPC_URL="${RPC_URL:-https://ethereum.reth.rs/rpc}"
 PROFILE="${PROFILE:-maxperf}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
-DATADIR="$SCHELK_MOUNT/datadir"
 PGO_DIR="$PWD/target/pgo-profiles"
 
 if [[ "$PROFILE" == dev ]]; then
@@ -36,10 +42,11 @@ fi
 
 echo "=== PGO Profile Collection ==="
 echo "Blocks: $PGO_BLOCKS"
+echo "Datadir: $DATADIR"
+echo "RPC URL: $RPC_URL"
 echo "Profile: $PROFILE"
 echo "Features: $FEATURES"
 echo "Target: $TARGET"
-echo "Snapshot mount: $SCHELK_MOUNT"
 
 # Clean old profiles
 rm -rf "$PGO_DIR"
@@ -64,22 +71,11 @@ cargo build --profile "$PROFILE" --features "$FEATURES" \
 RETH_BENCH_BIN="$(find target -name reth-bench -type f -executable | head -1)"
 echo "reth-bench binary: $RETH_BENCH_BIN"
 
-# Mount snapshot
-echo "=== Mounting snapshot ==="
-if mountpoint -q "$SCHELK_MOUNT"; then
-    sudo umount -l "$SCHELK_MOUNT" || true
-    sudo schelk recover -y || true
-fi
-sudo schelk mount -y
-sync
-sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-
-# Cleanup handler
+# Cleanup handler — stop reth on exit
 RETH_PID=
 cleanup() {
-    echo "=== Cleaning up ==="
     if [ -n "${RETH_PID:-}" ] && kill -0 "$RETH_PID" 2>/dev/null; then
-        # SIGTERM for graceful shutdown — profraw files are flushed on exit
+        echo "Stopping reth (pid $RETH_PID)..."
         sudo kill "$RETH_PID" 2>/dev/null || true
         for i in $(seq 1 60); do
             sudo kill -0 "$RETH_PID" 2>/dev/null || break
@@ -89,11 +85,6 @@ cleanup() {
             sleep 1
         done
         sudo kill -9 "$RETH_PID" 2>/dev/null || true
-        sleep 1
-    fi
-    if mountpoint -q "$SCHELK_MOUNT"; then
-        sudo umount -l "$SCHELK_MOUNT" || true
-        sudo schelk recover -y || true
     fi
 }
 trap cleanup EXIT
