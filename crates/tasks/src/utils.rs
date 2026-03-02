@@ -22,7 +22,7 @@ pub fn increase_thread_priority() {
 
 /// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
 /// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
-/// setting `SCHED_BATCH` scheduling policy + maximum niceness on them.
+/// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.
 ///
 /// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
 /// thread initialization or expose the TIDs, so we have to discover them after the fact by
@@ -70,38 +70,21 @@ fn _deprioritize_background_threads() {
             continue;
         }
 
-        // SCHED_BATCH signals to the scheduler that this is a CPU-bound non-interactive thread,
-        // allowing the kernel to apply longer timeslices and less aggressive preemption.
-        // SAFETY: sched_setscheduler and setpriority are safe to call with valid TIDs.
+        // SCHED_IDLE is the lowest-priority scheduling class. The kernel will only schedule these
+        // threads when no other (SCHED_OTHER/SCHED_BATCH/RT) threads need the CPU.
+        // SAFETY: sched_setscheduler is safe to call with a valid TID.
         unsafe {
             let param = libc::sched_param { sched_priority: 0 };
-            if libc::sched_setscheduler(tid, libc::SCHED_BATCH, std::ptr::from_ref(&param)) != 0 {
+            if libc::sched_setscheduler(tid, libc::SCHED_IDLE, std::ptr::from_ref(&param)) != 0 {
                 tracing::debug!(
                     tid,
                     comm,
                     err = std::io::Error::last_os_error().to_string(),
-                    "failed to set SCHED_BATCH"
-                );
-            }
-
-            // PRIO_PROCESS + max niceness to yield CPU to everything else.
-            if libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, NICENESS_MIN as libc::c_int) !=
-                0
-            {
-                tracing::debug!(
-                    tid,
-                    comm,
-                    err = std::io::Error::last_os_error().to_string(),
-                    "failed to set niceness"
+                    "failed to set SCHED_IDLE"
                 );
             }
         }
 
-        tracing::debug!(
-            tid,
-            comm,
-            "deprioritized background thread (SCHED_BATCH, nice {})",
-            NICENESS_MIN
-        );
+        tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
     }
 }
