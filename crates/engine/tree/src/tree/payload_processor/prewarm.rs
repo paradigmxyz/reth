@@ -506,7 +506,7 @@ where
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
-    terminate_execution: Arc<AtomicBool>,
+    pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
@@ -515,36 +515,6 @@ where
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-}
-
-impl<N, P, Evm> PrewarmContext<N, P, Evm>
-where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
-{
-    /// Creates a new prewarm context.
-    pub fn new(
-        env: ExecutionEnv<Evm>,
-        evm_config: Evm,
-        saved_cache: Option<SavedCache>,
-        provider: StateProviderBuilder<N, P>,
-        metrics: PrewarmMetrics,
-        executed_tx_index: Arc<AtomicUsize>,
-        precompile_cache_disabled: bool,
-        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    ) -> Self {
-        Self {
-            env,
-            evm_config,
-            saved_cache,
-            provider,
-            metrics,
-            terminate_execution: Arc::new(AtomicBool::new(false)),
-            executed_tx_index,
-            precompile_cache_disabled,
-            precompile_cache_map,
-        }
-    }
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
