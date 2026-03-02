@@ -1169,7 +1169,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the state trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::Exists)
@@ -1233,7 +1233,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the storage trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::Exists)
@@ -1294,7 +1294,7 @@ mod tests {
         ];
 
         // Reveal V2 proof nodes
-        sparse.reveal_account_v2_proof_nodes(v2_proof_nodes.clone()).unwrap();
+        sparse.reveal_account_v2_proof_nodes(v2_proof_nodes).unwrap();
 
         // Check that the state trie contains the leaf node and value
         assert!(matches!(
@@ -1340,7 +1340,7 @@ mod tests {
         ];
 
         // Reveal V2 storage proof nodes for account
-        sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes.clone()).unwrap();
+        sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes).unwrap();
 
         // Check that the storage trie contains the leaf node and value
         assert!(matches!(
