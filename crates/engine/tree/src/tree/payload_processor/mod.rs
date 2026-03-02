@@ -50,7 +50,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, info, instrument, warn, Span};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
@@ -653,20 +653,12 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                let retained_bytes = trie.memory_size();
-                let retained_tries = trie.retained_storage_tries_count();
                 trie_metrics
                     .sparse_trie_retained_memory_bytes
-                    .set(retained_bytes as f64);
+                    .set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
-                    .set(retained_tries as f64);
-                info!(
-                    target: "engine::tree::payload_processor",
-                    retained_bytes,
-                    retained_tries,
-                    "Preserved sparse trie cache"
-                );
+                    .set(trie.retained_storage_tries_count() as f64);
                 guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {
