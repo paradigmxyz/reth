@@ -6,14 +6,13 @@ use alloy_primitives::{Address, B256, B64, U256};
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{Block, BlockBody};
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::Block as BlockTrait;
+use reth_primitives_traits::{Block as BlockTrait, SealedBlock};
 use std::{io::Write, path::Path};
 use tracing::debug;
 
 /// Generate test blocks for a given chain spec
-pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlock> {
-    let mut blocks: Vec<SealedBlock> = Vec::new();
+pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlock<Block>> {
+    let mut blocks: Vec<SealedBlock<Block>> = Vec::new();
     let genesis_header = chain_spec.sealed_genesis_header();
     let mut parent_hash = genesis_header.hash();
     let mut parent_number = genesis_header.number();
@@ -139,7 +138,7 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
 }
 
 /// Write blocks to RLP file
-pub fn write_blocks_to_rlp(blocks: &[SealedBlock], path: &Path) -> std::io::Result<()> {
+pub fn write_blocks_to_rlp(blocks: &[SealedBlock<Block>], path: &Path) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     let mut total_bytes = 0;
 
@@ -173,7 +172,7 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock], path: &Path) -> std::io::Resu
 }
 
 /// Create FCU JSON for the tip of the chain
-pub fn create_fcu_json(tip: &SealedBlock) -> serde_json::Value {
+pub fn create_fcu_json(tip: &SealedBlock<Block>) -> serde_json::Value {
     serde_json::json!({
         "params": [{
             "headBlockHash": format!("0x{:x}", tip.hash()),

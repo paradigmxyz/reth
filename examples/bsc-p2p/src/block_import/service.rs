@@ -10,8 +10,7 @@ use reth_network::{
 };
 use reth_network_api::PeerId;
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::{AlloyBlockHeader, Block};
+use reth_primitives_traits::{AlloyBlockHeader, Block, NodePrimitives};
 use reth_provider::{BlockHashReader, BlockNumReader};
 use std::{
     future::Future,
@@ -230,8 +229,8 @@ mod tests {
     use reth_chainspec::ChainInfo;
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_eth_wire::NewBlock;
+    use reth_ethereum_primitives::Block;
     use reth_node_ethereum::EthEngineTypes;
-    use reth_primitives::Block;
     use reth_provider::ProviderError;
     use std::{
         sync::Arc,
@@ -362,9 +361,9 @@ mod tests {
             handle_engine_msg(from_engine, responses).await;
 
             let (service, handle) = ImportService::new(consensus, engine_handle);
-            tokio::spawn(Box::pin(async move {
+            tokio::spawn(async move {
                 service.await.unwrap();
-            }));
+            });
 
             Self { handle }
         }
@@ -402,7 +401,7 @@ mod tests {
 
     /// Creates a test block message
     fn create_test_block() -> NewBlockMessage<NewBlock<Block>> {
-        let block: reth_primitives::Block = Block::default();
+        let block: reth_ethereum_primitives::Block = Block::default();
         let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
         NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }
     }
@@ -412,7 +411,7 @@ mod tests {
         mut from_engine: mpsc::UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
         responses: EngineResponses,
     ) {
-        tokio::spawn(Box::pin(async move {
+        tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
                     BeaconEngineMessage::NewPayload { payload: _, tx } => {
@@ -434,6 +433,6 @@ mod tests {
                     _ => {}
                 }
             }
-        }));
+        });
     }
 }

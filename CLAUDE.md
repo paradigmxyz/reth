@@ -172,9 +172,96 @@ Before submitting changes, ensure:
 2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
-5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+5. **CLI Docs** (if CLI changed): Run `make update-book-cli` (see below)
+6. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+### CLI Reference Docs (`book` CI Job)
+
+The CLI reference pages under `docs/vocs/docs/pages/cli/` are **auto-generated** from the `reth` binary's `--help` output. **Do not edit these files manually** — any hand edits will be overwritten and CI will fail regardless.
+
+When you add, remove, or modify CLI commands, subcommands, or flags, regenerate the CLI docs by running:
+
+```bash
+make update-book-cli
+```
+
+This builds `reth` in debug mode and runs `docs/cli/update.sh` to regenerate all CLI pages. Commit the resulting changes.
+
+The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating the docs and running `git diff --exit-code`. If the committed docs don't match the generated output, CI fails. Manually editing these pages is never productive — always use `make update-book-cli`.
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
+
+#### Titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) with an optional scope:
+
+```
+<type>(<scope>): <short description>
+```
+
+**Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`
+
+**Scope** (optional): crate or area, e.g. `evm`, `trie`, `rpc`, `engine`, `net`
+
+Examples:
+- `fix(rpc): correct gas estimation for ERC-20 transfers`
+- `perf: batch trie updates to reduce cursor overhead`
+- `feat(engine): add new_payload_interval metric`
+
+#### Descriptions
+
+Keep it short. Say what changed and why — nothing more.
+
+**Do:**
+- Write 1–3 sentences summarizing the change
+- Explain _why_ if the diff doesn't make it obvious
+- Link related issues or EIPs
+- Include benchmark numbers for perf changes
+
+**Don't:**
+- List every file changed — that's what the diff is for
+- Repeat the title in the body
+- Add "Files changed" or "Changes" sections
+- Write walls of text that go stale when the diff is updated
+- Use filler like "This PR introduces...", "comprehensive", "robust", "enhance", "leverage"
+
+**Template:**
+
+```
+Closes #<issue>
+
+<what changed, 1-3 sentences>
+
+<why, if not obvious from the diff>
+```
+
+**Good example:**
+
+```
+Closes #16800
+
+Adds fallback for external IP resolution so node startup doesn't fail
+when STUN is unreachable. Falls back to the configured default.
+```
+
+**Bad example:**
+
+```
+## Summary
+This PR introduces comprehensive improvements to the IP resolution system.
+
+## Changes
+- Modified `crates/net/discv4/src/lib.rs` to add fallback
+- Modified `crates/net/discv4/src/config.rs` to add default IP
+- Added tests in `crates/net/discv4/src/tests/ip.rs`
+
+## Files Changed
+- crates/net/discv4/src/lib.rs
+- crates/net/discv4/src/config.rs
+- crates/net/discv4/src/tests/ip.rs
+```
+
+#### Labels and CI
 
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
@@ -313,6 +400,74 @@ GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
 Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
 
 
+#### Rust Style Guides
+
+##### Type Ordering in Files
+
+When defining structs, traits, and functions in a file, follow this ordering convention. The file's primary type (matching the file name) comes first, followed by supporting public types, then private types and helpers.
+
+```rust
+use ...;
+
+/// The primary type of this file (matches filename).
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// Followed by public auxiliary types that support the primary type
+
+/// Configuration for the processor.
+pub struct PayloadProcessorConfig { ... }
+
+/// Result type returned by processor operations.
+pub struct ProcessorResult { ... }
+
+// Followed by public traits related to the primary type
+
+pub trait ProcessorExt { ... }
+
+// Followed by private helper types
+
+struct InternalState { ... }
+
+// Followed by private helper functions
+
+fn validate_input() { ... }
+```
+
+❌ **Bad**: Adding new traits and auxiliary types **above** the file's primary type (see [#22133](https://github.com/paradigmxyz/reth/pull/22133)):
+
+```rust
+use ...;
+
+// ❌ BAD - new auxiliary struct added before the file's main type
+pub struct CacheWaitDurations { ... }
+
+// ❌ BAD - new trait added before the file's main type  
+pub trait WaitForCaches { ... }
+
+// The file's primary type is buried below unrelated additions
+pub struct PayloadProcessor { ... }
+```
+
+✅ **Good**: New types go **after** the primary type:
+
+```rust
+use ...;
+
+// ✅ The file's primary type stays at the top
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// ✅ Auxiliary types follow the primary type
+pub struct CacheWaitDurations { ... }
+
+pub trait WaitForCaches { ... }
+
+impl WaitForCaches for PayloadProcessor { ... }
+```
+
 ### Example Contribution Workflow
 
 Let's say you want to fix a bug where external IP resolution fails on startup:
@@ -381,11 +536,14 @@ cargo nextest run --workspace
 cargo bench --bench bench_name
 
 # Build optimized binary
-cargo build --release --features "jemalloc asm-keccak"
+cargo build --release
 
 # Check compilation for all features
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo docs --document-private-items
+
+# Regenerate CLI reference docs (after CLI changes)
+make update-book-cli
 ```

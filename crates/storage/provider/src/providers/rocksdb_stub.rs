@@ -74,6 +74,13 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path)
     }
 
+    /// Returns `true` if a `RocksDB` database exists at the given path (stub implementation).
+    ///
+    /// Always returns `false` since `RocksDB` is not available.
+    pub fn exists(_path: impl AsRef<Path>) -> bool {
+        false
+    }
+
     /// Check consistency of `RocksDB` tables (stub implementation).
     ///
     /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.

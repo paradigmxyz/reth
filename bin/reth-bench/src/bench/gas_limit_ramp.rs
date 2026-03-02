@@ -6,7 +6,9 @@ use crate::{
         helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
         output::GasRampPayloadFile,
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload, payload_to_new_payload},
+    valid_payload::{
+        call_forkchoice_updated_with_reth, call_new_payload_with_reth, payload_to_new_payload,
+    },
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -19,6 +21,7 @@ use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK};
+use reth_rpc_api::RethNewPayloadInput;
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
@@ -47,6 +50,14 @@ pub struct Command {
     /// Output directory for benchmark results and generated payloads.
     #[arg(long, value_name = "OUTPUT")]
     output: PathBuf,
+
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reth_new_payload: bool,
 }
 
 /// Mode for determining when to stop ramping.
@@ -138,6 +149,9 @@ impl Command {
                 );
             }
         }
+        if self.reth_new_payload {
+            info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
+        }
 
         let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
@@ -163,7 +177,7 @@ impl Command {
             // Regenerate the payload from the modified block, but keep the original sidecar
             // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-            let (version, params) = payload_to_new_payload(
+            let (version, params, execution_data) = payload_to_new_payload(
                 payload,
                 sidecar,
                 false,
@@ -171,27 +185,45 @@ impl Command {
                 Some(new_payload_version),
             )?;
 
+            let (version, params) = if self.reth_new_payload {
+                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?)
+            } else {
+                (Some(version), params)
+            };
+
             // Save payload to file with version info for replay
             let payload_path =
                 self.output.join(format!("payload_block_{}.json", block.header.number));
-            let file =
-                GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
+            let file = GasRampPayloadFile {
+                version: version.map(|v| v as u8),
+                block_hash,
+                params: params.clone(),
+            };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
             info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
-            call_new_payload(&provider, version, params).await?;
+            let _ = call_new_payload_with_reth(&provider, version, params).await?;
 
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash: block_hash,
                 finalized_block_hash: block_hash,
             };
-            call_forkchoice_updated(&provider, version, forkchoice_state, None).await?;
+            call_forkchoice_updated_with_reth(&provider, version, forkchoice_state).await?;
 
             parent_header = block.header;
             parent_hash = block_hash;
             blocks_processed += 1;
+
+            let progress = match mode {
+                RampMode::Blocks(total) => format!("{blocks_processed}/{total}"),
+                RampMode::TargetGasLimit(target) => {
+                    let pct = (parent_header.gas_limit as f64 / target as f64 * 100.0).min(100.0);
+                    format!("{pct:.1}%")
+                }
+            };
+            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
         }
 
         let final_gas_limit = parent_header.gas_limit;

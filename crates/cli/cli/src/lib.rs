@@ -66,7 +66,8 @@ pub trait RethCli: Sized {
         F: FnOnce(Self, CliRunner) -> R,
     {
         let cli = Self::parse_args()?;
-        let runner = CliRunner::try_default_runtime()?;
+        let runner = CliRunner::try_default_runtime()
+            .map_err(|e| Error::raw(clap::error::ErrorKind::Io, e))?;
         Ok(cli.with_runner(f, runner))
     }
 

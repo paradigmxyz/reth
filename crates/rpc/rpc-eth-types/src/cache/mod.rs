@@ -11,7 +11,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
 use reth_storage_api::{BlockReader, TransactionVariant};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     future::Future,
@@ -76,15 +76,15 @@ impl<N: NodePrimitives> Clone for EthStateCache<N> {
 
 impl<N: NodePrimitives> EthStateCache<N> {
     /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
-    fn create<Provider, Tasks>(
+    fn create<Provider>(
         provider: Provider,
-        action_task_spawner: Tasks,
+        action_task_spawner: Runtime,
         max_blocks: u32,
         max_receipts: u32,
         max_headers: u32,
         max_concurrent_db_operations: usize,
         max_cached_tx_hashes: u32,
-    ) -> (Self, EthStateCacheService<Provider, Tasks>)
+    ) -> (Self, EthStateCacheService<Provider, Runtime>)
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt>,
     {
@@ -105,29 +105,17 @@ impl<N: NodePrimitives> EthStateCache<N> {
         (cache, service)
     }
 
-    /// Creates a new async LRU backed cache service task and spawns it to a new task via
-    /// [`tokio::spawn`].
-    ///
-    /// See also [`Self::spawn_with`]
-    pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
-    where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
-    {
-        Self::spawn_with(provider, config, TokioTaskExecutor::default())
-    }
-
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
     /// The cache is memory limited by the given max bytes values.
-    pub fn spawn_with<Provider, Tasks>(
+    pub fn spawn_with<Provider>(
         provider: Provider,
         config: EthStateCacheConfig,
-        executor: Tasks,
+        executor: Runtime,
     ) -> Self
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig {
             max_blocks,
@@ -145,7 +133,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         );
-        executor.spawn_critical("eth state cache", Box::pin(service));
+        executor.spawn_critical_task("eth state cache", service);
         this
     }
 
@@ -343,10 +331,9 @@ pub(crate) struct EthStateCacheService<
     tx_hash_index: LruMap<TxHash, (B256, usize), ByLength>,
 }
 
-impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
+impl<Provider> EthStateCacheService<Provider, Runtime>
 where
     Provider: BlockReader + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
@@ -449,10 +436,9 @@ where
     }
 }
 
-impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
+impl<Provider> Future for EthStateCacheService<Provider, Runtime>
 where
     Provider: BlockReader + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
 
@@ -494,7 +480,7 @@ where
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Block, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking_task(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
@@ -506,7 +492,7 @@ where
                                         )
                                         .map(|maybe_block| maybe_block.map(Arc::new));
                                     action_sender.send_block(block_sender);
-                                }));
+                                });
                             }
                         }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
@@ -523,7 +509,7 @@ where
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking_task(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
                                     let res = provider
@@ -531,7 +517,7 @@ where
                                         .map(|maybe_receipts| maybe_receipts.map(Arc::new));
 
                                     action_sender.send_receipts(res);
-                                }));
+                                });
                             }
                         }
                         CacheAction::GetHeader { block_hash, response_tx } => {
@@ -555,7 +541,7 @@ where
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Header, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking_task(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
                                     let header = provider.header(block_hash).and_then(|header| {
@@ -564,7 +550,7 @@ where
                                         })
                                     });
                                     action_sender.send_header(header);
-                                }));
+                                });
                             }
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {

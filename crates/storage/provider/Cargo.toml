@@ -24,7 +24,7 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
@@ -105,4 +105,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-tasks/test-utils",
 ]

@@ -14,9 +14,12 @@
 
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_ethereum::network::{
-    api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
-    NetworkEventListenerProvider, NetworkManager,
+use reth_ethereum::{
+    network::{
+        api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
+        NetworkEventListenerProvider, NetworkManager,
+    },
+    tasks::Runtime,
 };
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
@@ -49,7 +52,7 @@ async fn main() {
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
 
     // The network configuration
-    let net_cfg = NetworkConfig::builder(secret_key)
+    let net_cfg = NetworkConfig::builder(secret_key, Runtime::test())
         .set_head(head())
         .network_mode(NetworkMode::Work)
         .listener_addr(local_addr)

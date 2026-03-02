@@ -1,8 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::{
-    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
-    STORAGE_POOL,
-};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
     map::{AddressMap, HashMap},
@@ -21,7 +18,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -38,7 +35,6 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
 };
 use tracing::instrument;
 
@@ -694,6 +690,14 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path)
     }
 
+    /// Returns `true` if a `RocksDB` database exists at the given path.
+    ///
+    /// Checks for the presence of the `CURRENT` file, which `RocksDB` creates
+    /// when initializing a database.
+    pub fn exists(path: impl AsRef<Path>) -> bool {
+        path.as_ref().join("CURRENT").exists()
+    }
+
     /// Returns `true` if this provider is in read-only mode.
     pub fn is_read_only(&self) -> bool {
         matches!(self.0.as_ref(), RocksDBProviderInner::ReadOnly { .. })
@@ -1204,8 +1208,9 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
-        if !ctx.storage_settings.any_in_rocksdb() {
+        if !ctx.storage_settings.storage_v2 {
             return Ok(());
         }
 
@@ -1213,26 +1218,32 @@ impl RocksDBProvider {
         let mut r_account_history = None;
         let mut r_storage_history = None;
 
-        let write_tx_hash = ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
-            ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.account_history_in_rocksdb;
-        let write_storage_history = ctx.storage_settings.storages_history_in_rocksdb;
+        let write_tx_hash =
+            ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.storage_v2;
+        let write_storage_history = ctx.storage_settings.storage_v2;
 
-        STORAGE_POOL.in_place_scope(|s| {
+        // Propagate tracing context into rayon-spawned threads so that RocksDB
+        // write spans appear as children of write_blocks_data in traces.
+        let span = tracing::Span::current();
+        runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
                 });
             }
 
             if write_account_history {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_account_history = Some(self.write_account_history(blocks, &ctx));
                 });
             }
 
             if write_storage_history {
                 s.spawn(|_| {
+                    let _guard = span.enter();
                     r_storage_history = Some(self.write_storage_history(blocks, &ctx));
                 });
             }
@@ -1274,10 +1285,8 @@ impl RocksDBProvider {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
-            let mut tx_num = first_tx_num;
-            for transaction in body.transactions_iter() {
+            for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
                 batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
-                tx_num += 1;
             }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
@@ -1338,9 +1347,9 @@ impl RocksDBProvider {
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::new(slot.to_be_bytes());
                         storage_history
-                            .entry((revert.address, key))
+                            .entry((revert.address, plain_key))
                             .or_default()
                             .push(block_number);
                     }

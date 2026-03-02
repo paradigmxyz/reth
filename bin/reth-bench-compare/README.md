@@ -30,7 +30,7 @@ reth-bench-compare \
 | `--draw` | Generate charts (needs Python/uv) | `false` | No |
 | `--profile` | Enable CPU profiling (needs samply) | `false` | No |
 | `-vvvv` | Debug logging | Info | No |
-| `--features <FEATURES>` | Rust features for both builds | `jemalloc,asm-keccak` | No |
+| `--features <FEATURES>` | Extra Rust features for both builds | - | No |
 | `--rustflags <FLAGS>` | RUSTFLAGS for both builds | `-C target-cpu=native` | No |
 | `--baseline-features <FEATURES>` | Features for baseline only | Inherits `--features` | No |
 | `--feature-features <FEATURES>` | Features for feature only | Inherits `--features` | No |

@@ -5,7 +5,7 @@ use reth_engine_primitives::{
     TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
     DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
 };
-use std::sync::OnceLock;
+use std::{sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -29,7 +29,6 @@ pub struct DefaultEngineValues {
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
-    multiproof_chunking_enabled: bool,
     multiproof_chunk_size: usize,
     reserved_cpu_cores: usize,
     precompile_cache_disabled: bool,
@@ -38,11 +37,12 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
-    disable_proof_v2: bool,
+    prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
-    disable_trie_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
+    disable_sparse_trie_cache_pruning: bool,
+    state_root_task_timeout: Option<String>,
 }
 
 impl DefaultEngineValues {
@@ -110,12 +110,6 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to enable multiproof chunking by default
-    pub const fn with_multiproof_chunking_enabled(mut self, v: bool) -> Self {
-        self.multiproof_chunking_enabled = v;
-        self
-    }
-
     /// Set the default multiproof chunk size
     pub const fn with_multiproof_chunk_size(mut self, v: usize) -> Self {
         self.multiproof_chunk_size = v;
@@ -167,21 +161,15 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to disable proof V2 by default
-    pub const fn with_disable_proof_v2(mut self, v: bool) -> Self {
-        self.disable_proof_v2 = v;
+    /// Set the default prewarming thread count
+    pub const fn with_prewarming_threads(mut self, v: Option<usize>) -> Self {
+        self.prewarming_threads = v;
         self
     }
 
     /// Set whether to disable cache metrics by default
     pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
         self.cache_metrics_disabled = v;
-        self
-    }
-
-    /// Set whether to disable sparse trie cache by default
-    pub const fn with_disable_trie_cache(mut self, v: bool) -> Self {
-        self.disable_trie_cache = v;
         self
     }
 
@@ -194,6 +182,18 @@ impl DefaultEngineValues {
     /// Set the maximum number of storage tries to retain after sparse trie pruning by default
     pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
         self.sparse_trie_max_storage_tries = v;
+        self
+    }
+
+    /// Set whether to disable sparse trie cache pruning by default
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, v: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = v;
+        self
+    }
+
+    /// Set the default state root task timeout
+    pub fn with_state_root_task_timeout(mut self, v: Option<String>) -> Self {
+        self.state_root_task_timeout = v;
         self
     }
 }
@@ -210,7 +210,6 @@ impl Default for DefaultEngineValues {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
             accept_execution_requests_hash: false,
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
@@ -219,11 +218,12 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
-            disable_proof_v2: false,
+            prewarming_threads: None,
             cache_metrics_disabled: false,
-            disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout: Some("1s".to_string()),
         }
     }
 }
@@ -292,10 +292,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.accept-execution-requests-hash", default_value_t = DefaultEngineValues::get_global().accept_execution_requests_hash)]
     pub accept_execution_requests_hash: bool,
 
-    /// Whether multiproof task should chunk proof targets.
-    #[arg(long = "engine.multiproof-chunking", default_value_t = DefaultEngineValues::get_global().multiproof_chunking_enabled)]
-    pub multiproof_chunking_enabled: bool,
-
     /// Multiproof task chunk size for proof targets.
     #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
     pub multiproof_chunk_size: usize,
@@ -344,17 +340,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
-    /// Disable V2 storage proofs for state root calculations
-    #[arg(long = "engine.disable-proof-v2", default_value_t = DefaultEngineValues::get_global().disable_proof_v2)]
-    pub disable_proof_v2: bool,
+    /// Configure the number of prewarming threads.
+    /// If not specified, defaults to available parallelism.
+    #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
+    pub prewarming_threads: Option<usize>,
 
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
-
-    /// Disable sparse trie cache.
-    #[arg(long = "engine.disable-trie-cache", default_value_t = DefaultEngineValues::get_global().disable_trie_cache, conflicts_with = "disable_proof_v2")]
-    pub disable_trie_cache: bool,
 
     /// Sparse trie prune depth.
     #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
@@ -363,6 +356,27 @@ pub struct EngineArgs {
     /// Maximum number of storage tries to retain after sparse trie pruning.
     #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
     pub sparse_trie_max_storage_tries: usize,
+
+    /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
+    /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
+    /// the effects of retaining the full trie cache.
+    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
+    pub disable_sparse_trie_cache_pruning: bool,
+
+    /// Configure the timeout for the state root task before spawning a sequential fallback.
+    /// If the state root task takes longer than this, a sequential computation starts in
+    /// parallel and whichever finishes first is used.
+    ///
+    /// --engine.state-root-task-timeout 1s
+    /// --engine.state-root-task-timeout 400ms
+    ///
+    /// Set to 0s to disable.
+    #[arg(
+        long = "engine.state-root-task-timeout",
+        value_parser = humantime::parse_duration,
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
+    )]
+    pub state_root_task_timeout: Option<Duration>,
 }
 
 #[allow(deprecated)]
@@ -378,7 +392,6 @@ impl Default for EngineArgs {
             cross_block_cache_size,
             state_root_task_compare_updates,
             accept_execution_requests_hash,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
@@ -387,11 +400,12 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            disable_proof_v2,
+            prewarming_threads,
             cache_metrics_disabled,
-            disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -406,7 +420,6 @@ impl Default for EngineArgs {
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_enabled: true,
@@ -416,11 +429,14 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            disable_proof_v2,
+            prewarming_threads,
             cache_metrics_disabled,
-            disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout: state_root_task_timeout
+                .as_deref()
+                .map(|s| humantime::parse_duration(s).expect("valid default duration")),
         }
     }
 }
@@ -437,7 +453,6 @@ impl EngineArgs {
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
-            .with_multiproof_chunking_enabled(self.multiproof_chunking_enabled)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .without_precompile_cache(self.precompile_cache_disabled)
@@ -446,13 +461,11 @@ impl EngineArgs {
                 self.always_process_payload_attributes_on_canonical_head,
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
-            .with_storage_worker_count_opt(self.storage_worker_count)
-            .with_account_worker_count_opt(self.account_worker_count)
-            .with_disable_proof_v2(self.disable_proof_v2)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_disable_trie_cache(self.disable_trie_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
 }
 
@@ -491,7 +504,6 @@ mod tests {
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
             precompile_cache_enabled: true,
@@ -501,11 +513,12 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
-            disable_proof_v2: false,
+            prewarming_threads: Some(4),
             cache_metrics_disabled: true,
-            disable_trie_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
+            disable_sparse_trie_cache_pruning: true,
+            state_root_task_timeout: Some(Duration::from_secs(2)),
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -522,7 +535,6 @@ mod tests {
             "256",
             "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
-            "--engine.multiproof-chunking",
             "--engine.multiproof-chunk-size",
             "512",
             "--engine.reserved-cpu-cores",
@@ -535,12 +547,16 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.prewarming-threads",
+            "4",
             "--engine.disable-cache-metrics",
-            "--engine.disable-trie-cache",
             "--engine.sparse-trie-prune-depth",
             "10",
             "--engine.sparse-trie-max-storage-tries",
             "100",
+            "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.state-root-task-timeout",
+            "2s",
         ])
         .args;
 

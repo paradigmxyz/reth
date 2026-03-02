@@ -19,7 +19,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, RocksDbArgs, StaticFilesArgs, StorageArgs},
+    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs, StorageArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -67,67 +67,34 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     #[command(flatten)]
     pub static_files: StaticFilesArgs,
 
-    /// All `RocksDB` related arguments
-    #[command(flatten)]
-    pub rocksdb: RocksDbArgs,
-
     /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]
     pub storage: StorageArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
-    /// Returns the effective storage settings derived from `--storage.v2`, static-file, and
-    /// `RocksDB` CLI args.
+    /// Returns the effective storage settings derived from `--storage.v2`.
     ///
     /// The base storage mode is determined by `--storage.v2`:
     /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
-    /// - Otherwise: uses [`StorageSettings::v1()`] defaults
-    ///
-    /// Individual `--static-files.*` and `--rocksdb.*` flags override the base when explicitly set.
+    /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub fn storage_settings(&self) -> StorageSettings {
-        let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
-
-        // Apply static files overrides (only when explicitly set)
-        if let Some(v) = self.static_files.receipts {
-            s = s.with_receipts_in_static_files(v);
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
         }
-        if let Some(v) = self.static_files.transaction_senders {
-            s = s.with_transaction_senders_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.account_changesets {
-            s = s.with_account_changesets_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.storage_changesets {
-            s = s.with_storage_changesets_in_static_files(v);
-        }
-
-        // Apply rocksdb overrides
-        // --rocksdb.all sets all rocksdb flags to true
-        if self.rocksdb.all {
-            s = s
-                .with_transaction_hash_numbers_in_rocksdb(true)
-                .with_storages_history_in_rocksdb(true)
-                .with_account_history_in_rocksdb(true);
-        }
-
-        // Individual rocksdb flags override --rocksdb.all when explicitly set
-        if let Some(v) = self.rocksdb.tx_hash {
-            s = s.with_transaction_hash_numbers_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.storages_history {
-            s = s.with_storages_history_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.account_history {
-            s = s.with_account_history_in_rocksdb(v);
-        }
-
-        s
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    ///
+    /// The provided `runtime` is used for parallel storage I/O.
+    pub fn init<N: CliNodeTypes>(
+        &self,
+        access: AccessRights,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
@@ -179,14 +146,27 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
-            .with_default_tables()
-            .with_database_log_level(self.db.log_level)
-            .with_read_only(!access.is_read_write())
-            .build()?;
+        let rocksdb_provider = if !access.is_read_write() && !RocksDBProvider::exists(&rocksdb_path)
+        {
+            // RocksDB database doesn't exist yet (e.g. datadir restored from a snapshot
+            // or created before RocksDB storage). Create an empty one so read-only
+            // commands can proceed.
+            debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?
+        } else {
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .with_read_only(!access.is_read_write())
+                .build()?
+        };
 
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
@@ -207,6 +187,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
         access: AccessRights,
+        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -217,6 +198,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )?
         .with_prune_modes(prune_modes.clone());
 

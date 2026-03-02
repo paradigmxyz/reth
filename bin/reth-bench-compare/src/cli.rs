@@ -191,10 +191,9 @@ pub(crate) struct Args {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub reth_args: Vec<String>,
 
-    /// Comma-separated list of features to enable during reth compilation (applied to both builds)
-    ///
-    /// Example: `jemalloc,asm-keccak`
-    #[arg(long, value_name = "FEATURES", default_value = "jemalloc,asm-keccak")]
+    /// Comma-separated list of extra features to enable during reth compilation (applied to both
+    /// builds)
+    #[arg(long, value_name = "FEATURES", default_value = "")]
     pub features: String,
 
     /// Comma-separated list of features to enable only for baseline build (overrides --features)
@@ -205,7 +204,7 @@ pub(crate) struct Args {
 
     /// Comma-separated list of features to enable only for feature build (overrides --features)
     ///
-    /// Example: `--feature-features jemalloc,asm-keccak`
+    /// Example: `--feature-features jemalloc-prof`
     #[arg(long, value_name = "FEATURES")]
     pub feature_features: Option<String>,
 
@@ -277,10 +276,8 @@ impl Args {
     /// Get the default RPC URL for a given chain
     const fn get_default_rpc_url(chain: &Chain) -> &'static str {
         match chain.id() {
-            8453 => "https://base.reth.rs/rpc",             // base
-            84532 => "https://base-sepolia.rpc.ithaca.xyz", // base-sepolia
-            27082 => "https://rpc.hoodi.ethpandaops.io",    // hoodi
-            _ => "https://ethereum.reth.rs/rpc",            // mainnet and fallback
+            27082 => "https://rpc.hoodi.ethpandaops.io", // hoodi
+            _ => "https://ethereum.reth.rs/rpc",         // mainnet and fallback
         }
     }
 
@@ -292,11 +289,7 @@ impl Args {
     /// Get the JWT secret path - either provided or derived from datadir
     pub(crate) fn jwt_secret_path(&self) -> PathBuf {
         match &self.jwt_secret {
-            Some(path) => {
-                let jwt_secret_str = path.to_string_lossy();
-                let expanded = shellexpand::tilde(&jwt_secret_str);
-                PathBuf::from(expanded.as_ref())
-            }
+            Some(path) => path.clone(),
             None => {
                 // Use the same logic as reth: <datadir>/<chain>/jwt.hex
                 let chain_path = self.datadir.clone().resolve_datadir(self.chain);
@@ -311,10 +304,9 @@ impl Args {
         chain_path.data_dir().to_path_buf()
     }
 
-    /// Get the expanded output directory path
+    /// Get the output directory path
     pub(crate) fn output_dir_path(&self) -> PathBuf {
-        let expanded = shellexpand::tilde(&self.output_dir);
-        PathBuf::from(expanded.as_ref())
+        PathBuf::from(&self.output_dir)
     }
 
     /// Get the effective warmup blocks value - either specified or defaults to blocks

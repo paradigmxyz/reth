@@ -29,7 +29,7 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,

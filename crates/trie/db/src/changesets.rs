@@ -7,20 +7,24 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
-use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
+use crate::{
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
+};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
-    HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
+    TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 #[cfg(feature = "metrics")]
@@ -66,7 +70,26 @@ where
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
+{
+    crate::with_adapter!(provider, |A| {
+        compute_block_trie_changesets_inner::<_, A>(provider, block_number)
+    })
+}
+
+fn compute_block_trie_changesets_inner<Provider, A>(
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> Result<TrieUpdatesSorted, ProviderError>
+where
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
+    A: TrieTableAdapter,
 {
     debug!(
         target: "trie::changeset_cache",
@@ -77,14 +100,11 @@ where
     // Step 1: Collect/calculate state reverts
 
     // This is just the changes from this specific block
-    let individual_state_revert = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-        provider,
-        block_number..=block_number,
-    )?;
+    let individual_state_revert =
+        crate::state::from_reverts_auto(provider, block_number..=block_number)?;
 
     // This reverts all changes from db tip back to just after block was processed
-    let cumulative_state_revert =
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, (block_number + 1)..)?;
+    let cumulative_state_revert = crate::state::from_reverts_auto(provider, (block_number + 1)..)?;
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
@@ -99,16 +119,21 @@ where
         prefix_sets_prev,
     );
 
+    type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
+        DatabaseTrieCursorFactory<&'a TX, A>,
+        DatabaseHashedCursorFactory<&'a TX>,
+    >;
+
     let cumulative_trie_updates_prev =
-        StateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input_prev)
+        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input_prev)
             .map_err(ProviderError::other)?
             .1
             .into_sorted();
 
-    // Step 2: Create prefix sets from individual revert (only paths changed by this block)
+    // Step 3: Create prefix sets from individual revert (only paths changed by this block)
     let prefix_sets = individual_state_revert.construct_prefix_sets();
 
-    // Step 3: Calculate trie updates for block
+    // Step 4: Calculate trie updates for block
     // Use cumulative trie updates for block-1 as the node overlay and cumulative state for block
     let input = TrieInputSorted::new(
         Arc::new(cumulative_trie_updates_prev.clone()),
@@ -116,14 +141,15 @@ where
         prefix_sets,
     );
 
-    let trie_updates = StateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input)
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
+    let trie_updates =
+        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input)
+            .map_err(ProviderError::other)?
+            .1
+            .into_sorted();
 
-    // Step 4: Compute changesets using cumulative trie updates for block-1 as overlay
+    // Step 5: Compute changesets using cumulative trie updates for block-1 as overlay
     // Create an overlay cursor factory that has the trie state from after block-1
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref());
+    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
     let overlay_factory =
         InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
 
@@ -180,7 +206,27 @@ where
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
+{
+    crate::with_adapter!(provider, |A| {
+        compute_block_trie_updates_inner::<_, A>(cache, provider, block_number)
+    })
+}
+
+fn compute_block_trie_updates_inner<Provider, A>(
+    cache: &ChangesetCache,
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> ProviderResult<TrieUpdatesSorted>
+where
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
+    A: TrieTableAdapter,
 {
     let tx = provider.tx_ref();
 
@@ -210,7 +256,7 @@ where
 
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 5: Collect all account trie nodes that changed in the target block
@@ -334,7 +380,8 @@ impl ChangesetCache {
             + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + BlockNumReader,
+            + BlockNumReader
+            + StorageSettingsCache,
     {
         // Try cache first (with read lock)
         {
@@ -423,7 +470,8 @@ impl ChangesetCache {
             + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + BlockNumReader,
+            + BlockNumReader
+            + StorageSettingsCache,
     {
         // Get the database tip block number
         let db_tip_block = provider

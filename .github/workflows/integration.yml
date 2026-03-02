@@ -24,7 +24,7 @@ jobs:
   test:
     name: test / ${{ matrix.network }} / ${{ matrix.storage }}
     if: github.event_name != 'schedule'
-    runs-on: depot-ubuntu-latest-4
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -46,6 +46,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
+            --no-fail-fast \
             --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
@@ -64,7 +65,7 @@ jobs:
 
   era-files:
     name: era1 file integration tests once a day
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -76,4 +77,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era1 files integration tests
-        run: cargo nextest run --release --package reth-era --test it -- --ignored
+        run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored

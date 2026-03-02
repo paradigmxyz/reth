@@ -34,9 +34,9 @@ The safest way to access the database is through Reth's provider factory:
 use reth_ethereum::node::EthereumNode;
 use reth_ethereum::chainspec::MAINNET;
 
-// Open with automatic configuration
+// Open with automatic configuration (requires a Runtime for task spawning)
 let factory = EthereumNode::provider_factory_builder()
-    .open_read_only(MAINNET.clone(), "path/to/datadir")?;
+    .open_read_only(MAINNET.clone(), "path/to/datadir", runtime)?;
 
 // Get a provider for queries
 let provider = factory.provider()?;
@@ -72,7 +72,7 @@ To opt out of this, this safety mechanism can be disabled:
 
 ```rust
 let factory = EthereumNode::provider_factory_builder()
-    .open_read_only(MAINNET.clone(),  ReadOnlyConfig::from_datadir("datadir").disable_long_read_transaction_safety())?;
+    .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").disable_long_read_transaction_safety(), runtime)?;
 ```
 
 ### Real-time Block Access Configuration

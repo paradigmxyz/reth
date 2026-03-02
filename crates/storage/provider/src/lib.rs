@@ -28,9 +28,6 @@ pub use providers::{
 pub mod changeset_walker;
 pub mod changesets_utils;
 
-mod storage_threadpool;
-use storage_threadpool::STORAGE_POOL;
-
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;

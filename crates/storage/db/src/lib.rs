@@ -140,6 +140,10 @@ pub mod test_utils {
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
         }
+
+        fn path(&self) -> std::path::PathBuf {
+            self.db().path()
+        }
     }
 
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
@@ -241,7 +245,7 @@ mod tests {
         // Test that TempDatabase properly cleans up its directory when dropped
         let temp_path = {
             let db = crate::test_utils::create_test_rw_db();
-            let path = db.path().to_path_buf();
+            let path = db.path();
             assert!(path.exists(), "Database directory should exist while TempDatabase is alive");
             path
             // TempDatabase dropped here

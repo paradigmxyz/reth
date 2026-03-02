@@ -72,30 +72,36 @@ pub struct StageCommand {
 }
 
 macro_rules! handle_stage {
-    ($stage_fn:ident, $tool:expr, $command:expr) => {{
+    ($stage_fn:ident, $tool:expr, $command:expr, $runtime:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
         let output_datadir =
             output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
-        $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
+        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $runtime).await?
     }};
 
-    ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr, $consensus:expr) => {{
+    ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr, $consensus:expr, $runtime:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
         let output_datadir =
             output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
-        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor, $consensus).await?
+        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor, $consensus, $runtime)
+            .await?
     }};
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `dump-stage` command
-    pub async fn execute<N, Comp, F>(self, components: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp, F>(
+        self,
+        components: F,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+        let Environment { provider_factory, .. } =
+            self.env.init::<N>(AccessRights::RO, runtime.clone())?;
         let tool = DbTool::new(provider_factory)?;
         let components = components(tool.chain());
         let evm_config = components.evm_config().clone();
@@ -103,12 +109,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         match &self.command {
             Stages::Execution(cmd) => {
-                handle_stage!(dump_execution_stage, &tool, cmd, evm_config, consensus)
+                handle_stage!(
+                    dump_execution_stage,
+                    &tool,
+                    cmd,
+                    evm_config,
+                    consensus,
+                    runtime.clone()
+                )
             }
-            Stages::StorageHashing(cmd) => handle_stage!(dump_hashing_storage_stage, &tool, cmd),
-            Stages::AccountHashing(cmd) => handle_stage!(dump_hashing_account_stage, &tool, cmd),
+            Stages::StorageHashing(cmd) => {
+                handle_stage!(dump_hashing_storage_stage, &tool, cmd, runtime.clone())
+            }
+            Stages::AccountHashing(cmd) => {
+                handle_stage!(dump_hashing_account_stage, &tool, cmd, runtime.clone())
+            }
             Stages::Merkle(cmd) => {
-                handle_stage!(dump_merkle_stage, &tool, cmd, evm_config, consensus)
+                handle_stage!(dump_merkle_stage, &tool, cmd, evm_config, consensus, runtime.clone())
             }
         }
 
