@@ -819,6 +819,50 @@ where
         self.account_rlp_buf.clear();
     }
 
+    /// Returns a heuristic for the total in-memory size of this state trie in bytes.
+    ///
+    /// This aggregates the memory usage of the account trie, all revealed storage tries
+    /// (including cleared ones retained for allocation reuse), and auxiliary data structures.
+    pub fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        size += match &self.state {
+            RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                t.memory_size()
+            }
+            RevealableSparseTrie::Blind(None) => 0,
+        };
+
+        for trie in self.storage.tries.values() {
+            size += match trie {
+                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                    t.memory_size()
+                }
+                RevealableSparseTrie::Blind(None) => 0,
+            };
+        }
+        for trie in &self.storage.cleared_tries {
+            size += match trie {
+                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
+                    t.memory_size()
+                }
+                RevealableSparseTrie::Blind(None) => 0,
+            };
+        }
+
+        size += self.revealed_account_paths.capacity() * core::mem::size_of::<Nibbles>();
+        for paths in self.storage.revealed_paths.values() {
+            size += paths.capacity() * core::mem::size_of::<Nibbles>();
+        }
+
+        size
+    }
+
+    /// Returns the number of storage tries currently retained (active + cleared).
+    pub fn retained_storage_tries_count(&self) -> usize {
+        self.storage.tries.len() + self.storage.cleared_tries.len()
+    }
+
     /// Shrinks the capacity of the sparse trie to the given node and value sizes.
     ///
     /// This helps reduce memory usage when the trie has excess capacity.
