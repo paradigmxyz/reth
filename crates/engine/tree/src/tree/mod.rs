@@ -2104,15 +2104,20 @@ where
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
     fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
+        let parent_header = self.sealed_header_by_hash(parent_hash)?;
+
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? &&
-            !parent.difficulty().is_zero()
-        {
+        if parent_header.as_ref().is_some_and(|p| !p.difficulty().is_zero()) {
             parent_hash = B256::ZERO;
         }
 
-        let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
+        let valid_parent_hash = if parent_header.is_some() && !parent_hash.is_zero() {
+            Some(parent_hash)
+        } else {
+            self.latest_valid_hash_for_invalid_payload(parent_hash)?
+        };
+
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
