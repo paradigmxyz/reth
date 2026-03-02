@@ -940,7 +940,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let handle = tokio::spawn(Box::pin(async move {
+        let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
@@ -960,7 +960,7 @@ mod tests {
                     panic!("expected mismatched protocol version error, got {other_err:?}")
                 }
             }
-        }));
+        });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);

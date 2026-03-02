@@ -277,10 +277,10 @@ mod tests {
 
         let (signal, shutdown) = signal();
 
-        rt.spawn_task(Box::pin(async move {
+        rt.spawn_task(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
-        }));
+        });
 
         rt.graceful_shutdown();
 
