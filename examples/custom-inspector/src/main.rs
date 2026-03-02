@@ -50,7 +50,7 @@ fn main() {
             println!("Spawning trace task!");
 
             // Spawn an async block to listen for transactions.
-            node.task_executor.spawn_task(Box::pin(async move {
+            node.task_executor.spawn_task(async move {
                 // Waiting for new transactions
                 while let Some(event) = pending_transactions.next().await {
                     let tx = event.transaction;
@@ -96,7 +96,7 @@ fn main() {
                         }
                     }
                 }
-            }));
+            });
 
             node_exit_future.await
         })

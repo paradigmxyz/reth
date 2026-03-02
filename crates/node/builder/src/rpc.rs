@@ -993,12 +993,9 @@ where
 
         let new_canonical_blocks = node.provider().canonical_state_stream();
         let c = cache.clone();
-        node.task_executor().spawn_critical_task(
-            "cache canonical blocks task",
-            Box::pin(async move {
-                cache_new_blocks_task(c, new_canonical_blocks).await;
-            }),
-        );
+        node.task_executor().spawn_critical_task("cache canonical blocks task", async move {
+            cache_new_blocks_task(c, new_canonical_blocks).await;
+        });
 
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
         let ctx = EthApiCtx {
