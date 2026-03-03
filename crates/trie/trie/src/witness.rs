@@ -267,13 +267,13 @@ where
         let bytes = Bytes::from(encoded.clone());
         self.witness.entry(keccak256(&bytes)).or_insert(bytes);
 
-        if let TrieNodeV2::Branch(branch) = node {
-            if !branch.key.is_empty() {
-                encoded.clear();
-                BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
-                let bytes = Bytes::from(encoded.clone());
-                self.witness.entry(keccak256(&bytes)).or_insert(bytes);
-            }
+        if let TrieNodeV2::Branch(branch) = node &&
+            !branch.key.is_empty()
+        {
+            encoded.clear();
+            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
+            let bytes = Bytes::from(encoded.clone());
+            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
         }
     }
 
