@@ -163,8 +163,8 @@ impl<B: FullBlock> FileClient<B> {
         if self.headers.is_empty() {
             return true
         }
-        let min = *self.headers.keys().min().expect("not empty");
-        let max = *self.headers.keys().max().expect("not empty");
+        let min = self.min_block().expect("not empty");
+        let max = self.max_block().expect("not empty");
         // Contiguous range from min to max means no gaps
         max - min + 1 == self.headers.len() as u64
     }
