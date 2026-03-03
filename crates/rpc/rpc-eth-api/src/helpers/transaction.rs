@@ -233,6 +233,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadReceipt + 'static,
     {
         async move {
+            // Try the RPC cache first
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await
+                && let Some(receipt) = cached.into_receipt(self.converter())
+            {
+                return receipt.map_err(Self::Error::from).map(Some);
+            }
+
+            // Cache miss - fall back to DB
             match self.load_transaction_and_receipt(hash).await? {
                 Some((tx, meta, receipt)) => {
                     self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
