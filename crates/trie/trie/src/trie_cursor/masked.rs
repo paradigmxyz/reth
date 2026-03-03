@@ -82,7 +82,7 @@ impl<C> MaskedTrieCursor<C> {
     }
 
     /// Create a new storage cursor that can swap its prefix set on `set_hashed_address`.
-    pub fn new_storage(
+    pub const fn new_storage(
         cursor: C,
         prefix_set: PrefixSet,
         storage_prefix_sets: B256Map<PrefixSet>,
