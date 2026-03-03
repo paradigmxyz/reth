@@ -126,10 +126,8 @@ where
 
     let mut insert_fn = |address: Address, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
-        collector.insert(
-            ShardedKey::new(address, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
-        )?;
+        collector
+            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
         Ok::<(), StageError>(())
     };
 

@@ -276,39 +276,27 @@ where
     ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
         // Checks for tx_type
         match transaction.ty() {
-            LEGACY_TX_TYPE_ID => {
-                // Accept legacy transactions
-            }
-            EIP2930_TX_TYPE_ID => {
-                // Accept only legacy transactions until EIP-2718/2930 activates
-                if !self.eip2718 {
+            LEGACY_TX_TYPE_ID | EIP2930_TX_TYPE_ID | EIP1559_TX_TYPE_ID | EIP4844_TX_TYPE_ID |
+            EIP7702_TX_TYPE_ID => {
+                if transaction.ty() == EIP2930_TX_TYPE_ID && !self.eip2718 {
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip2930Disabled.into(),
                     ))
                 }
-            }
-            EIP1559_TX_TYPE_ID => {
-                // Reject dynamic fee transactions until EIP-1559 activates.
-                if !self.eip1559 {
+                if transaction.ty() == EIP1559_TX_TYPE_ID && !self.eip1559 {
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
                     ))
                 }
-            }
-            EIP4844_TX_TYPE_ID => {
-                // Reject blob transactions.
-                if !self.eip4844 {
+                if transaction.ty() == EIP4844_TX_TYPE_ID && !self.eip4844 {
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
                     ))
                 }
-            }
-            EIP7702_TX_TYPE_ID => {
-                // Reject EIP-7702 transactions.
-                if !self.eip7702 {
+                if transaction.ty() == EIP7702_TX_TYPE_ID && !self.eip7702 {
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip7702Disabled.into(),

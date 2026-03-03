@@ -141,7 +141,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
             // By sorting by the account we ensure that we continue with the partially processed
             // trie (the last of the previous run) first. We sort in reverse order because we pop
             // off of this Vec.
-            self.storage_tries.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            self.storage_tries.sort_unstable_by_key(|b| std::cmp::Reverse(b.0));
 
             // loop back to the top.
         }

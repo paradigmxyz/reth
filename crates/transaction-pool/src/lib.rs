@@ -523,7 +523,7 @@ where
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        self.pool.add_transactions(origin, validated.into_iter())
+        self.pool.add_transactions(origin, validated)
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {

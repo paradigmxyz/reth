@@ -853,7 +853,8 @@ impl ExecutionCache {
     /// This is useful for synchronization before starting payload processing.
     ///
     /// Returns the time spent waiting for the lock.
-    pub fn wait_for_availability(&self) -> Duration {
+    #[expect(dead_code)]
+    pub(crate) fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
         // Acquire write lock to wait for any current holders to finish
         let _guard = self.inner.write();
