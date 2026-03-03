@@ -2330,6 +2330,54 @@ impl ArenaParallelSparseTrie {
     }
 }
 
+#[cfg(debug_assertions)]
+fn collect_reachable_nodes(
+    arena: &Arena<ArenaSparseNode>,
+    idx: Index,
+    reachable: &mut HashSet<Index>,
+) {
+    if !reachable.insert(idx) {
+        return;
+    }
+    if let ArenaSparseNode::Branch(b) = &arena[idx] {
+        for child in &b.children {
+            if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
+                collect_reachable_nodes(arena, *child_idx, reachable);
+            }
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_no_orphaned_nodes(arena: &Arena<ArenaSparseNode>, root: Index, label: &str) {
+    let mut reachable = HashSet::default();
+    collect_reachable_nodes(arena, root, &mut reachable);
+    let all_indices: HashSet<Index> = arena.iter().map(|(idx, _)| idx).collect();
+    let orphaned: Vec<_> = all_indices.difference(&reachable).collect();
+    debug_assert!(
+        orphaned.is_empty(),
+        "{label} has {} orphaned node(s): {orphaned:?}",
+        orphaned.len(),
+    );
+}
+
+#[cfg(debug_assertions)]
+impl Drop for ArenaParallelSparseTrie {
+    fn drop(&mut self) {
+        assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
+
+        for (_, node) in self.upper_arena.iter() {
+            if let Some(subtrie) = node.as_subtrie() {
+                assert_no_orphaned_nodes(
+                    &subtrie.arena,
+                    subtrie.root,
+                    &alloc::format!("subtrie {:?}", subtrie.path),
+                );
+            }
+        }
+    }
+}
+
 impl Default for ArenaParallelSparseTrie {
     fn default() -> Self {
         let mut upper_arena = Arena::new();
