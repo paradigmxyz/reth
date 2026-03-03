@@ -1,4 +1,5 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
+use alloc::vec::Vec;
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
@@ -31,6 +32,19 @@ pub trait EvmStateProvider {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get a range of storage entries for a given account, starting from the given key
+    /// (inclusive).
+    #[allow(clippy::type_complexity)]
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: B256,
+        max_result: u64,
+    ) -> ProviderResult<(Vec<(StorageKey, StorageValue)>, Option<B256>)> {
+        let _ = (account, start_key, max_result);
+        Ok((Vec::new(), None))
+    }
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
@@ -56,6 +70,16 @@ impl<T: StateProvider> EvmStateProvider for T {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         <T as StateProvider>::storage(self, account, storage_key)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: B256,
+        max_result: u64,
+    ) -> ProviderResult<(Vec<(StorageKey, StorageValue)>, Option<B256>)> {
+        <T as StateProvider>::storage_range(self, account, start_key, max_result)
     }
 }
 

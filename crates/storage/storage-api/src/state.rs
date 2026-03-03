@@ -47,6 +47,23 @@ pub trait StateProvider:
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
+    /// Get a range of storage entries for a given account, starting from the given key (inclusive).
+    ///
+    /// Returns up to `max_result` entries as `(StorageKey, StorageValue)` pairs, plus a `next_key`
+    /// if there are more entries beyond the returned range.
+    ///
+    /// The default implementation returns an empty result. Providers backed by a database should
+    /// override this for efficient cursor-based iteration.
+    #[allow(clippy::type_complexity)]
+    fn storage_range(
+        &self,
+        _account: Address,
+        _start_key: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(Vec<(StorageKey, StorageValue)>, Option<B256>)> {
+        Ok((Vec::new(), None))
+    }
+
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract

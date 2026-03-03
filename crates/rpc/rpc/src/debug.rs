@@ -1,12 +1,12 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::env::BlockEnvironment;
+use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -27,7 +27,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -625,6 +625,111 @@ where
             })
             .await
     }
+
+    /// Returns the storage range for a contract after replaying `tx_idx` transactions in the
+    /// given block.
+    pub async fn storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<StorageRangeResult, Eth::Error> {
+        let ((evm_env, _), block) = futures::try_join!(
+            self.eth_api().evm_env_at(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
+        )?;
+
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // Replay transactions up to tx_idx
+                {
+                    let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                    for (idx, tx) in block.transactions_recovered().enumerate() {
+                        if idx >= tx_idx {
+                            break;
+                        }
+                        let tx_env = eth_api.evm_config().tx_env(tx);
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                }
+
+                // Collect in-memory storage modifications from execution cache
+                let cache_storage: std::collections::BTreeMap<B256, alloy_primitives::U256> = db
+                    .cache
+                    .accounts
+                    .get(&contract_address)
+                    .and_then(|a| a.account.as_ref())
+                    .map(|plain| {
+                        plain
+                            .storage
+                            .iter()
+                            .map(|(k, v)| (B256::new(k.to_be_bytes()), *v))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                // Fetch base storage entries with extra buffer for cache overrides
+                let fetch_count =
+                    max_result.saturating_add(cache_storage.len() as u64).saturating_add(1);
+                let (base_entries, _) = reth_storage_api::StateProvider::storage_range(
+                    &*db.database,
+                    contract_address,
+                    key_start,
+                    fetch_count,
+                )
+                .map_err(Eth::Error::from_eth_err)?;
+
+                // Merge base entries with cache overrides
+                let mut merged = std::collections::BTreeMap::new();
+                for (key, value) in base_entries {
+                    if let Some(&cached) = cache_storage.get(&key) {
+                        // Use cached value if non-zero (zero means deleted)
+                        if !cached.is_zero() {
+                            merged.insert(key, cached);
+                        }
+                    } else {
+                        merged.insert(key, value);
+                    }
+                }
+
+                // Add new entries from cache that weren't in base
+                for (&key, &value) in &cache_storage {
+                    if key >= key_start && !value.is_zero() && !merged.contains_key(&key) {
+                        merged.insert(key, value);
+                    }
+                }
+
+                // Build paginated result
+                let mut storage = std::collections::BTreeMap::new();
+                let mut next_key = None;
+
+                for (count, (&key, &value)) in merged.iter().enumerate() {
+                    if count as u64 >= max_result {
+                        next_key = Some(key);
+                        break;
+                    }
+                    storage.insert(
+                        alloy_primitives::keccak256(key),
+                        alloy_rpc_types_debug::StorageResult {
+                            key,
+                            value: B256::from(value.to_be_bytes()),
+                        },
+                    );
+                }
+
+                Ok(StorageRangeResult {
+                    storage: alloy_rpc_types_debug::StorageMap(storage),
+                    next_key,
+                })
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -1059,13 +1164,16 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<StorageRangeResult> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::storage_range_at(self, block_hash, tx_idx, contract_address, key_start, max_result)
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(

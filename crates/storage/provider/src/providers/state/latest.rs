@@ -263,6 +263,32 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             Ok(None)
         }
     }
+
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: B256,
+        max_result: u64,
+    ) -> ProviderResult<(Vec<(StorageKey, StorageValue)>, Option<B256>)> {
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut entries = Vec::new();
+
+        // Seek to the first entry >= start_key for this account (inclusive)
+        let mut current = cursor.seek_by_key_subkey(account, start_key)?;
+
+        while let Some(entry) = current {
+            if entries.len() as u64 >= max_result {
+                // There are more entries, return next_key for pagination
+                return Ok((entries, Some(entry.key)));
+            }
+            if !entry.value.is_zero() {
+                entries.push((entry.key, entry.value));
+            }
+            current = cursor.next_dup_val()?;
+        }
+
+        Ok((entries, None))
+    }
 }
 
 impl<Provider: DBProvider + BlockHashReader> BytecodeReader

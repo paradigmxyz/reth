@@ -154,6 +154,18 @@ impl StateProvider for StateProviderTraitObjWrapper {
         self.0.storage(account, storage_key)
     }
 
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: B256,
+        max_result: u64,
+    ) -> reth_errors::ProviderResult<(
+        Vec<(alloy_primitives::StorageKey, alloy_primitives::StorageValue)>,
+        Option<B256>,
+    )> {
+        self.0.storage_range(account, start_key, max_result)
+    }
+
     fn account_code(
         &self,
         addr: &Address,
