@@ -533,8 +533,8 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 /// Tries to extract a chain ID from a snapshot URL filename.
 ///
 /// Splits the filename by `-` and checks if the second segment is a valid chain ID.
-/// For example, `tempo-42429-18302466-1772514022.tar.lz4` splits into
-/// `["tempo", "42429", "18302466", "1772514022.tar.lz4"]` and `42429` is parsed as the chain ID.
+/// For example, `reth-1-minimal-edge-24571111-1772470929.tar.zst` splits into
+/// `["reth", "1", "minimal", ...]` and `1` is parsed as the chain ID.
 fn detect_chain_from_url(url: &str) -> Option<Chain> {
     let filename = Url::parse(url)
         .ok()
@@ -629,22 +629,24 @@ mod tests {
     fn test_detect_chain_from_url() {
         // Second `-`-delimited segment is the chain ID
         assert_eq!(
-            detect_chain_from_url("https://host.dev/tempo-42429-18302466-1772514022.tar.lz4"),
-            Some(Chain::from_id(42429))
+            detect_chain_from_url(
+                "https://snapshots-r2.reth.rs/reth-1-minimal-edge-24571111-1772470929.tar.zst"
+            ),
+            Some(Chain::from_id(1))
         );
         assert_eq!(
-            detect_chain_from_url("https://example.com/tempo-4217-100-999.tar.zst"),
-            Some(Chain::from_id(4217))
+            detect_chain_from_url("https://example.com/reth-17000-full-24571111.tar.lz4"),
+            Some(Chain::from_id(17000))
         );
         assert_eq!(
-            detect_chain_from_url("file:///tmp/tempo-42429-18302466-1772514022.tar.lz4"),
-            Some(Chain::from_id(42429))
+            detect_chain_from_url("file:///tmp/reth-1-minimal-edge-24571111.tar.zst"),
+            Some(Chain::from_id(1))
         );
 
         // No second segment or not numeric → None
         assert_eq!(detect_chain_from_url("https://example.com/snapshot.tar.lz4"), None);
-        assert_eq!(detect_chain_from_url("https://example.com/tempo-.tar.lz4"), None);
-        assert_eq!(detect_chain_from_url("https://example.com/tempo-abc-123.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/reth-.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/reth-abc-123.tar.lz4"), None);
     }
 
     #[test]
