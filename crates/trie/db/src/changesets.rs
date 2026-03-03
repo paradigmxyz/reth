@@ -30,7 +30,7 @@ use std::{
     ops::RangeInclusive,
     sync::{Arc, OnceLock},
 };
-use tracing::{debug, debug_span};
+use tracing::{debug, debug_span, warn};
 
 #[cfg(feature = "metrics")]
 use reth_metrics::{
@@ -510,11 +510,11 @@ impl ChangesetCache {
         }
 
         // No cache hit and no pending computation - compute from database
-        debug!(
+        warn!(
             target: "trie::changeset_cache",
             ?block_hash,
             block_number,
-            "Changeset cache MISS, computing from database"
+            "Changeset cache MISS, falling back to DB-based computation"
         );
 
         let start = Instant::now();
