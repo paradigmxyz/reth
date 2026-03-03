@@ -2030,11 +2030,20 @@ pub struct ArenaParallelismThresholds {
     /// update. Subtries with fewer updates than this are updated inline during the upper trie
     /// walk.
     pub min_updates: usize,
+    /// Minimum number of revealed leaves in a subtrie before it is eligible for parallel
+    /// pruning. Subtries with fewer leaves than this are pruned inline during the upper trie
+    /// walk.
+    pub min_leaves_for_prune: u64,
 }
 
 impl Default for ArenaParallelismThresholds {
     fn default() -> Self {
-        Self { min_dirty_leaves: 128, min_revealed_nodes: 128, min_updates: 128 }
+        Self {
+            min_dirty_leaves: 128,
+            min_revealed_nodes: 128,
+            min_updates: 128,
+            min_leaves_for_prune: 128,
+        }
     }
 }
 
@@ -2728,22 +2737,43 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return 0;
         }
 
-        self.buffers.stack.clear();
-        push_stack(&self.upper_arena, &mut self.buffers.stack, self.root, Nibbles::default());
+        let threshold = self.parallelism_thresholds.min_leaves_for_prune;
+
+        let mut stack = mem::take(&mut self.buffers.stack);
+        stack.clear();
+        push_stack(&self.upper_arena, &mut stack, self.root, Nibbles::default());
+
+        // Subtries taken for parallel pruning: (arena_index, subtrie).
+        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
 
         let mut pruned = 0;
         let mut start_nibble: u8 = 0;
 
         loop {
-            let head_idx = self.buffers.stack.last().unwrap().index;
+            let head_idx = stack.last().unwrap().index;
 
-            // If the current head is a subtrie, prune it and pop.
-            if let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] {
-                pruned += subtrie.prune(max_depth);
+            // If the current head is a subtrie, either take or prune inline.
+            if matches!(&self.upper_arena[head_idx], ArenaSparseNode::Subtrie(_)) {
+                let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+                    unreachable!()
+                };
+                if subtrie.num_leaves >= threshold {
+                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                        &mut self.upper_arena[head_idx],
+                        ArenaSparseNode::TakenSubtrie,
+                    ) else {
+                        unreachable!()
+                    };
+                    taken.push((head_idx, subtrie));
+                } else {
+                    let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
+                        unreachable!()
+                    };
+                    pruned += subtrie.prune(max_depth);
+                }
 
-                let popped_path =
-                    pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
-                if self.buffers.stack.is_empty() {
+                let popped_path = pop_and_propagate_stack(&mut self.upper_arena, &mut stack);
+                if stack.is_empty() {
                     break;
                 }
                 start_nibble = popped_path.last().unwrap() + 1;
@@ -2766,8 +2796,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                 match &self.upper_arena[child_idx] {
                     ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => {
-                        let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
-                        push_stack(&self.upper_arena, &mut self.buffers.stack, child_idx, path);
+                        let path = child_path(&self.upper_arena, &stack, nibble);
+                        push_stack(&self.upper_arena, &mut stack, child_idx, path);
                         start_nibble = 0;
                         descended = true;
                         break;
@@ -2781,12 +2811,34 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             // All children processed; pop.
-            let popped_path =
-                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
-            if self.buffers.stack.is_empty() {
+            let popped_path = pop_and_propagate_stack(&mut self.upper_arena, &mut stack);
+            if stack.is_empty() {
                 break;
             }
             start_nibble = popped_path.last().unwrap() + 1;
+        }
+
+        // Drain remaining stack entries from the upper-trie walk.
+        drain_stack(&mut self.upper_arena, &mut stack);
+        self.buffers.stack = stack;
+
+        if !taken.is_empty() {
+            // Prune taken subtries, in parallel if more than one.
+            if taken.len() == 1 {
+                let (_, subtrie) = &mut taken[0];
+                pruned += subtrie.prune(max_depth);
+            } else {
+                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+                let parallel_pruned: Vec<usize> =
+                    taken.par_iter_mut().map(|(_, subtrie)| subtrie.prune(max_depth)).collect();
+                pruned += parallel_pruned.into_iter().sum::<usize>();
+            }
+
+            // Restore taken subtries into the upper arena.
+            for (child_idx, subtrie) in taken {
+                self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+            }
         }
 
         pruned
@@ -3239,6 +3291,7 @@ mod tests {
                     min_dirty_leaves: 3,
                     min_revealed_nodes: 3,
                     min_updates: 3,
+                    min_leaves_for_prune: 3,
                 },
             );
             apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
