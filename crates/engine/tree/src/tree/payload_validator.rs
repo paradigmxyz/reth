@@ -830,7 +830,27 @@ where
                     .map_err(BlockExecutionError::other)?
                     .unwrap_or_default(),
             );
-            let bal_items = bal.total_storage_reads() as u64 + bal.account_count() as u64;
+            let mut bal_items: u64 = 0;
+
+            for account in bal.into_inner() {
+                // Count address
+                bal_items += 1;
+
+                // Collect unique storage slots across reads + writes
+                let mut unique_slots = alloy_primitives::map::HashSet::new();
+
+                for change in account.storage_changes() {
+                    unique_slots.insert(change.slot);
+                }
+
+                for slot in account.storage_reads() {
+                    unique_slots.insert(*slot);
+                }
+
+                // Count unique storage keys
+                bal_items += unique_slots.len() as u64;
+            }
+
             let item_cost = 2000;
             if bal_items > input.gas_limit() / item_cost {
                 debug!(target: "engine::tree::payload_validator", bal_items, "{} {}", input.gas_limit(), "BAL is invalid since it contains more items than the gas limit allows");
