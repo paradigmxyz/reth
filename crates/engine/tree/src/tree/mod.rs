@@ -42,7 +42,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Duration};
+use std::{fmt::Debug, ops, sync::Arc};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -3259,22 +3259,3 @@ enum PersistTarget {
     Head,
 }
 
-/// Result of waiting for caches to become available.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
-    pub execution_cache: Duration,
-    /// Time spent waiting for the sparse trie lock.
-    pub sparse_trie: Duration,
-}
-
-/// Trait for types that can wait for caches to become available.
-///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
-pub trait WaitForCaches {
-    /// Waits for cache updates to complete.
-    ///
-    /// Returns the time spent waiting for each cache separately.
-    fn wait_for_caches(&self) -> CacheWaitDurations;
-}

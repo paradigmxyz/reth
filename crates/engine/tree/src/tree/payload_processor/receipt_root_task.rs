@@ -12,7 +12,7 @@ use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
-use tracing::debug_span;
+use tracing::{debug, debug_span};
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -73,6 +73,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
+        debug!(target: "engine::tree::payload_processor", "Starting receipts root task");
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::new();

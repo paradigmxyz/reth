@@ -8,7 +8,7 @@ use crate::tree::{
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, StateProviderBuilder, TreeConfig, WaitForCaches,
+    StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
