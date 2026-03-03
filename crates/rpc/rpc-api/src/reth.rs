@@ -6,6 +6,16 @@ use serde::{Deserialize, Serialize};
 // Required for the subscription attributes below
 use reth_chain_state as _;
 
+/// Response for the `reth_forkSchedule` RPC method.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkSchedule {
+    /// Ordered list of all hardforks and their activation conditions.
+    pub schedule: Vec<ForkInfo>,
+    /// Name of the latest active hardfork at the chain head.
+    pub active: String,
+}
+
 /// Information about a single hardfork in the chain's fork schedule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,8 +85,8 @@ pub trait RethApi {
         &self,
     ) -> jsonrpsee::core::SubscriptionResult;
 
-    /// Returns the fork schedule showing all hardforks, their activation conditions, and
-    /// whether they are currently active.
+    /// Returns the fork schedule showing all hardforks, their activation conditions,
+    /// whether they are currently active, and the name of the latest active fork.
     #[method(name = "forkSchedule")]
-    async fn reth_fork_schedule(&self) -> RpcResult<Vec<ForkInfo>>;
+    async fn reth_fork_schedule(&self) -> RpcResult<ForkSchedule>;
 }

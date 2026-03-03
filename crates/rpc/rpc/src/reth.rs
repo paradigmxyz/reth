@@ -15,7 +15,7 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_chainspec::{ChainSpecProvider, ForkCondition, Hardforks};
-use reth_rpc_api::{ForkInfo, RethApiServer};
+use reth_rpc_api::{ForkInfo, ForkSchedule, RethApiServer};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
@@ -193,7 +193,7 @@ where
     EvmConfig: Send + Sync + 'static,
 {
     /// Returns the fork schedule from the chain spec with active status.
-    pub fn fork_schedule(&self) -> EthResult<Vec<ForkInfo>> {
+    pub fn fork_schedule(&self) -> EthResult<ForkSchedule> {
         let chain_spec = self.provider().chain_spec();
         let chain_info = self.provider().chain_info()?;
         let best_block = chain_info.best_number;
@@ -203,7 +203,9 @@ where
             .ok_or(EthApiError::HeaderNotFound(best_block.into()))?;
         let best_timestamp = best_header.timestamp();
 
-        let forks = chain_spec
+        let mut latest_active = None;
+
+        let schedule: Vec<ForkInfo> = chain_spec
             .forks_iter()
             .map(|(fork, condition)| {
                 let (condition_type, activation_value, active) = match condition {
@@ -225,8 +227,13 @@ where
                     ForkCondition::Never => ("never".to_string(), None, false),
                 };
 
+                let name = fork.name().to_string();
+                if active {
+                    latest_active = Some(name.clone());
+                }
+
                 ForkInfo {
-                    name: fork.name().to_string(),
+                    name,
                     condition_type,
                     activation_value,
                     active,
@@ -234,7 +241,10 @@ where
             })
             .collect();
 
-        Ok(forks)
+        Ok(ForkSchedule {
+            schedule,
+            active: latest_active.unwrap_or_default(),
+        })
     }
 }
 
@@ -321,7 +331,7 @@ where
     }
 
     /// Handler for `reth_forkSchedule`
-    async fn reth_fork_schedule(&self) -> RpcResult<Vec<ForkInfo>> {
+    async fn reth_fork_schedule(&self) -> RpcResult<ForkSchedule> {
         Ok(Self::fork_schedule(self)?)
     }
 }

@@ -47,7 +47,7 @@ pub mod servers {
         miner::MinerApiServer,
         net::NetApiServer,
         otterscan::OtterscanServer,
-        reth::{ForkInfo, RethApiServer},
+        reth::{ForkInfo, ForkSchedule, RethApiServer},
         reth_engine::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus},
         rpc::RpcApiServer,
         testing::TestingApiServer,
