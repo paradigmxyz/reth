@@ -1943,8 +1943,8 @@ pub struct ArenaParallelismThresholds {
 impl Default for ArenaParallelismThresholds {
     fn default() -> Self {
         Self {
-            min_dirty_leaves: 128,
-            min_revealed_nodes: 128,
+            min_dirty_leaves: 16,
+            min_revealed_nodes: 16,
             min_updates: 128,
             min_leaves_for_prune: 128,
         }
