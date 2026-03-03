@@ -352,9 +352,7 @@ where
             .into())
         }
 
-        // The block is already in hand; derive the EVM env from its header directly
-        // rather than fetching it from the database again.
-        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
