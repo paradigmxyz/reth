@@ -14,8 +14,8 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     chain_spec: impl OpHardforks,
     timestamp: u64,
 ) -> B256 {
-    // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot calculation,
-    // rather than removing them only during Regolith.
+    // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
+    // calculation, rather than removing them only during Regolith.
     if chain_spec.is_regolith_active_at_timestamp(timestamp) {
         let receipts = receipts
             .iter()
@@ -42,8 +42,8 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     chain_spec: impl OpHardforks,
     timestamp: u64,
 ) -> B256 {
-    // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot calculation,
-    // rather than removing them only during Regolith.
+    // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
+    // calculation, rather than removing them only during Regolith.
     if chain_spec.is_regolith_active_at_timestamp(timestamp) {
         let receipts = receipts
             .iter()

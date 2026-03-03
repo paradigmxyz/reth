@@ -151,7 +151,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         parent_hash: B256,
     ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
         let Some(rx) = self.inner.flashblocks.as_ref().map(|f| &f.pending_block_rx) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // Check if a flashblock is being built
@@ -314,6 +314,17 @@ where
 {
 }
 
+fn normalize_empty_storage_proofs(response: &mut EIP1186AccountProofResponse) {
+    for storage_proof in &mut response.storage_proof {
+        if storage_proof.value.is_zero() &&
+            storage_proof.proof.len() == 1 &&
+            storage_proof.proof[0].as_ref() == [EMPTY_STRING_CODE]
+        {
+            storage_proof.proof = Vec::new();
+        }
+    }
+}
+
 impl<N, Rpc> EthState for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -352,8 +363,6 @@ where
             let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
             let block_id = block_id.unwrap_or_default();
 
-            // Check whether the distance to the block exceeds the maximum configured window.
-            // When max_window is 0, it means unlimited (compatible with geth behavior).
             let max_window = self.max_proof_window();
             if max_window > 0 {
                 let block_number = self
@@ -365,7 +374,6 @@ where
                     return Err(EthApiError::ExceedsMaxProofWindow.into());
                 }
             }
-
             self.spawn_blocking_io_fut(move |this| async move {
                 let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
@@ -373,22 +381,7 @@ where
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
                 let mut response = proof.into_eip1186_response(keys);
-
-                // Align with geth's behavior: for empty storage, return empty proof instead of ["0x80"]
-                // geth returns [] when storageTrie is nil (storage root is EmptyRootHash)
-                // reth returns ["0x80"] which is the RLP encoding of empty trie root
-                // Both are valid for proof verification, but we align with geth for RPC compatibility
-                for storage_proof in &mut response.storage_proof {
-                    // Check if this is an empty storage proof:
-                    // - value is 0 (storage slot doesn't exist or is zero)
-                    // - proof contains only the empty trie root marker [0x80]
-                    if storage_proof.value.is_zero()
-                        && storage_proof.proof.len() == 1
-                        && storage_proof.proof[0].as_ref() == [EMPTY_STRING_CODE]
-                    {
-                        storage_proof.proof = vec![];
-                    }
-                }
+                normalize_empty_storage_proofs(&mut response);
 
                 Ok(response)
             })
@@ -605,5 +598,36 @@ where
             U256::from(min_suggested_priority_fee),
             flashblocks,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use alloy_rpc_types_eth::EIP1186StorageProof;
+
+    #[test]
+    fn normalizes_empty_storage_proof_to_geth_shape() {
+        let mut response = EIP1186AccountProofResponse {
+            storage_proof: vec![
+                EIP1186StorageProof {
+                    key: JsonStorageKey::from(B256::ZERO),
+                    value: U256::ZERO,
+                    proof: vec![Bytes::from_static(&[EMPTY_STRING_CODE])],
+                },
+                EIP1186StorageProof {
+                    key: JsonStorageKey::from(B256::from([1u8; 32])),
+                    value: U256::from(1),
+                    proof: vec![Bytes::from_static(&[0x01])],
+                },
+            ],
+            ..Default::default()
+        };
+
+        normalize_empty_storage_proofs(&mut response);
+
+        assert!(response.storage_proof[0].proof.is_empty());
+        assert_eq!(response.storage_proof[1].proof, vec![Bytes::from_static(&[0x01])]);
     }
 }

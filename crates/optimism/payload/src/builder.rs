@@ -33,11 +33,12 @@ use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, Payloa
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
 };
+use reth_provider::{DBProvider, DatabaseProviderFactory};
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
 };
-use reth_storage_api::{errors::ProviderError, DBProvider, StateProvider, StateProviderFactory, DatabaseProviderFactory};
+use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
 use std::{marker::PhantomData, sync::Arc};
@@ -156,7 +157,8 @@ impl<Pool, Client, Evm, Txs, Attrs> OpPayloadBuilder<Pool, Client, Evm, Txs, Att
 impl<Pool, Client, Evm, N, T, Attrs> OpPayloadBuilder<Pool, Client, Evm, T, Attrs>
 where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + DatabaseProviderFactory,
+    Client:
+        StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + DatabaseProviderFactory,
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<
         Primitives = N,
@@ -241,7 +243,10 @@ impl<Pool, Client, Evm, N, Txs, Attrs> PayloadBuilder
     for OpPayloadBuilder<Pool, Client, Evm, Txs, Attrs>
 where
     N: OpPayloadPrimitives,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + DatabaseProviderFactory + Clone,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + DatabaseProviderFactory
+        + Clone,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<
         Primitives = N,
@@ -258,9 +263,7 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let pool = self.pool.clone();
-        let result =
-            self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs));
-        result
+        self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs))
     }
 
     fn on_missing_payload(
@@ -401,7 +404,7 @@ impl<Txs> OpBuilder<'_, Txs> {
                     Some(block.state_root()),
                     true,
                 )
-                .map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+                .map_err(|e| PayloadBuilderError::other(io::Error::other(e.to_string())))?;
             }
         }
 
@@ -751,8 +754,8 @@ where
 
             // We skip invalid cross chain txs, they would be removed on the next block update in
             // the maintenance job
-            if let Some(interop) = interop
-                && !is_valid_interop(interop, self.config.attributes.timestamp())
+            if let Some(interop) = interop &&
+                !is_valid_interop(interop, self.config.attributes.timestamp())
             {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;

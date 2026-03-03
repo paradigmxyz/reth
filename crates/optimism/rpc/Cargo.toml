@@ -84,6 +84,8 @@ eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 derive_more = { workspace = true, features = ["constructor"] }
+parking_lot.workspace = true
+schnellru.workspace = true
 
 # metrics
 reth-metrics.workspace = true

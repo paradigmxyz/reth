@@ -41,31 +41,36 @@ impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primit
         let receipt = Receipt {
             status: rb.receipt.status_or_post_state(),
             cumulative_gas_used: rb.receipt.cumulative_gas_used(),
-            logs: rb.receipt.logs().iter().map(|l| alloy_primitives::Log::from(l.clone())).collect(),
+            logs: rb
+                .receipt
+                .logs()
+                .iter()
+                .map(|l| alloy_primitives::Log::from(l.clone()))
+                .collect(),
         };
         let logs_bloom = rb.logs_bloom;
-        let envelope = match &rb.receipt {
+        let envelope = match rb.receipt {
             op_alloy_consensus::OpReceipt::Legacy(_) => {
                 op_alloy_consensus::OpReceiptEnvelope::Legacy(ReceiptWithBloom {
-                    receipt: receipt.clone(),
+                    receipt,
                     logs_bloom,
                 })
             }
             op_alloy_consensus::OpReceipt::Eip2930(_) => {
                 op_alloy_consensus::OpReceiptEnvelope::Eip2930(ReceiptWithBloom {
-                    receipt: receipt.clone(),
+                    receipt,
                     logs_bloom,
                 })
             }
             op_alloy_consensus::OpReceipt::Eip1559(_) => {
                 op_alloy_consensus::OpReceiptEnvelope::Eip1559(ReceiptWithBloom {
-                    receipt: receipt.clone(),
+                    receipt,
                     logs_bloom,
                 })
             }
             op_alloy_consensus::OpReceipt::Eip7702(_) => {
                 op_alloy_consensus::OpReceiptEnvelope::Eip7702(ReceiptWithBloom {
-                    receipt: receipt.clone(),
+                    receipt,
                     logs_bloom,
                 })
             }
@@ -115,14 +120,18 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_try_from_receipt_response_optimism() {
-        use op_alloy_consensus::OpReceiptEnvelope;
+        use alloy_consensus::ReceiptWithBloom;
+        use op_alloy_consensus::OpReceipt as OpConsensusReceipt;
         use op_alloy_network::Optimism;
         use op_alloy_rpc_types::OpTransactionReceipt;
         use reth_optimism_primitives::OpReceipt;
 
         let op_receipt = OpTransactionReceipt {
             inner: alloy_rpc_types_eth::TransactionReceipt {
-                inner: OpReceiptEnvelope::Eip1559(Default::default()),
+                inner: ReceiptWithBloom {
+                    logs_bloom: Default::default(),
+                    receipt: OpConsensusReceipt::Eip1559(Default::default()),
+                },
                 transaction_hash: Default::default(),
                 transaction_index: None,
                 block_hash: None,

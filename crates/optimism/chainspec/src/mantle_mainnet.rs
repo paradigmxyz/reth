@@ -7,7 +7,9 @@ use alloy_hardforks::Hardfork;
 use alloy_primitives::U256;
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
-use reth_mantle_forks::{MantleHardfork, MANTLE_MAINNET_SKADI_TIMESTAMP};
+use reth_mantle_forks::{
+    MantleHardfork, MANTLE_MAINNET_LIMB_TIMESTAMP, MANTLE_MAINNET_SKADI_TIMESTAMP,
+};
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
 
@@ -23,13 +25,13 @@ use reth_primitives_traits::SealedHeader;
 const MANTLE_MAINNET_GENESIS_HASH: alloy_primitives::B256 =
     alloy_primitives::b256!("0xcd3253817bbf6ae83c9839c362a0688a83d59d2fabeb9463b348cc98c4b056aa");
 
-/// The Mantle Mainnet spec with hardcoded Skadi timestamp
+/// The Mantle Mainnet spec with hardcoded Mantle hardfork timestamps
 pub static MANTLE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     // Create a minimal genesis configuration
     // In a real deployment, this should come from the official Mantle genesis
     let genesis = create_mantle_mainnet_genesis();
 
-    // Build hardforks with hardcoded Skadi timestamp
+    // Build hardforks with hardcoded Mantle timestamps
     let hardforks = create_mantle_mainnet_hardforks();
 
     OpChainSpec {
@@ -171,10 +173,12 @@ fn create_mantle_mainnet_genesis() -> alloy_genesis::Genesis {
     .expect("Invalid Mantle mainnet genesis JSON")
 }
 
-/// Creates Mantle mainnet hardforks with hardcoded Skadi timestamp
+/// Creates Mantle mainnet hardforks with hardcoded Mantle timestamps
 fn create_mantle_mainnet_hardforks() -> ChainHardforks {
     let skadi_fork_condition = ForkCondition::Timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP);
-    ChainHardforks::new(vec![
+    let limb_fork_condition = ForkCondition::Timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP);
+
+    let hardforks = vec![
         // Ethereum hardforks at block 0
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -202,14 +206,18 @@ fn create_mantle_mainnet_hardforks() -> ChainHardforks {
         // Note: Mantle Mainnet only has Bedrock and Regolith enabled
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        // Canyon, Ecotone, Fjord, Granite, Holocene are NOT enabled on Mantle Mainnet
         // L1 hardforks mapped to Skadi timestamp (hardcoded)
         (EthereumHardfork::Shanghai.boxed(), skadi_fork_condition),
         (EthereumHardfork::Cancun.boxed(), skadi_fork_condition),
         (EthereumHardfork::Prague.boxed(), skadi_fork_condition),
-        // Mantle-specific Skadi hardfork (hardcoded timestamp from code)
+        // L1 Osaka mapped to Limb timestamp
+        (EthereumHardfork::Osaka.boxed(), limb_fork_condition),
+        // Mantle-specific hardforks
         (MantleHardfork::Skadi.boxed(), skadi_fork_condition),
-    ])
+        (MantleHardfork::Limb.boxed(), limb_fork_condition),
+    ];
+
+    ChainHardforks::new(hardforks)
 }
 
 #[cfg(test)]
@@ -235,6 +243,17 @@ mod tests {
     }
 
     #[test]
+    fn verify_limb_is_configured() {
+        let spec = MANTLE_MAINNET.clone();
+
+        // Limb should be active at the hardcoded timestamp
+        assert!(spec.is_limb_active_at_timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP));
+
+        // Limb should not be active before the timestamp
+        assert!(!spec.is_limb_active_at_timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP - 1));
+    }
+
+    #[test]
     fn verify_hardfork_timestamps() {
         let spec = MANTLE_MAINNET.clone();
 
@@ -242,5 +261,8 @@ mod tests {
         assert!(spec.is_shanghai_active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
         assert!(spec.is_cancun_active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
         assert!(spec.is_prague_active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
+
+        // Verify that Osaka is mapped to Limb timestamp
+        assert!(spec.is_osaka_active_at_timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP));
     }
 }

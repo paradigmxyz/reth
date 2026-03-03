@@ -85,9 +85,9 @@ impl<ChainSpec: OpHardforks + MantleHardforks> OpBlockAssembler<ChainSpec> {
                 // In jovian, we're using the blob gas used field to store the current da
                 // footprint's value.
                 (Some(0), Some(*blob_gas_used))
-            } else if self.chain_spec.is_skadi_active_at_timestamp(timestamp) {
-                (Some(0), Some(0))
-            } else if self.chain_spec.is_ecotone_active_at_timestamp(timestamp) {
+            } else if self.chain_spec.is_skadi_active_at_timestamp(timestamp) ||
+                self.chain_spec.is_ecotone_active_at_timestamp(timestamp)
+            {
                 (Some(0), Some(0))
             } else {
                 (None, None)

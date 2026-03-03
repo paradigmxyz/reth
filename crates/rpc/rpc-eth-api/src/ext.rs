@@ -1,11 +1,9 @@
 //! `eth_` Extension traits.
 
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use alloy_rpc_types_eth::TransactionRequest;
-use alloy_eips::BlockNumberOrTag;
+use alloy_rpc_types_eth::{erc4337::TransactionConditional, TransactionRequest};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Extension trait for `eth_` namespace for L2s.
@@ -19,7 +17,6 @@ pub trait L2EthApiExt {
         bytes: Bytes,
         condition: TransactionConditional,
     ) -> RpcResult<B256>;
-
 }
 
 /// Preconfirmation transaction event
@@ -91,11 +88,12 @@ pub trait MantleEthApiExt<B: RpcObject> {
     /// # Parameters
     /// - `start_number`: The block number to start from (inclusive).
     /// - `end_number`: The block number to end at (inclusive).
-    /// - `full_transactions`: If true, returns full transaction objects, otherwise returns hashes only.
-    /// 
+    /// - `full_transactions`: If true, returns full transaction objects, otherwise returns hashes
+    ///   only.
+    ///
     /// # Returns
     /// A list of blocks. Each block is a JSON object containing all fields of a block.
-    /// 
+    ///
     /// # Errors
     /// Returns an error if:
     /// - Start block number is greater than end block number.
@@ -111,13 +109,13 @@ pub trait MantleEthApiExt<B: RpcObject> {
     ) -> RpcResult<Vec<B>>;
 
     /// Sends a raw transaction with preconfirmation support.
-    /// 
+    ///
     /// This method submits a signed transaction to the transaction pool and returns
     /// a preconfirmation event indicating the transaction's predicted L2 block.
-    /// 
+    ///
     /// # Parameters
     /// - `bytes`: The raw transaction bytes.
-    /// 
+    ///
     /// # Returns
     /// A preconfirmation event containing:
     /// - Transaction hash
@@ -126,10 +124,7 @@ pub trait MantleEthApiExt<B: RpcObject> {
     /// - Predicted L2 block number
     /// - Receipt (logs)
     #[method(name = "sendRawTransactionWithPreconf")]
-    async fn send_raw_transaction_with_preconf(
-        &self,
-        bytes: Bytes,
-    ) -> RpcResult<PreconfTxEvent>;
+    async fn send_raw_transaction_with_preconf(&self, bytes: Bytes) -> RpcResult<PreconfTxEvent>;
 
     /// Estimates the total transaction cost (L2 execution + L1 data + operator fee) in wei.
     ///

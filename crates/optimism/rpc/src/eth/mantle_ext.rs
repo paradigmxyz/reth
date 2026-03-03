@@ -1,30 +1,61 @@
 //! Mantle Eth API extension implementation.
 
-use crate::error::SequencerClientError;
-use crate::SequencerClient;
+use crate::{error::SequencerClientError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag, Encodable2718};
-use alloy_primitives::Sealable;
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::{Bytes, Sealable, U256};
+use alloy_rpc_types_eth::TransactionRequest;
 use jsonrpsee::types::ErrorObject;
 use jsonrpsee_core::RpcResult;
+use op_revm::constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_optimism_evm::RethL1BlockInfo;
+use reth_mantle_forks::MantleHardforks;
+use reth_optimism_evm::{extract_l1_info, RethL1BlockInfo};
+use reth_primitives_traits::Block;
+use reth_rpc_convert::TryIntoSimTx;
 use reth_rpc_eth_api::{
     helpers::Call, EthApiServer, EthApiTypes, MantleEthApiExtServer, PreconfTxEvent, RpcBlock,
     RpcNodeCore,
 };
 use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt, StateProviderFactory};
-use reth_mantle_forks::MantleHardforks;
-use op_revm::constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT};
-use reth_rpc_convert::TryIntoSimTx;
-use alloy_rpc_types_eth::TransactionRequest;
-use reth_optimism_evm::extract_l1_info;
-use reth_primitives_traits::Block;
 use std::sync::Arc;
-use tracing::info;
+
+const GETH_MANTLE_RPC_GAS_CAP: u64 = 0x4000000000000;
+
+fn estimate_total_fee_gas_price(
+    request_gas_price: Option<u128>,
+    request_max_fee_per_gas: Option<u128>,
+    request_max_priority_fee_per_gas: Option<u128>,
+    base_fee: U256,
+    suggested_tip: U256,
+) -> U256 {
+    match (request_gas_price, request_max_fee_per_gas) {
+        (Some(gas_price), _) if gas_price > 0 => U256::from(gas_price),
+        (_, Some(max_fee)) if max_fee > 0 => {
+            let tip = U256::from(request_max_priority_fee_per_gas.unwrap_or(0));
+            base_fee.saturating_add(tip).min(U256::from(max_fee))
+        }
+        _ => base_fee.saturating_add(suggested_tip),
+    }
+}
+
+fn capped_l1_gas_limit(request_gas: Option<u64>) -> u64 {
+    request_gas.map(|gas| gas.min(GETH_MANTLE_RPC_GAS_CAP)).unwrap_or(GETH_MANTLE_RPC_GAS_CAP)
+}
+
+fn l1_nonce_or_default(request_nonce: Option<u64>) -> u64 {
+    request_nonce.unwrap_or(0)
+}
+
+const fn should_use_l1_legacy_path(
+    has_base_fee: bool,
+    max_fee_per_gas: Option<u128>,
+    max_priority_fee_per_gas: Option<u128>,
+) -> bool {
+    !has_base_fee && max_fee_per_gas.is_none() && max_priority_fee_per_gas.is_none()
+}
 
 /// Mantle-specific `Eth` API extensions implementation.
 ///
@@ -42,7 +73,7 @@ pub struct MantleEthApiExt<Provider, EthApi> {
 
 impl<Provider, EthApi> MantleEthApiExt<Provider, EthApi> {
     /// Creates a new [`MantleEthApiExt`].
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         eth_api: Arc<EthApi>,
         sequencer_client: Option<SequencerClient>,
@@ -51,7 +82,7 @@ impl<Provider, EthApi> MantleEthApiExt<Provider, EthApi> {
     }
 
     #[inline]
-    fn provider(&self) -> &Provider {
+    const fn provider(&self) -> &Provider {
         &self.provider
     }
 
@@ -73,8 +104,8 @@ where
         + Send
         + Sync
         + 'static,
-    reth_rpc_eth_api::RpcTxReq<EthApi::NetworkTypes>: reth_rpc_convert::TryIntoSimTx<op_alloy_consensus::OpTxEnvelope>
-        + Clone,
+    reth_rpc_eth_api::RpcTxReq<EthApi::NetworkTypes>:
+        reth_rpc_convert::TryIntoSimTx<op_alloy_consensus::OpTxEnvelope> + Clone,
     EthApi: Call
         + RpcNodeCore
         + EthApiTypes
@@ -211,7 +242,9 @@ where
         let block = self
             .provider()
             .block_by_id(block_id)
-            .map_err(|e| ErrorObject::owned(-32000, format!("failed to get block: {e}"), None::<()>))?
+            .map_err(|e| {
+                ErrorObject::owned(-32000, format!("failed to get block: {e}"), None::<()>)
+            })?
             .ok_or_else(|| invalid_params_rpc_err("Block not found"))?;
 
         let header = block.header();
@@ -222,97 +255,83 @@ where
                 -32000,
                 "eth_estimateTotalFee is not supported for pre-Arsia blocks",
                 None::<()>,
-            )
-            .into());
+            ));
         }
 
-        let mut req_value = serde_json::to_value(&request).map_err(|e| {
-            ErrorObject::owned(-32000, format!("invalid request: {e}"), None::<()>)
-        })?;
+        let mut req_value = serde_json::to_value(&request)
+            .map_err(|e| ErrorObject::owned(-32000, format!("invalid request: {e}"), None::<()>))?;
         // Inject chainId when missing or null so build_typed_tx() can encode the tx for L1 fee
-        if req_value.get("chainId").map_or(true, |v| v.is_null()) {
+        if req_value.get("chainId").is_none_or(|v| v.is_null()) {
             req_value["chainId"] =
                 serde_json::Value::String(format!("0x{:x}", chain_spec.chain().id()));
         }
         let mut op_req: reth_rpc_eth_api::RpcTxReq<EthApi::NetworkTypes> =
-            serde_json::from_value(req_value)
-                .map_err(|e| ErrorObject::owned(-32000, format!("invalid request: {e}"), None::<()>))?;
-
-        // Ensure chain_id is set so build_typed_tx() can encode the tx for L1 fee (JSON may omit or use wrong key)
-        if op_req.as_ref().chain_id.is_none() {
-            op_req
-                .as_mut()
-                .set_chain_id(chain_spec.chain().id());
-        }
-
-        let gas_estimate = self
-            .eth_api()
-            .estimate_gas(op_req.clone(), Some(block_id), None)
-            .await
-            .map_err(|e| {
-                ErrorObject::owned(
-                    -32000,
-                    format!("failed to estimate gas: {}", e.message()),
-                    None::<()>,
-                )
+            serde_json::from_value(req_value).map_err(|e| {
+                ErrorObject::owned(-32000, format!("invalid request: {e}"), None::<()>)
             })?;
 
+        // Ensure chain_id is set so build_typed_tx() can encode the tx for L1 fee (JSON may omit or
+        // use wrong key)
+        if op_req.as_ref().chain_id.is_none() {
+            op_req.as_mut().set_chain_id(chain_spec.chain().id());
+        }
+
+        let gas_estimate =
+            self.eth_api().estimate_gas(op_req.clone(), Some(block_id), None).await.map_err(
+                |e| {
+                    ErrorObject::owned(
+                        -32000,
+                        format!("failed to estimate gas: {}", e.message()),
+                        None::<()>,
+                    )
+                },
+            )?;
+
         let base_fee = U256::from(header.base_fee_per_gas().unwrap_or(0));
-        let gas_price = match (request.gas_price, request.max_fee_per_gas) {
-            (Some(gp), _) if gp > 0 => U256::from(gp),
-            (_, Some(max_fee)) if max_fee > 0 => {
-                let tip = U256::from(request.max_priority_fee_per_gas.unwrap_or(0));
-                let effective = base_fee.saturating_add(tip);
-                effective.min(U256::from(max_fee))
-            }
-            _ => {
-                let tip = self
-                    .eth_api()
-                    .max_priority_fee_per_gas()
-                    .await
-                    .unwrap_or(U256::ZERO);
-                base_fee.saturating_add(tip)
-            }
-        };
+        let suggested_tip = self.eth_api().max_priority_fee_per_gas().await.unwrap_or(U256::ZERO);
+        let gas_price = estimate_total_fee_gas_price(
+            request.gas_price,
+            request.max_fee_per_gas,
+            request.max_priority_fee_per_gas,
+            base_fee,
+            suggested_tip,
+        );
 
         let l2_fee = gas_estimate.saturating_mul(gas_price);
 
-        // Align with geth: tx for L1 cost is built with CallDefaults (gas_cap when gas nil, nonce 0 when nil, fee fields 0 when nil).
-        // Geth uses RPCGasCap = DefaultMantleBlockGasLimit (0x4000000000000); use same so L1-cost encoded tx matches geth.
-        const GETH_MANTLE_RPC_GAS_CAP: u64 = 0x4000000000000; // op-geth core/blockchain.go DefaultMantleBlockGasLimit
-        let gas_for_l1: u64 = op_req
-            .as_ref()
-            .gas
-            .and_then(|g| g.try_into().ok())
-            .map(|g: u64| g.min(GETH_MANTLE_RPC_GAS_CAP))
-            .unwrap_or(GETH_MANTLE_RPC_GAS_CAP);
-        let nonce_for_l1: u64 = op_req
-            .as_ref()
-            .nonce
-            .and_then(|n| n.try_into().ok())
-            .unwrap_or(0);
+        // Align with geth: tx for L1 cost is built with CallDefaults (gas cap when gas nil, nonce 0
+        // when nil, fee fields 0 when nil).
+        let gas_for_l1 = capped_l1_gas_limit(op_req.as_ref().gas);
+        let nonce_for_l1 = l1_nonce_or_default(op_req.as_ref().nonce);
 
-        // Align with geth: when chain has baseFee, CallDefaults sets MaxFeePerGas/MaxPriorityFeePerGas (0 if nil),
-        // so ToTransaction builds EIP-1559. Use Legacy for L1 only when chain has no baseFee and request has no EIP-1559 fields.
+        // Align with geth: when chain has baseFee, CallDefaults sets
+        // MaxFeePerGas/MaxPriorityFeePerGas (0 if nil), so ToTransaction builds EIP-1559.
+        // Use Legacy for L1 only when chain has no baseFee and request has no EIP-1559 fields.
         let has_base_fee = header.base_fee_per_gas().map_or(0, |g| g) > 0;
-        let use_l1_legacy_path = !has_base_fee
-            && op_req.as_ref().max_fee_per_gas.is_none()
-            && op_req.as_ref().max_priority_fee_per_gas.is_none();
+        let use_l1_legacy_path = should_use_l1_legacy_path(
+            has_base_fee,
+            op_req.as_ref().max_fee_per_gas,
+            op_req.as_ref().max_priority_fee_per_gas,
+        );
 
-        // When block has no L1 info (e.g. earliest/genesis), use L1 fee 0 so we still return a total (align with geth)
+        // When block has no L1 info (e.g. earliest/genesis), use L1 fee 0 so we still return a
+        // total (align with geth)
         let (l1_data_fee, operator_fee) = match extract_l1_info(block.body()) {
             Ok(mut l1_block_info) => {
-                // token_ratio is not in setL1BlockValues calldata; read from GasOracle contract state (align with receipt + geth)
+                // token_ratio is not in setL1BlockValues calldata; read from GasOracle contract
+                // state (align with receipt + geth)
                 let state = self
                     .provider()
                     .state_by_block_hash(block.header().parent_hash())
-                    .or_else(|_| self.provider().state_by_block_hash(block.header().hash_slow().into()));
-                if let Ok(state) = state {
-                    if let Ok(Some(ratio)) = state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into()) {
-                        l1_block_info.token_ratio = ratio;
-                    }
+                    .or_else(|_| self.provider().state_by_block_hash(block.header().hash_slow()));
+                if let Ok(state) = state &&
+                    let Ok(Some(ratio)) =
+                        state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into())
+                {
+                    l1_block_info.token_ratio = ratio;
                 }
-                // Build tx for L1 cost with geth CallDefaults: gas=gas_cap (or request capped), nonce=0 when nil, fee fields 0 when nil.
+                // Build tx for L1 cost with geth CallDefaults: gas=gas_cap (or request capped),
+                // nonce=0 when nil, fee fields 0 when nil.
                 let encoded_for_l1 = {
                     let mut op_req_l1 = op_req.clone();
                     {
@@ -322,29 +341,20 @@ where
                         if use_l1_legacy_path {
                             let gp = request.gas_price.unwrap_or(0);
                             r.set_gas_price(gp);
-                            // Leave max_fee_per_gas and max_priority_fee_per_gas as None so build_typed_tx produces Legacy
+                            // Leave max_fee_per_gas and max_priority_fee_per_gas as None so
+                            // build_typed_tx produces Legacy
                         } else {
-                            // Match geth: when chain has baseFee, use EIP-1559 with 0/0 if request did not specify
+                            // Match geth: when chain has baseFee, use EIP-1559 with 0/0 if request
+                            // did not specify
                             let max_fee = request.max_fee_per_gas.unwrap_or(0);
                             let max_priority = request.max_priority_fee_per_gas.unwrap_or(0);
                             r.set_max_fee_per_gas(max_fee);
                             r.set_max_priority_fee_per_gas(max_priority);
-                            // Do not set gas_price so encoder produces EIP-1559 (request with no gas_price keeps None)
+                            // Do not set gas_price so encoder produces EIP-1559 (request with no
+                            // gas_price keeps None)
                         }
                     }
-                    let req = op_req_l1.as_ref();
-                    let to_str = req
-                        .to
-                        .as_ref()
-                        .map(|a| format!("{:?}", a))
-                        .unwrap_or_else(|| "None".to_string());
-                    let data_len = req.input.data.as_ref().map(|d| d.len()).unwrap_or(0);
-                    let value_str = req.value.unwrap_or(U256::ZERO).to_string();
-                    let chain_id = req.chain_id;
-                    let gp = req.gas_price;
-                    let mf = req.max_fee_per_gas;
-                    let mp = req.max_priority_fee_per_gas;
-                    let encoded = op_req_l1
+                    op_req_l1
                         .try_into_sim_tx()
                         .map_err(|_| {
                             ErrorObject::owned(
@@ -354,23 +364,6 @@ where
                             )
                         })?
                         .encoded_2718()
-                        .to_vec();
-                    // Debug: 与 geth 逐字段对比，字段名与 geth 一致便于 grep 对比。
-                    info!(
-                        tx_type = if use_l1_legacy_path { 0u8 } else { 2u8 },
-                        nonce = nonce_for_l1,
-                        gas = gas_for_l1,
-                        to = %to_str,
-                        value = %value_str,
-                        data_len,
-                        chain_id = ?chain_id,
-                        gas_price = ?gp,
-                        gas_fee_cap = ?mf,
-                        gas_tip_cap = ?mp,
-                        rlp_len = encoded.len(),
-                        "eth_estimateTotalFee L1 tx [reth]"
-                    );
-                    encoded
                 };
 
                 let l1_data_fee = l1_block_info
@@ -389,12 +382,8 @@ where
                         )
                     })?;
                 let operator_fee = {
-                    let scalar = l1_block_info
-                        .operator_fee_scalar
-                        .unwrap_or(U256::ZERO);
-                    let constant = l1_block_info
-                        .operator_fee_constant
-                        .unwrap_or(U256::ZERO);
+                    let scalar = l1_block_info.operator_fee_scalar.unwrap_or(U256::ZERO);
+                    let constant = l1_block_info.operator_fee_constant.unwrap_or(U256::ZERO);
                     if scalar.is_zero() && constant.is_zero() {
                         U256::ZERO
                     } else {
@@ -409,10 +398,54 @@ where
             Err(_) => (U256::ZERO, U256::ZERO),
         };
 
-        let total = l2_fee
-            .saturating_add(l1_data_fee)
-            .saturating_add(operator_fee);
+        let total = l2_fee.saturating_add(l1_data_fee).saturating_add(operator_fee);
 
         Ok(total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimate_total_fee_gas_price_prefers_explicit_gas_price() {
+        let gas_price = estimate_total_fee_gas_price(
+            Some(123),
+            Some(999),
+            Some(7),
+            U256::from(10),
+            U256::from(5),
+        );
+        assert_eq!(gas_price, U256::from(123));
+    }
+
+    #[test]
+    fn estimate_total_fee_gas_price_uses_eip1559_cap() {
+        let gas_price =
+            estimate_total_fee_gas_price(None, Some(15), Some(10), U256::from(10), U256::from(5));
+        assert_eq!(gas_price, U256::from(15));
+    }
+
+    #[test]
+    fn estimate_total_fee_gas_price_uses_suggested_tip_fallback() {
+        let gas_price =
+            estimate_total_fee_gas_price(None, None, None, U256::from(10), U256::from(3));
+        assert_eq!(gas_price, U256::from(13));
+    }
+
+    #[test]
+    fn capped_l1_gas_limit_matches_geth_cap() {
+        assert_eq!(capped_l1_gas_limit(None), GETH_MANTLE_RPC_GAS_CAP);
+        assert_eq!(capped_l1_gas_limit(Some(21_000)), 21_000);
+        assert_eq!(capped_l1_gas_limit(Some(GETH_MANTLE_RPC_GAS_CAP + 1)), GETH_MANTLE_RPC_GAS_CAP);
+    }
+
+    #[test]
+    fn should_use_l1_legacy_path_only_without_base_fee_and_eip1559_fields() {
+        assert!(should_use_l1_legacy_path(false, None, None));
+        assert!(!should_use_l1_legacy_path(true, None, None));
+        assert!(!should_use_l1_legacy_path(false, Some(1), None));
+        assert!(!should_use_l1_legacy_path(false, None, Some(1)));
     }
 }

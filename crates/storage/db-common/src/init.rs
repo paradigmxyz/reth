@@ -450,7 +450,11 @@ where
         {
             // Export computed state for debugging purposes
             info!(target: "reth::cli", "Exporting computed state for debugging...");
-            if let Err(e) = export_state_on_mismatch(provider_rw, "computed_state_mismatch.json", Some(computed_state_root)) {
+            if let Err(e) = export_state_on_mismatch(
+                provider_rw,
+                "computed_state_mismatch.json",
+                Some(computed_state_root),
+            ) {
                 tracing::warn!(target: "reth::cli", error = ?e, "Failed to export computed state for debugging");
             }
         }

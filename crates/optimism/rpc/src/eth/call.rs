@@ -11,12 +11,12 @@
 //! ## Gas Price for Estimation (gasPriceForEstimate)
 //!
 //! When user doesn't specify any fee fields, geth uses `gasPriceForEstimate`
-//! (SuggestGasTipCap + baseFee) for EVM execution. This affects:
+//! (`SuggestGasTipCap` + baseFee) for EVM execution. This affects:
 //! - The `GASPRICE` opcode return value
-//! - Gas fee balance check skip (geth's GasEstimationWithSkipCheckBalanceMode)
+//! - Gas fee balance check skip (geth's `GasEstimationWithSkipCheckBalanceMode`)
 //!
 //! We align this behavior by:
-//! 1. Detecting when user didn't specify fees (gas_price == 0 after tx_env creation)
+//! 1. Detecting when user didn't specify fees (`gas_price` == 0 after `tx_env` creation)
 //! 2. Setting `evm_env.cfg_env.disable_balance_check = true` to skip GAS FEE balance
 //! 3. Setting `tx_env.set_gas_price(basefee)` to provide a non-zero GASPRICE value
 //!
@@ -37,15 +37,15 @@
 //! a retriable condition that triggers raising the gas limit.
 //!
 //! In reth, the L1 cost is calculated differently:
-//! - Geth: Uses `L1CostFunc` which is injected into `BlockContext` and calculated
-//!   during `state_transition.go` execution
+//! - Geth: Uses `L1CostFunc` which is injected into `BlockContext` and calculated during
+//!   `state_transition.go` execution
 //! - Reth: L1 cost calculation is handled by the Optimism EVM configuration
 //!
 //! Current status: The `is_gas_too_low()` check in reth should capture similar
 //! scenarios, but the exact error mapping may differ. Integration tests are
 //! required to verify alignment.
 //!
-//! ## MaxUsedGas Equivalence
+//! ## `MaxUsedGas` Equivalence
 //!
 //! Geth's `MaxUsedGas` (from `state_transition.go:843-868`) equals `gas_used + gas_refund`
 //! in reth's `ExecutionResult::Success`. This is used for the optimistic gas limit
@@ -70,7 +70,10 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::StateProvider;
-use revm::{context_interface::{result::ExecutionResult, Block, Transaction}, DatabaseRef};
+use revm::{
+    context_interface::{result::ExecutionResult, Block, Transaction},
+    DatabaseRef,
+};
 use tracing::trace;
 
 impl<N, Rpc> EthCall for OpEthApi<N, Rpc>
@@ -89,15 +92,15 @@ where
 {
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This implementation is aligned with geth's gasestimator.Estimate():
+    /// This implementation is aligned with geth's `gasestimator.Estimate()`:
     /// <https://github.com/ethereum/go-ethereum/blob/master/eth/gasestimator/gasestimator.go>
     ///
     /// Key alignments with op-geth Mantle (IsMantleArsia):
     /// 1. Binary search midpoint favors lower bound (mid = lo * 2 if mid > lo * 2)
-    /// 2. Uses geth's optimistic gas limit formula: (MaxUsedGas + CallStipend) * 64 / 63
+    /// 2. Uses geth's optimistic gas limit formula: (`MaxUsedGas` + `CallStipend`) * 64 / 63
     /// 3. Returns raw estimate (no 120% buffer; op-geth api.go:1052-1053)
-    /// 4. Basic transfer optimization with MIN_TRANSACTION_GAS
-    /// 5. Skips balance check when gas_price is 0 (user didn't specify fees)
+    /// 4. Basic transfer optimization with `MIN_TRANSACTION_GAS`
+    /// 5. Skips balance check when `gas_price` is 0 (user didn't specify fees)
     fn estimate_gas_with<S>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
@@ -154,9 +157,9 @@ where
 
         // Check if this is a basic transfer (no input data to account with no code)
         // Reference: geth gasestimator.go:134-141
-        let is_basic_transfer = if tx_env.input().is_empty()
-            && let TxKind::Call(to) = tx_env.kind()
-            && let Ok(code) = db.database.account_code(&to)
+        let is_basic_transfer = if tx_env.input().is_empty() &&
+            let TxKind::Call(to) = tx_env.kind() &&
+            let Ok(code) = db.database.account_code(&to)
         {
             code.map(|code| code.is_empty()).unwrap_or(true)
         } else {
@@ -174,8 +177,9 @@ where
         // Check value transfer - align with geth state_transition.go:780-781
         // CanTransfer: `return db.GetBalance(addr).Cmp(amount) >= 0`
         //
-        // This check happens during EVM execution regardless of GasEstimationWithSkipCheckBalanceMode.
-        // When value > balance, geth ALWAYS returns "insufficient funds for transfer".
+        // This check happens during EVM execution regardless of
+        // GasEstimationWithSkipCheckBalanceMode. When value > balance, geth ALWAYS returns
+        // "insufficient funds for transfer".
         //
         // We perform this check early to:
         // 1. Return a meaningful error instead of "internal error"
@@ -186,7 +190,7 @@ where
             let balance = db
                 .database
                 .basic_ref(caller)
-                .map_err(|e| EthApiError::from(e))?
+                .map_err(EthApiError::from)?
                 .map_or(U256::ZERO, |acc| acc.balance);
 
             // Fail if balance < value (i.e., value > balance)
@@ -202,11 +206,7 @@ where
                     "failed with {} gas: insufficient funds for transfer: address {}",
                     hi, caller
                 );
-                let err_obj = jsonrpsee_types::error::ErrorObject::owned(
-                    -32000,
-                    msg,
-                    None::<()>,
-                );
+                let err_obj = jsonrpsee_types::error::ErrorObject::owned(-32000, msg, None::<()>);
                 return Err(OpEthApiError::Eth(EthApiError::other(err_obj)));
             }
         }
@@ -245,11 +245,11 @@ where
             let mut min_tx_env = tx_env.clone();
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) {
-                if res.result.is_success() {
-                    // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply buffer)
-                    return Ok(U256::from(MIN_TRANSACTION_GAS));
-                }
+            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+                res.result.is_success()
+            {
+                // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply buffer)
+                return Ok(U256::from(MIN_TRANSACTION_GAS));
             }
         }
 
@@ -260,8 +260,8 @@ where
         let mut res = match evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err) {
             // Handle the exceptional case where the transaction initialization uses too much gas
             Err(err)
-                if err.is_gas_too_high()
-                    && (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
+                if err.is_gas_too_high() &&
+                    (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 return map_out_of_gas_err::<Self::Evm, _>(&mut evm, tx_env, max_gas_limit);
             }
@@ -599,7 +599,8 @@ mod tests {
         //
         // The fix:
         // When user doesn't specify any fee fields (gas_price == 0), we:
-        // 1. Set cfg_env.disable_balance_check = true (matches geth's GasEstimationWithSkipCheckBalanceMode)
+        // 1. Set cfg_env.disable_balance_check = true (matches geth's
+        //    GasEstimationWithSkipCheckBalanceMode)
         // 2. Set tx_env.gas_price to basefee for GASPRICE opcode
         //
         // Reference: geth api.go:1030-1035
@@ -617,9 +618,9 @@ mod tests {
         let max_fee_per_gas: Option<u128> = None;
         let max_priority_fee: Option<u128> = None;
 
-        let skip_balance_check = gas_price == 0
-            && max_fee_per_gas.map_or(true, |fee| fee == 0)
-            && max_priority_fee.map_or(true, |fee| fee == 0);
+        let skip_balance_check = gas_price == 0 &&
+            max_fee_per_gas.is_none_or(|fee| fee == 0) &&
+            max_priority_fee.is_none_or(|fee| fee == 0);
 
         assert!(skip_balance_check, "Balance check should be skipped when no fees specified");
 
@@ -668,18 +669,18 @@ mod tests {
         // Case 1: value > balance - should fail
         // Error type depends on gas_price (see test_value_transfer_error_depends_on_gas_price)
         let balance = U256::from(1_000_000u64); // 1M wei
-        let value = U256::from(2_000_000u64);   // 2M wei
+        let value = U256::from(2_000_000u64); // 2M wei
         let should_fail = value > balance;
         assert!(should_fail, "value > balance should fail");
 
         // Case 2: value == balance - should SUCCEED (balance >= value is true)
         let equal_value = balance;
-        let should_succeed = !(equal_value > balance);
+        let should_succeed = equal_value <= balance;
         assert!(should_succeed, "value == balance should succeed");
 
         // Case 3: value < balance - should SUCCEED
         let smaller_value = U256::from(500_000u64); // 0.5M wei
-        let should_succeed_2 = !(smaller_value > balance);
+        let should_succeed_2 = smaller_value <= balance;
         assert!(should_succeed_2, "value < balance should succeed");
 
         // Case 4: value == 0 - should be skipped entirely (!value.is_zero() is false)
@@ -694,7 +695,7 @@ mod tests {
         //
         // This is wrapped in gasestimator.go:276
 
-        use alloy_primitives::{U256, address};
+        use alloy_primitives::{address, U256};
 
         // Mock data
         let value = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
@@ -752,7 +753,7 @@ mod tests {
 
         use alloy_primitives::U256;
 
-        let value = U256::from(1u64);   // 1 wei
+        let value = U256::from(1u64); // 1 wei
         let balance = U256::from(1u64); // 1 wei
 
         // Geth's CanTransfer: balance >= value

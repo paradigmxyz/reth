@@ -2,31 +2,98 @@
 
 use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use alloy_consensus::{BlockHeader, Receipt, ReceiptWithBloom, TxReceipt};
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{b256, U256};
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_primitives::{b256, B256, U256};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::OpTransaction;
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
-use op_revm::constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT};
-use op_revm::estimate_tx_compressed_size;
+use op_revm::{
+    constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT},
+    estimate_tx_compressed_size,
+};
+use parking_lot::Mutex;
 use reth_chainspec::ChainSpecProvider;
 use reth_mantle_forks::MantleHardforks;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_primitives::OpReceipt;
-use reth_primitives_traits::SealedBlock;
+use reth_primitives_traits::{BlockBody, Receipt as ReceiptTrait, SealedBlock};
 use reth_rpc_eth_api::{
     helpers::LoadReceipt,
     transaction::{ConvertReceiptInput, ReceiptConverter},
     RpcConvert,
 };
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::{BlockReader, StateProviderFactory};
-use std::fmt::Debug;
+use reth_storage_api::{BlockReader, ReceiptProvider, StateProviderFactory};
+use schnellru::{ByLength, LruMap};
+use std::{fmt::Debug, sync::Arc};
 
 const TOKEN_RATIO_UPDATED_TOPIC: U256 = U256::from_be_bytes(
     b256!("5d6ae9db2d6725497bed0302a8212c0db5fdb3bd7d14f188a83b5589089caafd").0,
 );
+
+const MAX_REASONABLE_TOKEN_RATIO: u128 = 1_000_000_000;
+const TOKEN_RATIO_PREFIX_CACHE_MAX_BLOCKS: usize = 1024;
+
+type TokenRatioPrefixCache = Arc<Mutex<LruMap<B256, Arc<Vec<U256>>, ByLength>>>;
+
+/// Returns `token_ratio` after applying any `TokenRatioUpdated` event in the given logs.
+fn token_ratio_after_logs(mut current: U256, logs: &[alloy_primitives::Log]) -> U256 {
+    for log in logs {
+        if log.address != GAS_ORACLE_CONTRACT {
+            continue;
+        }
+        let topics = log.topics();
+        let is_token_ratio_updated = topics
+            .first()
+            .is_some_and(|t| U256::from_be_bytes(t.0) == TOKEN_RATIO_UPDATED_TOPIC) ||
+            (topics.len() == 2);
+        if is_token_ratio_updated && let Some(new_ratio) = topics.last() {
+            let new_ratio_val = U256::from_be_bytes(new_ratio.0);
+            if new_ratio_val <= U256::from(MAX_REASONABLE_TOKEN_RATIO) {
+                current = new_ratio_val;
+            }
+        }
+    }
+    current
+}
+
+fn has_full_block_indices(
+    block_tx_count: usize,
+    indices: impl ExactSizeIterator<Item = u64>,
+) -> bool {
+    indices.len() == block_tx_count &&
+        indices.enumerate().all(|(idx, input_index)| input_index == idx as u64)
+}
+
+fn build_token_ratio_prefixes_from_logs<'a>(
+    initial_ratio: U256,
+    logs_by_receipt: impl IntoIterator<Item = &'a [alloy_primitives::Log]>,
+) -> Vec<U256> {
+    let mut ratio_before = vec![initial_ratio];
+    let mut current = initial_ratio;
+
+    for logs in logs_by_receipt {
+        current = token_ratio_after_logs(current, logs);
+        ratio_before.push(current);
+    }
+
+    ratio_before
+}
+
+fn get_or_insert_token_ratio_prefix(
+    cache: &TokenRatioPrefixCache,
+    block_hash: B256,
+    build: impl FnOnce() -> Option<Arc<Vec<U256>>>,
+) -> Option<Arc<Vec<U256>>> {
+    if let Some(cached) = cache.lock().get(&block_hash).cloned() {
+        return Some(cached);
+    }
+
+    let computed = build()?;
+    cache.lock().insert(block_hash, computed.clone());
+    Some(computed)
+}
 
 impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
 where
@@ -39,12 +106,18 @@ where
 #[derive(Debug, Clone)]
 pub struct OpReceiptConverter<Provider> {
     provider: Provider,
+    token_ratio_prefix_cache: TokenRatioPrefixCache,
 }
 
 impl<Provider> OpReceiptConverter<Provider> {
     /// Creates a new [`OpReceiptConverter`].
-    pub const fn new(provider: Provider) -> Self {
-        Self { provider }
+    pub fn new(provider: Provider) -> Self {
+        Self {
+            provider,
+            token_ratio_prefix_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(
+                TOKEN_RATIO_PREFIX_CACHE_MAX_BLOCKS as u32,
+            )))),
+        }
     }
 }
 
@@ -53,6 +126,7 @@ where
     N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
     Provider: BlockReader<Block = N::Block>
         + ChainSpecProvider<ChainSpec: MantleHardforks>
+        + ReceiptProvider<Receipt: ReceiptTrait>
         + StateProviderFactory
         + Debug
         + 'static,
@@ -98,43 +172,56 @@ where
         let state = self
             .provider
             .state_by_block_hash(block.parent_hash())
-            .or_else(|_| self.provider.state_by_block_hash(block.hash()))
-            .unwrap();
-        let mut token_ratio = state
-            .storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into())
-            .unwrap()
-            .unwrap_or_default();
+            .or_else(|_| self.provider.state_by_block_hash(block.hash()))?;
+        let mut token_ratio =
+            state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into())?.unwrap_or_default();
+
+        let block_tx_count = block.body().transactions().len();
+        let block_hash = B256::from(*block.hash());
+        let has_full_block_inputs =
+            has_full_block_indices(block_tx_count, inputs.iter().map(|input| input.meta.index));
+
+        // For single-receipt requests (e.g. eth_getTransactionReceipt), we only get one input, so
+        // we never see earlier tx logs and token_ratio stays at parent state. Load full block
+        // receipts and compute token_ratio before each tx so the requested receipt gets the
+        // correct ratio (e.g. after TokenRatioUpdated in a previous tx).
+        let token_ratio_before_tx: Option<Arc<Vec<U256>>> = if has_full_block_inputs {
+            None
+        } else {
+            get_or_insert_token_ratio_prefix(&self.token_ratio_prefix_cache, block_hash, || {
+                self.provider
+                    .receipts_by_block(BlockHashOrNumber::Hash(block_hash))
+                    .ok()
+                    .flatten()
+                    .filter(|all_receipts| all_receipts.len() == block_tx_count)
+                    .map(|all_receipts| {
+                        Arc::new(build_token_ratio_prefixes_from_logs(
+                            token_ratio,
+                            all_receipts.iter().map(|receipt| receipt.logs()),
+                        ))
+                    })
+            })
+        };
 
         let mut receipts = Vec::with_capacity(inputs.len());
 
         for input in inputs {
-            // Update the token ratio for the current transaction
-            l1_block_info.token_ratio = token_ratio;
+            let ratio_for_this_tx = token_ratio_before_tx
+                .as_ref()
+                .and_then(|rb| rb.get(input.meta.index as usize).copied())
+                .unwrap_or(token_ratio);
+            l1_block_info.token_ratio = ratio_for_this_tx;
 
-            // We must clear this cache as different L2 transactions can have different
-            // L1 costs. A potential improvement here is to only clear the cache if the
-            // new transaction input has changed, since otherwise the L1 cost wouldn't.
+            // Update running token_ratio when we did not precompute (before consuming input)
+            if token_ratio_before_tx.is_none() {
+                token_ratio = token_ratio_after_logs(token_ratio, input.receipt.logs());
+            }
+
             l1_block_info.clear_tx_l1_cost();
 
             let receipt =
                 OpReceiptBuilder::new(&self.provider.chain_spec(), input, &mut l1_block_info)?
                     .build();
-
-            // Check for TokenRatioUpdated event
-            // event TokenRatioUpdated(uint256 indexed previousTokenRatio, uint256 indexed newTokenRatio)
-            // Topic 0: 0x5d6ae9db2d6725497bed0302a8212c0db5fdb3bd7d14f188a83b5589089caafd
-            for log in receipt.inner.logs() {
-                if log.address() == GAS_ORACLE_CONTRACT
-                    && log
-                        .topics()
-                        .first()
-                        .map_or(false, |t| U256::from_be_bytes(t.0) == TOKEN_RATIO_UPDATED_TOPIC)
-                {
-                    if let Some(new_ratio) = log.topics().get(2) {
-                        token_ratio = U256::from_be_bytes(new_ratio.0);
-                    }
-                }
-            }
 
             receipts.push(receipt);
         }
@@ -242,19 +329,12 @@ impl OpReceiptFieldsBuilder {
         self.l1_blob_base_fee_scalar =
             l1_block_info.l1_blob_base_fee_scalar.map(|scalar| scalar.saturating_to());
 
-        // If the operator fee params are both set to 0, we don't add them to the receipt.
-        let operator_fee_scalar_has_non_zero_value: bool =
-            l1_block_info.operator_fee_scalar.is_some_and(|scalar| !scalar.is_zero());
-
-        let operator_fee_constant_has_non_zero_value =
-            l1_block_info.operator_fee_constant.is_some_and(|constant| !constant.is_zero());
-
-        if operator_fee_scalar_has_non_zero_value || operator_fee_constant_has_non_zero_value {
-            self.operator_fee_scalar =
-                l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
-            self.operator_fee_constant =
-                l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
-        }
+        // Align with geth: explicit zero operator fee values should still be emitted as 0x0.
+        // Only truly absent values (`None`) remain omitted in JSON serialization.
+        self.operator_fee_scalar =
+            l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
+        self.operator_fee_constant =
+            l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
 
         self.token_ratio = Some(l1_block_info.token_ratio.saturating_to());
 
@@ -366,7 +446,7 @@ impl OpReceiptBuilder {
                         op_alloy_consensus::OpDepositReceipt {
                             deposit_nonce: r.deposit_nonce,
                             deposit_receipt_version: r.deposit_receipt_version,
-                            inner: map_logs(r.inner.clone()),
+                            inner: map_logs(r.inner),
                         },
                     ),
                     logs_bloom,
@@ -375,7 +455,8 @@ impl OpReceiptBuilder {
         });
 
         // Geth only adds L1 fee fields for non-deposit transactions.
-        // For deposit transactions, only depositNonce is included (no L1 fee fields or blobGasUsed).
+        // For deposit transactions, only depositNonce is included (no L1 fee fields or
+        // blobGasUsed).
         let is_deposit = tx_signed.is_deposit();
 
         // In jovian, we're using the blob gas used field to store the current da
@@ -398,7 +479,8 @@ impl OpReceiptBuilder {
             });
         }
 
-        // Build receipt fields: for deposit transactions, skip L1 fee fields to match geth behavior.
+        // Build receipt fields: for deposit transactions, skip L1 fee fields to match geth
+        // behavior.
         let op_receipt_fields = if is_deposit {
             let deposit_nonce = match &core_receipt.inner.receipt {
                 op_alloy_consensus::OpReceipt::Deposit(d) => d.deposit_nonce,
@@ -432,7 +514,7 @@ mod test {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Block, BlockBody, Eip658Value, TxEip7702};
     use alloy_op_hardforks::{OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP};
-    use alloy_primitives::{hex, Address, Bytes, Signature, U256};
+    use alloy_primitives::{hex, Address, Bytes, LogData, Signature, B256, U256};
     use op_alloy_consensus::OpTypedTransaction;
     use op_alloy_network::eip2718::Decodable2718;
     use reth_mantle_forks::MantleChainHardforks;
@@ -440,6 +522,15 @@ mod test {
     use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
     use reth_primitives_traits::Recovered;
+    use std::{cell::Cell, hint::black_box, time::Instant};
+
+    fn topic_from_u128(value: u128) -> B256 {
+        U256::from(value).to_be_bytes::<32>().into()
+    }
+
+    fn token_ratio_log(address: Address, topics: Vec<B256>) -> alloy_primitives::Log {
+        alloy_primitives::Log { address, data: LogData::new_unchecked(topics, Bytes::new()) }
+    }
 
     /// OP Mainnet transaction at index 0 in block 124665056.
     ///
@@ -483,7 +574,7 @@ mod test {
         };
 
     /// Decoding the L1 block tx (0x7e) hex can yield RlpError(Overflow) with current
-    /// op_alloy_consensus/alloy_rlp; ignore until upstream fix or test vectors updated.
+    /// `op_alloy_consensus/alloy_rlp`; ignore until upstream fix or test vectors updated.
     #[test]
     #[ignore = "OpTransactionSigned::decode_2718(L1 block tx) returns RlpError(Overflow)"]
     fn op_receipt_fields_from_block_and_tx() {
@@ -585,9 +676,11 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let mut l1_block_info = op_revm::L1BlockInfo::default();
-        l1_block_info.operator_fee_scalar = Some(U256::from(0));
-        l1_block_info.operator_fee_constant = Some(U256::from(2));
+        let mut l1_block_info = op_revm::L1BlockInfo {
+            operator_fee_scalar: Some(U256::from(0)),
+            operator_fee_constant: Some(U256::from(2)),
+            ..Default::default()
+        };
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
@@ -599,6 +692,30 @@ mod test {
 
         assert_eq!(operator_fee_scalar, Some(0), "incorrect operator fee scalar");
         assert_eq!(operator_fee_constant, Some(2), "incorrect operator fee constant");
+    }
+
+    #[test]
+    fn op_explicit_zero_operator_fee_params_included_in_receipt() {
+        let tx_1 =
+            OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
+                .unwrap();
+
+        let mut l1_block_info = op_revm::L1BlockInfo {
+            operator_fee_scalar: Some(U256::ZERO),
+            operator_fee_constant: Some(U256::ZERO),
+            ..Default::default()
+        };
+
+        let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
+            .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
+            .expect("should parse revm l1 info")
+            .build();
+
+        let L1BlockInfo { operator_fee_scalar, operator_fee_constant, .. } =
+            receipt_meta.l1_block_info;
+
+        assert_eq!(operator_fee_scalar, Some(0), "incorrect operator fee scalar");
+        assert_eq!(operator_fee_constant, Some(0), "incorrect operator fee constant");
     }
 
     #[test]
@@ -619,6 +736,251 @@ mod test {
 
         assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
         assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
+    }
+
+    #[test]
+    fn token_ratio_update_from_signature_topic_uses_last_topic_as_new_ratio() {
+        let current = U256::from(10);
+        let logs = vec![token_ratio_log(
+            GAS_ORACLE_CONTRACT,
+            vec![
+                TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                topic_from_u128(10),
+                topic_from_u128(25),
+            ],
+        )];
+
+        assert_eq!(token_ratio_after_logs(current, &logs), U256::from(25));
+    }
+
+    #[test]
+    fn token_ratio_update_accepts_two_topic_fallback_shape() {
+        let current = U256::from(1);
+        let logs = vec![token_ratio_log(
+            GAS_ORACLE_CONTRACT,
+            vec![topic_from_u128(1), topic_from_u128(7)],
+        )];
+
+        assert_eq!(token_ratio_after_logs(current, &logs), U256::from(7));
+    }
+
+    #[test]
+    fn token_ratio_update_ignores_unreasonable_values() {
+        let current = U256::from(42);
+        let logs = vec![token_ratio_log(
+            GAS_ORACLE_CONTRACT,
+            vec![
+                TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                topic_from_u128(42),
+                topic_from_u128(MAX_REASONABLE_TOKEN_RATIO + 1),
+            ],
+        )];
+
+        assert_eq!(token_ratio_after_logs(current, &logs), U256::from(42));
+    }
+
+    #[test]
+    fn token_ratio_updates_apply_in_order_across_multiple_logs() {
+        let current = U256::from(5);
+        let logs = vec![
+            token_ratio_log(
+                GAS_ORACLE_CONTRACT,
+                vec![
+                    TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                    topic_from_u128(5),
+                    topic_from_u128(8),
+                ],
+            ),
+            token_ratio_log(Address::ZERO, vec![topic_from_u128(1), topic_from_u128(999)]),
+            token_ratio_log(GAS_ORACLE_CONTRACT, vec![topic_from_u128(8), topic_from_u128(12)]),
+        ];
+
+        assert_eq!(token_ratio_after_logs(current, &logs), U256::from(12));
+    }
+
+    #[test]
+    fn full_block_indices_detected_only_for_sequential_range() {
+        assert!(has_full_block_indices(3, [0, 1, 2].into_iter()));
+        assert!(!has_full_block_indices(3, [0, 2, 1].into_iter()));
+        assert!(!has_full_block_indices(3, [0, 1].into_iter()));
+        assert!(!has_full_block_indices(3, [1, 2, 3].into_iter()));
+    }
+
+    #[test]
+    fn token_ratio_prefixes_store_pre_tx_ratios() {
+        let logs_by_receipt = [
+            vec![token_ratio_log(
+                GAS_ORACLE_CONTRACT,
+                vec![
+                    TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                    topic_from_u128(1),
+                    topic_from_u128(10),
+                ],
+            )],
+            vec![],
+            vec![token_ratio_log(
+                GAS_ORACLE_CONTRACT,
+                vec![
+                    TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                    topic_from_u128(10),
+                    topic_from_u128(25),
+                ],
+            )],
+        ];
+
+        let prefixes = build_token_ratio_prefixes_from_logs(
+            U256::from(1),
+            logs_by_receipt.iter().map(Vec::as_slice),
+        );
+
+        assert_eq!(prefixes, vec![U256::from(1), U256::from(10), U256::from(10), U256::from(25)]);
+    }
+
+    #[test]
+    fn token_ratio_prefix_cache_reuses_existing_entry() {
+        let cache: TokenRatioPrefixCache = Arc::new(Mutex::new(LruMap::new(ByLength::new(2))));
+        let block_hash = B256::from([7_u8; 32]);
+        let build_calls = Cell::new(0_u32);
+
+        let first = get_or_insert_token_ratio_prefix(&cache, block_hash, || {
+            build_calls.set(build_calls.get() + 1);
+            Some(Arc::new(vec![U256::ZERO, U256::from(9)]))
+        })
+        .expect("expected first build");
+
+        let second = get_or_insert_token_ratio_prefix(&cache, block_hash, || {
+            build_calls.set(build_calls.get() + 1);
+            None
+        })
+        .expect("expected cached value");
+
+        assert_eq!(build_calls.get(), 1);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    #[ignore = "manual perf benchmark"]
+    fn benchmark_token_ratio_prefix_cache_vs_uncached_queries() {
+        const RECEIPT_COUNT: usize = 1_200;
+        const LOGS_PER_RECEIPT: usize = 40;
+        const QUERY_COUNT: usize = 8_000;
+
+        let logs_by_receipt = (0..RECEIPT_COUNT)
+            .map(|tx_idx| {
+                (0..LOGS_PER_RECEIPT)
+                    .map(|log_idx| {
+                        if log_idx % 9 == 0 {
+                            token_ratio_log(
+                                GAS_ORACLE_CONTRACT,
+                                vec![
+                                    TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                                    topic_from_u128(((tx_idx + log_idx) % 1000) as u128),
+                                    topic_from_u128(((tx_idx + log_idx + 1) % 1000) as u128),
+                                ],
+                            )
+                        } else {
+                            token_ratio_log(Address::ZERO, vec![topic_from_u128(log_idx as u128)])
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let query_indices =
+            (0..QUERY_COUNT).map(|i| (i.saturating_mul(7919)) % RECEIPT_COUNT).collect::<Vec<_>>();
+
+        let uncached_start = Instant::now();
+        let mut uncached_sink = U256::ZERO;
+        for &idx in &query_indices {
+            let prefix = build_token_ratio_prefixes_from_logs(
+                U256::from(1),
+                logs_by_receipt.iter().map(Vec::as_slice),
+            );
+            uncached_sink ^= black_box(prefix[idx]);
+        }
+        let uncached_elapsed = uncached_start.elapsed();
+
+        let cached_start = Instant::now();
+        let cached_prefix = build_token_ratio_prefixes_from_logs(
+            U256::from(1),
+            logs_by_receipt.iter().map(Vec::as_slice),
+        );
+        let mut cached_sink = U256::ZERO;
+        for &idx in &query_indices {
+            cached_sink ^= black_box(cached_prefix[idx]);
+        }
+        let cached_elapsed = cached_start.elapsed();
+
+        eprintln!(
+            "token-ratio benchmark -> uncached={:?}, cached={:?}, speedup={:.2}x, sinks=({:?},{:?})",
+            uncached_elapsed,
+            cached_elapsed,
+            uncached_elapsed.as_secs_f64() / cached_elapsed.as_secs_f64(),
+            uncached_sink,
+            cached_sink
+        );
+    }
+
+    #[test]
+    #[ignore = "manual perf benchmark"]
+    fn benchmark_full_block_prefetch_vs_streaming_token_ratio_scan() {
+        const RECEIPT_COUNT: usize = 1_200;
+        const LOGS_PER_RECEIPT: usize = 40;
+
+        let logs_by_receipt = (0..RECEIPT_COUNT)
+            .map(|tx_idx| {
+                (0..LOGS_PER_RECEIPT)
+                    .map(|log_idx| {
+                        if log_idx % 9 == 0 {
+                            token_ratio_log(
+                                GAS_ORACLE_CONTRACT,
+                                vec![
+                                    TOKEN_RATIO_UPDATED_TOPIC.to_be_bytes::<32>().into(),
+                                    topic_from_u128(((tx_idx + log_idx) % 1000) as u128),
+                                    topic_from_u128(((tx_idx + log_idx + 1) % 1000) as u128),
+                                ],
+                            )
+                        } else {
+                            token_ratio_log(Address::ZERO, vec![topic_from_u128(log_idx as u128)])
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        // Legacy full-block flow: scan every tx log once by precomputing prefixes from an
+        // independently loaded full-receipt list.
+        let prefetch_start = Instant::now();
+        let prefix = build_token_ratio_prefixes_from_logs(
+            U256::from(1),
+            logs_by_receipt.iter().map(Vec::as_slice),
+        );
+        let mut prefetch_sink = U256::ZERO;
+        for (idx, logs) in logs_by_receipt.iter().enumerate() {
+            prefetch_sink ^= black_box(prefix[idx]);
+            black_box(logs.len());
+        }
+        let prefetch_elapsed = prefetch_start.elapsed();
+
+        // New full-block flow: skip the extra prefetch and update token_ratio while consuming
+        // the already available input receipts.
+        let streaming_start = Instant::now();
+        let mut current = U256::from(1);
+        let mut streaming_sink = U256::ZERO;
+        for logs in &logs_by_receipt {
+            streaming_sink ^= black_box(current);
+            current = token_ratio_after_logs(current, logs);
+        }
+        let streaming_elapsed = streaming_start.elapsed();
+
+        eprintln!(
+            "full-block benchmark -> prefetch={:?}, streaming={:?}, speedup={:.2}x, sinks=({:?},{:?})",
+            prefetch_elapsed,
+            streaming_elapsed,
+            prefetch_elapsed.as_secs_f64() / streaming_elapsed.as_secs_f64(),
+            prefetch_sink,
+            streaming_sink
+        );
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12177>

@@ -64,7 +64,7 @@ impl Compact for AlloyTxDeposit {
             is_system_transaction: self.is_system_transaction,
             input: self.input.clone(),
             eth_value: self.eth_value,
-            eth_tx_value: self.eth_tx_value
+            eth_tx_value: self.eth_tx_value,
         };
         tx.to_compact(buf)
     }

@@ -532,6 +532,7 @@ mod compact {
 }
 
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+#[allow(rustdoc::private_doc_tests)]
 pub(super) mod serde_bincode_compat {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};

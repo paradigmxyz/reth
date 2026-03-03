@@ -913,7 +913,13 @@ where
 
         // Call export function (using bundle_state), pass computed state root
         // Only export storage details for accounts in bundle_state to avoid OOM
-        export_full_state_with_bundle(&provider, &output.state, &filename, Some(computed_root), true)?;
+        export_full_state_with_bundle(
+            &provider,
+            &output.state,
+            &filename,
+            Some(computed_root),
+            true,
+        )?;
 
         info!(target: "engine::tree::payload_validator", 
               filename = %filename,

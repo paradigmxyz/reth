@@ -84,13 +84,11 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        self.inner
-            .add_ons_builder::<CustomRpcTypes>()
-            .build::<
-                NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-                CustomEngineValidatorBuilder,
-                CustomEngineApiBuilder,
-                BasicEngineValidatorBuilder<CustomEngineValidatorBuilder>,
-            >()
+        self.inner.add_ons_builder::<CustomRpcTypes>().build::<NodeAdapter<
+            N,
+            <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components,
+        >, CustomEngineValidatorBuilder, CustomEngineApiBuilder, BasicEngineValidatorBuilder<
+            CustomEngineValidatorBuilder,
+        >>()
     }
 }

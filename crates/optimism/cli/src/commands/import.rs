@@ -14,7 +14,9 @@ use reth_node_core::version::version_metadata;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
-use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, StageCheckpointReader, ChainStateBlockWriter};
+use reth_provider::{
+    BlockNumReader, ChainSpecProvider, ChainStateBlockWriter, HeaderProvider, StageCheckpointReader,
+};
 use reth_prune::PruneModes;
 use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
@@ -70,7 +72,6 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut sealed_header = provider_factory
             .sealed_header(provider_factory.last_block_number()?)?
             .expect("should have genesis");
-
 
         while let Some(mut file_client) =
             reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
@@ -131,7 +132,8 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let provider_rw = provider_factory.provider_rw()?;
 
         let total_imported_blocks = provider_rw.tx_ref().entries::<tables::HeaderNumbers>()?;
-        let total_imported_txns = provider_rw.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        let total_imported_txns =
+            provider_rw.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
             total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns

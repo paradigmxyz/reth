@@ -23,7 +23,10 @@ pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
-pub use ext::{L2EthApiExtServer, MantleEthApiExtServer, PreconfTxEvent, PreconfStatus, PreconfTxReceipt, PreconfLog};
+pub use ext::{
+    L2EthApiExtServer, MantleEthApiExtServer, PreconfLog, PreconfStatus, PreconfTxEvent,
+    PreconfTxReceipt,
+};
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;

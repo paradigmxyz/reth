@@ -83,8 +83,9 @@ where
 /// Calculates the blob gas used ratio for a block, accounting for the case where
 /// `max_blob_gas_per_block` is zero.
 ///
-/// Returns `0.0` (matching geth's behavior where MaxBlobGasPerBlock returns 0 for chains without blob support)
-pub fn checked_blob_gas_used_ratio(_blob_gas_used: u64, _max_blob_gas_per_block: u64) -> f64 {
+/// Returns `0.0` (matching geth's behavior where `MaxBlobGasPerBlock` returns 0 for chains
+/// without blob support)
+pub const fn checked_blob_gas_used_ratio(_blob_gas_used: u64, _max_blob_gas_per_block: u64) -> f64 {
     0.0
 }
 
