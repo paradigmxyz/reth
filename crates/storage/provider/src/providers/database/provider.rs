@@ -4992,15 +4992,15 @@ mod tests {
                     ..Default::default()
                 };
 
-                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
-                    slots_per_account as u64)
-                    .map(|s| {
-                        (
-                            U256::from(s + acct_idx as u64 * 100),
-                            (U256::ZERO, U256::from(block_num * 1000 + s)),
-                        )
-                    })
-                    .collect();
+                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> =
+                    (1..=slots_per_account as u64)
+                        .map(|s| {
+                            (
+                                U256::from(s + acct_idx as u64 * 100),
+                                (U256::ZERO, U256::from(block_num * 1000 + s)),
+                            )
+                        })
+                        .collect();
 
                 let revert_storage: Vec<(U256, U256)> = (1..=slots_per_account as u64)
                     .map(|s| (U256::from(s + acct_idx as u64 * 100), U256::ZERO))
