@@ -1,4 +1,5 @@
 use crate::common::EnvironmentArgs;
+use alloy_chains::Chain;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
@@ -153,9 +154,6 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
-        fs::create_dir_all(&data_dir)?;
-
         let url = match self.url {
             Some(url) => url,
             None => {
@@ -165,8 +163,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
         };
 
+        let chain = detect_chain_from_url(&url).unwrap_or_else(|| self.env.chain.chain());
+
+        let data_dir = self.env.datadir.resolve_datadir(chain);
+        fs::create_dir_all(&data_dir)?;
+
         info!(target: "reth::cli",
-            chain = %self.env.chain.chain(),
+            chain = %chain,
             dir = ?data_dir.data_dir(),
             url = %url,
             "Starting snapshot download and extraction"
@@ -527,6 +530,21 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Tries to extract a chain ID from a snapshot URL filename.
+///
+/// Splits the filename by `-` and checks if the second segment is a valid chain ID.
+/// For example, `tempo-42429-18302466-1772514022.tar.lz4` splits into
+/// `["tempo", "42429", "18302466", "1772514022.tar.lz4"]` and `42429` is parsed as the chain ID.
+fn detect_chain_from_url(url: &str) -> Option<Chain> {
+    let filename = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let chain_id: u64 = filename.split('-').nth(1)?.parse().ok()?;
+    Some(Chain::from_id(chain_id))
+}
+
 // Builds default URL for latest mainnet archive snapshot using configured defaults
 async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
     let defaults = DownloadDefaults::get_global();
@@ -605,6 +623,28 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_detect_chain_from_url() {
+        // Second `-`-delimited segment is the chain ID
+        assert_eq!(
+            detect_chain_from_url("https://host.dev/tempo-42429-18302466-1772514022.tar.lz4"),
+            Some(Chain::from_id(42429))
+        );
+        assert_eq!(
+            detect_chain_from_url("https://example.com/tempo-4217-100-999.tar.zst"),
+            Some(Chain::from_id(4217))
+        );
+        assert_eq!(
+            detect_chain_from_url("file:///tmp/tempo-42429-18302466-1772514022.tar.lz4"),
+            Some(Chain::from_id(42429))
+        );
+
+        // No second segment or not numeric → None
+        assert_eq!(detect_chain_from_url("https://example.com/snapshot.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/tempo-.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/tempo-abc-123.tar.lz4"), None);
     }
 
     #[test]
