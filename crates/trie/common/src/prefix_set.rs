@@ -77,9 +77,8 @@ pub struct TriePrefixSets {
 ///
 /// Sorting and deduplication do not happen during insertion or membership checks on this mutable
 /// structure. Instead, keys are sorted and deduplicated when converting into the immutable
-/// `PrefixSet` via `freeze()`. The immutable `PrefixSet` provides `contains` and relies on the
-/// sorted and unique keys produced by `freeze()`; it does not perform additional sorting or
-/// deduplication.
+/// `PrefixSet` via `freeze()`. The immutable `PrefixSet` provides `contains` backed by a
+/// path-compressed bitmap trie for O(L) lookups where L is the prefix length.
 ///
 /// This guarantees that a `PrefixSet` constructed from a `PrefixSetMut` is always sorted and
 /// deduplicated.
@@ -91,7 +90,7 @@ pub struct TriePrefixSets {
 /// let mut prefix_set_mut = PrefixSetMut::default();
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
-/// let mut prefix_set = prefix_set_mut.freeze();
+/// let prefix_set = prefix_set_mut.freeze();
 /// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb])));
 /// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc])));
 /// ```
@@ -163,66 +162,234 @@ impl PrefixSetMut {
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
         if self.all {
-            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+            PrefixSet { all: true, keys: Arc::new(Vec::new()), trie: CompactTrie::default() }
         } else {
             self.keys.sort_unstable();
             self.keys.dedup();
-            // Shrink after deduplication to release unused capacity.
             self.keys.shrink_to_fit();
-            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
+            let trie = if self.keys.is_empty() {
+                CompactTrie::default()
+            } else {
+                CompactTrie::build(&self.keys)
+            };
+            PrefixSet { all: false, keys: Arc::new(self.keys), trie }
         }
     }
 }
 
-/// A sorted prefix set that has an immutable _sorted_ list of unique keys.
+/// A node in the path-compressed bitmap trie.
 ///
-/// See also [`PrefixSetMut::freeze`].
+/// Each node stores a 16-bit bitmap indicating which nibble children (0-15) exist,
+/// and an edge label (skip segment) representing collapsed single-child chains.
+#[derive(Debug, Clone)]
+struct TrieNode {
+    /// 16-bit bitmap: bit `n` is set if a child for nibble `n` exists.
+    bitmap: u16,
+    /// Number of nibbles in the skip segment (edge label from parent to this node).
+    skip_len: u16,
+    /// Index of the first child node in the flat `nodes` array. The child for nibble
+    /// `n` is at `child_base + popcount(bitmap & ((1 << n) - 1))`.
+    child_base: u32,
+    /// Byte offset into the shared `skip_data` buffer where this node's skip nibbles begin.
+    skip_offset: u32,
+}
+
+impl Default for TrieNode {
+    fn default() -> Self {
+        Self { bitmap: 0, skip_len: 0, child_base: 0, skip_offset: 0 }
+    }
+}
+
+/// Path-compressed bitmap trie (Patricia-style) for fast prefix containment queries.
+///
+/// Nodes are stored in a flat array with children of each node placed contiguously.
+/// Navigation uses popcount on 16-bit bitmaps to compute child indices in O(1).
+/// Single-child chains are collapsed into skip segments stored in a shared buffer.
+#[derive(Debug, Clone, Default)]
+struct CompactTrie {
+    /// Flat array of trie nodes. Node 0 is the root.
+    nodes: Vec<TrieNode>,
+    /// Shared buffer of skip nibble values (each 0-15 stored as `u8`).
+    skip_data: Vec<u8>,
+}
+
+impl CompactTrie {
+    /// Build a path-compressed bitmap trie from sorted, deduplicated keys.
+    fn build(keys: &[Nibbles]) -> Self {
+        debug_assert!(!keys.is_empty());
+        let mut trie = Self { nodes: Vec::with_capacity(keys.len() * 2), skip_data: Vec::new() };
+        // Reserve root node
+        trie.nodes.push(TrieNode::default());
+        trie.build_node(0, keys, 0);
+        trie.nodes.shrink_to_fit();
+        trie.skip_data.shrink_to_fit();
+        trie
+    }
+
+    /// Recursively build a trie node and its descendants.
+    ///
+    /// `node_idx` is a pre-allocated slot in `self.nodes`.
+    /// `keys` is a sorted slice of keys that share the same prefix up to `depth`.
+    fn build_node(&mut self, node_idx: usize, keys: &[Nibbles], depth: usize) {
+        // Compute the common prefix (skip segment) shared by all keys beyond `depth`
+        let skip_len = common_prefix_len(keys, depth);
+        let skip_offset = self.skip_data.len() as u32;
+
+        // Store skip nibbles into the shared buffer
+        if skip_len > 0 {
+            let first_key = &keys[0];
+            for i in 0..skip_len {
+                self.skip_data.push(first_key.get_unchecked(depth + i));
+            }
+        }
+
+        let new_depth = depth + skip_len;
+
+        // Group keys by their nibble at `new_depth` to determine children
+        let mut bitmap = 0u16;
+        let mut groups: Vec<(usize, usize)> = Vec::new();
+        let mut i = 0;
+        while i < keys.len() {
+            if keys[i].len() <= new_depth {
+                // Key is fully consumed by the skip segment — no child contribution
+                i += 1;
+                continue;
+            }
+            let nibble = keys[i].get_unchecked(new_depth);
+            bitmap |= 1u16 << nibble;
+            let start = i;
+            while i < keys.len() &&
+                keys[i].len() > new_depth &&
+                keys[i].get_unchecked(new_depth) == nibble
+            {
+                i += 1;
+            }
+            groups.push((start, i));
+        }
+
+        // Reserve contiguous child slots so siblings are adjacent in memory
+        let child_base = self.nodes.len() as u32;
+        let num_children = groups.len();
+        self.nodes.resize_with(self.nodes.len() + num_children, TrieNode::default);
+
+        // Write this node's data
+        self.nodes[node_idx] =
+            TrieNode { bitmap, skip_len: skip_len as u16, child_base, skip_offset };
+
+        // Recurse into each child group
+        for (child_rank, &(start, end)) in groups.iter().enumerate() {
+            self.build_node(child_base as usize + child_rank, &keys[start..end], new_depth + 1);
+        }
+    }
+
+    /// Check if any key in the trie starts with the given prefix.
+    ///
+    /// Traverses the trie following the prefix nibbles. At each node:
+    /// 1. Match the skip segment (compressed single-child chain)
+    /// 2. If prefix is consumed during or after the skip, return `true` (subtree exists)
+    /// 3. Check the 16-bit bitmap for the next nibble
+    /// 4. Use popcount to navigate to the child
+    #[inline]
+    fn contains(&self, prefix: &Nibbles) -> bool {
+        let prefix_len = prefix.len();
+        let mut node_idx = 0usize;
+        let mut nib_pos = 0usize;
+
+        loop {
+            let node = unsafe { self.nodes.get_unchecked(node_idx) };
+
+            // 1. Match skip segment
+            let skip_end = node.skip_offset as usize + node.skip_len as usize;
+            let mut skip_pos = node.skip_offset as usize;
+            while skip_pos < skip_end {
+                if nib_pos >= prefix_len {
+                    return true; // prefix consumed within skip → subtree exists
+                }
+                if unsafe { *self.skip_data.get_unchecked(skip_pos) } !=
+                    prefix.get_unchecked(nib_pos)
+                {
+                    return false; // mismatch
+                }
+                nib_pos += 1;
+                skip_pos += 1;
+            }
+
+            // 2. Prefix fully consumed after skip?
+            if nib_pos >= prefix_len {
+                return true;
+            }
+
+            // 3. Check bitmap for the next nibble
+            let nibble = prefix.get_unchecked(nib_pos);
+            let bit = 1u16 << nibble;
+            if node.bitmap & bit == 0 {
+                return false; // no child for this nibble
+            }
+
+            // 4. Popcount navigation to child
+            let rank = (node.bitmap & (bit - 1)).count_ones() as usize;
+            node_idx = node.child_base as usize + rank;
+            nib_pos += 1;
+        }
+    }
+}
+
+/// Compute the length of the common prefix shared by all keys starting at `start`.
+///
+/// For a single key, returns its remaining length. For sorted keys, only the first
+/// and last need to be compared (intermediate keys are lexicographically between them).
+fn common_prefix_len(keys: &[Nibbles], start: usize) -> usize {
+    if keys.len() <= 1 {
+        return keys.first().map(|k| k.len().saturating_sub(start)).unwrap_or(0);
+    }
+    let first = &keys[0];
+    let last = &keys[keys.len() - 1];
+    let max_len = first.len().min(last.len());
+    if start >= max_len {
+        return 0;
+    }
+    let mut len = 0;
+    while start + len < max_len &&
+        first.get_unchecked(start + len) == last.get_unchecked(start + len)
+    {
+        len += 1;
+    }
+    len
+}
+
+/// A sorted prefix set backed by a path-compressed bitmap trie for fast lookups.
+///
+/// Constructed via [`PrefixSetMut::freeze`]. The `contains` method uses a succinct
+/// trie with 16-bit bitmaps and popcount-based navigation for O(L) queries where
+/// L is the prefix length, independent of the number of keys in the set.
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
     /// Flag indicating that any entry should be considered changed.
     all: bool,
-    index: usize,
     keys: Arc<Vec<Nibbles>>,
+    trie: CompactTrie,
 }
 
 impl PrefixSet {
-    /// Returns `true` if any of the keys in the set has the given prefix
+    /// Returns `true` if any of the keys in the set has the given prefix.
     ///
-    /// # Note on Mutability
-    ///
-    /// This method requires `&mut self` (unlike typical `contains` methods) because it maintains an
-    /// internal position tracker (`self.index`) between calls. This enables significant performance
-    /// optimization for sequential lookups in sorted order, which is common during trie traversal.
-    ///
-    /// The `index` field allows subsequent searches to start where previous ones left off,
-    /// avoiding repeated full scans of the prefix array when keys are accessed in nearby ranges.
-    ///
-    /// This optimization was inspired by Silkworm's implementation and significantly improves
-    /// incremental state root calculation performance
-    /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
+    /// Uses a path-compressed bitmap trie for O(L) lookups where L is the prefix
+    /// length, with O(1) per trie level via popcount on 16-bit child bitmaps.
     #[inline]
-    pub fn contains(&mut self, prefix: &Nibbles) -> bool {
+    pub fn contains(&self, prefix: &Nibbles) -> bool {
         if self.all {
-            return true
+            return true;
         }
 
-        while self.index > 0 && &self.keys[self.index] > prefix {
-            self.index -= 1;
+        if self.trie.nodes.is_empty() {
+            return false;
         }
 
-        for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.starts_with(prefix) {
-                self.index += idx;
-                return true
-            }
-
-            if key > prefix {
-                self.index += idx;
-                return false
-            }
+        if prefix.is_empty() {
+            return true; // non-empty set, every key starts with the empty prefix
         }
 
-        false
+        self.trie.contains(prefix)
     }
 
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
@@ -266,7 +433,7 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        let mut prefix_set = prefix_set_mut.freeze();
+        let prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
@@ -284,7 +451,7 @@ mod tests {
         assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
         assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity is 4 (before deduplication)
 
-        let mut prefix_set = prefix_set_mut.freeze();
+        let prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
@@ -304,7 +471,7 @@ mod tests {
         assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
         assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity is 101 (before deduplication)
 
-        let mut prefix_set = prefix_set_mut.freeze();
+        let prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
@@ -317,5 +484,121 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_contains_exact_match() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([0xa, 0xb, 0xc]));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Exact match
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc])));
+        // Prefix of a key
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa])));
+        // Empty prefix matches any non-empty set
+        assert!(prefix_set.contains(&Nibbles::default()));
+        // Longer than any key
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xd])));
+        // Divergent prefix
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xc])));
+    }
+
+    #[test]
+    fn test_contains_shared_prefix() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3, 4]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 5, 6]));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Shared prefix
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
+        // Diverges within shared prefix
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 3])));
+        // Each branch
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 5])));
+        // Wrong branch
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 6])));
+    }
+
+    #[test]
+    fn test_contains_variable_length_keys() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3, 4]));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Short key is a prefix of long key
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
+        // The longer key
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3, 4])));
+        // Beyond the short key, but not matching long key
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 5])));
+        // Beyond the long key
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3, 4, 5])));
+    }
+
+    #[test]
+    fn test_single_key() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([0xa, 0xb, 0xc, 0xd]));
+        let prefix_set = prefix_set_mut.freeze();
+
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xd])));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xe])));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xb])));
+    }
+
+    #[test]
+    fn test_empty_set() {
+        let prefix_set_mut = PrefixSetMut::default();
+        let prefix_set = prefix_set_mut.freeze();
+
+        assert!(!prefix_set.contains(&Nibbles::default()));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
+    }
+
+    #[test]
+    fn test_all_flag() {
+        let prefix_set = PrefixSetMut::all().freeze();
+
+        assert!(prefix_set.contains(&Nibbles::default()));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
+        assert!(prefix_set.all());
+    }
+
+    #[test]
+    fn test_many_keys_all_nibbles() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        // Insert keys starting with every possible nibble
+        for n in 0u8..16 {
+            prefix_set_mut.insert(Nibbles::from_nibbles([n, 0, 0]));
+        }
+        let prefix_set = prefix_set_mut.freeze();
+
+        for n in 0u8..16 {
+            assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([n])));
+        }
+        assert_eq!(prefix_set.len(), 16);
+    }
+
+    #[test]
+    fn test_iter_returns_sorted_keys() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([7, 8, 9]));
+        let prefix_set = prefix_set_mut.freeze();
+
+        let keys: Vec<_> = prefix_set.iter().collect();
+        assert_eq!(keys.len(), 3);
+        assert!(keys[0] < keys[1]);
+        assert!(keys[1] < keys[2]);
     }
 }
