@@ -276,6 +276,8 @@ where
     /// Whether the node uses hashed state as canonical storage (v2 mode).
     /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
     use_hashed_state: bool,
+    /// Task runtime for spawning blocking work on named, reusable threads.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -302,6 +304,7 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("use_hashed_state", &self.use_hashed_state)
+            .field("runtime", &self.runtime)
             .finish()
     }
 }
@@ -342,6 +345,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -364,6 +368,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            runtime,
         }
     }
 
@@ -385,6 +390,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
+        runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -418,6 +424,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            runtime,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
@@ -1411,7 +1418,7 @@ where
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
         if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
-            tokio::task::spawn_blocking(move || {
+            self.runtime.spawn_blocking_named("prepare-overlay", move || {
                 let _ = overlay.get();
             });
         }
@@ -1570,7 +1577,7 @@ where
                                 {
                                     let (persistence_tx, persistence_rx) =
                                         std::sync::mpsc::channel();
-                                    tokio::task::spawn_blocking(move || {
+                                    self.runtime.spawn_blocking_named("wait-persist", move || {
                                         let start = Instant::now();
                                         let result =
                                             rx.recv().expect("persistence state channel closed");

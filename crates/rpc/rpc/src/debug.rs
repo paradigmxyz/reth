@@ -226,7 +226,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -352,7 +352,7 @@ where
             .into())
         }
 
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
@@ -1070,10 +1070,25 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: B256,
-        _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        let block = self
+            .inner
+            .bad_block_store
+            .get(block_hash)
+            .ok_or_else(|| internal_rpc_err("bad block not found in cache"))?;
+
+        let evm_env = self
+            .eth_api()
+            .evm_config()
+            .evm_env(block.header())
+            .map_err(RethError::other)
+            .to_rpc_result()?;
+
+        let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
+        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
     }
 
     async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
@@ -1152,6 +1167,12 @@ impl<B: BlockTrait> BadBlockStore<B> {
     fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
         let guard = self.inner.read();
         guard.iter().rev().cloned().collect()
+    }
+
+    /// Returns the bad block with the given hash, if cached.
+    fn get(&self, hash: B256) -> Option<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().find(|b| b.hash() == hash).cloned()
     }
 }
 

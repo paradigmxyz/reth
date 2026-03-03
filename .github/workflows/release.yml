@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
         id: extract_version
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
@@ -79,6 +79,7 @@ jobs:
             profile: maxperf
             allow_fail: false
             rustflags: ""
+            native: true
           - target: x86_64-apple-darwin
             os: macos-14
             profile: maxperf
@@ -100,6 +101,7 @@ jobs:
           target: ${{ matrix.configs.target }}
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install cross main
+        if: ${{ !matrix.configs.native }}
         id: cross_main
         run: |
           cargo install cross --locked --git https://github.com/cross-rs/cross
@@ -114,7 +116,12 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
       - name: Build Reth
-        run: make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-${{ matrix.configs.target }}
+        run: |
+          if [ "${{ matrix.configs.native }}" = "true" ]; then
+            make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-native-${{ matrix.configs.target }}
+          else
+            make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-${{ matrix.configs.target }}
+          fi
       - name: Move binary
         run: |
           mkdir artifacts
