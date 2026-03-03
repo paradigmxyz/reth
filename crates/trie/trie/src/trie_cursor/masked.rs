@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
     prefix_set::{PrefixSet, TriePrefixSets},
@@ -50,7 +50,11 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for MaskedTrieCursorFactory<CF> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         let prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
-        Ok(MaskedTrieCursor::new(cursor, prefix_set))
+        Ok(MaskedTrieCursor::new_storage(
+            cursor,
+            prefix_set,
+            self.prefix_sets.storage_prefix_sets.clone(),
+        ))
     }
 }
 
@@ -66,13 +70,24 @@ pub struct MaskedTrieCursor<C> {
     cursor: C,
     /// Prefix set used to determine which children's hashes to invalidate.
     prefix_set: PrefixSet,
+    /// Storage prefix sets for swapping on `set_hashed_address`.
+    storage_prefix_sets: Option<B256Map<PrefixSet>>,
 }
 
 impl<C> MaskedTrieCursor<C> {
     /// Create a new cursor wrapping `cursor`, masking hash bits for children whose paths match
     /// `prefix_set`.
     pub const fn new(cursor: C, prefix_set: PrefixSet) -> Self {
-        Self { cursor, prefix_set }
+        Self { cursor, prefix_set, storage_prefix_sets: None }
+    }
+
+    /// Create a new storage cursor that can swap its prefix set on `set_hashed_address`.
+    pub fn new_storage(
+        cursor: C,
+        prefix_set: PrefixSet,
+        storage_prefix_sets: B256Map<PrefixSet>,
+    ) -> Self {
+        Self { cursor, prefix_set, storage_prefix_sets: Some(storage_prefix_sets) }
     }
 }
 
@@ -85,6 +100,9 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         if !self.prefix_set.contains(key) {
             return true;
         }
+
+        // The subtree is modified — root hash is always invalid.
+        node.root_hash = None;
 
         let original_hash_mask = node.hash_mask;
         if original_hash_mask.is_empty() {
@@ -117,7 +135,6 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
             hashes.truncate(write);
 
             node.hash_mask = new_hash_mask;
-            node.root_hash = None;
 
             if node.hash_mask.is_empty() && node.tree_mask.is_empty() {
                 return false;
@@ -183,6 +200,9 @@ impl<C: TrieCursor> TrieCursor for MaskedTrieCursor<C> {
 impl<C: TrieStorageCursor> TrieStorageCursor for MaskedTrieCursor<C> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address);
+        if let Some(storage_prefix_sets) = &self.storage_prefix_sets {
+            self.prefix_set = storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
+        }
     }
 }
 
