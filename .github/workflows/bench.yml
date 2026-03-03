@@ -111,18 +111,26 @@ jobs:
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               cores = '${{ github.event.inputs.cores }}' || '0';
 
-              // Find PR for the selected branch
-              const branch = '${{ github.ref_name }}';
-              const { data: prs } = await github.rest.pulls.list({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                head: `${context.repo.owner}:${branch}`,
-                state: 'open',
-                per_page: 1,
-              });
-              pr = prs.length ? String(prs[0].number) : '';
+              // Find PR — prefer feature ref, fall back to workflow ref
+              const candidates = [];
+              if (feature) candidates.push(feature);
+              const workflowBranch = '${{ github.ref_name }}';
+              if (!candidates.includes(workflowBranch)) candidates.push(workflowBranch);
+              for (const branch of candidates) {
+                const { data: prs } = await github.rest.pulls.list({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head: `${context.repo.owner}:${branch}`,
+                  state: 'open',
+                  per_page: 1,
+                });
+                if (prs.length) {
+                  pr = String(prs[0].number);
+                  break;
+                }
+              }
               if (!pr) {
-                core.info(`No open PR found for branch '${branch}', results will be in job summary`);
+                core.info(`No open PR found for [${candidates.join(', ')}], results will be in job summary`);
               }
             } else {
               pr = String(context.issue.number);
