@@ -7411,7 +7411,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_block_buffer_blocks{$instance_label=\"$instance\"}",
+          "expr": "reth_blockchain_tree_in_mem_state_num_blocks{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,

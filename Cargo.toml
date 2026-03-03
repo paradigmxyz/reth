@@ -170,6 +170,7 @@ rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2024_incompatible_pat = "warn"
+rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 

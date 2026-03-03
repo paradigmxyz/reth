@@ -849,10 +849,9 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_pending_transactions(&mut self, hashes: Vec<TxHash>) {
-        // Nothing to propagate while initially syncing
-        if self.network.is_initially_syncing() {
-            return
-        }
+        // We intentionally do not gate this on initial sync.
+        // During initial sync we skip importing tx announcements from peers in
+        // `on_new_pooled_transaction_hashes`, so transactions reaching this path are local.
         if self.network.tx_gossip_disabled() {
             return
         }
@@ -2926,6 +2925,34 @@ mod tests {
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
         assert!(propagated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_propagate_pending_txs_while_initially_syncing() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) = new_tx_manager().await;
+        let peer_id = PeerId::random();
+
+        // Keep the node in initial sync mode.
+        network.handle().update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_initially_syncing(&network.handle()));
+
+        // Add a peer so propagation has a destination.
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let tx = MockTransaction::eip1559();
+        tx_manager
+            .pool
+            .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx.clone())
+            .await
+            .expect("transaction should be accepted into the pool");
+
+        tx_manager.on_new_pending_transactions(vec![*tx.get_hash()]);
+
+        let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
+        assert!(peer.seen_transactions.contains(tx.get_hash()));
     }
 
     #[tokio::test]
