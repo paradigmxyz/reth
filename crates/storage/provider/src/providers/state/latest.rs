@@ -282,18 +282,14 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         limit: usize,
     ) -> ProviderResult<reth_storage_api::StorageRangeIter> {
         if self.0.cached_storage_settings().use_hashed_state() {
-            // v2: HashedStorages only stores the hashed slot, so the original
-            // plain slot is unrecoverable. This path is unreachable in practice
-            // since debug_storageRangeAt uses the historical provider via
-            // spawn_with_state_at_block.
             return Ok(reth_storage_api::StorageRangeIter::empty());
         }
 
-        // v1: walk the PlainStorageState dup cursor for the address.
-        // We must hash every slot (keccak is unpredictable) but truncate to
-        // `limit` entries so the caller only pays for the requested page.
         let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
         let mut result: BTreeMap<B256, StorageEntry> = BTreeMap::new();
+        // Track the highest hash so we can evict entries beyond `limit`
+        // without rebuilding the entire map.
+        let mut cutoff: Option<B256> = None;
         let walker = cursor.walk_dup(Some(address), None)?;
         for entry in walker {
             let (_, storage_entry) = entry?;
@@ -304,11 +300,22 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             if hashed < key_start {
                 continue;
             }
+            // Skip entries beyond the current cutoff — they can't make it
+            // into the top `limit` entries.
+            if let Some(c) = cutoff &&
+                hashed >= c
+            {
+                continue;
+            }
             result.insert(hashed, storage_entry);
-        }
-
-        if result.len() > limit {
-            result = result.into_iter().take(limit).collect();
+            if result.len() > limit {
+                // Remove the largest entry and update the cutoff so future
+                // entries beyond this point are skipped entirely.
+                cutoff = result.keys().next_back().copied();
+                if let Some(c) = cutoff {
+                    result.remove(&c);
+                }
+            }
         }
 
         Ok(reth_storage_api::StorageRangeIter::new(result.into_iter().map(Ok)))

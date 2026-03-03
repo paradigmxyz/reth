@@ -32,9 +32,10 @@ use reth_trie_db::{
     hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot,
 };
-use std::collections::{BTreeMap, BTreeSet};
-
-use std::fmt::Debug;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+};
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
