@@ -89,9 +89,8 @@ where
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
     ) -> eyre::Result<Vec<Payload::BuiltPayload>>
     where
-        AddOns::EthApi: EthApiSpec<
-                Provider: BlockReader<Block = BlockTy<Node::Types>> + ChangeSetReader,
-            > + EthTransactions
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>> + ChangeSetReader>
+            + EthTransactions
             + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
