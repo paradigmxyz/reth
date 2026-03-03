@@ -1570,6 +1570,13 @@ where
         // The guard ensures the pending entry is cancelled if the task panics.
         let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
 
+        // Create the overlay provider NOW, while we're on the engine loop thread and
+        // eviction cannot race with us. If we deferred this to the background task,
+        // persistence could advance and evict changeset cache entries between factory
+        // creation and the task actually running, causing expensive DB fallback
+        // computations when building the overlay.
+        let changeset_provider = overlay_factory.database_provider_ro().ok();
+
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
@@ -1603,14 +1610,21 @@ where
                         .record(anchored.trie_input.state.total_len() as f64);
                 }
 
-                // Compute and cache changesets using the computed trie_updates
+                // Compute and cache changesets using the computed trie_updates.
+                // Use the pre-created provider to avoid races with changeset cache
+                // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                // Get a provider from the overlay factory for trie cursor access
-                let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
+                let changeset_result = changeset_provider
+                    .as_ref()
+                    .ok_or_else(|| {
+                        ProviderError::other(std::io::Error::other(
+                            "overlay provider was not created during validation",
+                        ))
+                    })
+                    .and_then(|provider| {
                         reth_trie::changesets::compute_trie_changesets(
-                            &provider,
+                            provider,
                             &computed.trie_updates,
                         )
                         .map_err(ProviderError::Database)
