@@ -1,6 +1,6 @@
 use clap::Parser;
 use metrics::{self, Counter};
-use reth_chainspec::{EthChainSpec, ForkCondition, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -53,7 +53,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes<ChainSpec: Hardforks>>(
+    pub fn execute<N: ProviderNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -67,15 +67,25 @@ impl Command {
                 use reth_node_metrics::chain::ForkActivation;
                 ChainSpecInfo {
                     name: chain_name,
-                    forks: spec.forks_iter().map(|(fork, condition)| {
-                        let (condition_type, activation_value) = match condition {
-                            ForkCondition::Block(block) => ("block".to_string(), Some(block)),
-                            ForkCondition::TTD { activation_block_number, .. } => ("ttd".to_string(), Some(activation_block_number)),
-                            ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
-                            ForkCondition::Never => ("never".to_string(), None),
-                        };
-                        ForkActivation { name: fork.name().to_string(), condition_type, activation_value }
-                    }).collect(),
+                    forks: EthereumHardfork::VARIANTS
+                        .iter()
+                        .map(|fork| {
+                            let condition = spec.ethereum_fork_activation(*fork);
+                            let (condition_type, activation_value) = match condition {
+                                ForkCondition::Block(block) => ("block".to_string(), Some(block)),
+                                ForkCondition::TTD { activation_block_number, .. } => {
+                                    ("ttd".to_string(), Some(activation_block_number))
+                                }
+                                ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
+                                ForkCondition::Never => ("never".to_string(), None),
+                            };
+                            ForkActivation {
+                                name: fork.to_string(),
+                                condition_type,
+                                activation_value,
+                            }
+                        })
+                        .collect(),
                 }
             };
             let executor = task_executor.clone();

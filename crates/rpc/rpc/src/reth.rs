@@ -10,11 +10,11 @@ use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
 };
+use reth_chainspec::{ChainSpecProvider, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_errors::RethResult;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_chainspec::{ChainSpecProvider, ForkCondition, Hardforks};
 use reth_rpc_api::{ForkInfo, ForkSchedule, RethApiServer};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
@@ -189,10 +189,13 @@ where
 impl<Provider, EvmConfig> RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
-    Provider::ChainSpec: Hardforks,
+    Provider::ChainSpec: EthereumHardforks,
     EvmConfig: Send + Sync + 'static,
 {
     /// Returns the fork schedule from the chain spec with active status.
+    ///
+    /// Iterates all known [`EthereumHardfork`] variants so that forks not configured
+    /// in the chain spec are included as `"never"`.
     pub fn fork_schedule(&self) -> EthResult<ForkSchedule> {
         let chain_spec = self.provider().chain_spec();
         let chain_info = self.provider().chain_info()?;
@@ -205,26 +208,23 @@ where
 
         let mut latest_active = None;
 
-        let schedule: Vec<ForkInfo> = chain_spec
-            .forks_iter()
-            .map(|(fork, condition)| {
+        let schedule: Vec<ForkInfo> = EthereumHardfork::VARIANTS
+            .iter()
+            .map(|fork| {
+                let condition = chain_spec.ethereum_fork_activation(*fork);
                 let (condition_type, activation_value, active) = match condition {
-                    ForkCondition::Block(block) => (
-                        "block".to_string(),
-                        Some(U256::from(block)),
-                        best_block >= block,
-                    ),
+                    ForkCondition::Block(block) => {
+                        ("block", Some(U256::from(block)), best_block >= block)
+                    }
                     ForkCondition::TTD { activation_block_number, .. } => (
-                        "ttd".to_string(),
+                        "ttd",
                         Some(U256::from(activation_block_number)),
                         best_block >= activation_block_number,
                     ),
-                    ForkCondition::Timestamp(ts) => (
-                        "timestamp".to_string(),
-                        Some(U256::from(ts)),
-                        best_timestamp >= ts,
-                    ),
-                    ForkCondition::Never => ("never".to_string(), None, false),
+                    ForkCondition::Timestamp(ts) => {
+                        ("timestamp", Some(U256::from(ts)), best_timestamp >= ts)
+                    }
+                    ForkCondition::Never => ("never", None, false),
                 };
 
                 let name = fork.name().to_string();
@@ -234,17 +234,14 @@ where
 
                 ForkInfo {
                     name,
-                    condition_type,
+                    condition_type: condition_type.to_string(),
                     activation_value,
                     active,
                 }
             })
             .collect();
 
-        Ok(ForkSchedule {
-            schedule,
-            active: latest_active.unwrap_or_default(),
-        })
+        Ok(ForkSchedule { schedule, active: latest_active.unwrap_or_default() })
     }
 }
 
@@ -260,7 +257,7 @@ where
         + PersistedBlockSubscriptions
         + ChainSpecProvider
         + 'static,
-    Provider::ChainSpec: Hardforks,
+    Provider::ChainSpec: EthereumHardforks,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`

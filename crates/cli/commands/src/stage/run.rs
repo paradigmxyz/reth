@@ -6,7 +6,7 @@ use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, 
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -99,7 +99,7 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks + Hardforks>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, Comp, F>(self, ctx: CliContext, components: F) -> eyre::Result<()>
     where
@@ -141,17 +141,31 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let spec = provider_factory.chain_spec();
                     ChainSpecInfo {
                         name: spec.chain().to_string(),
-                        forks: spec.forks_iter().map(|(fork, condition)| {
-                            use reth_chainspec::ForkCondition;
-                            use reth_node_metrics::chain::ForkActivation;
-                            let (condition_type, activation_value) = match condition {
-                                ForkCondition::Block(block) => ("block".to_string(), Some(block)),
-                                ForkCondition::TTD { activation_block_number, .. } => ("ttd".to_string(), Some(activation_block_number)),
-                                ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
-                                ForkCondition::Never => ("never".to_string(), None),
-                            };
-                            ForkActivation { name: fork.name().to_string(), condition_type, activation_value }
-                        }).collect(),
+                        forks: EthereumHardfork::VARIANTS
+                            .iter()
+                            .map(|fork| {
+                                use reth_chainspec::ForkCondition;
+                                use reth_node_metrics::chain::ForkActivation;
+                                let condition = spec.ethereum_fork_activation(*fork);
+                                let (condition_type, activation_value) = match condition {
+                                    ForkCondition::Block(block) => {
+                                        ("block".to_string(), Some(block))
+                                    }
+                                    ForkCondition::TTD { activation_block_number, .. } => {
+                                        ("ttd".to_string(), Some(activation_block_number))
+                                    }
+                                    ForkCondition::Timestamp(ts) => {
+                                        ("timestamp".to_string(), Some(ts))
+                                    }
+                                    ForkCondition::Never => ("never".to_string(), None),
+                                };
+                                ForkActivation {
+                                    name: fork.to_string(),
+                                    condition_type,
+                                    activation_value,
+                                }
+                            })
+                            .collect(),
                     }
                 },
                 ctx.task_executor,

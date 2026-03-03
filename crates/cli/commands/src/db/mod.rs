@@ -1,6 +1,6 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
@@ -79,7 +79,7 @@ pub enum Subcommands {
     State(state::Command),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks + Hardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
