@@ -1,7 +1,7 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::env::BlockEnvironment;
+use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
@@ -27,17 +27,18 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
+use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -627,6 +628,43 @@ where
             })
             .await
     }
+
+    /// Executes a block and returns the state root after each transaction.
+    pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
+        let ((evm_env, _), block) = futures::try_join!(
+            self.eth_api().evm_env_at(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
+        )?;
+
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                // Enable transition tracking so that merge_transitions works
+                db.transition_state = Some(Default::default());
+
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                let mut roots = Vec::with_capacity(block.body().transactions().len());
+                for tx in block.transactions_recovered() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    {
+                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                    // Merge transitions into cumulative bundle_state
+                    db.merge_transitions(BundleRetention::PlainState);
+                    // Compute state root from the accumulated state changes
+                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let root =
+                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                    roots.push(root);
+                }
+
+                Ok(roots)
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -969,10 +1007,11 @@ where
 
     async fn debug_intermediate_roots(
         &self,
-        _block_hash: B256,
+        block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+    ) -> RpcResult<Vec<B256>> {
+        let _permit = self.acquire_trace_permit().await;
+        self.intermediate_roots(block_hash).await.map_err(Into::into)
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
