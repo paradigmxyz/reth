@@ -293,114 +293,113 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical_with_shutdown_signal(
-            "consensus engine",
-            move |on_shutdown| async move {
-                if let Some(initial_target) = initial_target {
-                    debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                    // network_handle's sync state is already initialized at Syncing
-                    orchestrator.start_backfill_sync(initial_target);
-                } else if startup_sync_state_idle {
-                    network_handle.update_sync_state(SyncState::Idle);
-                }
+        let consensus_engine = move |on_shutdown| async move {
+            if let Some(initial_target) = initial_target {
+                debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                // network_handle's sync state is already initialized at Syncing
+                orchestrator.start_backfill_sync(initial_target);
+            } else if startup_sync_state_idle {
+                network_handle.update_sync_state(SyncState::Idle);
+            }
 
-                let mut res = Ok(());
-                let mut shutdown_rx = shutdown_rx.fuse();
-                let mut on_shutdown = on_shutdown;
+            let mut res = Ok(());
+            let mut shutdown_rx = shutdown_rx.fuse();
+            let mut on_shutdown = on_shutdown;
 
-                // advance the chain and await payloads built locally to add into the engine api
-                // tree handler to prevent re-execution if that block is received as payload from
-                // the CL
-                loop {
-                    tokio::select! {
-                        event = orchestrator.next() => {
-                            let Some(event) = event else { break };
-                            debug!(target: "reth::cli", "Event: {event}");
-                            match event {
-                                ChainEvent::BackfillSyncFinished => {
-                                    if terminate_after_backfill {
-                                        debug!(target: "reth::cli", "Terminating after initial backfill");
-                                        break
-                                    }
-                                    if startup_sync_state_idle {
-                                        network_handle.update_sync_state(SyncState::Idle);
-                                    }
-                                }
-                                ChainEvent::BackfillSyncStarted => {
-                                    network_handle.update_sync_state(SyncState::Syncing);
-                                }
-                                ChainEvent::FatalError => {
-                                    error!(target: "reth::cli", "Fatal error in consensus engine");
-                                    res = Err(eyre::eyre!("Fatal error in consensus engine"));
+            // advance the chain and await payloads built locally to add into the engine api
+            // tree handler to prevent re-execution if that block is received as payload from
+            // the CL
+            loop {
+                tokio::select! {
+                    event = orchestrator.next() => {
+                        let Some(event) = event else { break };
+                        debug!(target: "reth::cli", "Event: {event}");
+                        match event {
+                            ChainEvent::BackfillSyncFinished => {
+                                if terminate_after_backfill {
+                                    debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
                                 }
-                                ChainEvent::Handler(ev) => {
-                                    if let Some(head) = ev.canonical_header() {
-                                        // Once we're progressing via live sync, we can consider the node is not syncing anymore
-                                        network_handle.update_sync_state(SyncState::Idle);
-                                        let head_block = Head {
-                                            number: head.number(),
-                                            hash: head.hash(),
-                                            difficulty: head.difficulty(),
-                                            timestamp: head.timestamp(),
-                                            total_difficulty: chainspec.final_paris_total_difficulty()
-                                                .filter(|_| chainspec.is_paris_active_at_block(head.number()))
-                                                .unwrap_or_default(),
-                                        };
-                                        network_handle.update_status(head_block);
+                                if startup_sync_state_idle {
+                                    network_handle.update_sync_state(SyncState::Idle);
+                                }
+                            }
+                            ChainEvent::BackfillSyncStarted => {
+                                network_handle.update_sync_state(SyncState::Syncing);
+                            }
+                            ChainEvent::FatalError => {
+                                error!(target: "reth::cli", "Fatal error in consensus engine");
+                                res = Err(eyre::eyre!("Fatal error in consensus engine"));
+                                break
+                            }
+                            ChainEvent::Handler(ev) => {
+                                if let Some(head) = ev.canonical_header() {
+                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                    network_handle.update_sync_state(SyncState::Idle);
+                                    let head_block = Head {
+                                        number: head.number(),
+                                        hash: head.hash(),
+                                        difficulty: head.difficulty(),
+                                        timestamp: head.timestamp(),
+                                        total_difficulty: chainspec.final_paris_total_difficulty()
+                                            .filter(|_| chainspec.is_paris_active_at_block(head.number()))
+                                            .unwrap_or_default(),
+                                    };
+                                    network_handle.update_status(head_block);
 
-                                        let updated = BlockRangeUpdate {
-                                            earliest: provider.earliest_block_number().unwrap_or_default(),
-                                            latest: head.number(),
-                                            latest_hash: head.hash(),
-                                        };
-                                        network_handle.update_block_range(updated);
-                                    }
-                                    event_sender.notify(ev);
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
+                                        latest: head.number(),
+                                        latest_hash: head.hash(),
+                                    };
+                                    network_handle.update_block_range(updated);
                                 }
+                                event_sender.notify(ev);
                             }
-                        }
-                        payload = built_payloads.select_next_some(), if !built_payloads.is_terminated() => {
-                            if let Some(executed_block) = payload.executed_block() {
-                                debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
-                                orchestrator.handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
-                            }
-                        }
-                        shutdown_req = &mut shutdown_rx => {
-                            // Always send Terminate regardless of whether the shutdown handle was
-                            // explicitly invoked (Ok) or dropped without calling shutdown (Err).
-                            let done_tx = match shutdown_req {
-                                Ok(req) => {
-                                    debug!(target: "reth::cli", "received engine shutdown request");
-                                    req.done_tx
-                                }
-                                Err(_) => {
-                                    debug!(target: "reth::cli", "engine shutdown handle dropped, terminating engine");
-                                    let (tx, _) = oneshot::channel();
-                                    tx
-                                }
-                            };
-                            orchestrator.handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: done_tx }.into()
-                            );
-                        }
-                        _ = &mut on_shutdown => {
-                            // Shutdown signal received.
-                            // Send Terminate so the engine OS thread can exit cleanly before we
-                            // drop the orchestrator.
-                            debug!(target: "reth::cli", "shutdown signal received, terminating engine");
-                            let (done_tx, _) = oneshot::channel();
-                            orchestrator.handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: done_tx }.into()
-                            );
-                            break;
                         }
                     }
+                    payload = built_payloads.select_next_some(), if !built_payloads.is_terminated() => {
+                        if let Some(executed_block) = payload.executed_block() {
+                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                            orchestrator.handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
+                        }
+                    }
+                    shutdown_req = &mut shutdown_rx => {
+                        // Always send Terminate regardless of whether the shutdown handle was
+                        // explicitly invoked (Ok) or dropped without calling shutdown (Err).
+                        let done_tx = match shutdown_req {
+                            Ok(req) => {
+                                debug!(target: "reth::cli", "received engine shutdown request");
+                                req.done_tx
+                            }
+                            Err(_) => {
+                                debug!(target: "reth::cli", "engine shutdown handle dropped, terminating engine");
+                                let (tx, _) = oneshot::channel();
+                                tx
+                            }
+                        };
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                    }
+                    _ = &mut on_shutdown => {
+                        // Shutdown signal received.
+                        // Send Terminate so the engine OS thread can exit cleanly before we
+                        // drop the orchestrator.
+                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
+                        let (done_tx, _) = oneshot::channel();
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                        break;
+                    }
                 }
+            }
 
-                let _ = exit.send(res);
-            },
-        );
+            let _ = exit.send(res);
+        };
+        ctx.task_executor()
+            .spawn_critical_with_shutdown_signal("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
