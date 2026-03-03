@@ -435,14 +435,14 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
-revm = { version = "34.0.0", default-features = false }
-revm-bytecode = { version = "8.0.0", default-features = false }
-revm-database = { version = "10.0.0", default-features = false }
-revm-state = { version = "9.0.0", default-features = false }
-revm-primitives = { version = "22.0.0", default-features = false }
-revm-interpreter = { version = "32.0.0", default-features = false }
-revm-database-interface = { version = "9.0.0", default-features = false }
-op-revm = { version = "15.0.0", default-features = false }
+revm = { version = "35.0.0", default-features = false }
+revm-bytecode = { version = "9.0.0", default-features = false }
+revm-database = { version = "11.0.0", default-features = false }
+revm-state = { version = "10.0.0", default-features = false }
+revm-primitives = { version = "22.1.0", default-features = false }
+revm-interpreter = { version = "33.0.0", default-features = false }
+revm-database-interface = { version = "9.0.1", default-features = false }
+op-revm = { version = "16.0.0", default-features = false }
 revm-inspectors = "0.34.2"
 
 # eth
