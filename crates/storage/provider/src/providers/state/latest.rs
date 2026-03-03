@@ -263,6 +263,41 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             Ok(None)
         }
     }
+
+    fn storage_range(
+        &self,
+        account: Address,
+        keys: &[StorageKey],
+    ) -> ProviderResult<Vec<(StorageKey, StorageValue)>> {
+        let mut result = Vec::with_capacity(keys.len());
+        if keys.is_empty() {
+            return Ok(result);
+        }
+
+        if self.0.cached_storage_settings().use_hashed_state() {
+            let hashed_address = alloy_primitives::keccak256(account);
+            let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+            for &key in keys {
+                let hashed_slot = alloy_primitives::keccak256(key);
+                if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+                    entry.key == hashed_slot
+                {
+                    result.push((key, entry.value));
+                }
+            }
+        } else {
+            let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+            for &key in keys {
+                if let Some(entry) = cursor.seek_by_key_subkey(account, key)? &&
+                    entry.key == key
+                {
+                    result.push((key, entry.value));
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl<Provider: DBProvider + BlockHashReader> BytecodeReader

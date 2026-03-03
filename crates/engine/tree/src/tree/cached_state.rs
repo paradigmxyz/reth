@@ -351,6 +351,63 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_range(
+        &self,
+        account: Address,
+        keys: &[StorageKey],
+    ) -> ProviderResult<Vec<(StorageKey, StorageValue)>> {
+        let mut uncached_keys = Vec::new();
+        let mut result = Vec::with_capacity(keys.len());
+
+        if PREWARM {
+            for &key in keys {
+                if let Some(value) = self.caches.0.storage_cache.get(&(account, key)) {
+                    if !value.is_zero() {
+                        result.push((key, value));
+                    }
+                } else {
+                    uncached_keys.push(key);
+                }
+            }
+
+            // Batch-fetch all uncached keys from the inner provider
+            if !uncached_keys.is_empty() {
+                let fetched = self.state_provider.storage_range(account, &uncached_keys)?;
+                for (key, value) in &fetched {
+                    self.caches.insert_storage(account, *key, Some(*value));
+                }
+                // Insert zero entries for keys that weren't found
+                let fetched_set: std::collections::HashSet<StorageKey> =
+                    fetched.iter().map(|(k, _)| *k).collect();
+                for &key in &uncached_keys {
+                    if !fetched_set.contains(&key) {
+                        self.caches.insert_storage(account, key, Some(StorageValue::ZERO));
+                    }
+                }
+                result.extend(fetched);
+            }
+        } else {
+            for &key in keys {
+                if let Some(value) = self.caches.0.storage_cache.get(&(account, key)) {
+                    self.metrics.storage_cache_hits.increment(1);
+                    if !value.is_zero() {
+                        result.push((key, value));
+                    }
+                } else {
+                    self.metrics.storage_cache_misses.increment(1);
+                    uncached_keys.push(key);
+                }
+            }
+
+            if !uncached_keys.is_empty() {
+                let fetched = self.state_provider.storage_range(account, &uncached_keys)?;
+                result.extend(fetched);
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
