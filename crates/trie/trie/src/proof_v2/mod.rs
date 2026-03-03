@@ -1003,14 +1003,17 @@ where
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
-            if let Some(ref lower) = uncalculated_lower_bound &&
-                lower.starts_with(&self.branch_path) &&
-                lower.len() > self.branch_path.len()
-            {
-                let lower_nibble = lower.get_unchecked(self.branch_path.len());
-                // Clear all nibbles strictly below `lower_nibble` since they've been processed.
-                let already_processed_mask = (1u16 << lower_nibble) - 1;
-                next_child_nibbles &= !already_processed_mask;
+            if let Some(ref lower) = uncalculated_lower_bound {
+                if lower.starts_with(&self.branch_path) && lower.len() > self.branch_path.len() {
+                    let lower_nibble = lower.get_unchecked(self.branch_path.len());
+                    // Clear all nibbles strictly below `lower_nibble` since they've been processed.
+                    let already_processed_mask = (1u16 << lower_nibble) - 1;
+                    next_child_nibbles &= !already_processed_mask;
+                } else if !self.branch_path.starts_with(lower) {
+                    // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
+                    // lower is 0x7). All remaining children have been processed.
+                    next_child_nibbles = 0;
+                }
             }
 
             // If there are no further children to construct for this branch then pop it off both
@@ -2010,8 +2013,6 @@ mod tests {
     /// This scenario occurs when `MaskedTrieCursorFactory` clears a child's `hash_mask` bit
     /// (because the child's path is in the prefix set) but leaves the `state_mask` bit intact,
     /// while the `HashedPostStateCursorFactory` overlay has deleted the leaf data for that child.
-    /// Without the fix, `next_uncached_key_range` would return the same empty range repeatedly,
-    /// triggering the forward-progress guard.
     #[test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
@@ -2050,7 +2051,6 @@ mod tests {
             B256Map::from_iter([(account_addr, storage_nodes)]),
         );
 
-        // Step 4: Call storage_root_node — full trie traversal with no targets.
         let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
         let hashed_storage_cursor =
             hashed_cursor_factory.hashed_storage_cursor(account_addr).unwrap();
@@ -2059,6 +2059,64 @@ mod tests {
         let root_node = calculator
             .storage_root_node(account_addr)
             .expect("storage_root_node should succeed with masked empty child");
+
+        let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
+        assert!(root_hash.is_some(), "should produce a root hash");
+    }
+
+    /// Tests that `root_node` handles the case where `uncalculated_lower_bound` has advanced
+    /// entirely past a cached branch that still has unprocessed children in its `state_mask`.
+    ///
+    /// Branch at `0x6` has `state_mask` bits 0,1,5,f where nibble 5 has its `hash_mask`
+    /// cleared (simulating `MaskedTrieCursorFactory`) and no leaf data. The last child (nibble f)
+    /// causes `calculate_key_range` to be called with range `(0x6f, Some(0x7))`. After that range,
+    /// the hashed cursor still has keys (at `0x70...`), so `proof_subtrie` does not break and
+    /// re-enters `next_uncached_key_range` with `uncalculated_lower_bound = Some(0x7)`.
+    /// Since `0x7` is past `0x6`, all remaining children are skipped and the branch is popped.
+    #[test]
+    fn test_node_with_masked_empty_child_lower_bound_past_branch() {
+        reth_tracing::init_test_tracing();
+
+        let account_addr = B256::ZERO;
+        let val = U256::from(42u64);
+
+        // Leaf keys under 0x6 and one beyond (0x70) to keep the cursor alive after 0x6.
+        let slot_60 = B256::right_padding_from(&[0x60]);
+        let slot_61 = B256::right_padding_from(&[0x61]);
+        let slot_6f = B256::right_padding_from(&[0x6f]);
+        let slot_70 = B256::right_padding_from(&[0x70]);
+
+        // Branch at 0x6: state_mask bits 0,1,5,f; hash_mask bits 0,1 (NOT 5, NOT f).
+        // Nibble 5 has state_mask set but no hash and no leaf data (masked empty child).
+        // Nibble f has state_mask set, no hash, but DOES have leaf data.
+        let state_mask = TrieMask::new(0b1000_0000_0010_0011); // bits 0,1,5,f
+        let hash_mask = TrieMask::new(0b0000_0000_0000_0011); // bits 0,1
+        let hashes = vec![B256::repeat_byte(0xaa); hash_mask.count_ones() as usize];
+        let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
+
+        let mut storage_nodes = BTreeMap::new();
+        storage_nodes.insert(Nibbles::from_nibbles([0x6]), branch);
+
+        // Hashed cursor: slots at 0x60, 0x61, 0x6f, 0x70 — but NOT 0x65.
+        let post_state_storage: BTreeMap<B256, U256> =
+            [slot_60, slot_61, slot_6f, slot_70].iter().map(|s| (*s, val)).collect();
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, post_state_storage)]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor =
+            hashed_cursor_factory.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
+        let root_node = calculator
+            .storage_root_node(account_addr)
+            .expect("storage_root_node should succeed when lower bound advances past branch");
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
         assert!(root_hash.is_some(), "should produce a root hash");
