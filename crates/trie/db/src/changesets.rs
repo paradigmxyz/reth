@@ -11,7 +11,7 @@ use crate::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
 };
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
-use parking_lot::{Condvar, Mutex, RwLock};
+use parking_lot::RwLock;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
@@ -24,8 +24,13 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{collections::BTreeMap, fmt, ops::RangeInclusive, sync::Arc};
-use tracing::debug;
+use std::{
+    collections::BTreeMap,
+    fmt,
+    ops::RangeInclusive,
+    sync::{Arc, OnceLock},
+};
+use tracing::{debug, debug_span};
 
 #[cfg(feature = "metrics")]
 use reth_metrics::{
@@ -303,46 +308,38 @@ where
 /// finishes, it waits on this entry instead of falling back to the expensive
 /// DB-based computation.
 struct PendingChangeset {
-    /// `None` while pending, `Some(Some(..))` when resolved with data,
-    /// `Some(None)` when cancelled (e.g. due to panic).
-    result: Mutex<Option<Option<Arc<TrieUpdatesSorted>>>>,
-    ready: Condvar,
+    /// `None` when cancelled (e.g. due to panic), `Some(..)` when resolved with data.
+    result: OnceLock<Option<Arc<TrieUpdatesSorted>>>,
 }
 
 impl PendingChangeset {
     const fn new() -> Self {
-        Self { result: Mutex::new(None), ready: Condvar::new() }
+        Self { result: OnceLock::new() }
     }
 
     /// Blocks until the computation finishes. Returns `Some` if resolved with data,
     /// `None` if the computation was cancelled.
     fn wait(&self) -> Option<Arc<TrieUpdatesSorted>> {
-        let mut result = self.result.lock();
-        while result.is_none() {
-            self.ready.wait(&mut result);
-        }
-        result.as_ref().expect("checked above").clone()
+        let _span =
+            debug_span!(target: "trie::changeset_cache", "waiting_for_pending_changeset").entered();
+        self.result.wait().clone()
     }
 
     /// Resolves the pending computation with the given result, waking all waiters.
     fn resolve(&self, changesets: Arc<TrieUpdatesSorted>) {
-        let mut result = self.result.lock();
-        *result = Some(Some(changesets));
-        self.ready.notify_all();
+        let _ = self.result.set(Some(changesets));
     }
 
     /// Cancels the pending computation, waking all waiters so they fall through
     /// to the DB fallback.
     fn cancel(&self) {
-        let mut result = self.result.lock();
-        *result = Some(None);
-        self.ready.notify_all();
+        let _ = self.result.set(None);
     }
 }
 
 impl fmt::Debug for PendingChangeset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let is_resolved = self.result.lock().is_some();
+        let is_resolved = self.result.get().is_some();
         f.debug_struct("PendingChangeset").field("resolved", &is_resolved).finish()
     }
 }
@@ -392,7 +389,7 @@ impl ChangesetCache {
     /// * `block_hash` - Hash of the block
     /// * `block_number` - Block number for tracking and eviction
     /// * `changesets` - Trie changesets to cache
-    pub fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
+    fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
         let pending = {
             let mut cache = self.inner.write();
             cache.insert(block_hash, block_number, Arc::clone(&changesets));
@@ -418,8 +415,9 @@ impl ChangesetCache {
     /// waiters fall through to the DB fallback.
     pub fn register_pending(&self, block_hash: B256) -> PendingChangesetGuard {
         let pending = Arc::new(PendingChangeset::new());
-        self.inner.write().pending.insert(block_hash, Arc::clone(&pending));
-        PendingChangesetGuard { cache: self.clone(), block_hash, pending }
+        let prev = self.inner.write().pending.insert(block_hash, Arc::clone(&pending));
+        debug_assert!(prev.is_none(), "duplicate pending changeset for {block_hash:?}");
+        PendingChangesetGuard { cache: self.clone(), block_hash, pending: Some(pending) }
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -668,14 +666,26 @@ impl ChangesetCache {
 
 /// Guard for a pending changeset computation.
 ///
-/// Returned by [`ChangesetCache::register_pending`]. If dropped without the pending entry
-/// being resolved (e.g. via [`ChangesetCache::insert`]), the pending entry is automatically
-/// removed so waiters fall through to the DB fallback.
-#[must_use = "the guard must be kept alive until the changeset is inserted into the cache"]
+/// Returned by [`ChangesetCache::register_pending`]. Must be resolved via [`Self::resolve`]
+/// to insert the computed changesets into the cache and wake waiting threads.
+///
+/// If dropped without resolving (e.g. due to a panic), the pending entry is automatically
+/// cancelled so waiters fall through to the DB fallback.
+#[must_use = "call .resolve() to insert changesets into the cache"]
 pub struct PendingChangesetGuard {
     cache: ChangesetCache,
     block_hash: B256,
-    pending: Arc<PendingChangeset>,
+    /// `None` after [`Self::resolve`] has been called.
+    pending: Option<Arc<PendingChangeset>>,
+}
+
+impl PendingChangesetGuard {
+    /// Resolves the pending computation by inserting the changesets into the cache
+    /// and waking all waiting threads.
+    pub fn resolve(mut self, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
+        self.cache.insert(self.block_hash, block_number, changesets);
+        self.pending = None;
+    }
 }
 
 impl fmt::Debug for PendingChangesetGuard {
@@ -686,13 +696,14 @@ impl fmt::Debug for PendingChangesetGuard {
 
 impl Drop for PendingChangesetGuard {
     fn drop(&mut self) {
-        // If `insert()` was already called for this block hash, the pending entry has been
-        // removed from the map and resolved — this is a no-op.
-        // If not (e.g. the deferred task panicked), cancel the pending entry so waiters
-        // don't block forever and can fall through to the DB computation.
+        let Some(pending) = self.pending.take() else {
+            // Guard was resolved successfully already, no-op
+            return
+        };
+
         let removed = self.cache.inner.write().pending.remove(&self.block_hash);
         if let Some(removed) = removed {
-            if Arc::ptr_eq(&removed, &self.pending) {
+            if Arc::ptr_eq(&removed, &pending) {
                 debug!(
                     target: "trie::changeset_cache",
                     block_hash = ?self.block_hash,
