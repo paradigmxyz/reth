@@ -38,6 +38,7 @@ use reth_stages_api::ControlFlow;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use tokio::runtime::Handle as TokioHandle;
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -271,6 +272,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Handle to the tokio runtime for spawning blocking work.
+    tokio_handle: TokioHandle,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -295,6 +298,7 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
+            .field("tokio_handle", &self.tokio_handle)
             .finish()
     }
 }
@@ -331,6 +335,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        tokio_handle: TokioHandle,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -351,6 +356,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            tokio_handle,
         }
     }
 
@@ -372,6 +378,8 @@ where
         evm_config: C,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
+        let tokio_handle = TokioHandle::current();
+
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
@@ -401,6 +409,7 @@ where
             config,
             kind,
             evm_config,
+            tokio_handle,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -1504,7 +1513,7 @@ where
                                 debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
                                 let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
                                 if let Some((rx, start_time, _action)) = pending_persistence {
-                                    tokio::task::spawn_blocking(move || {
+                                    self.tokio_handle.spawn_blocking(move || {
                                         let start = Instant::now();
                                         let result = rx.recv().ok();
                                         let _ = persistence_tx.send((

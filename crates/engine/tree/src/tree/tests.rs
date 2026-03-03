@@ -215,6 +215,7 @@ impl TestHarness {
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
+            tokio::runtime::Handle::current(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
