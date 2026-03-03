@@ -226,7 +226,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -352,7 +352,7 @@ where
             .into())
         }
 
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
