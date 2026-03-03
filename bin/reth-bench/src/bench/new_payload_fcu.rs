@@ -129,7 +129,7 @@ impl Command {
             rlp_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
-        let total_blocks = benchmark_mode.total_blocks();
+        let _total_blocks = benchmark_mode.total_blocks();
 
         if use_reth_namespace {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");

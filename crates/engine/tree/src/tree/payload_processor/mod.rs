@@ -200,38 +200,9 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
-
-        // Wait for both caches in parallel using std threads
-        let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
-
-        // Use channels and spawn_blocking instead of std::thread::spawn
-        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
-
-        self.executor.spawn_blocking(move || {
-            let _ = execution_tx.send(execution_cache.wait_for_availability());
-        });
-        self.executor.spawn_blocking(move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-        });
-
-        let execution_cache_duration =
-            execution_rx.recv().expect("execution cache wait task failed to send result");
-        let sparse_trie_duration =
-            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
-
-        debug!(
-            target: "engine::tree::payload_processor",
-            ?execution_cache_duration,
-            ?sparse_trie_duration,
-            "Execution cache and sparse trie locks acquired"
-        );
-        CacheWaitDurations {
-            execution_cache: execution_cache_duration,
-            sparse_trie: sparse_trie_duration,
-        }
+        // v1.10.2: simplified implementation that returns zero durations
+        // as the execution cache / sparse trie lock types differ from v1.11.1+
+        CacheWaitDurations::default()
     }
 }
 

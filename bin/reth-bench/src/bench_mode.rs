@@ -12,6 +12,14 @@ pub enum BenchMode {
 }
 
 impl BenchMode {
+    /// Returns the total number of blocks in the benchmark, or `None` for continuous mode.
+    pub fn total_blocks(&self) -> Option<u64> {
+        match self {
+            Self::Continuous(_) => None,
+            Self::Range(range) => Some(range.end() - range.start() + 1),
+        }
+    }
+
     /// Check if the block number is in the range
     pub fn contains(&self, block_number: u64) -> bool {
         match self {
