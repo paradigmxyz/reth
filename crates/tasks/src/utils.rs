@@ -32,16 +32,11 @@ pub fn increase_thread_priority() {
 /// Should be called once after tracing is initialized.
 ///
 /// No-op on non-Linux platforms.
-#[cfg(target_os = "linux")]
+#[allow(clippy::missing_const_for_fn)]
 pub fn deprioritize_background_threads() {
+    #[cfg(target_os = "linux")]
     _deprioritize_background_threads();
 }
-
-/// Should be called once after tracing is initialized.
-///
-/// No-op on non-Linux platforms.
-#[cfg(not(target_os = "linux"))]
-pub const fn deprioritize_background_threads() {}
 
 /// Thread name prefixes to deprioritize.
 #[cfg(target_os = "linux")]
