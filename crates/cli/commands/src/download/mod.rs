@@ -178,6 +178,7 @@ impl Default for DownloadDefaults {
     }
 }
 
+/// CLI command that downloads snapshot archives and configures a reth node from them.
 #[derive(Debug, Parser)]
 pub struct DownloadCommand<C: ChainSpecParser> {
     #[command(flatten)]
@@ -235,9 +236,6 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-    /// Skip reth.toml generation after download.
-    #[arg(long)]
-    no_config: bool,
 
     /// Use resumable two-phase downloads (download to disk first, then extract).
     ///
@@ -401,13 +399,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         // Generate reth.toml and set prune checkpoints
         let config =
             config_for_selections(&selections, &manifest, preset, Some(self.env.chain.as_ref()));
-        if !self.no_config && write_config(&config, target_dir)? {
-            let desc = config_gen::describe_prune_config_from_selections_with_preset(
-                &selections,
-                &manifest,
-                preset,
-                Some(self.env.chain.as_ref()),
-            );
+        if write_config(&config, target_dir)? {
+            let desc = config_gen::describe_prune_config(&config);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
 
@@ -685,8 +678,7 @@ impl<C: ChainSpecParser> DownloadCommand<C> {
     }
 }
 
-// Monitor process status and display progress every 100ms
-// to avoid overwhelming stdout
+/// Tracks download progress and throttles display updates to every 100ms.
 pub(crate) struct DownloadProgress {
     downloaded: u64,
     total_size: u64,

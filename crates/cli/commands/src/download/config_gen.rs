@@ -150,36 +150,22 @@ pub(crate) fn config_for_selections(
     preset: Option<SelectionPreset>,
     chain_spec: Option<&impl EthereumHardforks>,
 ) -> Config {
-    let tx_sel = selections
-        .get(&SnapshotComponentType::Transactions)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    let senders_sel = selections
-        .get(&SnapshotComponentType::TransactionSenders)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    let receipt_sel = selections
-        .get(&SnapshotComponentType::Receipts)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    let account_cs_sel = selections
-        .get(&SnapshotComponentType::AccountChangesets)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
-    let storage_cs_sel = selections
-        .get(&SnapshotComponentType::StorageChangesets)
-        .copied()
-        .unwrap_or(ComponentSelection::None);
+    let selection_for =
+        |ty| selections.get(&ty).copied().unwrap_or(ComponentSelection::None);
+
+    let tx_sel = selection_for(SnapshotComponentType::Transactions);
+    let senders_sel = selection_for(SnapshotComponentType::TransactionSenders);
+    let receipt_sel = selection_for(SnapshotComponentType::Receipts);
+    let account_cs_sel = selection_for(SnapshotComponentType::AccountChangesets);
+    let storage_cs_sel = selection_for(SnapshotComponentType::StorageChangesets);
 
     // Archive node — all data components present, no pruning
-    let is_archive = tx_sel == ComponentSelection::All &&
-        senders_sel == ComponentSelection::All &&
-        receipt_sel == ComponentSelection::All &&
-        account_cs_sel == ComponentSelection::All &&
-        storage_cs_sel == ComponentSelection::All;
+    let is_archive = [tx_sel, senders_sel, receipt_sel, account_cs_sel, storage_cs_sel]
+        .iter()
+        .all(|s| *s == ComponentSelection::All);
 
     // Extract blocks_per_file from manifest for all component types
-    let bpf = |ty: SnapshotComponentType| -> Option<u64> {
+    let blocks_per_file = |ty: SnapshotComponentType| -> Option<u64> {
         match manifest.component(ty)? {
             ComponentManifest::Chunked(c) => Some(c.blocks_per_file),
             ComponentManifest::Single(_) => None,
@@ -187,12 +173,12 @@ pub(crate) fn config_for_selections(
     };
     let static_files = StaticFilesConfig {
         blocks_per_file: BlocksPerFileConfig {
-            headers: bpf(SnapshotComponentType::Headers),
-            transactions: bpf(SnapshotComponentType::Transactions),
-            receipts: bpf(SnapshotComponentType::Receipts),
-            transaction_senders: bpf(SnapshotComponentType::TransactionSenders),
-            account_change_sets: bpf(SnapshotComponentType::AccountChangesets),
-            storage_change_sets: bpf(SnapshotComponentType::StorageChangesets),
+            headers: blocks_per_file(SnapshotComponentType::Headers),
+            transactions: blocks_per_file(SnapshotComponentType::Transactions),
+            receipts: blocks_per_file(SnapshotComponentType::Receipts),
+            transaction_senders: blocks_per_file(SnapshotComponentType::TransactionSenders),
+            account_change_sets: blocks_per_file(SnapshotComponentType::AccountChangesets),
+            storage_change_sets: blocks_per_file(SnapshotComponentType::StorageChangesets),
         },
     };
 
@@ -261,65 +247,29 @@ fn selection_to_prune_mode(
     match sel {
         ComponentSelection::All => None,
         ComponentSelection::Distance(d) => {
-            if let Some(min) = min_distance {
-                Some(PruneMode::Distance(d.max(min)))
-            } else {
-                Some(PruneMode::Distance(d))
-            }
+            Some(PruneMode::Distance(min_distance.map_or(d, |min| d.max(min))))
         }
         ComponentSelection::None => {
-            if let Some(min) = min_distance {
-                Some(PruneMode::Distance(min))
-            } else {
-                Some(PruneMode::Full)
-            }
+            Some(min_distance.map_or(PruneMode::Full, PruneMode::Distance))
         }
     }
 }
 
-/// Human-readable prune config summary from per-component selections.
-pub fn describe_prune_config_from_selections(
-    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
-    manifest: &SnapshotManifest,
-) -> Vec<String> {
-    describe_prune_config_from_selections_with_preset(
-        selections,
-        manifest,
-        None,
-        None::<&reth_chainspec::ChainSpec>,
-    )
-}
-
-pub(crate) fn describe_prune_config_from_selections_with_preset(
-    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
-    manifest: &SnapshotManifest,
-    preset: Option<SelectionPreset>,
-    chain_spec: Option<&impl EthereumHardforks>,
-) -> Vec<String> {
-    let config = config_for_selections(selections, manifest, preset, chain_spec);
+/// Human-readable prune config summary.
+pub(crate) fn describe_prune_config(config: &Config) -> Vec<String> {
     let segments = &config.prune.segments;
-    let mut lines = Vec::new();
 
-    if let Some(mode) = &segments.sender_recovery {
-        lines.push(format!("sender_recovery={}", format_mode(mode)));
-    }
-    if let Some(mode) = &segments.transaction_lookup {
-        lines.push(format!("transaction_lookup={}", format_mode(mode)));
-    }
-    if let Some(mode) = &segments.bodies_history {
-        lines.push(format!("bodies_history={}", format_mode(mode)));
-    }
-    if let Some(mode) = &segments.receipts {
-        lines.push(format!("receipts={}", format_mode(mode)));
-    }
-    if let Some(mode) = &segments.account_history {
-        lines.push(format!("account_history={}", format_mode(mode)));
-    }
-    if let Some(mode) = &segments.storage_history {
-        lines.push(format!("storage_history={}", format_mode(mode)));
-    }
-
-    lines
+    [
+        ("sender_recovery", segments.sender_recovery),
+        ("transaction_lookup", segments.transaction_lookup),
+        ("bodies_history", segments.bodies_history),
+        ("receipts", segments.receipts),
+        ("account_history", segments.account_history),
+        ("storage_history", segments.storage_history),
+    ]
+    .into_iter()
+    .filter_map(|(name, mode)| mode.map(|m| format!("{name}={}", format_mode(&m))))
+    .collect()
 }
 
 fn format_mode(mode: &PruneMode) -> String {
@@ -550,7 +500,13 @@ mod tests {
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
-        let desc = describe_prune_config_from_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+        let desc = describe_prune_config(&config);
         // Archive node — no prune segments described
         assert!(desc.is_empty());
     }
@@ -563,7 +519,13 @@ mod tests {
         selections
             .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
-        let desc = describe_prune_config_from_selections(&selections, &empty_manifest());
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+        let desc = describe_prune_config(&config);
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         // Bodies follows tx selection
         assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
