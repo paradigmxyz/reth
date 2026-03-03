@@ -73,7 +73,7 @@ where
             (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
         };
 
-        self.run_with_components::<EthereumNode>(components, |builder, ext| async move {
+        self.run_with_components::<EthereumNode>(components, async move |builder, ext| {
             launcher.entrypoint(builder, ext).await
         })
     }
@@ -126,6 +126,9 @@ where
         }
 
         self.init_tracing(&runner)?;
+
+        // Deprioritize background threads spawned by tracing/OTel libraries.
+        reth_tasks::utils::deprioritize_background_threads();
 
         // Install the prometheus recorder to be sure to record all metrics
         install_prometheus_recorder();

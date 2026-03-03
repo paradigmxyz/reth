@@ -1042,4 +1042,76 @@ mod tests {
             assert_ne!(tx.sender_id(), valid_new_higher_fee_tx.sender_id());
         }
     }
+
+    /// Reproduces the "Blob Transaction Ordering, Multiple Clients" Hive scenario.
+    ///
+    /// Sender A contributes 5-blob transactions while sender B contributes 1-blob transactions.
+    /// A single payload build should be able to fill the block with 6 blobs total (5+1).
+    #[test]
+    fn test_blob_transaction_ordering_multiple_clients_shape() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 1;
+        let max_blob_count: u64 = 6;
+
+        let sender_a = MockTransaction::eip4844()
+            .with_blob_hashes(5)
+            .with_max_fee(base_fee as u128 + 20)
+            .with_priority_fee(base_fee as u128 + 20)
+            .with_blob_fee(120);
+        for nonce in 0..5u64 {
+            let tx = sender_a.clone().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let sender_b = MockTransaction::eip4844()
+            .with_blob_hashes(1)
+            .with_max_fee(base_fee as u128 + 20)
+            .with_priority_fee(base_fee as u128 + 20)
+            .with_blob_fee(100);
+        for nonce in 0..5u64 {
+            let tx = sender_b.clone().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut block_blob_count = 0u64;
+        let mut included_txs = 0u64;
+
+        while let Some(tx) = best.next() {
+            if let Some(blob_hashes) = tx.transaction.blob_versioned_hashes() {
+                let tx_blob_count = blob_hashes.len() as u64;
+
+                if block_blob_count + tx_blob_count > max_blob_count {
+                    crate::traits::BestTransactions::mark_invalid(
+                        &mut best,
+                        &tx,
+                        &InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                                have: block_blob_count + tx_blob_count,
+                                permitted: max_blob_count,
+                            },
+                        ),
+                    );
+                    continue;
+                }
+
+                block_blob_count += tx_blob_count;
+                included_txs += 1;
+
+                if block_blob_count == max_blob_count {
+                    best.skip_blobs();
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(
+            block_blob_count, max_blob_count,
+            "expected a full blob block (5+1 blobs across senders)"
+        );
+        assert_eq!(included_txs, 2, "expected one 5-blob tx and one 1-blob tx in the block");
+    }
 }

@@ -38,6 +38,7 @@ use eyre::Context;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
+use reth_rpc_api::RethNewPayloadInput;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -161,7 +162,9 @@ struct GasRampPayload {
     /// Block number from filename.
     block_number: u64,
     /// Engine API version for newPayload.
-    version: EngineApiMessageVersion,
+    ///
+    /// `None` indicates that `reth_newPayload` should be used.
+    version: Option<EngineApiMessageVersion>,
     /// The file contents.
     file: GasRampPayloadFile,
 }
@@ -273,13 +276,10 @@ impl Command {
                 "Executing gas ramp payload (newPayload + FCU)"
             );
 
-            let reth_data =
-                if self.reth_new_payload { payload.file.execution_data.clone() } else { None };
             let _ = call_new_payload_with_reth(
                 &auth_provider,
                 payload.version,
                 payload.file.params.clone(),
-                reth_data,
             )
             .await?;
 
@@ -288,13 +288,7 @@ impl Command {
                 safe_block_hash: parent_hash,
                 finalized_block_hash: parent_hash,
             };
-            call_forkchoice_updated_with_reth(
-                &auth_provider,
-                payload.version,
-                fcu_state,
-                self.reth_new_payload,
-            )
-            .await?;
+            call_forkchoice_updated_with_reth(&auth_provider, payload.version, fcu_state).await?;
 
             info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
 
@@ -342,31 +336,34 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let params = serde_json::to_value((
-                execution_payload.clone(),
-                Vec::<B256>::new(),
-                B256::ZERO,
-                envelope.execution_requests.to_vec(),
-            ))?;
+            let (version, params) = if self.reth_new_payload {
+                let reth_data = ExecutionData {
+                    payload: execution_payload.clone().into(),
+                    sidecar: ExecutionPayloadSidecar::v4(
+                        CancunPayloadFields {
+                            versioned_hashes: Vec::new(),
+                            parent_beacon_block_root: B256::ZERO,
+                        },
+                        PraguePayloadFields {
+                            requests: envelope.execution_requests.clone().into(),
+                        },
+                    ),
+                };
+                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data),))?)
+            } else {
+                (
+                    Some(EngineApiMessageVersion::V4),
+                    serde_json::to_value((
+                        execution_payload.clone(),
+                        Vec::<B256>::new(),
+                        B256::ZERO,
+                        envelope.execution_requests.to_vec(),
+                    ))?,
+                )
+            };
 
-            let reth_data = self.reth_new_payload.then(|| ExecutionData {
-                payload: execution_payload.clone().into(),
-                sidecar: ExecutionPayloadSidecar::v4(
-                    CancunPayloadFields {
-                        versioned_hashes: Vec::new(),
-                        parent_beacon_block_root: B256::ZERO,
-                    },
-                    PraguePayloadFields { requests: envelope.execution_requests.clone().into() },
-                ),
-            });
-
-            let server_timings = call_new_payload_with_reth(
-                &auth_provider,
-                EngineApiMessageVersion::V4,
-                params,
-                reth_data,
-            )
-            .await?;
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
 
             let np_latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
@@ -391,13 +388,7 @@ impl Command {
             };
 
             let fcu_start = Instant::now();
-            call_forkchoice_updated_with_reth(
-                &auth_provider,
-                EngineApiMessageVersion::V4,
-                fcu_state,
-                self.reth_new_payload,
-            )
-            .await?;
+            call_forkchoice_updated_with_reth(&auth_provider, version, fcu_state).await?;
             let fcu_latency = fcu_start.elapsed();
 
             let total_latency =
@@ -558,13 +549,18 @@ impl Command {
             let file: GasRampPayloadFile = serde_json::from_str(&content)
                 .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
 
-            let version = match file.version {
-                1 => EngineApiMessageVersion::V1,
-                2 => EngineApiMessageVersion::V2,
-                3 => EngineApiMessageVersion::V3,
-                4 => EngineApiMessageVersion::V4,
-                5 => EngineApiMessageVersion::V5,
-                v => return Err(eyre::eyre!("Invalid version {} in {:?}", v, path)),
+            let version = if let Some(version) = file.version {
+                match version {
+                    1 => EngineApiMessageVersion::V1,
+                    2 => EngineApiMessageVersion::V2,
+                    3 => EngineApiMessageVersion::V3,
+                    4 => EngineApiMessageVersion::V4,
+                    5 => EngineApiMessageVersion::V5,
+                    v => return Err(eyre::eyre!("Invalid version {} in {:?}", v, path)),
+                }
+                .into()
+            } else {
+                None
             };
 
             info!(

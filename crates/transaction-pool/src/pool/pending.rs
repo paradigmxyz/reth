@@ -142,9 +142,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
-        let mut submission_id = self.submission_id;
-        for tx in unlocked {
-            submission_id += 1;
+        for (submission_id, tx) in (self.submission_id + 1..).zip(unlocked) {
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();

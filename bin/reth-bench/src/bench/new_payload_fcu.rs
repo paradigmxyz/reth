@@ -25,7 +25,7 @@ use crate::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
     },
 };
-use alloy_provider::Provider;
+use alloy_provider::{ext::DebugApi, Provider};
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
@@ -154,6 +154,7 @@ impl Command {
             mut next_block,
             is_optimism,
             use_reth_namespace,
+            rlp_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -186,6 +187,21 @@ impl Command {
                     }
                 };
 
+                let rlp = if rlp_blocks {
+                    let rlp = match block_provider.debug_get_raw_block(next_block.into()).await {
+                        Ok(rlp) => rlp,
+                        Err(e) => {
+                            tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}: {e}");
+                            let _ = error_sender
+                                .send(eyre::eyre!("Failed to fetch raw block {next_block}: {e}"));
+                            break;
+                        }
+                    };
+                    Some(rlp)
+                } else {
+                    None
+                };
+
                 let head_block_hash = block.header.hash;
                 let safe_block_hash = block_provider
                     .get_block_by_number(block.header.number.saturating_sub(32).into());
@@ -207,7 +223,7 @@ impl Command {
 
                 next_block += 1;
                 if let Err(e) = sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
+                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash, rlp))
                     .await
                 {
                     tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
@@ -221,7 +237,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((block, head, safe, finalized)) = {
+        while let Some((block, head, safe, finalized, rlp)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -240,11 +256,11 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
+            let (version, params) =
+                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
             let start = Instant::now();
-            let reth_data = use_reth_namespace.then_some(execution_data);
             let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
+                call_new_payload_with_reth(&auth_provider, version, params).await?;
 
             let np_latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
@@ -263,13 +279,7 @@ impl Command {
             };
 
             let fcu_start = Instant::now();
-            call_forkchoice_updated_with_reth(
-                &auth_provider,
-                version,
-                forkchoice_state,
-                use_reth_namespace,
-            )
-            .await?;
+            call_forkchoice_updated_with_reth(&auth_provider, version, forkchoice_state).await?;
             let fcu_latency = fcu_start.elapsed();
 
             let total_latency = if server_timings.is_some() {

@@ -11,7 +11,7 @@ use reth_net_banlist::{BanList, IpFilter};
 use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
-use crate::{BackoffKind, ReputationChangeWeights};
+use crate::{peers::PersistedPeerInfo, BackoffKind, ReputationChangeWeights};
 
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
@@ -147,6 +147,9 @@ pub struct PeersConfig {
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
+    /// Peers restored from a previous run, containing richer metadata than basic nodes.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub persisted_peers: Vec<PersistedPeerInfo>,
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
@@ -193,6 +196,7 @@ impl Default for PeersConfig {
             trusted_nodes_only: false,
             trusted_nodes_resolution_interval: Duration::from_secs(60 * 60),
             basic_nodes: Default::default(),
+            persisted_peers: Default::default(),
             max_backoff_count: 5,
             incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
             ip_filter: IpFilter::default(),
@@ -298,20 +302,39 @@ impl PeersConfig {
         self.connection_info.max_outbound + self.connection_info.max_inbound
     }
 
-    /// Read from file nodes available at launch. Ignored if None.
+    /// Read persisted peers from file at launch.
+    ///
+    /// Supports both the current [`PersistedPeerInfo`] format and the legacy `Vec<NodeRecord>`
+    /// format. Legacy entries are converted to [`PersistedPeerInfo`] with default metadata.
+    ///
+    /// Ignored if `optional_file` is `None` or the file does not exist.
+    #[cfg(feature = "serde")]
     pub fn with_basic_nodes_from_file(
-        self,
+        mut self,
         optional_file: Option<impl AsRef<Path>>,
     ) -> Result<Self, io::Error> {
         let Some(file_path) = optional_file else { return Ok(self) };
-        let reader = match std::fs::File::open(file_path.as_ref()) {
-            Ok(file) => io::BufReader::new(file),
+        let raw = match std::fs::read_to_string(file_path.as_ref()) {
+            Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
-            Err(e) => Err(e)?,
+            Err(e) => return Err(e),
         };
+
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
-        let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
-        Ok(self.with_basic_nodes(nodes))
+
+        // Try the new format first, fall back to legacy Vec<NodeRecord>
+        let peers: Vec<PersistedPeerInfo> = serde_json::from_str(&raw)
+            .or_else(|_| {
+                let nodes: HashSet<NodeRecord> = serde_json::from_str(&raw)?;
+                Ok::<_, serde_json::Error>(
+                    nodes.into_iter().map(PersistedPeerInfo::from_node_record).collect(),
+                )
+            })
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        info!(target: "net::peers", count = peers.len(), "Loaded persisted peers");
+        self.persisted_peers = peers;
+        Ok(self)
     }
 
     /// Configure the IP filter for restricting network connections to specific IP ranges.

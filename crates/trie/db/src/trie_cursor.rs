@@ -295,8 +295,8 @@ where
             if self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| *e.nibbles() == nibbles)
-                .is_some()
+                .as_ref()
+                .is_some_and(|e| *e.nibbles() == nibbles)
             {
                 self.cursor.delete_current()?;
             }

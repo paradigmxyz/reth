@@ -213,7 +213,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     dirty_addresses.remove(acc);
                 }
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()
@@ -221,7 +221,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // can fetch all dirty accounts at once
                 let accs_to_reload = std::mem::take(&mut dirty_addresses);
                 async move {
-                    let res = load_accounts(c, at, accs_to_reload.into_iter());
+                    let res = load_accounts(c, at, accs_to_reload);
                     let _ = tx.send(res);
                 }
                 .boxed()
@@ -533,12 +533,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                 });
 
                             let AllPoolTransactions { pending, queued } = pool.all_transactions();
-                            for tx in pending
-                                .into_iter()
-                                .chain(queued)
-                                .filter(|tx| tx.transaction.is_eip4844())
+                            for tx in pending.into_iter().chain(queued).filter(|tx| tx.is_eip4844())
                             {
-                                let tx_hash = *tx.transaction.hash();
+                                let tx_hash = *tx.hash();
 
                                 // Fetch sidecar from the pool
                                 let Ok(Some(sidecar)) = pool.get_blob(tx_hash) else {
