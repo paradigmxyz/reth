@@ -1,7 +1,7 @@
 //! Command that runs pruning.
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
@@ -30,7 +30,7 @@ pub struct PruneCommand<C: ChainSpecParser> {
     metrics: MetricArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
@@ -54,34 +54,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 },
                 {
                     let spec = provider_factory.chain_spec();
-                    ChainSpecInfo {
-                        name: spec.chain().to_string(),
-                        forks: EthereumHardfork::VARIANTS
-                            .iter()
-                            .map(|fork| {
-                                use reth_chainspec::ForkCondition;
-                                use reth_node_metrics::chain::ForkActivation;
-                                let condition = spec.ethereum_fork_activation(*fork);
-                                let (condition_type, activation_value) = match condition {
-                                    ForkCondition::Block(block) => {
-                                        ("block".to_string(), Some(block))
-                                    }
-                                    ForkCondition::TTD { activation_block_number, .. } => {
-                                        ("ttd".to_string(), Some(activation_block_number))
-                                    }
-                                    ForkCondition::Timestamp(ts) => {
-                                        ("timestamp".to_string(), Some(ts))
-                                    }
-                                    ForkCondition::Never => ("never".to_string(), None),
-                                };
-                                ForkActivation {
-                                    name: fork.to_string(),
-                                    condition_type,
-                                    activation_value,
-                                }
-                            })
-                            .collect(),
-                    }
+                    ChainSpecInfo::from_hardforks(spec.chain().to_string(), &*spec)
                 },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),

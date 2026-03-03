@@ -10,7 +10,7 @@ use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
 };
-use reth_chainspec::{ChainSpecProvider, EthereumHardfork, EthereumHardforks, ForkCondition};
+use reth_chainspec::{ChainSpecProvider, ForkCondition, Hardforks};
 use reth_errors::RethResult;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
@@ -189,13 +189,13 @@ where
 impl<Provider, EvmConfig> RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
-    Provider::ChainSpec: EthereumHardforks,
+    Provider::ChainSpec: Hardforks,
     EvmConfig: Send + Sync + 'static,
 {
     /// Returns the fork schedule from the chain spec with active status.
     ///
-    /// Iterates all known [`EthereumHardfork`] variants so that forks not configured
-    /// in the chain spec are included as `"never"`.
+    /// Iterates all forks via [`Hardforks::forks_iter`], capturing both standard Ethereum
+    /// hardforks and any custom chain forks.
     pub fn fork_schedule(&self) -> EthResult<ForkSchedule> {
         let chain_spec = self.provider().chain_spec();
         let chain_info = self.provider().chain_info()?;
@@ -208,10 +208,9 @@ where
 
         let mut latest_active = None;
 
-        let schedule: Vec<ForkInfo> = EthereumHardfork::VARIANTS
-            .iter()
-            .map(|fork| {
-                let condition = chain_spec.ethereum_fork_activation(*fork);
+        let schedule: Vec<ForkInfo> = chain_spec
+            .forks_iter()
+            .map(|(fork, condition)| {
                 let (condition_type, activation_value, active) = match condition {
                     ForkCondition::Block(block) => {
                         ("block", Some(U256::from(block)), best_block >= block)
@@ -257,7 +256,7 @@ where
         + PersistedBlockSubscriptions
         + ChainSpecProvider
         + 'static,
-    Provider::ChainSpec: EthereumHardforks,
+    Provider::ChainSpec: Hardforks,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`

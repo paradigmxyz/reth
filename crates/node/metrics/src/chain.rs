@@ -1,5 +1,6 @@
 //! This exposes reth's chain information over prometheus.
 use metrics::{describe_gauge, gauge};
+use reth_ethereum_forks::{ForkCondition, Hardforks};
 
 /// Fork activation information for metrics.
 #[derive(Debug, Clone)]
@@ -22,6 +23,32 @@ pub struct ChainSpecInfo {
 }
 
 impl ChainSpecInfo {
+    /// Builds [`ChainSpecInfo`] from any [`Hardforks`] implementation, capturing all configured
+    /// forks including custom ones.
+    pub fn from_hardforks(name: String, hardforks: &impl Hardforks) -> Self {
+        Self {
+            name,
+            forks: hardforks
+                .forks_iter()
+                .map(|(fork, condition)| {
+                    let (condition_type, activation_value) = match condition {
+                        ForkCondition::Block(block) => ("block".to_string(), Some(block)),
+                        ForkCondition::TTD { activation_block_number, .. } => {
+                            ("ttd".to_string(), Some(activation_block_number))
+                        }
+                        ForkCondition::Timestamp(ts) => ("timestamp".to_string(), Some(ts)),
+                        ForkCondition::Never => ("never".to_string(), None),
+                    };
+                    ForkActivation {
+                        name: fork.name().to_string(),
+                        condition_type,
+                        activation_value,
+                    }
+                })
+                .collect(),
+        }
+    }
+
     /// This exposes reth's chain information over prometheus.
     pub fn register_chain_spec_metrics(&self) {
         let labels: [(&str, String); 1] = [("name", self.name.clone())];

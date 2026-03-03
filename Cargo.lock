@@ -9435,6 +9435,7 @@ dependencies = [
  "pprof_util",
  "procfs",
  "reqwest",
+ "reth-ethereum-forks",
  "reth-fs-util",
  "reth-metrics",
  "reth-tasks",

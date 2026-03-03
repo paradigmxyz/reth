@@ -8,6 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+reth-ethereum-forks.workspace = true
 reth-metrics.workspace = true
 reth-tasks.workspace = true
 
