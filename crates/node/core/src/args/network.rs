@@ -344,9 +344,7 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter)
-            .with_enforce_enr_fork_id(
-                self.enforce_enr_fork_id || !chain_spec.is_ethereum(),
-            );
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id || !chain_spec.is_ethereum());
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
