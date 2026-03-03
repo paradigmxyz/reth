@@ -420,7 +420,7 @@ mod tests {
                     .into_iter()
                     .map(|(byte, value)| (B256::repeat_byte(byte), value))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })
@@ -438,7 +438,7 @@ mod tests {
                             (B256::repeat_byte(byte), effective_value)
                         })
                         .collect();
-                    result.sort_by(|a, b| a.0.cmp(&b.0));
+                    result.sort_by_key(|a| a.0);
                     result.dedup_by(|a, b| a.0 == b.0);
                     result
                 },
