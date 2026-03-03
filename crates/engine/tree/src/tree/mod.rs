@@ -1499,29 +1499,16 @@ where
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
                                 let pending_persistence = self.persistence_state.rx.take();
-                                let validator = &self.payload_validator;
 
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
-                                if let Some((rx, start_time, _action)) = pending_persistence {
-                                    tokio::task::spawn_blocking(move || {
-                                        let start = Instant::now();
-                                        let result = rx.recv().ok();
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                }
+                                debug!(target: "engine::tree", "Waiting for persistence and caches before processing reth_newPayload");
 
-                                let cache_wait = validator.wait_for_caches();
-                                let persistence_result = persistence_rx.try_recv().ok();
+                                let cache_wait = self.payload_validator.wait_for_caches();
 
                                 let persistence_wait =
-                                    if let Some((result, start_time, wait_duration)) =
-                                        persistence_result
-                                    {
+                                    if let Some((rx, start_time, _action)) = pending_persistence {
+                                        let start = Instant::now();
+                                        let result = rx.recv().ok();
+                                        let wait_duration = start.elapsed();
                                         let _ = self
                                             .on_persistence_complete(result.flatten(), start_time);
                                         Some(wait_duration)
