@@ -20,6 +20,7 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
+    time::Instant,
 };
 use tracing::*;
 
@@ -161,6 +162,7 @@ where
         } else {
             // Aggregate all changesets and make list of storages that have been
             // changed.
+            let start = Instant::now();
             let lists = provider.changed_storages_with_range(from_block..=to_block)?;
             let num_addresses = lists.len();
             let num_slots: usize = lists.values().map(|keys| keys.len()).sum();
@@ -168,21 +170,32 @@ where
                 target: "sync::stages::hashing_storage",
                 num_addresses,
                 num_slots,
+                elapsed = ?start.elapsed(),
                 "Collected changed storage slots"
             );
 
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
+            let start = Instant::now();
             let storages = provider.plain_state_storages(lists)?;
             info!(
                 target: "sync::stages::hashing_storage",
                 num_addresses,
                 num_slots,
-                "Fetched plain state storage values, inserting hashes"
+                elapsed = ?start.elapsed(),
+                "Fetched plain state storage values"
             );
 
+            let start = Instant::now();
             provider.insert_storage_for_hashing(storages)?;
+            info!(
+                target: "sync::stages::hashing_storage",
+                num_addresses,
+                num_slots,
+                elapsed = ?start.elapsed(),
+                "Inserted storage hashes"
+            );
         }
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
