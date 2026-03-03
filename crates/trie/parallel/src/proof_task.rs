@@ -1238,28 +1238,6 @@ fn dispatch_v2_storage_proofs(
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
 
-    // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root.
-    for target in account_targets {
-        let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) {
-            continue
-        }
-
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, vec![ProofV2Target::new(B256::ZERO)]);
-
-        storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
-
-        storage_proof_receivers.insert(hashed_address, result_rx);
-    }
-
     Ok(storage_proof_receivers)
 }
 
