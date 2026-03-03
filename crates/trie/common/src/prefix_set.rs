@@ -2,6 +2,10 @@ use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
 
+/// Maximum number of keys for the `Small` variant (linear scan / binary search).
+/// Sets larger than this threshold use the path-compressed bitmap trie.
+const SMALL_SET_THRESHOLD: usize = 16;
+
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]
 pub struct TriePrefixSetsMut {
@@ -77,11 +81,14 @@ pub struct TriePrefixSets {
 ///
 /// Sorting and deduplication do not happen during insertion or membership checks on this mutable
 /// structure. Instead, keys are sorted and deduplicated when converting into the immutable
-/// `PrefixSet` via `freeze()`. The immutable `PrefixSet` provides `contains` backed by a
-/// path-compressed bitmap trie for O(L) lookups where L is the prefix length.
+/// `PrefixSet` via `freeze()`.
 ///
-/// This guarantees that a `PrefixSet` constructed from a `PrefixSetMut` is always sorted and
-/// deduplicated.
+/// The frozen `PrefixSet` uses a size-specialized strategy:
+/// - 0 keys: empty set (instant false)
+/// - 1 key: inline single-key comparison (no allocation)
+/// - 2–16 keys: sorted slice with binary search
+/// - 17+ keys: path-compressed bitmap trie with O(L) lookups
+///
 /// # Examples
 ///
 /// ```
@@ -162,19 +169,44 @@ impl PrefixSetMut {
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
         if self.all {
-            PrefixSet { all: true, keys: Arc::new(Vec::new()), trie: CompactTrie::default() }
-        } else {
-            self.keys.sort_unstable();
-            self.keys.dedup();
-            self.keys.shrink_to_fit();
-            let trie = if self.keys.is_empty() {
-                CompactTrie::default()
-            } else {
-                CompactTrie::build(&self.keys)
-            };
-            PrefixSet { all: false, keys: Arc::new(self.keys), trie }
+            return PrefixSet { inner: PrefixSetInner::All };
         }
+
+        self.keys.sort_unstable();
+        self.keys.dedup();
+
+        let inner = match self.keys.len() {
+            0 => PrefixSetInner::Empty,
+            1 => PrefixSetInner::One(self.keys.pop().unwrap()),
+            n if n <= SMALL_SET_THRESHOLD => {
+                self.keys.shrink_to_fit();
+                PrefixSetInner::Small(Arc::new(self.keys))
+            }
+            _ => {
+                self.keys.shrink_to_fit();
+                let trie = CompactTrie::build(&self.keys);
+                PrefixSetInner::Trie { keys: Arc::new(self.keys), trie }
+            }
+        };
+
+        PrefixSet { inner }
     }
+}
+
+/// Size-specialized representation of an immutable prefix set.
+#[derive(Debug, Clone)]
+enum PrefixSetInner {
+    /// No keys.
+    Empty,
+    /// Every prefix matches (the `all` flag).
+    All,
+    /// Exactly one key — direct inline comparison, no heap allocation.
+    One(Nibbles),
+    /// 2–16 keys — sorted slice with binary search.
+    Small(Arc<Vec<Nibbles>>),
+    /// 17+ keys — path-compressed bitmap trie for O(L) lookups,
+    /// with sorted keys retained for iteration.
+    Trie { keys: Arc<Vec<Nibbles>>, trie: CompactTrie },
 }
 
 /// A node in the path-compressed bitmap trie.
@@ -230,6 +262,9 @@ impl CompactTrie {
     ///
     /// `node_idx` is a pre-allocated slot in `self.nodes`.
     /// `keys` is a sorted slice of keys that share the same prefix up to `depth`.
+    ///
+    /// Uses fixed-size stack arrays (max 16 children per nibble) to avoid heap
+    /// allocation during the recursive build.
     fn build_node(&mut self, node_idx: usize, keys: &[Nibbles], depth: usize) {
         // Compute the common prefix (skip segment) shared by all keys beyond `depth`
         let skip_len = common_prefix_len(keys, depth);
@@ -245,9 +280,12 @@ impl CompactTrie {
 
         let new_depth = depth + skip_len;
 
-        // Group keys by their nibble at `new_depth` to determine children
+        // Group keys by their nibble at `new_depth` using stack-allocated arrays
+        // (max 16 children for nibbles 0-15, zero heap allocation)
         let mut bitmap = 0u16;
-        let mut groups: Vec<(usize, usize)> = Vec::new();
+        let mut group_starts = [0u32; 16];
+        let mut group_ends = [0u32; 16];
+
         let mut i = 0;
         while i < keys.len() {
             if keys[i].len() <= new_depth {
@@ -255,30 +293,37 @@ impl CompactTrie {
                 i += 1;
                 continue;
             }
-            let nibble = keys[i].get_unchecked(new_depth);
+            let nibble = keys[i].get_unchecked(new_depth) as usize;
             bitmap |= 1u16 << nibble;
-            let start = i;
+            group_starts[nibble] = i as u32;
             while i < keys.len() &&
                 keys[i].len() > new_depth &&
-                keys[i].get_unchecked(new_depth) == nibble
+                keys[i].get_unchecked(new_depth) as usize == nibble
             {
                 i += 1;
             }
-            groups.push((start, i));
+            group_ends[nibble] = i as u32;
         }
 
         // Reserve contiguous child slots so siblings are adjacent in memory
+        let num_children = bitmap.count_ones() as usize;
         let child_base = self.nodes.len() as u32;
-        let num_children = groups.len();
         self.nodes.resize_with(self.nodes.len() + num_children, TrieNode::default);
 
         // Write this node's data
         self.nodes[node_idx] =
             TrieNode { bitmap, skip_len: skip_len as u16, child_base, skip_offset };
 
-        // Recurse into each child group
-        for (child_rank, &(start, end)) in groups.iter().enumerate() {
+        // Recurse into each child group in nibble order (iterate set bits)
+        let mut child_rank = 0;
+        let mut remaining = bitmap;
+        while remaining != 0 {
+            let nibble = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1; // clear lowest set bit
+            let start = group_starts[nibble] as usize;
+            let end = group_ends[nibble] as usize;
             self.build_node(child_base as usize + child_rank, &keys[start..end], new_depth + 1);
+            child_rank += 1;
         }
     }
 
@@ -357,59 +402,77 @@ fn common_prefix_len(keys: &[Nibbles], start: usize) -> usize {
     len
 }
 
-/// A sorted prefix set backed by a path-compressed bitmap trie for fast lookups.
+/// A sorted prefix set with size-specialized storage for fast lookups.
 ///
-/// Constructed via [`PrefixSetMut::freeze`]. The `contains` method uses a succinct
-/// trie with 16-bit bitmaps and popcount-based navigation for O(L) queries where
-/// L is the prefix length, independent of the number of keys in the set.
-#[derive(Debug, Default, Clone)]
+/// Constructed via [`PrefixSetMut::freeze`]. Uses an enum-based strategy:
+/// - **Empty/All**: instant return
+/// - **One**: single inline key, direct prefix comparison
+/// - **Small** (2–16 keys): binary search on sorted slice
+/// - **Trie** (17+ keys): path-compressed bitmap trie, O(L) per query
+#[derive(Debug, Clone)]
 pub struct PrefixSet {
-    /// Flag indicating that any entry should be considered changed.
-    all: bool,
-    keys: Arc<Vec<Nibbles>>,
-    trie: CompactTrie,
+    inner: PrefixSetInner,
+}
+
+impl Default for PrefixSet {
+    fn default() -> Self {
+        Self { inner: PrefixSetInner::Empty }
+    }
 }
 
 impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix.
-    ///
-    /// Uses a path-compressed bitmap trie for O(L) lookups where L is the prefix
-    /// length, with O(1) per trie level via popcount on 16-bit child bitmaps.
     #[inline]
     pub fn contains(&self, prefix: &Nibbles) -> bool {
-        if self.all {
-            return true;
+        match &self.inner {
+            PrefixSetInner::Empty => false,
+            PrefixSetInner::All => true,
+            PrefixSetInner::One(key) => prefix.is_empty() || key.starts_with(prefix),
+            PrefixSetInner::Small(keys) => {
+                if prefix.is_empty() {
+                    return true;
+                }
+                // Binary search: all keys with a given prefix form a contiguous sorted range,
+                // so the first key >= prefix either starts with it or nothing does.
+                let idx = keys.partition_point(|k| k < prefix);
+                idx < keys.len() && keys[idx].starts_with(prefix)
+            }
+            PrefixSetInner::Trie { trie, .. } => {
+                if prefix.is_empty() {
+                    return true;
+                }
+                trie.contains(prefix)
+            }
         }
-
-        if self.trie.nodes.is_empty() {
-            return false;
-        }
-
-        if prefix.is_empty() {
-            return true; // non-empty set, every key starts with the empty prefix
-        }
-
-        self.trie.contains(prefix)
     }
 
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
-        self.keys.iter()
+        self.keys_slice().iter()
     }
 
     /// Returns true if every entry should be considered changed.
     pub const fn all(&self) -> bool {
-        self.all
+        matches!(self.inner, PrefixSetInner::All)
     }
 
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
-        self.keys.len()
+        self.keys_slice().len()
     }
 
     /// Returns `true` if the set is empty and `all` flag is not set.
     pub fn is_empty(&self) -> bool {
-        !self.all && self.keys.is_empty()
+        matches!(self.inner, PrefixSetInner::Empty)
+    }
+
+    /// Returns a slice of all keys in sorted order.
+    fn keys_slice(&self) -> &[Nibbles] {
+        match &self.inner {
+            PrefixSetInner::Empty | PrefixSetInner::All => &[],
+            PrefixSetInner::One(key) => core::slice::from_ref(key),
+            PrefixSetInner::Small(keys) | PrefixSetInner::Trie { keys, .. } => keys,
+        }
     }
 }
 
@@ -455,28 +518,36 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.len(), 3); // 3 after dedup
+                                         // With Small variant: keys are in Arc<Vec> with shrunk capacity
+        if let PrefixSetInner::Small(ref keys) = prefix_set.inner {
+            assert_eq!(keys.capacity(), 3);
+        } else {
+            panic!("expected Small variant for 3 keys");
+        }
     }
 
     #[test]
     fn test_freeze_shrinks_existing_capacity() {
-        // do the above test but with preallocated capacity
         let mut prefix_set_mut = PrefixSetMut::with_capacity(101);
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 4]));
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
-        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity is 101 (before deduplication)
+        assert_eq!(prefix_set_mut.keys.len(), 4);
+        assert_eq!(prefix_set_mut.keys.capacity(), 101);
 
         let prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.len(), 3);
+        if let PrefixSetInner::Small(ref keys) = prefix_set.inner {
+            assert_eq!(keys.capacity(), 3);
+        } else {
+            panic!("expected Small variant for 3 keys");
+        }
     }
 
     #[test]
@@ -492,16 +563,12 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([0xa, 0xb, 0xc]));
         let prefix_set = prefix_set_mut.freeze();
 
-        // Exact match
+        assert!(matches!(prefix_set.inner, PrefixSetInner::One(_)));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc])));
-        // Prefix of a key
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa])));
-        // Empty prefix matches any non-empty set
         assert!(prefix_set.contains(&Nibbles::default()));
-        // Longer than any key
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xd])));
-        // Divergent prefix
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xc])));
     }
 
@@ -512,15 +579,11 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 5, 6]));
         let prefix_set = prefix_set_mut.freeze();
 
-        // Shared prefix
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
-        // Diverges within shared prefix
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 3])));
-        // Each branch
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 5])));
-        // Wrong branch
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 6])));
     }
 
@@ -531,15 +594,11 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3, 4]));
         let prefix_set = prefix_set_mut.freeze();
 
-        // Short key is a prefix of long key
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
-        // The longer key
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3, 4])));
-        // Beyond the short key, but not matching long key
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 5])));
-        // Beyond the long key
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3, 4, 5])));
     }
 
@@ -549,6 +608,7 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([0xa, 0xb, 0xc, 0xd]));
         let prefix_set = prefix_set_mut.freeze();
 
+        assert!(matches!(prefix_set.inner, PrefixSetInner::One(_)));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xd])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc, 0xe])));
@@ -560,6 +620,7 @@ mod tests {
         let prefix_set_mut = PrefixSetMut::default();
         let prefix_set = prefix_set_mut.freeze();
 
+        assert!(matches!(prefix_set.inner, PrefixSetInner::Empty));
         assert!(!prefix_set.contains(&Nibbles::default()));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([1])));
     }
@@ -568,6 +629,7 @@ mod tests {
     fn test_all_flag() {
         let prefix_set = PrefixSetMut::all().freeze();
 
+        assert!(matches!(prefix_set.inner, PrefixSetInner::All));
         assert!(prefix_set.contains(&Nibbles::default()));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2, 3])));
         assert!(prefix_set.all());
@@ -576,7 +638,6 @@ mod tests {
     #[test]
     fn test_many_keys_all_nibbles() {
         let mut prefix_set_mut = PrefixSetMut::default();
-        // Insert keys starting with every possible nibble
         for n in 0u8..16 {
             prefix_set_mut.insert(Nibbles::from_nibbles([n, 0, 0]));
         }
@@ -600,5 +661,93 @@ mod tests {
         assert_eq!(keys.len(), 3);
         assert!(keys[0] < keys[1]);
         assert!(keys[1] < keys[2]);
+    }
+
+    #[test]
+    fn test_variant_selection() {
+        // 0 keys → Empty
+        let ps = PrefixSetMut::default().freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::Empty));
+
+        // 1 key → One
+        let mut psm = PrefixSetMut::default();
+        psm.insert(Nibbles::from_nibbles([1]));
+        let ps = psm.freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::One(_)));
+
+        // 2 keys → Small
+        let mut psm = PrefixSetMut::default();
+        psm.insert(Nibbles::from_nibbles([1]));
+        psm.insert(Nibbles::from_nibbles([2]));
+        let ps = psm.freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::Small(_)));
+
+        // SMALL_SET_THRESHOLD keys → Small
+        let mut psm = PrefixSetMut::default();
+        for i in 0..SMALL_SET_THRESHOLD {
+            psm.insert(Nibbles::from_nibbles([i as u8 % 16, i as u8 / 16, 0]));
+        }
+        let ps = psm.freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::Small(_)));
+
+        // SMALL_SET_THRESHOLD + 1 keys → Trie
+        let mut psm = PrefixSetMut::default();
+        for i in 0..=SMALL_SET_THRESHOLD {
+            psm.insert(Nibbles::from_nibbles([i as u8 % 16, i as u8 / 16, 0]));
+        }
+        let ps = psm.freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::Trie { .. }));
+    }
+
+    #[test]
+    fn test_trie_variant_contains() {
+        // Force Trie variant with > SMALL_SET_THRESHOLD keys using two-nibble encoding
+        let mut psm = PrefixSetMut::default();
+        let mut inserted = Vec::new();
+        for i in 0..=SMALL_SET_THRESHOLD {
+            let lo = i as u8 % 16;
+            let hi = i as u8 / 16;
+            psm.insert(Nibbles::from_nibbles([lo, hi, lo]));
+            inserted.push((lo, hi));
+        }
+        let ps = psm.freeze();
+        assert!(matches!(ps.inner, PrefixSetInner::Trie { .. }));
+
+        for &(lo, hi) in &inserted {
+            assert!(ps.contains(&Nibbles::from_nibbles_unchecked([lo])));
+            assert!(ps.contains(&Nibbles::from_nibbles_unchecked([lo, hi])));
+            assert!(ps.contains(&Nibbles::from_nibbles_unchecked([lo, hi, lo])));
+        }
+        // Non-existent
+        assert!(!ps.contains(&Nibbles::from_nibbles_unchecked([0, 0, 1])));
+    }
+
+    #[test]
+    fn test_one_key_iter() {
+        let mut psm = PrefixSetMut::default();
+        psm.insert(Nibbles::from_nibbles([1, 2, 3]));
+        let ps = psm.freeze();
+
+        let keys: Vec<_> = ps.iter().collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(*keys[0], Nibbles::from_nibbles([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_clone_and_iterate() {
+        let mut psm = PrefixSetMut::default();
+        psm.insert(Nibbles::from_nibbles([1, 2]));
+        psm.insert(Nibbles::from_nibbles([3, 4]));
+        let ps = psm.freeze();
+        let ps2 = ps.clone();
+
+        // Both should iterate identically
+        let k1: Vec<_> = ps.iter().collect();
+        let k2: Vec<_> = ps2.iter().collect();
+        assert_eq!(k1, k2);
+
+        // Both should answer contains identically
+        assert!(ps2.contains(&Nibbles::from_nibbles_unchecked([1])));
+        assert!(!ps2.contains(&Nibbles::from_nibbles_unchecked([2])));
     }
 }
