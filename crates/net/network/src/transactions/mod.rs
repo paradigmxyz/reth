@@ -849,10 +849,9 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_pending_transactions(&mut self, hashes: Vec<TxHash>) {
-        // Nothing to propagate while initially syncing
-        if self.network.is_initially_syncing() {
-            return
-        }
+        // We intentionally do not gate this on initial sync.
+        // During initial sync we skip importing tx announcements from peers in
+        // `on_new_pooled_transaction_hashes`, so transactions reaching this path are local.
         if self.network.tx_gossip_disabled() {
             return
         }
@@ -1295,7 +1294,6 @@ where
                 let has_blob_txs = msg.has_eip4844();
 
                 let non_blob_txs = msg
-                    .0
                     .into_iter()
                     .map(N::PooledTransaction::try_from)
                     .filter_map(Result::ok)
@@ -1344,9 +1342,23 @@ where
             return
         }
 
+        let mut transactions = transactions.0;
+
+        // Truncate to remaining capacity early to bound work on all subsequent processing.
+        // Well-behaved peers follow the 4096 soft limit, so oversized payloads are likely
+        // malicious and we avoid wasting CPU on them.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            let skipped = transactions.len() - capacity;
+            transactions.truncate(capacity);
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(skipped as u64);
+            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        }
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let client_version = peer.client_version.clone();
-        let mut transactions = transactions.0;
 
         let start = Instant::now();
 
@@ -1365,20 +1377,11 @@ where
             }
         }
 
-        // 1. filter out txns already inserted into pool
-        let txns_count_pre_pool_filter = transactions.len();
-        self.pool.retain_unknown(&mut transactions);
-        if txns_count_pre_pool_filter > transactions.len() {
-            let already_known_txns_count = txns_count_pre_pool_filter - transactions.len();
-            self.metrics
-                .occurrences_transactions_already_in_pool
-                .increment(already_known_txns_count as u64);
-        }
-
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // Remove known and invalid transactions
+        // 1. Remove known, already-tracked, and invalid transactions first since these are
+        // cheap in-memory checks against local maps
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
                 entry.get_mut().insert(peer_id);
@@ -1397,16 +1400,14 @@ where
             true
         });
 
-        // Truncate to remaining capacity before recovery to avoid wasting CPU on transactions
-        // that won't be imported anyway.
-        let capacity = self.remaining_pool_import_capacity();
-        if transactions.len() > capacity {
-            let skipped = transactions.len() - capacity;
-            transactions.truncate(capacity);
+        // 2. filter out txns already inserted into pool
+        let txns_count_pre_pool_filter = transactions.len();
+        self.pool.retain_unknown(&mut transactions);
+        if txns_count_pre_pool_filter > transactions.len() {
+            let already_known_txns_count = txns_count_pre_pool_filter - transactions.len();
             self.metrics
-                .skipped_transactions_pending_pool_imports_at_capacity
-                .increment(skipped as u64);
-            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+                .occurrences_transactions_already_in_pool
+                .increment(already_known_txns_count as u64);
         }
 
         let txs_len = transactions.len();
@@ -2924,6 +2925,34 @@ mod tests {
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
         assert!(propagated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_propagate_pending_txs_while_initially_syncing() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) = new_tx_manager().await;
+        let peer_id = PeerId::random();
+
+        // Keep the node in initial sync mode.
+        network.handle().update_sync_state(SyncState::Syncing);
+        assert!(NetworkInfo::is_initially_syncing(&network.handle()));
+
+        // Add a peer so propagation has a destination.
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer);
+
+        let tx = MockTransaction::eip1559();
+        tx_manager
+            .pool
+            .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx.clone())
+            .await
+            .expect("transaction should be accepted into the pool");
+
+        tx_manager.on_new_pending_transactions(vec![*tx.get_hash()]);
+
+        let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
+        assert!(peer.seen_transactions.contains(tx.get_hash()));
     }
 
     #[tokio::test]

@@ -1153,6 +1153,10 @@ impl SparseTrie for ParallelSparseTrie {
         upper_count + lower_count
     }
 
+    fn memory_size(&self) -> usize {
+        self.memory_size()
+    }
+
     fn prune(&mut self, max_depth: usize) -> usize {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
@@ -3820,7 +3824,7 @@ mod tests {
         let mut stack = Vec::new();
         let mut state_mask = TrieMask::default();
 
-        for (&idx, hash) in children_indices.iter().zip(child_hashes.into_iter()) {
+        for (&idx, hash) in children_indices.iter().zip(child_hashes) {
             state_mask.set_bit(idx);
             stack.push(hash);
         }

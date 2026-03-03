@@ -461,8 +461,6 @@ impl EngineArgs {
                 self.always_process_payload_attributes_on_canonical_head,
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
-            .with_storage_worker_count_opt(self.storage_worker_count)
-            .with_account_worker_count_opt(self.account_worker_count)
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
