@@ -68,8 +68,17 @@ exclude_crates=(
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
   reth-payload-util # reth-transaction-pool
+  reth-trie # reth-tasks
+  reth-trie-db # reth-trie
   reth-trie-parallel # tokio
   reth-trie-sparse-parallel # rayon
+  reth-chain-state # reth-trie
+  reth-engine-primitives # reth-chain-state
+  reth-ethereum-engine-primitives # reth-engine-primitives
+  reth-exex-types # reth-chain-state
+  reth-node-types # reth-engine-primitives
+  reth-payload-builder-primitives # reth-node-types
+  reth-payload-primitives # reth-node-types
   reth-testing-utils
   reth-era-downloader # tokio
   reth-era-utils # tokio
