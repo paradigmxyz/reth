@@ -150,8 +150,7 @@ pub(crate) fn config_for_selections(
     preset: Option<SelectionPreset>,
     chain_spec: Option<&impl EthereumHardforks>,
 ) -> Config {
-    let selection_for =
-        |ty| selections.get(&ty).copied().unwrap_or(ComponentSelection::None);
+    let selection_for = |ty| selections.get(&ty).copied().unwrap_or(ComponentSelection::None);
 
     let tx_sel = selection_for(SnapshotComponentType::Transactions);
     let senders_sel = selection_for(SnapshotComponentType::TransactionSenders);
@@ -249,9 +248,7 @@ fn selection_to_prune_mode(
         ComponentSelection::Distance(d) => {
             Some(PruneMode::Distance(min_distance.map_or(d, |min| d.max(min))))
         }
-        ComponentSelection::None => {
-            Some(min_distance.map_or(PruneMode::Full, PruneMode::Distance))
-        }
+        ComponentSelection::None => Some(min_distance.map_or(PruneMode::Full, PruneMode::Distance)),
     }
 }
 

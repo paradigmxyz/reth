@@ -236,7 +236,6 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-
     /// Use resumable two-phase downloads (download to disk first, then extract).
     ///
     /// Archives are downloaded to a .part file with HTTP Range resume support
