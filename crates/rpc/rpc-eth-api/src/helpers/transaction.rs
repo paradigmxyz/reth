@@ -234,8 +234,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             // Try the RPC cache first
-            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await
-                && let Some(receipt) = cached.into_receipt(self.converter())
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                let Some(receipt) = cached.into_receipt(self.converter())
             {
                 return receipt.map_err(Self::Error::from).map(Some);
             }
