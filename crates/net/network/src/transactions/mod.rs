@@ -849,6 +849,9 @@ where
     /// transactions to a fraction of peers usually ensures that all nodes receive the transaction
     /// and won't need to request it.
     fn on_new_pending_transactions(&mut self, hashes: Vec<TxHash>) {
+        // We intentionally do not gate this on initial sync.
+        // During initial sync we skip importing tx announcements from peers in
+        // `on_new_pooled_transaction_hashes`, so transactions reaching this path are local.
         if self.network.tx_gossip_disabled() {
             return
         }
