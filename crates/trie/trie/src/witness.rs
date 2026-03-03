@@ -1,6 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     proof::Proof,
+    proof_v2,
     trie_cursor::TrieCursorFactory,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -9,12 +10,11 @@ use alloy_primitives::{
     map::{B256Map, HashMap},
     Bytes, B256, U256,
 };
-use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieAccount,
-    TrieNodeV2,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieNodeV2,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
 
@@ -203,14 +203,8 @@ where
             let storage_root =
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
                     storage_trie.root()
-                } else if sparse_trie.is_account_revealed(hashed_address) {
-                    if let Some(value) = sparse_trie.get_account_value(&hashed_address) {
-                        TrieAccount::decode(&mut &value[..])?.storage_root
-                    } else {
-                        EMPTY_ROOT_HASH
-                    }
                 } else {
-                    EMPTY_ROOT_HASH
+                    self.storage_root_from_cursor(hashed_address)?
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -275,6 +269,31 @@ where
             let bytes = Bytes::from(encoded.clone());
             self.witness.entry(keccak256(&bytes)).or_insert(bytes);
         }
+    }
+
+    /// Compute the storage root for an account by walking the storage trie from the cursor
+    /// factories. Records the root node in the witness.
+    fn storage_root_from_cursor(&mut self, hashed_address: B256) -> Result<B256, TrieWitnessError> {
+        let storage_trie_cursor = self
+            .trie_cursor_factory
+            .storage_trie_cursor(hashed_address)
+            .map_err(StateProofError::from)?;
+        let hashed_storage_cursor = self
+            .hashed_cursor_factory
+            .hashed_storage_cursor(hashed_address)
+            .map_err(StateProofError::from)?;
+        let mut calculator = proof_v2::StorageProofCalculator::new_storage(
+            storage_trie_cursor,
+            hashed_storage_cursor,
+        );
+        let root_node = calculator.storage_root_node(hashed_address)?;
+        let root_hash = calculator
+            .compute_root_hash(core::slice::from_ref(&root_node))?
+            .unwrap_or(EMPTY_ROOT_HASH);
+        drop(calculator);
+        let mut encoded = Vec::new();
+        self.record_witness_node(&root_node.node, &mut encoded);
+        Ok(root_hash)
     }
 
     /// Expand wiped storages into explicit zero-value entries for every existing slot in the
