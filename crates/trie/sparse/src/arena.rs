@@ -2242,20 +2242,7 @@ impl ArenaParallelSparseTrie {
         // stack.last().
         pop_and_propagate_stack(&mut self.upper_arena, stack);
 
-        // Extract the subtrie and recycle it. Before clearing, drain any update actions
-        // that were recorded during the subtrie's update_leaves (e.g. InsertRemoved from
-        // collapse_branch). Without this, those actions are lost when the subtrie is recycled.
-        let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(subtrie_idx).unwrap()
-        else {
-            unreachable!()
-        };
-        if let Some(actions) = self.buffers.update_actions.as_mut() {
-            let subtrie_actions =
-                subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
-            actions.append(subtrie_actions);
-        }
-        subtrie.clear();
-        self.cleared_subtries.push(*subtrie);
+        self.recycle_subtrie(subtrie_idx);
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
         let parent_branch = self.upper_arena[parent_idx].branch_mut();
@@ -2267,7 +2254,108 @@ impl ArenaParallelSparseTrie {
         // The branch structure changed (child removed), so any cached RLP is stale.
         parent_branch.state = parent_branch.state.to_dirty();
 
-        if parent_branch.state_mask.count_bits() == 1 {
+        self.maybe_collapse_or_remove_branch(stack);
+    }
+
+    /// Extracts a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx`, drains its
+    /// buffered update actions, clears it, and pushes it onto `cleared_subtries` for reuse.
+    fn recycle_subtrie(&mut self, idx: Index) {
+        let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(idx).unwrap() else {
+            unreachable!()
+        };
+        if let Some(actions) = self.buffers.update_actions.as_mut() {
+            let subtrie_actions =
+                subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
+            actions.append(subtrie_actions);
+        }
+        subtrie.clear();
+        self.cleared_subtries.push(*subtrie);
+    }
+
+    /// Handles cascading structural changes on the branch at `stack.last()` after a child
+    /// has been removed.
+    ///
+    /// Depending on the remaining child count:
+    /// - **0 children**: the branch becomes `EmptyRoot` (if root) or is removed from its parent,
+    ///   cascading upward.
+    /// - **1 child**: collapses the branch into its sole child, unless that child is a
+    ///   `TakenSubtrie` (deferred) or blinded. If the remaining child is an empty subtrie, it is
+    ///   also removed, reducing to the 0-children case.
+    /// - **2+ children**: nothing to do.
+    fn maybe_collapse_or_remove_branch(&mut self, stack: &mut Vec<ArenaStackEntry>) {
+        loop {
+            let branch_idx = stack.last().unwrap().index;
+
+            // Read-only phase: extract the count and remaining-child info we need before
+            // mutating. All values here are Copy so the borrow is released.
+            let count = {
+                let ArenaSparseNode::Branch(b) = &self.upper_arena[branch_idx] else {
+                    return;
+                };
+                b.state_mask.count_bits()
+            };
+
+            if count >= 2 {
+                return;
+            }
+
+            if count == 0 {
+                if branch_idx == self.root {
+                    self.upper_arena[branch_idx] = ArenaSparseNode::EmptyRoot;
+                    return;
+                }
+                // Remove the empty branch from its parent.
+                let branch_nibble = stack.last().unwrap().path.last().unwrap();
+                pop_and_propagate_stack(&mut self.upper_arena, stack);
+                self.upper_arena.remove(branch_idx);
+                let parent_idx = stack.last().unwrap().index;
+                let parent_branch = self.upper_arena[parent_idx].branch_mut();
+                let dense_idx = child_dense_index(parent_branch.state_mask, branch_nibble)
+                    .expect("child nibble not found in parent state_mask");
+                parent_branch.children.remove(dense_idx);
+                parent_branch.unset_child_bit(branch_nibble);
+                parent_branch.state = parent_branch.state.to_dirty();
+                continue; // re-check the parent
+            }
+
+            // count == 1 — determine what kind of child remains.
+            let (remaining_nibble, remaining_child_idx) = {
+                let b = self.upper_arena[branch_idx].branch_ref();
+                let nibble = b.state_mask.iter().next().unwrap();
+                let child_idx = match &b.children[0] {
+                    ArenaSparseNodeBranchChild::Revealed(idx) => Some(*idx),
+                    ArenaSparseNodeBranchChild::Blinded(_) => None,
+                };
+                (nibble, child_idx)
+            };
+
+            let Some(child_idx) = remaining_child_idx else {
+                debug_assert!(false, "single remaining child is blinded — should have been caught by check_subtrie_collapse_needs_proof");
+                return;
+            };
+
+            if matches!(self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie) {
+                // Subtrie hasn't been restored yet; collapse is deferred to the
+                // post-restore phase.
+                return;
+            }
+
+            // Check if the remaining child is an empty subtrie that should also be removed.
+            let is_empty_subtrie = matches!(
+                &self.upper_arena[child_idx],
+                ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+            );
+
+            if is_empty_subtrie {
+                self.recycle_subtrie(child_idx);
+                let branch = self.upper_arena[branch_idx].branch_mut();
+                branch.children.remove(0);
+                branch.unset_child_bit(remaining_nibble);
+                branch.state = branch.state.to_dirty();
+                continue; // now count == 0, will be handled next iteration
+            }
+
+            // Normal collapse: the remaining child is a Leaf, Branch, or non-empty Subtrie.
             collapse_branch(
                 &mut self.upper_arena,
                 stack,
@@ -2275,8 +2363,8 @@ impl ArenaParallelSparseTrie {
                 &mut self.buffers.update_actions,
             );
 
-            // After collapse, the remaining child (now at stack.last().index) may be a Subtrie
-            // whose path was shortened by the collapsed branch's prefix. Since
+            // After collapse, the remaining child (now at stack.last().index) may be a
+            // Subtrie whose path was shortened by the collapsed branch's prefix. Since
             // should_be_subtrie requires path_len == UPPER_TRIE_MAX_DEPTH and the collapse
             // made the path shorter, the subtrie is no longer eligible — unwrap it.
             let child_idx = stack.last().unwrap().index;
@@ -2300,6 +2388,7 @@ impl ArenaParallelSparseTrie {
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
             }
+            return;
         }
     }
 
@@ -3101,6 +3190,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             }
                         }
                         pop_and_propagate_stack(&mut self.upper_arena, &mut stack);
+
+                        // The parent branch (now at stack top) may have had a sibling
+                        // removed during inline processing while this subtrie was taken.
+                        // Handle any necessary collapse or removal.
+                        self.maybe_collapse_or_remove_branch(&mut stack);
                     }
                     _ => {
                         // Subtrie was already unwrapped by a prior collapse; dirty state
@@ -3420,7 +3514,7 @@ mod tests {
     use proptest_arbitrary_interop::arb;
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2000))]
+        #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
