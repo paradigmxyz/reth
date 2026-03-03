@@ -162,10 +162,26 @@ where
             // Aggregate all changesets and make list of storages that have been
             // changed.
             let lists = provider.changed_storages_with_range(from_block..=to_block)?;
+            let num_addresses = lists.len();
+            let num_slots: usize = lists.values().map(|keys| keys.len()).sum();
+            info!(
+                target: "sync::stages::hashing_storage",
+                num_addresses,
+                num_slots,
+                "Collected changed storage slots"
+            );
+
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
             let storages = provider.plain_state_storages(lists)?;
+            info!(
+                target: "sync::stages::hashing_storage",
+                num_addresses,
+                num_slots,
+                "Fetched plain state storage values, inserting hashes"
+            );
+
             provider.insert_storage_for_hashing(storages)?;
         }
 
