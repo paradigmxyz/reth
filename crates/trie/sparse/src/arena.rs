@@ -485,102 +485,6 @@ fn drain_stack(arena: &mut Arena<ArenaSparseNode>, stack: &mut Vec<ArenaStackEnt
     }
 }
 
-/// Walks the upper trie depth-first, restoring any [`ArenaSparseNode::TakenSubtrie`] nodes from
-/// `taken` and calling `on_subtrie` for every [`ArenaSparseNode::Subtrie`] visited (both
-/// restored taken subtries and non-taken ones). After each subtrie is processed, it is
-/// popped from the stack and dirty state is propagated to the parent.
-///
-/// `on_subtrie` receives the arena, the arena index of the subtrie, and `true` if it was
-/// just restored from `taken` (i.e. it was a `TakenSubtrie` in the arena).
-fn walk_upper_subtries(
-    arena: &mut Arena<ArenaSparseNode>,
-    root: Index,
-    stack: &mut Vec<ArenaStackEntry>,
-    taken: &mut Vec<(Index, Box<ArenaSparseSubtrie>)>,
-    mut on_subtrie: impl FnMut(&mut Arena<ArenaSparseNode>, Index),
-) {
-    taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
-
-    stack.clear();
-    push_stack(arena, stack, root, Nibbles::default());
-
-    let mut start_nibble: u8 = 0;
-
-    loop {
-        let head_idx = stack.last().unwrap().index;
-
-        match &arena[head_idx] {
-            ArenaSparseNode::TakenSubtrie => {
-                let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
-                debug_assert_eq!(
-                    subtrie.path,
-                    stack.last().unwrap().path,
-                    "taken subtrie path mismatch",
-                );
-                arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
-                on_subtrie(arena, head_idx);
-
-                let popped_path = pop_and_propagate_stack(arena, stack);
-                if stack.is_empty() {
-                    break;
-                }
-                start_nibble = popped_path.last().unwrap() + 1;
-                continue;
-            }
-            ArenaSparseNode::Subtrie(_) => {
-                on_subtrie(arena, head_idx);
-
-                let popped_path = pop_and_propagate_stack(arena, stack);
-                if stack.is_empty() {
-                    break;
-                }
-                start_nibble = popped_path.last().unwrap() + 1;
-                continue;
-            }
-            ArenaSparseNode::Branch(_) => {}
-            _ => unreachable!("unexpected node on stack: {:?}", arena[head_idx]),
-        }
-
-        // Head is a branch — iterate its children looking for subtries to descend into.
-        let state_mask = arena[head_idx].branch_ref().state_mask;
-
-        let mut descended = false;
-        for (dense_idx, nibble) in state_mask.iter().enumerate() {
-            if nibble < start_nibble {
-                continue;
-            }
-
-            let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                ArenaSparseNodeBranchChild::Blinded(_) => continue,
-            };
-
-            match &arena[child_idx] {
-                ArenaSparseNode::Branch(_) |
-                ArenaSparseNode::Subtrie(_) |
-                ArenaSparseNode::TakenSubtrie => {
-                    let path = child_path(arena, stack, nibble);
-                    push_stack(arena, stack, child_idx, path);
-                    start_nibble = 0;
-                    descended = true;
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        if descended {
-            continue;
-        }
-
-        let popped_path = pop_and_propagate_stack(arena, stack);
-        if stack.is_empty() {
-            break;
-        }
-        start_nibble = popped_path.last().unwrap() + 1;
-    }
-}
-
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
@@ -2482,6 +2386,22 @@ impl Default for ArenaParallelSparseTrie {
     }
 }
 
+impl ArenaParallelSparseTrie {
+    /// Hashes a subtrie at `head_idx` and collects its update actions.
+    fn update_upper_subtrie(&mut self, head_idx: Index) {
+        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
+            unreachable!()
+        };
+        subtrie.update_cached_rlp();
+
+        if let Some(actions) = self.buffers.update_actions.as_mut() &&
+            let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
+        {
+            actions.append(subtrie_actions);
+        }
+    }
+}
+
 impl SparseTrie for ArenaParallelSparseTrie {
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn set_root(
@@ -2776,26 +2696,89 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries.
-        let mut update_actions = self.buffers.update_actions.take();
-        walk_upper_subtries(
-            &mut self.upper_arena,
-            self.root,
-            &mut self.buffers.stack,
-            &mut taken,
-            |arena, head_idx| {
-                let ArenaSparseNode::Subtrie(subtrie) = &mut arena[head_idx] else {
-                    unreachable!()
-                };
-                subtrie.update_cached_rlp();
+        taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
 
-                if let Some(actions) = update_actions.as_mut() &&
-                    let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
-                {
-                    actions.append(subtrie_actions);
+        self.buffers.stack.clear();
+        push_stack(&self.upper_arena, &mut self.buffers.stack, self.root, Nibbles::default());
+
+        let mut start_nibble: u8 = 0;
+
+        loop {
+            let head_idx = self.buffers.stack.last().unwrap().index;
+
+            match &self.upper_arena[head_idx] {
+                ArenaSparseNode::TakenSubtrie => {
+                    let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
+                    debug_assert_eq!(
+                        subtrie.path,
+                        self.buffers.stack.last().unwrap().path,
+                        "taken subtrie path mismatch",
+                    );
+                    self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
+                    self.update_upper_subtrie(head_idx);
+
+                    let popped_path =
+                        pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
+                    if self.buffers.stack.is_empty() {
+                        break;
+                    }
+                    start_nibble = popped_path.last().unwrap() + 1;
+                    continue;
                 }
-            },
-        );
-        self.buffers.update_actions = update_actions;
+                ArenaSparseNode::Subtrie(_) => {
+                    self.update_upper_subtrie(head_idx);
+
+                    let popped_path =
+                        pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
+                    if self.buffers.stack.is_empty() {
+                        break;
+                    }
+                    start_nibble = popped_path.last().unwrap() + 1;
+                    continue;
+                }
+                ArenaSparseNode::Branch(_) => {}
+                _ => unreachable!("unexpected node on stack: {:?}", self.upper_arena[head_idx]),
+            }
+
+            // Head is a branch — iterate its children looking for subtries to descend into.
+            let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
+
+            let mut descended = false;
+            for (dense_idx, nibble) in state_mask.iter().enumerate() {
+                if nibble < start_nibble {
+                    continue;
+                }
+
+                let child_idx = match &self.upper_arena[head_idx].branch_ref().children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                match &self.upper_arena[child_idx] {
+                    ArenaSparseNode::Branch(_) |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie => {
+                        let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
+                        push_stack(&self.upper_arena, &mut self.buffers.stack, child_idx, path);
+                        start_nibble = 0;
+                        descended = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if descended {
+                continue;
+            }
+
+            let popped_path =
+                pop_and_propagate_stack(&mut self.upper_arena, &mut self.buffers.stack);
+            if self.buffers.stack.is_empty() {
+                break;
+            }
+            start_nibble = popped_path.last().unwrap() + 1;
+        }
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
