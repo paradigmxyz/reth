@@ -629,15 +629,9 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             // First, try the RPC cache
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) = cached.recovered_transaction()
+                let Some(source) = cached.to_transaction_source()
             {
-                return Ok(Some(TransactionSource::Block {
-                    transaction: tx.cloned(),
-                    index: cached.tx_index as u64,
-                    block_hash: cached.block.hash(),
-                    block_number: cached.block.number(),
-                    base_fee: cached.block.base_fee_per_gas(),
-                }));
+                return Ok(Some(source));
             }
 
             // Cache miss - try to find the transaction on disk
