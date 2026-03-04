@@ -261,11 +261,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .cache()
                 .get_transaction_with_receipts(hash)
                 .await
-                .map_err(Self::Error::from_eth_err)?
+                .map_err(Self::Error::from_eth_err)? &&
+                let Some(result) = cached.into_tx_and_receipt(hash)
             {
-                if let Some(result) = cached.into_tx_and_receipt(hash) {
-                    return Ok(Some(result));
-                }
+                return Ok(Some(result));
             }
 
             // Cache miss — fall back to the provider.
