@@ -96,7 +96,7 @@ if [ -n "${PGO_PROFDATA:-}" ] && [ -f "$PGO_PROFDATA" ]; then
     USE_PRECOLLECTED_PGO=true
     # Pass PGO profile directly via RUSTFLAGS since cargo-pgo's --with-pgo
     # scans for .profraw files and can't use a pre-merged .profdata
-    export RUSTFLAGS="${RUSTFLAGS:-} -Cprofile-use=$PGO_PROFDATA -Cllvm-args=-pgo-warn-missing-function"
+    export RUSTFLAGS="${RUSTFLAGS:-} -Cprofile-use=$PGO_PROFDATA"
 else
     echo "No pre-collected profile, running instrumentation..."
     export LLVM_PROFILE_FILE=$PWD/target/pgo-profiles/${BINARY}_%m_%p.profraw
