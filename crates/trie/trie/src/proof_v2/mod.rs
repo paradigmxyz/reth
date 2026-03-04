@@ -515,7 +515,7 @@ where
 
         // If the branch has fewer than 2 children then it is not a valid branch node. This can
         // happen when children that were present in the cached `state_mask` have been deleted
-        // (their hash was cleared by `MaskedTrieCursor` and no leaf data exists in the hashed
+        // (their hash was cleared by a `MaskedTrieCursor` and no leaf data exists in the hashed
         // cursor). The branch collapses: its extension + nibble are absorbed into the remaining
         // child's short key (or the branch is dropped entirely if empty).
         //
@@ -539,55 +539,31 @@ where
                 let child_nibble = branch.state_mask.get().trailing_zeros() as u8;
                 prefix.push_unchecked(child_nibble);
 
-                // If the child is an `RlpNode` we need to pop it and replace it, which
-                // requires splitting the borrow. Handle that case separately.
-                let is_rlp_node =
-                    matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_)));
+                // The remaining child cannot be an RlpNode — we don't know its short
+                // key, so we can't absorb the branch's extension into it.
+                debug_assert!(
+                    !matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))),
+                    "cannot collapse branch: remaining child is an RlpNode with unknown short key"
+                );
 
-                if is_rlp_node {
-                    let rlp_child = self.child_stack.pop().expect("checked num_children == 1");
-                    let ProofTrieBranchChild::RlpNode(rlp_node) = rlp_child else { unreachable!() };
+                let child = self.child_stack.last_mut().expect("checked num_children == 1");
+                let old_short_key = child.short_key().clone();
+                let mut new_short_key = prefix;
+                new_short_key.extend(&old_short_key);
 
-                    let old_short_key = Nibbles::new();
-                    let mut new_short_key = prefix;
-                    new_short_key.extend(&old_short_key);
-
-                    let mut stack = self.take_rlp_nodes_buf();
-                    stack.push(rlp_node);
-
-                    self.rlp_encode_buf.clear();
-                    BranchNodeRef::new(&stack, branch.state_mask).encode(&mut self.rlp_encode_buf);
-                    let branch_rlp = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
-
-                    self.child_stack.push(ProofTrieBranchChild::Branch {
-                        node: BranchNodeV2::new(
-                            new_short_key,
-                            stack,
-                            branch.state_mask,
-                            branch_rlp,
-                        ),
-                        masks: branch.masks,
-                    });
-                } else {
-                    let child = self.child_stack.last_mut().expect("checked num_children == 1");
-                    let old_short_key = child.short_key().clone();
-                    let mut new_short_key = prefix;
-                    new_short_key.extend(&old_short_key);
-
-                    match child {
-                        ProofTrieBranchChild::Leaf { short_key, .. } => {
-                            *short_key = new_short_key;
-                        }
-                        ProofTrieBranchChild::Branch { node, .. } => {
-                            node.key = new_short_key;
-                            // Recompute the branch_rlp_node since the extension key changed.
-                            self.rlp_encode_buf.clear();
-                            BranchNodeRef::new(&node.stack, node.state_mask)
-                                .encode(&mut self.rlp_encode_buf);
-                            node.branch_rlp_node = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
-                        }
-                        ProofTrieBranchChild::RlpNode(_) => unreachable!(),
+                match child {
+                    ProofTrieBranchChild::Leaf { short_key, .. } => {
+                        *short_key = new_short_key;
                     }
+                    ProofTrieBranchChild::Branch { node, .. } => {
+                        node.key = new_short_key;
+                        // Recompute the branch_rlp_node since the extension key changed.
+                        self.rlp_encode_buf.clear();
+                        BranchNodeRef::new(&node.stack, node.state_mask)
+                            .encode(&mut self.rlp_encode_buf);
+                        node.branch_rlp_node = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
+                    }
+                    ProofTrieBranchChild::RlpNode(_) => unreachable!(),
                 }
             }
 
