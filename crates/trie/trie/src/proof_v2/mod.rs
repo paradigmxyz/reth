@@ -37,17 +37,6 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
-/// A [`Nibbles`] which contains 64 zero nibbles.
-static PATH_ALL_ZEROS: Nibbles = {
-    let mut path = Nibbles::new();
-    let mut i = 0;
-    while i < 64 {
-        path.push_unchecked(0);
-        i += 1;
-    }
-    path
-};
-
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -675,8 +664,7 @@ where
         // leaf value can begin ASAP.
         let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
             debug_assert_eq!(key_b256.len(), 32);
-            // SAFETY: key is a B256 and so is exactly 32-bytes.
-            let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
+            let key = Nibbles::unpack_array(key_b256.as_ref());
             let val = value_encoder.deferred_encoder(key_b256, val);
             (key, val)
         };
@@ -883,7 +871,7 @@ where
         // If the next cached branch's path is all zeros then we can skip this catch-up step,
         // because there cannot be any keys prior to that range.
         let cached_path = &cached.0;
-        if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
+        if uncalculated_lower_bound < cached_path && !cached_path.is_zeroes() {
             let range = (*uncalculated_lower_bound, Some(*cached_path));
             trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
 
@@ -987,8 +975,8 @@ where
             let curr_branch =
                 self.branch_stack.last().expect("top of branch_stack corresponds to cached branch");
 
-            let cached_state_mask = cached_branch.state_mask.get();
-            let curr_state_mask = curr_branch.state_mask.get();
+            let cached_state_mask = cached_branch.state_mask;
+            let curr_state_mask = curr_branch.state_mask;
 
             // Determine all child nibbles which are set in the cached branch but not the
             // under-construction branch.
@@ -1001,7 +989,7 @@ where
 
             // If there are no further children to construct for this branch then pop it off both
             // stacks and loop using the parent branch.
-            if next_child_nibbles == 0 {
+            if next_child_nibbles.is_empty() {
                 trace!(
                     target: TRACE_TARGET,
                     path=?cached_path,
@@ -1047,7 +1035,7 @@ where
                     // we first need to calculate the mask of which cached hashes have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
                     // index of the next hash in the array to use.
-                    let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
+                    let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
                     let hash_idx = curr_hashed_used_mask.count_ones() as usize;
                     let hash = cached_branch.hashes[hash_idx];
 
