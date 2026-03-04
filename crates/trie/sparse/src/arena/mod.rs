@@ -887,66 +887,62 @@ impl ArenaParallelSparseTrie {
             }
         }
 
-        // Step 2: Walk dirty branches depth-first. Each iteration of the outer loop
-        // processes the branch at the top of the stack. `start_nibble` tracks where to
-        // resume iteration when returning from a child branch: 0 on first visit, or the
-        // nibble after the child that was just popped.
-        let mut start_nibble: u8 = 0;
-
+        // Step 2: Walk dirty branches depth-first using `cursor.next`. Only dirty branches
+        // are descended into; all other children (leaves, cached branches, blinded, subtries)
+        // are encoded when their parent branch is popped. By the time a branch is popped,
+        // all its dirty child branches have already been encoded and cached, so every child
+        // has RLP available.
         loop {
-            let head_idx = cursor.head().expect("cursor is non-empty").index;
-            let state_mask = arena[head_idx].branch_ref().state_mask;
+            let Some(head) = cursor.head() else { break };
+            let head_idx = head.index;
+            let head_path = head.path;
 
+            let result = cursor.next(arena, |node| {
+                matches!(
+                    node,
+                    ArenaSparseNode::Branch(b) if matches!(b.state, ArenaSparseNodeState::Dirty)
+                )
+            });
+
+            match result {
+                NextResult::Done => break,
+                NextResult::Descended => continue,
+                NextResult::NonBranch => {
+                    unreachable!("should_descend only returns true for dirty branches")
+                }
+                NextResult::Popped => {}
+            }
+
+            // The branch at `head_idx` was just popped. All its dirty child branches
+            // have already been encoded and cached. Collect all children's RLP nodes
+            // and encode the branch.
             trace!(
                 target: TRACE_TARGET,
-                branch_path = ?cursor.head().expect("cursor is non-empty").path,
+                branch_path = ?head_path,
                 branch_short_key = ?arena[head_idx].short_key().expect("head is a branch"),
-                ?state_mask,
+                state_mask = ?arena[head_idx].branch_ref().state_mask,
                 "Calculating branch RlpNode",
             );
 
-            // Step 2a: Iterate children of the current branch left-to-right, starting
-            // from `start_nibble`. We re-borrow the branch on each iteration rather than
-            // holding a reference, so `arena` can be mutably borrowed for leaf encoding.
-            //
-            // Each child's RlpNode is pushed onto `rlp_node_buf` in order, except for
-            // dirty branch children which cause us to descend (push onto stack and restart
-            // the outer loop).
-            let mut descended = false;
-            for (dense_idx, nibble) in state_mask.iter().enumerate() {
-                if nibble < start_nibble {
-                    continue;
-                }
-
-                let _trace_ctx;
-
+            rlp_node_buf.clear();
+            let state_mask = arena[head_idx].branch_ref().state_mask;
+            for (dense_idx, _nibble) in state_mask.iter().enumerate() {
                 match &arena[head_idx].branch_ref().children[dense_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node_buf.push(rlp_node.clone());
-                        _trace_ctx = "blinded";
                     }
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                         let child_idx = *child_idx;
                         match &arena[child_idx] {
                             ArenaSparseNode::Leaf { .. } => {
                                 Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
-                                _trace_ctx = "leaf";
                             }
                             ArenaSparseNode::Branch(child_b) => {
-                                if let ArenaSparseNodeState::Cached { rlp_node, .. } =
-                                    &child_b.state
-                                {
-                                    rlp_node_buf.push(rlp_node.clone());
-                                    _trace_ctx = "cached_branch";
-                                } else {
-                                    // Dirty branch child: descend into it. The parent will
-                                    // resume from nibble+1 when this child is popped.
-                                    let path = cursor.child_path(arena, nibble);
-                                    cursor.push(arena, child_idx, path);
-                                    start_nibble = 0;
-                                    descended = true;
-                                    break;
-                                }
+                                let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
+                                else {
+                                    panic!("child branch must be cached after DFS");
+                                };
+                                rlp_node_buf.push(rlp_node.clone());
                             }
                             ArenaSparseNode::Subtrie(subtrie) => {
                                 let subtrie_root = &subtrie.arena[subtrie.root];
@@ -960,7 +956,6 @@ impl ArenaParallelSparseTrie {
                                         ..
                                     } => {
                                         rlp_node_buf.push(rlp_node.clone());
-                                        _trace_ctx = "cached_subtrie";
                                     }
                                     _ => panic!("subtrie root must be a cached Branch or Leaf"),
                                 }
@@ -969,31 +964,12 @@ impl ArenaParallelSparseTrie {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         }
-
-                        trace!(
-                            target: TRACE_TARGET,
-                            path = ?cursor.child_path(arena, nibble),
-                            short_key = ?arena[child_idx].short_key(),
-                            rlp_node = ?rlp_node_buf.last().expect("rlp_node_buf is non-empty"),
-                            ctx = ?_trace_ctx,
-                            "Pushed RlpNode",
-                        );
                     }
                 }
             }
 
-            if descended {
-                continue;
-            }
-
-            // Step 2b: All children of the current branch have been processed and their
-            // RlpNodes are the last N entries on `rlp_node_buf`. Encode the branch using
-            // `BranchNodeRef` (which reads children from the end of the slice), optionally
-            // wrap in an extension if the branch has a `short_key`, then replace the N
-            // children with the single resulting RlpNode.
+            // Encode the branch, optionally wrapping in an extension if it has a short_key.
             let b = arena[head_idx].branch_ref();
-            let num_children = b.children.len();
-            let state_mask = b.state_mask;
             let short_key = b.short_key;
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
@@ -1011,27 +987,22 @@ impl ArenaParallelSparseTrie {
 
             trace!(
                 target: TRACE_TARGET,
-                path = ?cursor.head().expect("cursor is non-empty").path,
+                path = ?head_path,
                 short_key = ?arena[head_idx].short_key(),
-                children = ?state_mask.iter().zip(rlp_node_buf[rlp_node_buf.len() - num_children..].iter()).collect::<Vec<_>>(),
+                children = ?state_mask.iter().zip(rlp_node_buf.iter()).collect::<Vec<_>>(),
                 rlp_node = ?rlp_node,
                 "Calculated branch RlpNode",
             );
 
-            rlp_node_buf.truncate(rlp_node_buf.len() - num_children);
-
             let branch = arena[head_idx].branch_mut();
             branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
             branch.branch_masks = new_branch_masks;
-            rlp_node_buf.push(rlp_node);
 
-            // Step 2c: Record trie updates for dirty branches only.
-            // Branches that were merely `Revealed` (never modified) don't need updates
-            // — their DB state is unchanged. Only dirty branches can have changed masks
-            // or structure.
+            // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
             if let Some(trie_updates) = updates.as_mut().filter(|_| was_dirty) {
-                let logical_path = cursor.head_logical_branch_path(arena);
+                let mut logical_path = head_path;
+                logical_path.extend(&short_key);
 
                 if !logical_path.is_empty() {
                     if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
@@ -1045,19 +1016,12 @@ impl ArenaParallelSparseTrie {
                     }
                 }
             }
-
-            // Step 2d: Pop this branch from the stack, propagating leaf-count deltas and
-            // branch_masks to the parent. If the stack is now empty, the root is done.
-            // Otherwise resume the parent branch from the nibble after the child that was
-            // just completed.
-            let popped_path = cursor.pop(arena);
-            if cursor.is_empty() {
-                break;
-            }
-            start_nibble = popped_path.last().expect("popped non-root entry") + 1;
         }
 
-        rlp_node_buf.pop().expect("root RlpNode must be on rlp_node_buf after update_cached_rlp")
+        let ArenaSparseNodeState::Cached { rlp_node, .. } = &arena[root].branch_ref().state else {
+            panic!("root must be cached after update_cached_rlp");
+        };
+        rlp_node.clone()
     }
 
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
