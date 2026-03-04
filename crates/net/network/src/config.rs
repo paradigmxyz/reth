@@ -7,14 +7,14 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use alloy_eips::BlockNumHash;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, ForkCondition, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
-    UnifiedStatus,
+    EthNetworkPrimitives, EthVersion, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
+    UnifiedStatus, protocol::Protocol,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
@@ -641,8 +641,15 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
-        let mut hello_message =
-            hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
+        let mut hello_message = hello_message.unwrap_or_else(|| {
+            let mut msg = HelloMessage::builder(peer_id).build();
+            // Advertise eth/70 and eth/71 if the Osaka fork is scheduled for this chain
+            if !matches!(chain_spec.fork(EthereumHardfork::Osaka), ForkCondition::Never) {
+                let _ = msg.try_add_protocol(Protocol::from(EthVersion::Eth70));
+                let _ = msg.try_add_protocol(Protocol::from(EthVersion::Eth71));
+            }
+            msg
+        });
         hello_message.port = listener_addr.port();
 
         // set the status
