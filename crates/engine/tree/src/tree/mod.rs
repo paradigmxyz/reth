@@ -2501,6 +2501,13 @@ where
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
 
+        // Pre-compute the canonical overlay so it's ready when the next payload arrives.
+        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+            self.runtime.spawn_blocking_named("prepare-overlay", move || {
+                let _ = overlay.get();
+            });
+        }
+
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(
             Box::new(tip),
