@@ -12,14 +12,15 @@
 //!
 //! # Message Flow
 //!
-//! 1. The `SparseTrieCacheTask` prepares a storage or account job and hands it to `ProofWorkerHandle`.
-//!    The job carries a `ProofResultContext` so the worker knows how to send the result back.
+//! 1. The `SparseTrieCacheTask` prepares a storage or account job and hands it to
+//!    `ProofWorkerHandle`. The job carries a `ProofResultContext` so the worker knows how to send
+//!    the result back.
 //! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
 //!    provided `ProofResultSender`.
 //! 3. The `SparseTrieCacheTask` receives the message and proceeds with its state-root logic.
 //!
-//! Each job gets its own direct channel so results go straight back to the `SparseTrieCacheTask`. That
-//! keeps ordering decisions in one place and lets workers run independently.
+//! Each job gets its own direct channel so results go straight back to the `SparseTrieCacheTask`.
+//! That keeps ordering decisions in one place and lets workers run independently.
 //!
 //! ```text
 //! SparseTrieCacheTask -> ProofWorkerHandle -> Storage/Account Worker
@@ -526,7 +527,8 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `SparseTrieCacheTask`.
 ///
-/// This type enables workers to send proof results directly to the `SparseTrieCacheTask` event loop.
+/// This type enables workers to send proof results directly to the `SparseTrieCacheTask` event
+/// loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
     /// The proof calculation result
