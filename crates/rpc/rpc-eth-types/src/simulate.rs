@@ -354,7 +354,7 @@ where
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
-            ExecutionResult::Halt { reason, gas_used } => {
+            ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
                 #[allow(clippy::needless_update)]
                 SimCallResult {
@@ -364,13 +364,13 @@ where
                         code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: Vec::new(),
                     status: false,
                     ..Default::default()
                 }
             }
-            ExecutionResult::Revert { output, gas_used } => {
+            ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
                 #[allow(clippy::needless_update)]
                 SimCallResult {
@@ -380,19 +380,19 @@ where
                         code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     status: false,
                     logs: Vec::new(),
                     ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } =>
+            ExecutionResult::Success { output, gas, logs, .. } =>
             {
                 #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output.into_data(),
                     error: None,
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: logs
                         .into_iter()
                         .map(|log| {

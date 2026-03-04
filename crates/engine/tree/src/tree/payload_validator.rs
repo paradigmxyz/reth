@@ -825,7 +825,6 @@ where
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .build()
         });
 
