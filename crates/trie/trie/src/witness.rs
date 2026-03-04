@@ -14,7 +14,8 @@ use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieNodeV2,
+    prefix_set::TriePrefixSets, DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2,
+    ProofV2Target, TrieNodeV2,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
 
@@ -126,8 +127,12 @@ where
             return Ok(B256Map::from_iter([(root_hash, root_node)]))
         }
 
-        // Record all nodes from multiproof in the witness.
-        self.record_decoded_multiproof_v2(&multiproof);
+        // Build prefix sets for filtering witness nodes. Only nodes whose path is a prefix of
+        // a changed key are recorded.
+        let mut prefix_sets = state.construct_prefix_sets().freeze();
+
+        // Record matching nodes from multiproof in the witness.
+        self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
 
         let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
@@ -183,7 +188,7 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
-            self.record_decoded_multiproof_v2(&multiproof);
+            self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
             sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
         }
 
@@ -234,21 +239,36 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
-            self.record_decoded_multiproof_v2(&multiproof);
+            self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
             sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
         }
 
         Ok(self.witness)
     }
 
-    /// Record all nodes from a V2 decoded multiproof in the witness.
-    fn record_decoded_multiproof_v2(&mut self, multiproof: &DecodedMultiProofV2) {
+    /// Record nodes from a V2 decoded multiproof in the witness, keeping only nodes whose path is
+    /// a prefix of at least one changed key in the prefix sets.
+    fn record_decoded_multiproof_v2(
+        &mut self,
+        multiproof: &DecodedMultiProofV2,
+        prefix_sets: &mut TriePrefixSets,
+    ) {
         let mut encoded = Vec::new();
         for proof_node in &multiproof.account_proofs {
-            self.record_witness_node(&proof_node.node, &mut encoded);
+            if prefix_sets.account_prefix_set.contains(&proof_node.path) {
+                self.record_witness_node(&proof_node.node, &mut encoded);
+            }
         }
-        for proof_node in multiproof.storage_proofs.values().flatten() {
-            self.record_witness_node(&proof_node.node, &mut encoded);
+        for (&hashed_address, proof_nodes) in &multiproof.storage_proofs {
+            if let Some(storage_prefix_set) =
+                prefix_sets.storage_prefix_sets.get_mut(&hashed_address)
+            {
+                for proof_node in proof_nodes {
+                    if storage_prefix_set.contains(&proof_node.path) {
+                        self.record_witness_node(&proof_node.node, &mut encoded);
+                    }
+                }
+            }
         }
     }
 
