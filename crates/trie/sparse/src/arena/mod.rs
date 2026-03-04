@@ -6,9 +6,7 @@ use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
 
-use crate::{
-    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
-};
+use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
     keccak256,
@@ -46,9 +44,9 @@ const fn child_dense_index(state_mask: TrieMask, nibble: u8) -> Option<usize> {
 struct ArenaTrieBuffers {
     /// Reusable cursor for trie traversals.
     cursor: ArenaCursor,
-    /// Reusable buffer for collecting update actions. `Some` when tracking updates, `None`
-    /// otherwise. Initialized alongside `updates` in `set_updates`.
-    update_actions: Option<Vec<SparseTrieUpdatesAction>>,
+    /// Trie updates built up directly during hashing and structural changes. `Some` when
+    /// tracking updates, `None` otherwise. Initialized alongside `updates` in `set_updates`.
+    updates: Option<SparseTrieUpdates>,
     /// Reusable buffer for RLP encoding.
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
@@ -58,8 +56,8 @@ struct ArenaTrieBuffers {
 impl ArenaTrieBuffers {
     fn clear(&mut self) {
         self.cursor.clear();
-        if let Some(actions) = self.update_actions.as_mut() {
-            actions.clear();
+        if let Some(updates) = self.updates.as_mut() {
+            updates.clear();
         }
         self.rlp_buf.clear();
         self.rlp_node_buf.clear();
@@ -192,7 +190,7 @@ impl ArenaSparseSubtrie {
                         key,
                         full_path,
                         find_result,
-                        &mut self.buffers.update_actions,
+                        &mut self.buffers.updates,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -255,7 +253,7 @@ impl ArenaSparseSubtrie {
     /// Computes and caches `RlpNode` for all dirty nodes via iterative post-order DFS.
     /// After this call every node reachable from `self.root` will be in `Cached` state.
     ///
-    /// Update actions are written to `self.buffers.update_actions` (if `Some`).
+    /// Trie updates are written directly to `self.buffers.updates` (if `Some`).
     fn update_cached_rlp(&mut self) {
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
@@ -264,7 +262,7 @@ impl ArenaSparseSubtrie {
             &mut self.buffers.rlp_buf,
             &mut self.buffers.rlp_node_buf,
             self.path,
-            &mut self.buffers.update_actions,
+            &mut self.buffers.updates,
         );
         self.num_dirty_leaves = 0;
         #[cfg(debug_assertions)]
@@ -551,7 +549,7 @@ impl ArenaParallelSparseTrie {
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
         if self.updates.is_some() {
-            subtrie.buffers.update_actions.get_or_insert_with(Vec::new).clear();
+            subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         }
         Box::new(subtrie)
     }
@@ -661,19 +659,15 @@ impl ArenaParallelSparseTrie {
         self.maybe_collapse_or_remove_branch(cursor);
     }
 
-    /// Extracts a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx`, drains its
-    /// buffered update actions, clears it, and pushes it onto `cleared_subtries` for reuse.
+    /// Extracts a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx`, merges its
+    /// buffered updates, clears it, and pushes it onto `cleared_subtries` for reuse.
     fn recycle_subtrie(&mut self, idx: Index) {
         let ArenaSparseNode::Subtrie(mut subtrie) =
             self.upper_arena.remove(idx).expect("subtrie exists in arena")
         else {
             unreachable!()
         };
-        if let Some(actions) = self.buffers.update_actions.as_mut() {
-            let subtrie_actions =
-                subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
-            actions.append(subtrie_actions);
-        }
+        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         subtrie.clear();
         self.cleared_subtries.push(*subtrie);
     }
@@ -771,7 +765,7 @@ impl ArenaParallelSparseTrie {
                 &mut self.upper_arena,
                 cursor,
                 &mut self.root,
-                &mut self.buffers.update_actions,
+                &mut self.buffers.updates,
             );
 
             // After collapse, the remaining child (now at cursor head) may be a
@@ -791,11 +785,10 @@ impl ArenaParallelSparseTrie {
                     subtrie.root,
                     Some(child_idx),
                 );
-                if let Some(actions) = self.buffers.update_actions.as_mut() {
-                    let subtrie_actions =
-                        subtrie.buffers.update_actions.as_mut().expect("updates are enabled");
-                    actions.append(subtrie_actions);
-                }
+                Self::merge_subtrie_updates(
+                    &mut self.buffers.updates,
+                    &mut subtrie.buffers.updates,
+                );
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
             }
@@ -803,30 +796,18 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Drains the given update actions buffer and applies each action to the `self.updates`
-    /// set, then returns the buffer (cleared) to `self.buffers.update_actions` for reuse.
-    fn apply_update_actions(&mut self, mut actions: Vec<SparseTrieUpdatesAction>) {
-        if let Some(updates) = self.updates.as_mut() {
-            updates.updated_nodes.reserve(actions.len());
-            updates.removed_nodes.reserve(actions.len());
-            #[allow(clippy::iter_with_drain)]
-            for action in actions.drain(..) {
-                match action {
-                    SparseTrieUpdatesAction::InsertRemoved(path) => {
-                        updates.updated_nodes.remove(&path);
-                        updates.removed_nodes.insert(path);
-                    }
-                    SparseTrieUpdatesAction::RemoveUpdated(_path) => {
-                        panic!("SparseTrieUpdatesAction::RemoveUpdated is not used by ArenaParallelSparseTrie");
-                    }
-                    SparseTrieUpdatesAction::InsertUpdated(path, branch_node) => {
-                        updates.updated_nodes.insert(path, branch_node);
-                        updates.removed_nodes.remove(&path);
-                    }
-                }
-            }
+    /// Merges updates from a subtrie's buffer into the parent's buffer.
+    /// Both `dst` and `src` must be `Some` when updates are being tracked.
+    fn merge_subtrie_updates(
+        dst: &mut Option<SparseTrieUpdates>,
+        src: &mut Option<SparseTrieUpdates>,
+    ) {
+        if let Some(dst_updates) = dst.as_mut() {
+            let src_updates = src.as_mut().expect("updates are enabled");
+            debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
+            dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
+            dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
         }
-        self.buffers.update_actions = Some(actions);
     }
 
     /// Right-pads a nibble path with zeros and packs it into a [`B256`].
@@ -881,7 +862,7 @@ impl ArenaParallelSparseTrie {
         rlp_buf: &mut Vec<u8>,
         rlp_node_buf: &mut Vec<RlpNode>,
         base_path: Nibbles,
-        update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
+        updates: &mut Option<SparseTrieUpdates>,
     ) -> RlpNode {
         rlp_node_buf.clear();
         cursor.clear();
@@ -1044,21 +1025,23 @@ impl ArenaParallelSparseTrie {
             branch.branch_masks = new_branch_masks;
             rlp_node_buf.push(rlp_node);
 
-            // Step 2c: Emit trie update actions for dirty branches only.
-            // Branches that were merely `Revealed` (never modified) don't need update
-            // actions — their DB state is unchanged. Only dirty branches can have
-            // changed masks or structure.
+            // Step 2c: Record trie updates for dirty branches only.
+            // Branches that were merely `Revealed` (never modified) don't need updates
+            // — their DB state is unchanged. Only dirty branches can have changed masks
+            // or structure.
             // Skip the root node (empty logical path) as PST does.
-            if let Some(actions) = update_actions.as_mut().filter(|_| was_dirty) {
+            if let Some(trie_updates) = updates.as_mut().filter(|_| was_dirty) {
                 let logical_path = cursor.head_logical_branch_path(arena);
 
                 if !logical_path.is_empty() {
                     if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
-                        actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+                        trie_updates.updated_nodes.remove(&logical_path);
+                        trie_updates.removed_nodes.insert(logical_path);
                     } else if !new_branch_masks.is_empty() {
                         let mut compact = BranchNodeCompact::default();
                         arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
-                        actions.push(SparseTrieUpdatesAction::InsertUpdated(logical_path, compact));
+                        trie_updates.updated_nodes.insert(logical_path.clone(), compact);
+                        trie_updates.removed_nodes.remove(&logical_path);
                     }
                 }
             }
@@ -1357,55 +1340,25 @@ impl ArenaParallelSparseTrie {
                 )
             }
             SeekResult::RevealedLeaf => {
+                // RevealedLeaf guarantees the leaf's full path matches the target exactly.
                 let head_idx = head.index;
-                let head_path = head.path;
-                let leaf_key = match &arena[head_idx] {
-                    ArenaSparseNode::Leaf { key, .. } => *key,
-                    _ => unreachable!("LeafHead but stack head is not a leaf"),
-                };
-
-                let mut leaf_full_path = head_path;
-                leaf_full_path.extend(&leaf_key);
-
-                if &leaf_full_path == full_path {
-                    // Same leaf — update value in place.
-                    let was_clean = if let ArenaSparseNode::Leaf { value: v, state, .. } =
-                        &mut arena[head_idx]
-                    {
+                let was_clean =
+                    if let ArenaSparseNode::Leaf { value: v, state, .. } = &mut arena[head_idx] {
                         v.clear();
                         v.extend_from_slice(value);
                         let was_clean = !matches!(state, ArenaSparseNodeState::Dirty);
                         *state = ArenaSparseNodeState::Dirty;
                         was_clean
                     } else {
-                        false
+                        unreachable!("RevealedLeaf but stack head is not a leaf")
                     };
-                    (
-                        UpsertLeafResult::Updated,
-                        SubtrieCounterDeltas {
-                            num_leaves_delta: 0,
-                            num_dirty_leaves_delta: was_clean as i64,
-                        },
-                    )
-                } else {
-                    // Different leaf — split into a branch.
-                    let remaining_full = full_path.slice(head_path.len()..);
-                    let split_dirtied_existing =
-                        Self::split_and_insert_leaf(arena, cursor, root, remaining_full, value);
-
-                    let result = if cursor.len() >= 2 {
-                        UpsertLeafResult::NewChild
-                    } else {
-                        UpsertLeafResult::NewLeaf
-                    };
-                    (
-                        result,
-                        SubtrieCounterDeltas {
-                            num_leaves_delta: 1,
-                            num_dirty_leaves_delta: 1 + split_dirtied_existing as i64,
-                        },
-                    )
-                }
+                (
+                    UpsertLeafResult::Updated,
+                    SubtrieCounterDeltas {
+                        num_leaves_delta: 0,
+                        num_dirty_leaves_delta: was_clean as i64,
+                    },
+                )
             }
             SeekResult::Diverged => {
                 let head_path = head.path;
@@ -1485,7 +1438,7 @@ impl ArenaParallelSparseTrie {
         key: B256,
         full_path: &Nibbles,
         find_result: SeekResult,
-        update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
+        updates: &mut Option<SparseTrieUpdates>,
     ) -> (RemoveLeafResult, SubtrieCounterDeltas) {
         match find_result {
             SeekResult::Blinded | SeekResult::RevealedSubtrie => {
@@ -1495,28 +1448,14 @@ impl ArenaParallelSparseTrie {
                 (RemoveLeafResult::NotFound, SubtrieCounterDeltas::default())
             }
             SeekResult::RevealedLeaf => {
+                // RevealedLeaf guarantees the leaf's full path matches the target exactly.
                 let head = cursor.head().expect("cursor is non-empty");
                 let head_idx = head.index;
                 let head_path = head.path;
-                let leaf_key = arena[head_idx].short_key().expect("stack head is a leaf");
-
-                let mut leaf_full_path = head_path;
-                leaf_full_path.extend(leaf_key);
-
-                if &leaf_full_path != full_path {
-                    trace!(
-                        target: TRACE_TARGET,
-                        ?full_path,
-                        ?leaf_full_path,
-                        "Full path not matched, key not removed",
-                    );
-                    return (RemoveLeafResult::NotFound, SubtrieCounterDeltas::default());
-                }
 
                 trace!(
                     target: TRACE_TARGET,
                     path = ?head_path,
-                    short_key = ?leaf_key,
                     ?full_path,
                     "Removing leaf",
                 );
@@ -1595,7 +1534,7 @@ impl ArenaParallelSparseTrie {
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
                 let collapse_dirtied_leaf = if parent_branch.state_mask.count_bits() == 1 {
-                    Self::collapse_branch(arena, cursor, root, update_actions)
+                    Self::collapse_branch(arena, cursor, root, updates)
                 } else {
                     false
                 };
@@ -1684,7 +1623,7 @@ impl ArenaParallelSparseTrie {
         arena: &mut Arena<ArenaSparseNode>,
         cursor: &mut ArenaCursor,
         root: &mut Index,
-        update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
+        updates: &mut Option<SparseTrieUpdates>,
     ) -> bool {
         let branch_entry = cursor.head().expect("cursor is non-empty");
         let branch_idx = branch_entry.index;
@@ -1714,12 +1653,13 @@ impl ArenaParallelSparseTrie {
 
         // Record the collapsed branch's logical path for trie update tracking if it
         // was previously persisted in the DB trie.
-        if let Some(actions) = update_actions.as_mut() &&
+        if let Some(trie_updates) = updates.as_mut() &&
             !branch.branch_masks.is_empty()
         {
             let logical_path = cursor.head_logical_branch_path(arena);
             if !logical_path.is_empty() {
-                actions.push(SparseTrieUpdatesAction::InsertRemoved(logical_path));
+                trie_updates.updated_nodes.remove(&logical_path);
+                trie_updates.removed_nodes.insert(logical_path);
             }
         }
 
@@ -1981,11 +1921,7 @@ impl ArenaParallelSparseTrie {
             subtrie.update_cached_rlp();
         }
 
-        if let Some(actions) = self.buffers.update_actions.as_mut() &&
-            let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
-        {
-            actions.append(subtrie_actions);
-        }
+        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
     }
 }
 
@@ -2043,9 +1979,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn set_updates(&mut self, retain_updates: bool) {
         self.updates = retain_updates.then(Default::default);
         if retain_updates {
-            self.buffers.update_actions.get_or_insert_with(Vec::new).clear();
+            self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         } else {
-            self.buffers.update_actions = None;
+            self.buffers.updates = None;
         }
     }
 
@@ -2203,7 +2139,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn root(&mut self) -> B256 {
         self.update_subtrie_hashes();
 
-        let mut update_actions = self.buffers.update_actions.take();
+        // Merge buffered subtrie updates into self.updates before hashing the upper trie,
+        // which will add its own updates directly into self.updates.
+        Self::merge_subtrie_updates(&mut self.updates, &mut self.buffers.updates);
+
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
@@ -2211,13 +2150,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             &mut self.buffers.rlp_buf,
             &mut self.buffers.rlp_node_buf,
             Nibbles::default(),
-            &mut update_actions,
+            &mut self.updates,
         );
-
-        // Apply collected update actions into self.updates.
-        if let Some(actions) = update_actions {
-            self.apply_update_actions(actions);
-        }
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
     }
@@ -2692,7 +2626,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             key,
                             full_path,
                             find_result,
-                            &mut self.buffers.update_actions,
+                            &mut self.buffers.updates,
                         );
                         if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
                             proof_required_fn(proof_key, min_len);

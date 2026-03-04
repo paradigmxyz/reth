@@ -21,11 +21,11 @@ pub(super) struct ArenaCursorStackEntry {
 pub(super) enum SeekResult {
     /// The stack head is an empty root node.
     EmptyRoot,
-    /// The stack head is a leaf node. The leaf has been pushed onto the stack.
+    /// The stack head is a leaf whose full path matches the target exactly.
     RevealedLeaf,
     /// The next child along the path is blinded (unrevealed).
     Blinded,
-    /// The target path diverges within the stack head branch's `short_key`.
+    /// The target path diverges from the stack head's `short_key` (branch or leaf).
     Diverged,
     /// The target nibble has no child in the branch's `state_mask`.
     NoChild { child_nibble: u8 },
@@ -216,8 +216,14 @@ impl ArenaCursor {
                 ArenaSparseNode::EmptyRoot => {
                     return SeekResult::EmptyRoot;
                 }
-                ArenaSparseNode::Leaf { .. } => {
-                    return SeekResult::RevealedLeaf;
+                ArenaSparseNode::Leaf { key, .. } => {
+                    let mut leaf_full_path = head.path;
+                    leaf_full_path.extend(key);
+                    return if &leaf_full_path == full_path {
+                        SeekResult::RevealedLeaf
+                    } else {
+                        SeekResult::Diverged
+                    };
                 }
                 ArenaSparseNode::Branch(b) => b,
                 ArenaSparseNode::Subtrie(_) => {
