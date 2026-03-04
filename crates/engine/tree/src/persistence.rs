@@ -162,15 +162,13 @@ where
                 // When `memory_block_buffer_target > 0` the batch may not include
                 // the finalized block yet — keep the original value pending for the
                 // next `save_blocks` call.
-                let clamped = finalized.min(last.number);
-                provider_rw.save_finalized_block_number(clamped)?;
+                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
                 if finalized > last.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                let clamped = safe.min(last.number);
-                provider_rw.save_safe_block_number(clamped)?;
+                provider_rw.save_safe_block_number(safe.min(last.number))?;
                 if safe > last.number {
                     self.pending_safe_block = Some(safe);
                 }
