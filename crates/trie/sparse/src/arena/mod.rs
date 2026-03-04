@@ -2760,6 +2760,8 @@ mod tests {
     /// forms for later use. Exposes a `proof_v2` method that generates storage proofs using
     /// mock cursors over the starting state.
     struct ArenaTrieTestHarness {
+        /// The base storage dataset (hashed slot → value). Zero-valued entries are absent.
+        storage: BTreeMap<B256, U256>,
         /// The expected storage root, calculated by `StorageRoot`.
         original_root: B256,
         /// The starting storage trie updates (unsorted), used for `minimize_trie_updates`.
@@ -2776,9 +2778,37 @@ mod tests {
         /// Computes the storage root and `StorageTrieUpdates` using `StorageRoot` with mock
         /// cursors, then stores both sorted forms.
         fn new(storage: BTreeMap<B256, U256>) -> Self {
-            let hashed_cursor_factory = MockHashedCursorFactory::new(
+            let mut harness = Self {
+                storage: BTreeMap::new(),
+                original_root: B256::ZERO,
+                storage_trie_updates: StorageTrieUpdates::default(),
+                trie_cursor_factory: MockTrieCursorFactory::new(
+                    BTreeMap::new(),
+                    Default::default(),
+                ),
+                hashed_cursor_factory: MockHashedCursorFactory::new(
+                    BTreeMap::new(),
+                    Default::default(),
+                ),
+            };
+            harness.apply_changeset(storage);
+            harness
+        }
+
+        /// Merges `changeset` into the base storage (zero values remove entries) and
+        /// recomputes the storage root, trie updates, and cursor factories.
+        fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
+            for (k, v) in changeset {
+                if v == U256::ZERO {
+                    self.storage.remove(&k);
+                } else {
+                    self.storage.insert(k, v);
+                }
+            }
+
+            self.hashed_cursor_factory = MockHashedCursorFactory::new(
                 BTreeMap::new(),
-                once((HASHED_ADDRESS, storage)).collect(),
+                once((HASHED_ADDRESS, self.storage.clone())).collect(),
             );
 
             let empty_trie_cursor_factory = MockTrieCursorFactory::new(
@@ -2793,7 +2823,7 @@ mod tests {
 
                 StorageRoot::new_hashed(
                     empty_trie_cursor_factory,
-                    hashed_cursor_factory.clone(),
+                    self.hashed_cursor_factory.clone(),
                     HASHED_ADDRESS,
                     PrefixSet::default(),
                     #[cfg(feature = "metrics")]
@@ -2803,7 +2833,7 @@ mod tests {
                 .expect("StorageRoot should succeed")
             };
 
-            let trie_cursor_factory = MockTrieCursorFactory::new(
+            self.trie_cursor_factory = MockTrieCursorFactory::new(
                 BTreeMap::new(),
                 once((
                     HASHED_ADDRESS,
@@ -2816,7 +2846,8 @@ mod tests {
                 .collect(),
             );
 
-            Self { original_root, storage_trie_updates, trie_cursor_factory, hashed_cursor_factory }
+            self.original_root = original_root;
+            self.storage_trie_updates = storage_trie_updates;
         }
 
         /// Removes all entries from `updates` that are redundant with the starting storage
@@ -2868,8 +2899,13 @@ mod tests {
         }
 
         /// Computes the new storage root and trie updates after applying the given changes
-        /// using both `StorageRoot` and `ArenaParallelSparseTrie`, then asserts they match.
-        fn assert_changes(&self, changes: BTreeMap<B256, U256>) {
+        /// using both `StorageRoot` and the provided `ArenaParallelSparseTrie`, then asserts
+        /// they match.
+        fn assert_changes(
+            &self,
+            apst: &mut ArenaParallelSparseTrie,
+            changes: BTreeMap<B256, U256>,
+        ) {
             // Build prefix set from changed keys.
             let mut prefix_set = PrefixSetMut::with_capacity(changes.len());
             for hashed_slot in changes.keys() {
@@ -2931,18 +2967,6 @@ mod tests {
                     (slot, LeafUpdate::Changed(rlp_value))
                 })
                 .collect();
-
-            // Obtain the root node proof and initialize the APST.
-            let root_node = self.root_node();
-            let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                ArenaParallelismThresholds {
-                    min_dirty_leaves: 3,
-                    min_revealed_nodes: 3,
-                    min_updates: 3,
-                    min_leaves_for_prune: 3,
-                },
-            );
-            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
             // Reveal-update loop: call update_leaves, collect required proofs, fetch them,
             // reveal, and repeat until no more proofs are needed.
@@ -3019,12 +3043,42 @@ mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
 
+    /// Builds a changeset by mixing `new_keys` (fresh insertions) with a fraction of
+    /// existing keys from `base` (updates/deletions).
+    ///
+    /// `overlap_pct` controls how many existing keys are included, and `delete_pct`
+    /// controls how many of those become deletions (zero values). The remaining
+    /// overlap keys get random non-zero values.
+    fn build_changeset(
+        base: &BTreeMap<B256, U256>,
+        new_keys: BTreeMap<B256, U256>,
+        overlap_pct: f64,
+        delete_pct: f64,
+        rng: &mut rand::rngs::StdRng,
+    ) -> BTreeMap<B256, U256> {
+        let num_overlap = (base.len() as f64 * overlap_pct) as usize;
+        let num_delete = (num_overlap as f64 * delete_pct) as usize;
+
+        let mut all_keys: Vec<B256> = base.keys().copied().collect();
+        all_keys.shuffle(rng);
+        let overlap_keys = &all_keys[..num_overlap];
+
+        let mut changeset = new_keys;
+        for (i, &key) in overlap_keys.iter().enumerate() {
+            let value =
+                if i < num_delete { U256::ZERO } else { U256::from(rng.random::<u64>() | 1) };
+            changeset.entry(key).or_insert(value);
+        }
+        changeset
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
-            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
+            changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
+            changeset2_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
             delete_pct in 0.0..=0.33f64,
             shuffle_seed in arb::<u64>(),
@@ -3037,35 +3091,41 @@ mod tests {
                 .filter(|(_, v)| *v != U256::ZERO)
                 .collect();
 
-            // Build changeset: pick overlap_pct of existing keys (updates/deletions) +
-            // fresh keys (insertions). delete_pct of overlap keys become deletions (zero),
-            // the rest get random non-zero values (upserts).
-            let num_overlap = (initial.len() as f64 * overlap_pct) as usize;
-            let num_delete = (num_overlap as f64 * delete_pct) as usize;
-
-            // Deterministic shuffle using a seeded RNG so selected keys and
-            // deletion/upsert assignments are scattered throughout the keyspace.
             let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
-            let mut all_keys: Vec<B256> = initial.keys().copied().collect();
-            all_keys.shuffle(&mut rng);
-            let overlap_keys = &all_keys[..num_overlap];
 
-            let mut changeset = changeset_new_keys;
-            for (i, &key) in overlap_keys.iter().enumerate() {
-                let value = if i < num_delete {
-                    U256::ZERO
-                } else {
-                    U256::from(rng.random::<u64>() | 1)
-                };
-                changeset.entry(key).or_insert(value);
+            let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
+            for (i, (k, v)) in changeset1.iter().enumerate() {
+                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
             }
 
-            for (i, (k, v)) in changeset.iter().enumerate() {
-                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset entry");
+            let mut harness = ArenaTrieTestHarness::new(initial);
+
+            // Initialize the APST from the harness root node.
+            let root_node = harness.root_node();
+            let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                ArenaParallelismThresholds {
+                    min_dirty_leaves: 3,
+                    min_revealed_nodes: 3,
+                    min_updates: 3,
+                    min_leaves_for_prune: 3,
+                },
+            );
+            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+            harness.assert_changes(&mut apst, changeset1.clone());
+
+            // Prune the trie and apply a second changeset on top.
+            apst.prune(3);
+
+            // Update the harness base dataset to reflect the first changeset.
+            harness.apply_changeset(changeset1);
+
+            let changeset2 = build_changeset(&harness.storage, changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
+            for (i, (k, v)) in changeset2.iter().enumerate() {
+                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
             }
 
-            let harness = ArenaTrieTestHarness::new(initial);
-            harness.assert_changes(changeset);
+            harness.assert_changes(&mut apst, changeset2);
         }
     }
 }
