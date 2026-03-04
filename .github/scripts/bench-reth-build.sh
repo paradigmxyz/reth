@@ -35,7 +35,7 @@ fi
 EXTRA_FEATURES=""
 EXTRA_RUSTFLAGS=""
 if [ "$TRACY_MODE" != "off" ]; then
-  EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  EXTRA_FEATURES="tracy-ondemand"
   EXTRA_RUSTFLAGS="-Cforce-frame-pointers=yes"
 elif [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   EXTRA_RUSTFLAGS="-Cforce-frame-pointers=yes"
