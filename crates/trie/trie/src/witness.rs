@@ -110,6 +110,13 @@ where
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .multiproof_v2(proof_targets)?;
 
+        tracing::debug!(
+            target: "trie::witness",
+            account_proofs = multiproof.account_proofs.len(),
+            storage_proofs = multiproof.storage_proofs.len(),
+            "Initial multiproof computed"
+        );
+
         // No need to reconstruct the rest of the trie, we just need to include
         // the root node and return.
         if is_state_empty {
@@ -130,7 +137,10 @@ where
         self.record_decoded_multiproof_v2(&multiproof);
 
         let mut sparse_trie = SparseStateTrie::new();
-        sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+        sparse_trie.reveal_decoded_multiproof_v2(multiproof).map_err(|e| {
+            tracing::error!(target: "trie::witness", %e, "Failed to reveal initial multiproof");
+            e
+        })?;
 
         // Build storage leaf updates for all accounts with storage changes.
         let mut storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
@@ -183,8 +193,17 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
+            tracing::debug!(
+                target: "trie::witness",
+                account_proofs = multiproof.account_proofs.len(),
+                storage_proofs = multiproof.storage_proofs.len(),
+                "Storage loop: additional multiproof computed"
+            );
             self.record_decoded_multiproof_v2(&multiproof);
-            sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+            sparse_trie.reveal_decoded_multiproof_v2(multiproof).map_err(|e| {
+                tracing::error!(target: "trie::witness", %e, "Failed to reveal storage loop multiproof");
+                e
+            })?;
         }
 
         // Build account leaf updates.
@@ -234,8 +253,16 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
+            tracing::debug!(
+                target: "trie::witness",
+                account_proofs = multiproof.account_proofs.len(),
+                "Account loop: additional multiproof computed"
+            );
             self.record_decoded_multiproof_v2(&multiproof);
-            sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+            sparse_trie.reveal_decoded_multiproof_v2(multiproof).map_err(|e| {
+                tracing::error!(target: "trie::witness", %e, "Failed to reveal account loop multiproof");
+                e
+            })?;
         }
 
         Ok(self.witness)

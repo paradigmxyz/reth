@@ -364,7 +364,15 @@ where
             trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
             self.state.reveal_root(root_node.node.clone(), root_node.masks, self.retain_updates)?
         } else {
-            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+            self.state.as_revealed_mut().ok_or_else(|| {
+                tracing::error!(
+                    target: "trie::sparse",
+                    node_count = nodes.len(),
+                    node_paths = ?nodes.iter().map(|n| &n.path).collect::<Vec<_>>(),
+                    "reveal_account_v2_proof_nodes: account trie is blind and no root node in proof"
+                );
+                SparseTrieErrorKind::Blind
+            })?
         };
         trie.reserve_nodes(capacity);
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
@@ -417,7 +425,16 @@ where
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
             trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
         } else {
-            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+            trie.as_revealed_mut().ok_or_else(|| {
+                tracing::error!(
+                    target: "trie::sparse",
+                    ?account,
+                    node_count = nodes.len(),
+                    node_paths = ?nodes.iter().map(|n| &n.path).collect::<Vec<_>>(),
+                    "reveal_storage_v2_proof_nodes_inner: storage trie is blind and no root node in proof"
+                );
+                SparseTrieErrorKind::Blind
+            })?
         };
         trie.reserve_nodes(capacity);
         trace!(target: "trie::sparse", ?account, total_nodes, "Revealing storage nodes from V2 proof");
@@ -571,7 +588,14 @@ where
         self.storage
             .tries
             .get_mut(&address)
-            .ok_or(SparseTrieErrorKind::Blind)?
+            .ok_or_else(|| {
+                tracing::error!(
+                    target: "trie::sparse",
+                    ?address,
+                    "update_storage_leaf: storage trie not found in tries map"
+                );
+                SparseTrieErrorKind::Blind
+            })?
             .update_leaf(slot, value, provider)?;
         Ok(())
     }
@@ -590,7 +614,14 @@ where
     ) -> SparseStateTrieResult<bool> {
         let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+            storage_trie.root().ok_or_else(|| {
+                tracing::error!(
+                    target: "trie::sparse",
+                    ?address,
+                    "update_account: storage trie exists but is blind (root() returned None)"
+                );
+                SparseTrieErrorKind::Blind
+            })?
         } else if self.is_account_revealed(address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             // The account was revealed, either...
@@ -602,6 +633,11 @@ where
                 EMPTY_ROOT_HASH
             }
         } else {
+            tracing::error!(
+                target: "trie::sparse",
+                ?address,
+                "update_account: account is not revealed"
+            );
             return Err(SparseTrieErrorKind::Blind.into())
         };
 
