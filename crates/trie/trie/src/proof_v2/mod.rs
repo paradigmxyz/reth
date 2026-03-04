@@ -1909,7 +1909,7 @@ mod tests {
         let mut fresh_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
         let mut value_encoder = SyncAccountValueEncoder::new(
             harness.trie_cursor_factory.clone(),
-            harness.hashed_cursor_factory.clone(),
+            harness.hashed_cursor_factory,
         );
         let fresh_result = fresh_calculator.proof(&mut value_encoder, &mut targets).unwrap();
 
