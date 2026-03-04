@@ -55,15 +55,6 @@ impl<S: StateProvider> StateProvider for BloomStateProvider<S> {
         self.inner.storage(account, storage_key)
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        // Cannot bloom-check pre-hashed keys — bloom stores unhashed (address, slot) pairs.
-        self.inner.storage_by_hashed_key(address, hashed_storage_key)
-    }
-}
 
 impl<S: BytecodeReader> BytecodeReader for BloomStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
