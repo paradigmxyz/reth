@@ -40,18 +40,11 @@ where
     /// out peers that don't have the required blocks.
     pub fn spawn(self) {
         if self.block_num_hashes.is_empty() {
-            debug!(
-                target: "net::filter",
-                "No required block hashes configured, skipping peer filtering"
-            );
+            debug!(target: "net::filter", "No required block hashes configured, skipping peer filtering");
             return;
         }
 
-        info!(
-            target: "net::filter",
-            "Starting required block peer filter with {} block hashes",
-            self.block_num_hashes.len()
-        );
+        info!(target: "net::filter", "Starting required block peer filter with {} block hashes", self.block_num_hashes.len());
 
         tokio::spawn(async move {
             self.run().await;
@@ -119,12 +112,7 @@ where
 
             // Send the request to the peer
             if let Err(e) = messages.try_send(peer_request) {
-                debug!(
-                    target: "net::filter",
-                    "Failed to send block header request to peer {}: {:?}",
-                    peer_id,
-                    e
-                );
+                debug!(target: "net::filter", "Failed to send block header request to peer {}: {:?}", peer_id, e);
                 continue;
             }
 
@@ -144,13 +132,7 @@ where
             let headers = match response {
                 Ok(headers) => headers,
                 Err(e) => {
-                    debug!(
-                        target: "net::filter",
-                        "Error getting block {} from peer {}: {:?}",
-                        block_hash,
-                        peer_id,
-                        e
-                    );
+                    debug!(target: "net::filter", "Error getting block {} from peer {}: {:?}", block_hash, peer_id, e);
                     // Ban the peer if they fail to respond properly
                     network.reputation_change(peer_id, ReputationChangeKind::BadProtocol);
                     return;

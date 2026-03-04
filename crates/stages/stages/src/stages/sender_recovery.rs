@@ -150,11 +150,7 @@ where
 
         let mut writer = EitherWriter::new_senders(provider, *range_output.block_range.start())?;
 
-        info!(
-            target: "sync::stages::sender_recovery",
-            tx_range = ?range_output.tx_range,
-            "Recovering senders"
-        );
+        info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
         let batch = range_output
@@ -267,11 +263,7 @@ where
         return Err(StageError::Fatal(err.into()));
     }
 
-    debug!(
-        target: "sync::stages::sender_recovery",
-        ?tx_range,
-        "Appending recovered senders to the database"
-    );
+    debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
 
     let mut processed_transactions = 0;
     let mut block_numbers = block_numbers.into_iter();

@@ -377,12 +377,7 @@ where
         let committed_chain = notification.committed_chain().unwrap();
         let new_exex_head =
             (committed_chain.first().parent_hash(), committed_chain.first().number() - 1).into();
-        debug!(
-            target: "exex::notifications",
-            old_exex_head = ?self.initial_exex_head.block,
-            new_exex_head = ?new_exex_head,
-            "ExEx head updated"
-        );
+        debug!(target: "exex::notifications", old_exex_head = ?self.initial_exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
         self.initial_exex_head.block = new_exex_head;
 
         // Return an inverted notification. See the documentation for
@@ -409,10 +404,7 @@ where
         match self.initial_exex_head.block.number.cmp(&self.initial_local_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
-                debug!(
-                    target: "exex::notifications",
-                    "ExEx is behind the node head and on the canonical chain, starting backfill"
-                );
+                debug!(target: "exex::notifications", "ExEx is behind the node head and on the canonical chain, starting backfill");
                 let backfill = backfill_job_factory
                     .backfill(
                         self.initial_exex_head.block.number + 1..=self.initial_local_head.number,
@@ -490,11 +482,7 @@ where
             }
 
             if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)).transpose()? {
-                debug!(
-                    target: "exex::notifications",
-                    range = ?chain.range(),
-                    "Backfill job returned a chain"
-                );
+                debug!(target: "exex::notifications", range = ?chain.range(), "Backfill job returned a chain");
                 return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
                     new: Arc::new(chain),
                 })))

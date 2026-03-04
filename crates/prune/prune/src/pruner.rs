@@ -267,12 +267,7 @@ where
                     stats.push(info);
                 }
             } else {
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    purpose = ?segment.purpose(),
-                    "Nothing to prune for the segment"
-                );
+                debug!(target: "pruner", segment = ?segment.segment(), purpose = ?segment.purpose(), "Nothing to prune for the segment");
             }
         }
 
@@ -321,20 +316,11 @@ where
         match *self.finished_exex_height.borrow() {
             FinishedExExHeight::NoExExs => Some(tip_block_number),
             FinishedExExHeight::NotReady => {
-                debug!(
-                    target: "pruner",
-                    %tip_block_number,
-                    "Not all ExExs have emitted a `FinishedHeight` event yet, can't prune"
-                );
+                debug!(target: "pruner", %tip_block_number, "Not all ExExs have emitted a `FinishedHeight` event yet, can't prune");
                 None
             }
             FinishedExExHeight::Height(finished_exex_height) => {
-                debug!(
-                    target: "pruner",
-                    %tip_block_number,
-                    %finished_exex_height,
-                    "Adjusting tip block number to the finished ExEx height"
-                );
+                debug!(target: "pruner", %tip_block_number, %finished_exex_height, "Adjusting tip block number to the finished ExEx height");
                 Some(finished_exex_height)
             }
         }

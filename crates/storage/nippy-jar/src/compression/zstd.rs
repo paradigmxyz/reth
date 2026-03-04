@@ -80,11 +80,7 @@ impl Zstd {
                 }
 
                 if let Some(dictionaries) = &self.dictionaries {
-                    debug!(
-                        target: "nippy-jar",
-                        count=?dictionaries.len(),
-                        "Generating ZSTD compressor dictionaries."
-                    );
+                    debug!(target: "nippy-jar", count=?dictionaries.len(), "Generating ZSTD compressor dictionaries.");
                     return Ok(Some(dictionaries.compressors()?))
                 }
                 Ok(None)

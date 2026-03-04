@@ -101,13 +101,7 @@ pub async fn setup_engine_with_chain_import(
         let _enter = span.enter();
 
         // First, import the chain data into this datadir
-        info!(
-            target: "test",
-            "Importing chain data from {:?} for node {} into {:?}",
-            rlp_path,
-            idx,
-            datadir
-        );
+        info!(target: "test", "Importing chain data from {:?} for node {} into {:?}", rlp_path, idx, datadir);
 
         // Create database path and static files path
         let db_path = datadir.join("db");
@@ -197,10 +191,7 @@ pub async fn setup_engine_with_chain_import(
             if headers_checkpoint.is_none() {
                 return Err(eyre::eyre!("Headers stage checkpoint is missing after import!"));
             }
-            debug!(
-                target: "e2e::import",
-                "Headers stage checkpoint after import: {headers_checkpoint:?}"
-            );
+            debug!(target: "e2e::import", "Headers stage checkpoint after import: {headers_checkpoint:?}");
             drop(provider);
         }
 

@@ -226,11 +226,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                             got: got_gas_used,
                                         };
 
-                                        error!(
-                                            number=?block.number(),
-                                            ?mismatch,
-                                            "Gas usage mismatch"
-                                        );
+                                        error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
                                             executor = evm_config
                                                 .batch_executor(db_at(block.number()));

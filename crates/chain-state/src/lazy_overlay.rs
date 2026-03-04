@@ -94,10 +94,7 @@ impl LazyOverlay {
         let blocks = &self.inputs.blocks;
 
         if blocks.is_empty() {
-            debug!(
-                target: "chain_state::lazy_overlay",
-                "No in-memory blocks, returning empty overlay"
-            );
+            debug!(target: "chain_state::lazy_overlay", "No in-memory blocks, returning empty overlay");
             return TrieInputSorted::default();
         }
 
@@ -107,11 +104,7 @@ impl LazyOverlay {
             let data = tip.wait_cloned();
             if let Some(anchored) = &data.anchored_trie_input {
                 if anchored.anchor_hash == anchor_hash {
-                    trace!(
-                        target: "chain_state::lazy_overlay",
-                        %anchor_hash,
-                        "Reusing tip block's cached overlay (fast path)"
-                    );
+                    trace!(target: "chain_state::lazy_overlay", %anchor_hash, "Reusing tip block's cached overlay (fast path)");
                     return (*anchored.trie_input).clone();
                 }
                 debug!(
@@ -124,11 +117,7 @@ impl LazyOverlay {
         }
 
         // Slow path: Merge all blocks' trie data into a new overlay.
-        debug!(
-            target: "chain_state::lazy_overlay",
-            num_blocks = blocks.len(),
-            "Merging blocks (slow path)"
-        );
+        debug!(target: "chain_state::lazy_overlay", num_blocks = blocks.len(), "Merging blocks (slow path)");
         Self::merge_blocks(blocks)
     }
 

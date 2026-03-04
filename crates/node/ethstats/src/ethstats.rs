@@ -622,11 +622,7 @@ where
                             }
                             Err(e) => match e {
                                 crate::error::ConnectionError::Serialization(err) => {
-                                    debug!(
-                                        target: "ethstats",
-                                        "JSON parse error from stats server: {}",
-                                        err
-                                    );
+                                    debug!(target: "ethstats", "JSON parse error from stats server: {}", err);
                                 }
                                 other => {
                                     debug!(target: "ethstats", "Read error: {}", other);

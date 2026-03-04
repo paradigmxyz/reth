@@ -147,12 +147,7 @@ impl AccountHistory {
                 .static_file_provider()
                 .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;
         }
-        trace!(
-            target: "pruner",
-            pruned = %pruned_changesets,
-            %done,
-            "Pruned account history (changesets from static files)"
-        );
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from static files)");
 
         let result = HistoryPruneResult {
             highest_deleted: highest_deleted_accounts,
@@ -214,12 +209,7 @@ impl AccountHistory {
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
-        trace!(
-            target: "pruner",
-            pruned = %pruned_changesets,
-            %done,
-            "Pruned account history (changesets from database)"
-        );
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from database)");
 
         let result = HistoryPruneResult {
             highest_deleted: highest_deleted_accounts,
@@ -285,12 +275,7 @@ impl AccountHistory {
             changesets_processed += 1;
             limiter.increment_deleted_entries_count();
         }
-        trace!(
-            target: "pruner",
-            processed = %changesets_processed,
-            %done,
-            "Scanned account changesets from static files"
-        );
+        trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned account changesets from static files");
 
         let last_changeset_pruned_block = last_changeset_pruned_block
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
@@ -316,13 +301,7 @@ impl AccountHistory {
 
             Ok(((), Some(batch.into_inner())))
         })?;
-        trace!(
-            target: "pruner",
-            deleted = deleted_shards,
-            updated = updated_shards,
-            %done,
-            "Pruned account history (RocksDB indices)"
-        );
+        trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
 
         // Delete static file jars only when fully processed. During provider.commit(), RocksDB
         // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit

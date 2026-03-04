@@ -410,23 +410,15 @@ impl NodeManager {
                                 debug!("Node is still syncing {sync_info:?}, waiting...");
                             }
                             _ => {
-                                debug!(
-                                    "HTTP RPC is up and node is not syncing, checking block number..."
-                                );
+                                debug!("HTTP RPC is up and node is not syncing, checking block number...");
                                 // Node is not syncing, now get the tip
                                 match provider.get_block_number().await {
                                     Ok(tip) => {
-                                        debug!(
-                                            "HTTP RPC ready at block: {}, checking WebSocket...",
-                                            tip
-                                        );
+                                        debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
 
                                         // Verify WebSocket RPC is ready (public endpoint, no JWT required)
                                         let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
-                                        debug!(
-                                            "Attempting WebSocket connection to {} (public endpoint)",
-                                            ws_url
-                                        );
+                                        debug!("Attempting WebSocket connection to {} (public endpoint)", ws_url);
                                         let ws_connect = WsConnect::new(&ws_url);
 
                                         match RpcClient::connect_pubsub(ws_connect).await
@@ -448,22 +440,14 @@ impl NodeManager {
                                         }
                                     }
                                     Err(e) => {
-                                        debug!(
-                                            "Failed to get block number (iteration {}): {:?}",
-                                            iteration,
-                                            e
-                                        );
+                                        debug!("Failed to get block number (iteration {}): {:?}", iteration, e);
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        debug!(
-                            "Node RPC not ready yet or failed to check sync status (iteration {}): {:?}",
-                            iteration,
-                            e
-                        );
+                        debug!("Node RPC not ready yet or failed to check sync status (iteration {}): {:?}", iteration, e);
                     }
                 }
 

@@ -236,12 +236,7 @@ where
             return Poll::Ready(Ok(()))
         }
 
-        debug!(
-            target: "sync::stages::headers",
-            ?tip,
-            head = ?gap.local_head.hash(),
-            "Commencing sync"
-        );
+        debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
         let local_head_number = gap.local_head.number();
 
         // let the downloader know what to sync

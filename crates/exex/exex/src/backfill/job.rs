@@ -106,12 +106,7 @@ where
             cumulative_gas += block.gas_used();
 
             // Configure the executor to use the current state.
-            trace!(
-                target: "exex::backfill",
-                number = block_number,
-                txs = block.body().transactions().len(),
-                "Executing block"
-            );
+            trace!(target: "exex::backfill", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -225,12 +220,7 @@ where
                 .map_err(BlockExecutionError::other)?,
         ));
 
-        trace!(
-            target: "exex::backfill",
-            number = block_number,
-            txs = block_with_senders.body().transaction_count(),
-            "Executing block"
-        );
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
         let block_execution_output = executor.execute(&block_with_senders)?;
 

@@ -99,12 +99,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     for (address, account) in update {
         if account.is_touched() {
             let hashed_address = keccak256(address);
-            trace!(
-                target: "engine::tree::payload_processor::multiproof",
-                ?address,
-                ?hashed_address,
-                "Adding account to state update"
-            );
+            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };

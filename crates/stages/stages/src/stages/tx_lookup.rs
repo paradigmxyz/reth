@@ -141,11 +141,7 @@ where
 
             let end_block = *range_output.block_range.end();
 
-            info!(
-                target: "sync::stages::transaction_lookup",
-                tx_range = ?range_output.tx_range,
-                "Calculating transaction hashes"
-            );
+            info!(target: "sync::stages::transaction_lookup", tx_range = ?range_output.tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(range_output.tx_range)? {
                 hash_collector.insert(key, value)?;

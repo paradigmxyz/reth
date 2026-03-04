@@ -483,12 +483,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
                 Err(error) => {
                     fetch_failures += 1;
                     if fetch_failures % 20 == 0 {
-                        error!(
-                            target: "reth::cli",
-                            ?fetch_failures,
-                            %error,
-                            "Failed to fetch the tip. Retrying..."
-                        );
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
                     }
                 }
             }

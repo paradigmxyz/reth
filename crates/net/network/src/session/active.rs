@@ -193,11 +193,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
                         RequestState::Waiting(PeerRequest::$item { response, .. }) => {
-                            trace!(
-                                peer_id=?self.remote_peer_id,
-                                ?request_id,
-                                "received response from peer"
-                            );
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received response from peer");
                             let _ = response.send(Ok(message));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -210,11 +206,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         }
                     }
                 } else {
-                    trace!(
-                        peer_id=?self.remote_peer_id,
-                        ?request_id,
-                        "received response to unknown request"
-                    );
+                    trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
                     // we received a response to a request we never sent
                     self.on_bad_message();
                 }
@@ -374,12 +366,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if msg.is_valid_for_version(self.conn.version()) {
                     self.queued_outgoing.push_back(EthMessage::from(msg).into());
                 } else {
-                    debug!(
-                        target: "net",
-                        ?msg,
-                        version=?self.conn.version(),
-                        "Message is invalid for connection version, skipping"
-                    );
+                    debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -525,12 +512,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.poll_disconnect(cx)
             }
             Err(err) => {
-                debug!(
-                    target: "net::session",
-                    %err,
-                    remote_peer_id=?self.remote_peer_id,
-                    "could not send disconnect"
-                );
+                debug!(target: "net::session", %err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
                 self.close_on_error(err, cx)
             }
         }
@@ -549,12 +531,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         for (id, req) in &mut self.inflight_requests {
             if req.is_timed_out(now) {
                 if req.is_waiting() {
-                    debug!(
-                        target: "net::session",
-                        ?id,
-                        remote_peer_id=?self.remote_peer_id,
-                        "timed out outgoing request"
-                    );
+                    debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
                     req.timeout();
                 } else if now - req.timestamp > self.protocol_breach_request_timeout {
                     return true
@@ -685,12 +662,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
                     if let Err(err) = res {
-                        debug!(
-                            target: "net::session",
-                            %err,
-                            remote_peer_id=?this.remote_peer_id,
-                            "failed to send message"
-                        );
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         return this.close_on_error(err, cx)
                     }
@@ -755,22 +727,13 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         if this.is_disconnecting() {
                             break
                         }
-                        debug!(
-                            target: "net::session",
-                            remote_peer_id=?this.remote_peer_id,
-                            "eth stream completed"
-                        );
+                        debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "eth stream completed");
                         return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(
-                                    target: "net::session",
-                                    msg_id=?msg.message_id(),
-                                    remote_peer_id=?this.remote_peer_id,
-                                    "received eth message"
-                                );
+                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
                                 // decode and handle message
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
@@ -794,12 +757,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                 }
                             }
                             Err(err) => {
-                                debug!(
-                                    target: "net::session",
-                                    %err,
-                                    remote_peer_id=?this.remote_peer_id,
-                                    "failed to receive message"
-                                );
+                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
                                 return this.close_on_error(err, cx)
                             }
                         }

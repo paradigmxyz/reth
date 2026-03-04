@@ -179,11 +179,7 @@ impl Command {
         if let Some(path) = self.benchmark.output {
             // first write the new payload results to a file
             let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
-            info!(
-                target: "reth-bench",
-                "Writing newPayload call latency output to file: {:?}",
-                output_path
-            );
+            info!(target: "reth-bench", "Writing newPayload call latency output to file: {:?}", output_path);
             let mut writer = Writer::from_path(output_path)?;
             for result in new_payload_results {
                 writer.serialize(result)?;

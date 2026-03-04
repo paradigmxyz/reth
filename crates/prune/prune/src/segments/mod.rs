@@ -173,11 +173,7 @@ impl PruneInput {
             .and_then(|checkpoint| match checkpoint.tx_number {
                 Some(tx_number) => Some(tx_number + 1),
                 _ => {
-                    error!(
-                        target: "pruner",
-                        ?checkpoint,
-                        "Expected transaction number in prune checkpoint, found None"
-                    );
+                    error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
                     None
                 },
             })

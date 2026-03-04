@@ -151,11 +151,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             // RocksDB database doesn't exist yet (e.g. datadir restored from a snapshot
             // or created before RocksDB storage). Create an empty one so read-only
             // commands can proceed.
-            debug!(
-                target: "reth::cli",
-                ?rocksdb_path,
-                "RocksDB not found, initializing empty database"
-            );
+            debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
             reth_fs_util::create_dir_all(&rocksdb_path)?;
             RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
@@ -172,12 +168,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
-            debug!(
-                target: "reth::cli",
-                chain=%self.chain.chain(),
-                genesis=?self.chain.genesis_hash(),
-                "Initializing genesis"
-            );
+            debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
         }
 
@@ -217,11 +208,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             if factory.db_ref().is_read_only()? {
-                warn!(
-                    target: "reth::cli",
-                    ?unwind_target,
-                    "Inconsistent storage. Restart node to heal."
-                );
+                warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
                 return Ok(factory)
             }
 
@@ -233,11 +220,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 "A static file <> database inconsistency was found that would trigger an unwind to block 0"
             );
 
-            info!(
-                target: "reth::cli",
-                unwind_target = %unwind_target,
-                "Executing an unwind after a failed storage consistency check."
-            );
+            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 

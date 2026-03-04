@@ -476,11 +476,7 @@ where
                 // update total downloaded metric
                 self.metrics.total_downloaded.increment(headers.len() as u64);
 
-                trace!(
-                    target: "downloaders::headers",
-                    len=%headers.len(),
-                    "Received headers response"
-                );
+                trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
                 if headers.is_empty() {
                     return Err(HeadersResponseError {
@@ -509,12 +505,7 @@ where
                 // validate the response
                 let highest = &headers[0];
 
-                trace!(
-                    target: "downloaders::headers",
-                    requested_block_number,
-                    highest=?highest.number(),
-                    "Validating non-empty headers response"
-                );
+                trace!(target: "downloaders::headers", requested_block_number, highest=?highest.number(), "Validating non-empty headers response");
 
                 if highest.number() != requested_block_number {
                     return Err(HeadersResponseError {
@@ -727,12 +718,7 @@ where
         match target {
             SyncTarget::Tip(tip) => {
                 if Some(tip) != current_tip {
-                    trace!(
-                        target: "downloaders::headers",
-                        current=?current_tip,
-                        new=?tip,
-                        "Update sync target"
-                    );
+                    trace!(target: "downloaders::headers", current=?current_tip, new=?tip, "Update sync target");
                     let new_sync_target = SyncTargetBlock::from_hash(tip);
 
                     // if the new sync target is the next queued request we don't need to re-start
@@ -764,13 +750,7 @@ where
                     // targeted block number
                     let parent_block_number = existing.block.number.saturating_sub(1);
 
-                    trace!(
-                        target: "downloaders::headers",
-                        current=?current_tip,
-                        new=?target,
-                        %parent_block_number,
-                        "Updated sync target"
-                    );
+                    trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 
                     // Update the sync target hash
                     self.sync_target = match self.sync_target.take() {
@@ -783,11 +763,7 @@ where
             SyncTarget::TipNum(num) => {
                 let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
                 if Some(num) != current_tip_num {
-                    trace!(
-                        target: "downloaders::headers",
-                        %num,
-                        "Updating sync target based on num"
-                    );
+                    trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
                     // just update the sync target
                     self.sync_target = Some(SyncTargetBlock::from_number(num));
                     self.sync_target_request = Some(
@@ -832,11 +808,7 @@ where
                     match this.on_sync_target_outcome(outcome) {
                         Ok(()) => break,
                         Err(ReverseHeadersDownloaderError::Response(error)) => {
-                            trace!(
-                                target: "downloaders::headers",
-                                %error,
-                                "invalid sync target response"
-                            );
+                            trace!(target: "downloaders::headers", %error, "invalid sync target response");
                             if error.is_channel_closed() {
                                 // download channel closed which means the network was dropped
                                 return Poll::Ready(None)
@@ -926,11 +898,7 @@ where
                     this.lowest_validated_header = next_batch.last().cloned();
                 }
 
-                trace!(
-                    target: "downloaders::headers",
-                    batch=%next_batch.len(),
-                    "Returning validated batch"
-                );
+                trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
                 this.metrics.total_flushed.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(Ok(next_batch)))

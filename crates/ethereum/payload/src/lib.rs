@@ -321,21 +321,11 @@ where
             })) => {
                 if error.is_nonce_too_low() {
                     // if the nonce is too low, we can skip this transaction
-                    trace!(
-                        target: "payload_builder",
-                        %error,
-                        ?tx,
-                        "skipping nonce too low transaction"
-                    );
+                    trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
                 } else {
                     // if the transaction is invalid, we can skip it and all of its
                     // descendants
-                    trace!(
-                        target: "payload_builder",
-                        %error,
-                        ?tx,
-                        "skipping invalid transaction and its descendants"
-                    );
+                    trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
                         &InvalidPoolTransactionError::Consensus(
@@ -389,12 +379,7 @@ where
         .then_some(execution_result.requests);
 
     let sealed_block = Arc::new(block.sealed_block().clone());
-    debug!(
-        target: "payload_builder",
-        id=%attributes.id,
-        sealed_block_header = ?sealed_block.sealed_header(),
-        "sealed built block"
-    );
+    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
         return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {

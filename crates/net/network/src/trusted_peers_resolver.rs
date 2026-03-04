@@ -58,12 +58,7 @@ impl TrustedPeersResolver {
         match ready!(self.pending.poll_next_unpin(cx)) {
             Some((peer_id, Ok(record))) => Poll::Ready((peer_id, record)),
             Some((peer_id, Err(e))) => {
-                warn!(
-                    target: "net::peers",
-                    "Failed to resolve trusted peer {:?}: {:?}",
-                    peer_id,
-                    e
-                );
+                warn!(target: "net::peers", "Failed to resolve trusted peer {:?}: {:?}", peer_id, e);
                 Poll::Pending
             }
             None => Poll::Pending,

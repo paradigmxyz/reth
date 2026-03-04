@@ -250,13 +250,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
             }
 
             let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
-            trace!(
-                target: "trie::verify",
-                account=?self.account,
-                ?curr_path,
-                ?path,
-                "Current cursor node"
-            );
+            trace!(target: "trie::verify", account=?self.account, ?curr_path, ?path, "Current cursor node");
 
             // Use depth-first ordering for comparison
             match depth_first::cmp(&path, curr_path) {
@@ -379,11 +373,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             };
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
-                trace!(
-                    target: "trie::verify",
-                    account = ?curr_account,
-                    "Verifying account has empty storage"
-                );
+                trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
 
                 let mut storage_cursor =
                     self.trie_cursor_factory.storage_trie_cursor(curr_account)?;

@@ -207,11 +207,7 @@ impl NodeState {
                 self.current_stage = Some(current_stage);
             }
             PipelineEvent::Unwound { stage_id, result } => {
-                info!(
-                    stage = %stage_id,
-                    checkpoint = %result.checkpoint.block_number,
-                    "Unwound stage"
-                );
+                info!(stage = %stage_id, checkpoint = %result.checkpoint.block_number, "Unwound stage");
                 self.current_stage = None;
             }
             _ => (),
@@ -263,31 +259,17 @@ impl NodeState {
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number());
-                info!(
-                    number=head.number(),
-                    hash=?head.hash(),
-                    ?elapsed,
-                    "Canonical chain committed"
-                );
+                info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
-                info!(
-                    number=block.number(),
-                    hash=?block.hash(),
-                    ?elapsed,
-                    "Block added to fork chain"
-                );
+                info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
             ConsensusEngineEvent::InvalidBlock(block) => {
                 warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
             }
             ConsensusEngineEvent::BlockReceived(num_hash) => {
-                info!(
-                    number=num_hash.number,
-                    hash=?num_hash.hash,
-                    "Received new payload from consensus engine"
-                );
+                info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
             }
         }
     }
@@ -566,12 +548,7 @@ impl Eta {
 
             let Some(remaining) = current.total.checked_sub(current.processed) else {
                 self.eta = None;
-                debug!(
-                    target: "reth::cli",
-                    %stage,
-                    ?current,
-                    "Failed to calculate the ETA: total entities is less than processed entities"
-                );
+                debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
                 return
             };
 

@@ -315,12 +315,7 @@ where
                 }
             }
         } else {
-            debug!(
-                target: "sync::stages::merkle::exec",
-                current = ?current_block_number,
-                target = ?to_block,
-                "Updating trie in chunks"
-            );
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
             for start_block in range.step_by(incremental_threshold as usize) {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);

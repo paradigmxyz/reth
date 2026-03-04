@@ -59,12 +59,7 @@ impl InvalidHeaderCache {
         invalid_ancestor: BlockWithParent,
     ) {
         if self.get(&header_hash).is_none() {
-            warn!(
-                target: "consensus::engine",
-                hash=?header_hash,
-                ?invalid_ancestor,
-                "Bad block with existing invalid ancestor"
-            );
+            warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
             self.insert_entry(header_hash, invalid_ancestor);
 
             // update metrics

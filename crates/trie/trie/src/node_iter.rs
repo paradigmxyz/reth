@@ -125,11 +125,7 @@ where
         if let Some((last_key, last_value)) = self.last_next_result &&
             last_key == key
         {
-            trace!(
-                target: "trie::node_iter",
-                seek_key = ?key,
-                "reusing result from last next() call instead of seeking"
-            );
+            trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
             self.last_next_result = None; // Consume the cached value
 
             let result = Some((last_key, last_value));
@@ -246,11 +242,7 @@ where
             // Handle seeking and advancing based on the previous hashed key
             match self.previous_hashed_key.take() {
                 Some(hashed_key) => {
-                    trace!(
-                        target: "trie::node_iter",
-                        ?hashed_key,
-                        "seeking to the previous hashed entry"
-                    );
+                    trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
                     self.seek_hashed_entry(hashed_key)?;
                     self.current_hashed_entry = self.next_hashed_entry()?;

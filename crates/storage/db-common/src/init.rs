@@ -172,10 +172,7 @@ where
                 // database. Since `factory.block_hash` will only query the static files, we need to
                 // make sure that our database has been written to, and throw error if it's empty.
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
-                    error!(
-                        target: "reth::storage",
-                        "Genesis header found on static files, but database is uninitialized."
-                    );
+                    error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
@@ -670,10 +667,7 @@ where
     let mut prefix_sets = TriePrefixSetsMut::default();
     dump_state(collector, provider_rw, block, &mut prefix_sets)?;
 
-    info!(
-        target: "reth::cli",
-        "All accounts written to database, starting state root computation (may take some time)"
-    );
+    info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(provider_rw, Some(prefix_sets.freeze()))?;

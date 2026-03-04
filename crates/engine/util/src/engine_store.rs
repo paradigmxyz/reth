@@ -144,12 +144,7 @@ where
         if let Some(msg) = &next &&
             let Err(error) = this.store.on_message(msg, SystemTime::now())
         {
-            error!(
-                target: "engine::stream::store",
-                ?msg,
-                %error,
-                "Error handling Engine API message"
-            );
+            error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
         }
         Poll::Ready(next)
     }

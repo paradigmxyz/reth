@@ -131,12 +131,7 @@ where
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
 
-        debug!(
-            target: "engine::persistence",
-            ?new_tip_num,
-            ?new_tip_hash,
-            "Removed blocks from disk"
-        );
+        debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
@@ -153,13 +148,7 @@ where
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(
-            target: "engine::persistence",
-            ?block_count,
-            first=?first_block,
-            last=?last_block,
-            "Saving range of blocks"
-        );
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
 
@@ -184,12 +173,7 @@ where
             provider_rw.commit()?;
         }
 
-        debug!(
-            target: "engine::persistence",
-            first=?first_block,
-            last=?last_block,
-            "Saved range of blocks"
-        );
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());

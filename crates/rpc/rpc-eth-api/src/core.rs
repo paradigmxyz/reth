@@ -581,12 +581,7 @@ where
         hash: B256,
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
-        trace!(
-            target: "rpc::eth",
-            ?hash,
-            ?index,
-            "Serving eth_getRawTransactionByBlockHashAndIndex"
-        );
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
         Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into())
             .await?)
     }
@@ -608,12 +603,7 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
-        trace!(
-            target: "rpc::eth",
-            ?number,
-            ?index,
-            "Serving eth_getRawTransactionByBlockNumberAndIndex"
-        );
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
         Ok(EthTransactions::raw_transaction_by_block_and_tx_index(
             self,
             number.into(),
@@ -628,12 +618,7 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
-        trace!(
-            target: "rpc::eth",
-            ?number,
-            ?index,
-            "Serving eth_getTransactionByBlockNumberAndIndex"
-        );
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
             .await?)
     }
@@ -735,14 +720,7 @@ where
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes> {
-        trace!(
-            target: "rpc::eth",
-            ?request,
-            ?block_number,
-            ?state_overrides,
-            ?block_overrides,
-            "Serving eth_call"
-        );
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(EthCall::call(
             self,
             request,
@@ -768,13 +746,7 @@ where
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>> {
-        trace!(
-            target: "rpc::eth",
-            ?bundles,
-            ?state_context,
-            ?state_override,
-            "Serving eth_callMany"
-        );
+        trace!(target: "rpc::eth", ?bundles, ?state_context, ?state_override, "Serving eth_callMany");
         Ok(EthCall::call_many(self, bundles, state_context, state_override).await?)
     }
 
@@ -785,13 +757,7 @@ where
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult> {
-        trace!(
-            target: "rpc::eth",
-            ?request,
-            ?block_number,
-            ?state_override,
-            "Serving eth_createAccessList"
-        );
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_override, "Serving eth_createAccessList");
         Ok(EthCall::create_access_list_at(self, request, block_number, state_override).await?)
     }
 
@@ -855,13 +821,7 @@ where
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory> {
-        trace!(
-            target: "rpc::eth",
-            ?block_count,
-            ?newest_block,
-            ?reward_percentiles,
-            "Serving eth_feeHistory"
-        );
+        trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         Ok(EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?)
     }
 

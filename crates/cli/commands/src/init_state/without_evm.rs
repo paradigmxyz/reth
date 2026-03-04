@@ -47,11 +47,7 @@ where
         + Sync
         + 'static,
 {
-    info!(
-        target: "reth::cli",
-        new_tip = ?header.num_hash(),
-        "Setting up dummy EVM chain before importing state."
-    );
+    info!(target: "reth::cli", new_tip = ?header.num_hash(), "Setting up dummy EVM chain before importing state.");
 
     let static_file_provider = provider_rw.static_file_provider();
     // Write EVM dummy data up to `header - 1` block

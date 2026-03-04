@@ -182,10 +182,7 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        debug!(
-            target: "engine::tree::payload_processor",
-            "Waiting for execution cache and sparse trie locks"
-        );
+        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
         // Wait for both caches in parallel using std threads
         let execution_cache = self.execution_cache.clone();
@@ -458,11 +455,7 @@ where
                             tx
                         });
                         let _ = execute_tx.send(tx);
-                        debug!(
-                            target: "engine::tree::payload_processor",
-                            idx,
-                            "yielded transaction"
-                        );
+                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                     });
             });
         }
@@ -732,11 +725,7 @@ where
 
             // Replace with the updated cache
             *cached = Some(new_cache);
-            debug!(
-                target: "engine::caching",
-                ?block_with_parent,
-                "Updated execution cache for inserted block"
-            );
+            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
 }

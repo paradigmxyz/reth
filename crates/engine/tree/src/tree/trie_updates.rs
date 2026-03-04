@@ -35,14 +35,7 @@ impl TrieUpdatesDiff {
     pub(super) fn log_differences(mut self) {
         if self.has_differences() {
             for (path, EntryDiff { task, regular, database }) in &mut self.account_nodes {
-                warn!(
-                    target: "engine::tree",
-                    ?path,
-                    ?task,
-                    ?regular,
-                    ?database,
-                    "Difference in account trie updates"
-                );
+                warn!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
             }
 
             for (
@@ -92,26 +85,11 @@ impl StorageTrieUpdatesDiff {
             database: database_not_exists,
         }) = self.is_deleted
         {
-            warn!(
-                target: "engine::tree",
-                ?address,
-                ?task_deleted,
-                ?regular_deleted,
-                ?database_not_exists,
-                "Difference in storage trie deletion"
-            );
+            warn!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
         }
 
         for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
-            warn!(
-                target: "engine::tree",
-                ?address,
-                ?path,
-                ?task,
-                ?regular,
-                ?database,
-                "Difference in storage trie updates"
-            );
+            warn!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
         }
 
         for (

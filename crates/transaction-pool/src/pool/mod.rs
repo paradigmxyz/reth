@@ -838,12 +838,7 @@ where
 
     /// Notifies transaction listeners about changes once a block was processed.
     fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome<T::Transaction>) {
-        trace!(
-            target: "txpool",
-            promoted=outcome.promoted.len(),
-            discarded= outcome.discarded.len(),
-            "notifying listeners on state change"
-        );
+        trace!(target: "txpool", promoted=outcome.promoted.len(), discarded= outcome.discarded.len() ,"notifying listeners on state change");
 
         // notify about promoted pending transactions - emit hashes
         let mut needs_pending_cleanup = false;

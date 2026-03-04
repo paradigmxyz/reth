@@ -535,14 +535,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         err: StageError,
     ) -> Result<Option<ControlFlow>, PipelineError> {
         if let StageError::DetachedHead { local_head, header, error } = err {
-            warn!(
-                target: "sync::pipeline",
-                stage = %stage_id,
-                ?local_head,
-                ?header,
-                %error,
-                "Stage encountered detached head"
-            );
+            warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
             if let Some(last_detached_head_unwind_target) = self.last_detached_head_unwind_target {
                 if local_head.block.hash == last_detached_head_unwind_target &&
@@ -634,11 +627,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 bad_block: block,
             }))
         } else if err.is_fatal() {
-            error!(
-                target: "sync::pipeline",
-                stage = %stage_id,
-                "Stage encountered a fatal error: {err}"
-            );
+            error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
             Err(err.into())
         } else {
             // On other errors we assume they are recoverable if we discard the

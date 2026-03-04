@@ -323,12 +323,7 @@ where
         let mut last_log_instant = Instant::now();
         let log_duration = Duration::from_secs(10);
 
-        debug!(
-            target: "sync::stages::execution",
-            start = start_block,
-            end = max_block,
-            "Executing range"
-        );
+        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
 
         // Execute block range
         let mut cumulative_gas = 0;
@@ -350,12 +345,7 @@ where
             cumulative_gas += block.header().gas_used();
 
             // Configure the executor to use the current state.
-            trace!(
-                target: "sync::stages::execution",
-                number = block_number,
-                txs = block.body().transactions().len(),
-                "Executing block"
-            );
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -746,12 +736,7 @@ where
     }
 
     let duration = start.elapsed();
-    debug!(
-        target: "sync::stages::execution",
-        ?range,
-        ?duration,
-        "Finished calculating gas used from headers"
-    );
+    debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
     Ok(gas_total)
 }

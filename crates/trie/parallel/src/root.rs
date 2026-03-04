@@ -93,11 +93,7 @@ where
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(
-            target: "trie::parallel_state_root",
-            len = storage_root_targets.len(),
-            "pre-calculating storage roots"
-        );
+        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
         let handle = self.runtime.handle().clone();

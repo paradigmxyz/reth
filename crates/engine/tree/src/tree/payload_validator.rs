@@ -592,10 +592,7 @@ where
 
         match strategy {
             StateRootStrategy::StateRootTask => {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    "Using sparse trie state root algorithm"
-                );
+                debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
 
                 let task_result = ensure_ok_post_block!(
                     self.await_state_root_with_timeout(
@@ -614,12 +611,7 @@ where
                         debug_recorders,
                     }) => {
                         let elapsed = root_time.elapsed();
-                        info!(
-                            target: "engine::tree::payload_validator",
-                            ?state_root,
-                            ?elapsed,
-                            "State root task finished"
-                        );
+                        info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
 
                         #[cfg(feature = "trie-debug")]
                         {
@@ -661,20 +653,13 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(
-                            target: "engine::tree::payload_validator",
-                            %error,
-                            "State root task failed"
-                        );
+                        debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
                         state_root_task_failed = true;
                     }
                 }
             }
             StateRootStrategy::Parallel => {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    "Using parallel state root algorithm"
-                );
+                debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
@@ -687,11 +672,7 @@ where
                         maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
                     }
                     Err(error) => {
-                        debug!(
-                            target: "engine::tree::payload_validator",
-                            %error,
-                            "Parallel state root computation failed"
-                        );
+                        debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
                     }
                 }
             }
@@ -708,15 +689,9 @@ where
         } else {
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    "Using state root fallback for testing"
-                );
+                debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
             } else {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    "Failed to compute state root in parallel"
-                );
+                warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
@@ -807,24 +782,14 @@ where
         transaction_root: Option<B256>,
     ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(
-                target: "engine::tree::payload_validator",
-                ?block,
-                "Failed to validate header {}: {e}",
-                block.hash()
-            );
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
         if let Err(e) =
             self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
         {
-            error!(
-                target: "engine::tree::payload_validator",
-                ?block,
-                "Failed to validate block {}: {e}",
-                block.hash()
-            );
+            error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
 
@@ -945,11 +910,7 @@ where
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
 
-        debug!(
-            target: "engine::tree::payload_validator",
-            elapsed = ?execution_duration,
-            "Executed block"
-        );
+        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
         Ok((output, senders, result_rx))
     }
 
@@ -1202,10 +1163,7 @@ where
         hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
-        debug!(
-            target: "engine::tree::payload_validator",
-            "Comparing trie updates with serial computation"
-        );
+        debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
             Ok((serial_root, serial_trie_updates)) => {
@@ -1320,11 +1278,7 @@ where
     {
         let start = Instant::now();
 
-        trace!(
-            target: "engine::tree::payload_validator",
-            block=?block.num_hash(),
-            "Validating block consensus"
-        );
+        trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         if let Err(e) = self.validate_block_inner(block, transaction_root) {
             return Err(e.into())
@@ -1335,12 +1289,7 @@ where
         if let Err(e) =
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
-            warn!(
-                target: "engine::tree::payload_validator",
-                ?block,
-                "Failed to validate header {} against parent: {e}",
-                block.hash()
-            );
+            warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
         }
         drop(_enter);
@@ -1499,11 +1448,7 @@ where
             return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
-        debug!(
-            target: "engine::tree::payload_validator",
-            %hash,
-            "no canonical state found for block"
-        );
+        debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
         Ok(None)
     }
 
@@ -1555,10 +1500,7 @@ where
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
-            debug!(
-                target: "engine::tree::payload_validator",
-                "Parent found on disk, no lazy overlay needed"
-            );
+            debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
             return (None, anchor_hash);
         }
 

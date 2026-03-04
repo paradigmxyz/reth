@@ -88,12 +88,7 @@ async fn main() {
                 );
             }
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
-                info!(
-                    peers=%net_handle.num_connected_peers(),
-                    %peer_id,
-                    ?reason,
-                    "Session closed."
-                );
+                info!(peers=%net_handle.num_connected_peers() , %peer_id, ?reason, "Session closed.");
             }
             _ => {}
         }

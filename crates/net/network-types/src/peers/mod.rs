@@ -93,13 +93,7 @@ impl Peer {
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(
-            target: "net::peers",
-            reputation=%self.reputation,
-            banned=%self.is_banned(),
-            ?kind,
-            "applied reputation change"
-        );
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), ?kind, "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();

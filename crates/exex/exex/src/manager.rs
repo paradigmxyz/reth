@@ -372,11 +372,7 @@ where
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
     fn finalize_wal(&self, finalized_header: SealedHeader<N::BlockHeader>) -> eyre::Result<()> {
-        debug!(
-            target: "exex::manager",
-            header = ?finalized_header.num_hash(),
-            "Received finalized header"
-        );
+        debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain
         let exex_finished_heights = self
@@ -465,12 +461,7 @@ where
         // Handle incoming ExEx events
         for exex in &mut this.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(
-                    target: "exex::manager",
-                    exex_id = %exex.id,
-                    ?event,
-                    "Received event from ExEx"
-                );
+                debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -493,32 +484,17 @@ where
                 let committed_tip =
                     notification.committed_chain().map(|chain| chain.tip().number());
                 let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
-                debug!(
-                    target: "exex::manager",
-                    ?committed_tip,
-                    ?reverted_tip,
-                    "Received new notification"
-                );
+                debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
 
                 // Commit to WAL only notifications from blockchain tree. Pipeline notifications
                 // always contain only finalized blocks.
                 match source {
                     ExExNotificationSource::BlockchainTree => {
-                        debug!(
-                            target: "exex::manager",
-                            ?committed_tip,
-                            ?reverted_tip,
-                            "Committing notification to WAL"
-                        );
+                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
                         this.wal.commit(&notification)?;
                     }
                     ExExNotificationSource::Pipeline => {
-                        debug!(
-                            target: "exex::manager",
-                            ?committed_tip,
-                            ?reverted_tip,
-                            "Notification was sent from pipeline, skipping WAL commit"
-                        );
+                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
                     }
                 }
 

@@ -253,13 +253,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
         match entry {
             Some(Err(err)) => {
-                debug!(
-                    target: "disc::dns",
-                    %err,
-                    domain=%link.domain,
-                    ?hash,
-                    "Failed to lookup entry"
-                )
+                debug!(target: "disc::dns",%err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
                 trace!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
@@ -270,25 +264,13 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
                 match entry {
                     DnsEntry::Root(root) => {
-                        debug!(
-                            target: "disc::dns",
-                            %root,
-                            domain=%link.domain,
-                            ?hash,
-                            "resolved unexpected root entry"
-                        );
+                        debug!(target: "disc::dns",%root, domain=%link.domain, ?hash, "resolved unexpected root entry");
                     }
                     DnsEntry::Link(link_entry) => {
                         if kind.is_link() {
                             self.sync_tree_with_link(link_entry)
                         } else {
-                            debug!(
-                                target: "disc::dns",
-                                %link_entry,
-                                domain=%link.domain,
-                                ?hash,
-                                "resolved unexpected Link entry"
-                            );
+                            debug!(target: "disc::dns",%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");
                         }
                     }
                     DnsEntry::Branch(branch_entry) => {
@@ -298,12 +280,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     }
                     DnsEntry::Node(entry) => {
                         if kind.is_link() {
-                            debug!(
-                                target: "disc::dns",
-                                domain=%link.domain,
-                                ?hash,
-                                "resolved unexpected enr entry"
-                            );
+                            debug!(target: "disc::dns",domain=%link.domain, ?hash, "resolved unexpected enr entry");
                         } else {
                             self.on_resolved_enr(entry.enr)
                         }

@@ -714,11 +714,7 @@ impl ExecutionCache {
             // error has occurred because this state should be unrepresentable. An account with
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
-                trace!(
-                    target: "engine::caching",
-                    ?account,
-                    "Account with None account info found in state updates"
-                );
+                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
                 return Err(())
             };
 
