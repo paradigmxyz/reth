@@ -9,13 +9,9 @@ pub use thread_priority::{self, *};
 /// be re-entered (e.g. tokio blocking pool).
 #[macro_export]
 macro_rules! once {
-    (|| $body:block) => {{
+    ($e:expr) => {{
         static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| $body);
-    }};
-    (|| $body:expr) => {{
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| { $body });
+        ONCE.call_once(|| $e);
     }};
 }
 
