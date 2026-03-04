@@ -1,4 +1,4 @@
-use crate::common::EnvironmentArgs;
+use alloy_chains::Chain;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
@@ -6,6 +6,7 @@ use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusC
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
+use reth_node_core::args::DatadirArgs;
 use std::{
     borrow::Cow,
     fs::OpenOptions,
@@ -144,7 +145,22 @@ impl Default for DownloadDefaults {
 #[derive(Debug, Parser)]
 pub struct DownloadCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    datadir: DatadirArgs,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// When omitted, the chain is auto-detected from the snapshot URL filename.
+    /// Defaults to mainnet if the chain cannot be detected.
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        long_help = C::help_message(),
+        value_parser = C::parser(),
+        global = true
+    )]
+    chain: Option<Arc<C::ChainSpec>>,
 
     /// Custom URL to download the snapshot from
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
@@ -153,20 +169,26 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
-        fs::create_dir_all(&data_dir)?;
+        let explicit_chain = self.chain.as_ref().map(|c| c.chain());
 
         let url = match self.url {
             Some(url) => url,
             None => {
-                let url = get_latest_snapshot_url(self.env.chain.chain().id()).await?;
+                let chain_id = explicit_chain.unwrap_or_default().id();
+                let url = get_latest_snapshot_url(chain_id).await?;
                 info!(target: "reth::cli", "Using default snapshot URL: {}", url);
                 url
             }
         };
 
+        // Explicit --chain takes priority, then URL-derived, then mainnet default.
+        let chain = explicit_chain.or_else(|| detect_chain_from_url(&url)).unwrap_or_default();
+
+        let data_dir = self.datadir.resolve_datadir(chain);
+        fs::create_dir_all(&data_dir)?;
+
         info!(target: "reth::cli",
-            chain = %self.env.chain.chain(),
+            chain = %chain,
             dir = ?data_dir.data_dir(),
             url = %url,
             "Starting snapshot download and extraction"
@@ -182,7 +204,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 impl<C: ChainSpecParser> DownloadCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
-        Some(&self.env.chain)
+        self.chain.as_ref()
     }
 }
 
@@ -527,6 +549,21 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Tries to extract a chain ID from a snapshot URL filename.
+///
+/// Splits the filename by `-` and checks if the second segment is a valid chain ID.
+/// For example, `reth-1-minimal-edge-24571111-1772470929.tar.zst` splits into
+/// `["reth", "1", "minimal", ...]` and `1` is parsed as the chain ID.
+fn detect_chain_from_url(url: &str) -> Option<Chain> {
+    let filename = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let chain_id: u64 = filename.split('-').nth(1)?.parse().ok()?;
+    Some(Chain::from_id(chain_id))
+}
+
 // Builds default URL for latest mainnet archive snapshot using configured defaults
 async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
     let defaults = DownloadDefaults::get_global();
@@ -605,6 +642,30 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_detect_chain_from_url() {
+        // Second `-`-delimited segment is the chain ID
+        assert_eq!(
+            detect_chain_from_url(
+                "https://snapshots-r2.reth.rs/reth-1-minimal-edge-24571111-1772470929.tar.zst"
+            ),
+            Some(Chain::from_id(1))
+        );
+        assert_eq!(
+            detect_chain_from_url("https://example.com/reth-17000-full-24571111.tar.lz4"),
+            Some(Chain::from_id(17000))
+        );
+        assert_eq!(
+            detect_chain_from_url("file:///tmp/reth-1-minimal-edge-24571111.tar.zst"),
+            Some(Chain::from_id(1))
+        );
+
+        // No second segment or not numeric → None
+        assert_eq!(detect_chain_from_url("https://example.com/snapshot.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/reth-.tar.lz4"), None);
+        assert_eq!(detect_chain_from_url("https://example.com/reth-abc-123.tar.lz4"), None);
     }
 
     #[test]
