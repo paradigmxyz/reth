@@ -719,7 +719,7 @@ pub struct ArenaParallelismThresholds {
 impl Default for ArenaParallelismThresholds {
     fn default() -> Self {
         Self {
-            min_dirty_leaves: 16,
+            min_dirty_leaves: 64,
             min_revealed_nodes: 16,
             min_updates: 128,
             min_leaves_for_prune: 128,
@@ -2709,18 +2709,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
-        let threshold = self.parallelism_thresholds.min_dirty_leaves;
-
-        // Take qualifying subtries from the upper arena and hash them in parallel.
+        // Count total dirty leaves across all subtries to make a global parallelism
+        // decision, matching the approach in ParallelSparseTrie.
+        let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
             let ArenaSparseNode::Subtrie(s) = node else { continue };
             if s.num_dirty_leaves == 0 {
                 continue;
             }
-            if s.num_dirty_leaves < threshold {
-                continue;
-            }
+            total_dirty_leaves += s.num_dirty_leaves;
             let ArenaSparseNode::Subtrie(subtrie) =
                 mem::replace(node, ArenaSparseNode::TakenSubtrie)
             else {
@@ -2729,12 +2727,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
-        // Hash taken subtries (in parallel if more than one), then sort by path
-        // reversed so we can pop them in lexicographic order during the walk.
+        // Hash taken subtries: in parallel if total dirty leaves meet the threshold,
+        // otherwise serially. This mirrors ParallelSparseTrie's all-or-nothing approach.
         if !taken.is_empty() {
-            if taken.len() == 1 {
-                let (_, subtrie) = &mut taken[0];
-                subtrie.update_cached_rlp();
+            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
+            {
+                for (_, subtrie) in &mut taken {
+                    subtrie.update_cached_rlp();
+                }
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
