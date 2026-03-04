@@ -145,11 +145,12 @@ enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of a Branch or Leaf node, or `None` for other node types.
-    const fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
+    /// Returns the state of a Branch, Leaf, or Subtrie root node, or `None` for other types.
+    fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
             Self::Branch(b) => Some(&b.state),
             Self::Leaf { state, .. } => Some(state),
+            Self::Subtrie(s) => s.arena[s.root].state_ref(),
             _ => None,
         }
     }
@@ -160,6 +161,11 @@ impl ArenaSparseNode {
             Self::Leaf { state, .. } => state,
             _ => panic!("state_mut called on non-Branch/Leaf node"),
         }
+    }
+
+    /// Returns `true` if this node's RLP encoding is cached.
+    fn is_cached(&self) -> bool {
+        self.state_ref().is_some_and(|s| matches!(s, ArenaSparseNodeState::Cached { .. }))
     }
 
     /// Returns the short key of the branch or leaf, or None.
@@ -2389,6 +2395,10 @@ impl Default for ArenaParallelSparseTrie {
 impl ArenaParallelSparseTrie {
     /// Hashes a subtrie at `head_idx` and collects its update actions.
     fn update_upper_subtrie(&mut self, head_idx: Index) {
+        if self.upper_arena[head_idx].is_cached() {
+            return;
+        }
+
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()
         };
@@ -2637,13 +2647,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn is_root_cached(&self) -> bool {
-        matches!(
-            &self.upper_arena[self.root],
-            ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                state: ArenaSparseNodeState::Cached { .. },
-                ..
-            }) | ArenaSparseNode::Leaf { state: ArenaSparseNodeState::Cached { .. }, .. }
-        )
+        self.upper_arena[self.root].is_cached()
     }
 
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
@@ -2694,8 +2698,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
         }
 
+        // If the root branch is already cached and nothing was taken for parallel
+        // hashing, there are no dirty subtries to process.
+        if taken.is_empty() && self.upper_arena[self.root].is_cached() {
+            return;
+        }
+
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
-        // any remaining dirty subtries.
+        // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
+        // cannot contain dirty subtries since dirty state propagates upward.
         taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
 
         self.buffers.stack.clear();
@@ -2740,7 +2751,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 _ => unreachable!("unexpected node on stack: {:?}", self.upper_arena[head_idx]),
             }
 
-            // Head is a branch — iterate its children looking for subtries to descend into.
+            // Head is a branch — iterate its children looking for dirty subtries to
+            // descend into. Skip children that are clean: non-dirty branches cannot
+            // contain dirty subtries, and non-dirty subtries need no rehashing.
             let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
 
             let mut descended = false;
@@ -2754,17 +2767,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
                 };
 
-                match &self.upper_arena[child_idx] {
-                    ArenaSparseNode::Branch(_) |
-                    ArenaSparseNode::Subtrie(_) |
-                    ArenaSparseNode::TakenSubtrie => {
-                        let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
-                        push_stack(&self.upper_arena, &mut self.buffers.stack, child_idx, path);
-                        start_nibble = 0;
-                        descended = true;
-                        break;
-                    }
-                    _ => {}
+                let child = &self.upper_arena[child_idx];
+                let needs_visit = match child {
+                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
+                    ArenaSparseNode::TakenSubtrie => true,
+                    _ => false,
+                };
+
+                if needs_visit {
+                    let path = child_path(&self.upper_arena, &self.buffers.stack, nibble);
+                    push_stack(&self.upper_arena, &mut self.buffers.stack, child_idx, path);
+                    start_nibble = 0;
+                    descended = true;
+                    break;
                 }
             }
 
