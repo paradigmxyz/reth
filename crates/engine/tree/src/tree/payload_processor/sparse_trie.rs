@@ -92,6 +92,14 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
+    /// Accumulated account leaf update cache hits.
+    account_cache_hits: u64,
+    /// Accumulated account leaf update cache misses.
+    account_cache_misses: u64,
+    /// Accumulated storage leaf update cache hits.
+    storage_cache_hits: u64,
+    /// Accumulated storage leaf update cache misses.
+    storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
     /// Number of pending execution/prewarming updates received but not yet passed to
@@ -142,6 +150,10 @@ where
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
+            account_cache_hits: 0,
+            account_cache_misses: 0,
+            storage_cache_hits: 0,
+            storage_cache_misses: 0,
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             metrics,
@@ -332,6 +344,15 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
+        self.metrics.sparse_trie_account_cache_hits.increment(self.account_cache_hits);
+        self.metrics.sparse_trie_account_cache_misses.increment(self.account_cache_misses);
+        self.metrics.sparse_trie_storage_cache_hits.increment(self.storage_cache_hits);
+        self.metrics.sparse_trie_storage_cache_misses.increment(self.storage_cache_misses);
+        self.account_cache_hits = 0;
+        self.account_cache_misses = 0;
+        self.storage_cache_hits = 0;
+        self.storage_cache_misses = 0;
+
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
@@ -495,8 +516,6 @@ where
 
         // Process all storage updates, skipping tries with no pending updates.
         let span = debug_span!("process_storage_leaf_updates").entered();
-        let mut storage_cache_hits = 0u64;
-        let mut storage_cache_misses = 0u64;
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
@@ -521,15 +540,13 @@ where
                 }
             })?;
             let updates_len_after = updates.len();
-            storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            storage_cache_misses += updates_len_after as u64;
+            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
+            self.storage_cache_misses += updates_len_after as u64;
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
             }
         }
-        self.metrics.sparse_trie_storage_cache_hits.increment(storage_cache_hits);
-        self.metrics.sparse_trie_storage_cache_misses.increment(storage_cache_misses);
 
         drop(span);
 
@@ -571,10 +588,8 @@ where
         })?;
 
         let updates_len_after = account_updates.len();
-        let cache_hits = (updates_len_before - updates_len_after) as u64;
-        let cache_misses = updates_len_after as u64;
-        self.metrics.sparse_trie_account_cache_hits.increment(cache_hits);
-        self.metrics.sparse_trie_account_cache_misses.increment(cache_misses);
+        self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
+        self.account_cache_misses += updates_len_after as u64;
 
         Ok(updates_len_after < updates_len_before)
     }
