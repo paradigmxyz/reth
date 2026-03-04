@@ -1507,43 +1507,56 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let validator = &self.payload_validator;
-
+                                // Before processing the new payload, we wait for persistence and
+                                // cache updates to complete. We do it in parallel, spawning
+                                // persistence and cache update wait tasks with Tokio, so that we
+                                // can get an unbiased breakdown on how long did every step take.
+                                //
+                                // If we first wait for persistence, and only then for cache
+                                // updates, we will offset the cache update waits by the duration of
+                                // persistence, which is incorrect.
                                 debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
-                                if let Some((rx, start_time, _action)) = pending_persistence {
+
+                                let pending_persistence = self.persistence_state.rx.take();
+                                let persistence_rx = if let Some((rx, start_time, _action)) =
+                                    pending_persistence
+                                {
+                                    let (persistence_tx, persistence_rx) =
+                                        std::sync::mpsc::channel();
                                     self.tokio_handle.spawn_blocking(move || {
                                         let start = Instant::now();
-                                        let result = rx.recv().ok();
+                                        let result =
+                                            rx.recv().expect("persistence state channel closed");
                                         let _ = persistence_tx.send((
                                             result,
                                             start_time,
                                             start.elapsed(),
                                         ));
                                     });
-                                }
+                                    Some(persistence_rx)
+                                } else {
+                                    None
+                                };
 
-                                let cache_wait = validator.wait_for_caches();
-                                let persistence_result = persistence_rx.try_recv().ok();
+                                let cache_wait = self.payload_validator.wait_for_caches();
 
-                                let persistence_wait =
-                                    if let Some((result, start_time, wait_duration)) =
-                                        persistence_result
-                                    {
-                                        let _ = self
-                                            .on_persistence_complete(result.flatten(), start_time);
-                                        Some(wait_duration)
-                                    } else {
-                                        None
-                                    };
+                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
+                                {
+                                    let (result, start_time, wait_duration) = persistence_rx
+                                        .recv()
+                                        .expect("persistence result channel closed");
+                                    let _ = self.on_persistence_complete(result, start_time);
+                                    Some(wait_duration)
+                                } else {
+                                    None
+                                };
 
                                 debug!(
                                     target: "engine::tree",
-                                    persistence_wait = ?persistence_wait,
+                                    ?persistence_wait,
                                     execution_cache_wait = ?cache_wait.execution_cache,
                                     sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Peresistence finished and caches updated for reth_newPayload"
+                                    "Persistence finished and caches updated for reth_newPayload"
                                 );
 
                                 let start = Instant::now();
