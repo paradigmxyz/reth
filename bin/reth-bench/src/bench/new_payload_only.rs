@@ -84,17 +84,18 @@ impl Command {
                     }
                 };
 
-                let rlp = if rlp_blocks {
-                    let Ok(rlp) = block_provider.debug_get_raw_block(next_block.into()).await
-                    else {
-                        tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}");
-                        let _ = error_sender
-                            .send(eyre::eyre!("Failed to fetch raw block {next_block}"));
-                        break;
-                    };
-                    Some(rlp)
-                } else {
-                    None
+                let rlp = match rlp_blocks {
+                    true => {
+                        let Ok(rlp) = block_provider.debug_get_raw_block(next_block.into()).await
+                        else {
+                            tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}");
+                            let _ = error_sender
+                                .send(eyre::eyre!("Failed to fetch raw block {next_block}"));
+                            break;
+                        };
+                        Some(rlp)
+                    }
+                    false => None,
                 };
 
                 next_block += 1;
