@@ -157,6 +157,8 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
+                // Clamp to the highest persisted block so that on restart
+                // `last_finalized_block_number` never points past available state.
                 provider_rw.save_finalized_block_number(finalized.min(last.number))?;
                 if finalized > last.number {
                     self.pending_finalized_block = Some(finalized);
