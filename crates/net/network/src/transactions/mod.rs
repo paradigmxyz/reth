@@ -980,6 +980,7 @@ where
                     propagated.record(hash, PropagateKind::Hash(peer_id));
                     peer.seen_transactions.insert(hash);
                 }
+            }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
 
