@@ -192,10 +192,10 @@ where
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
             let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
         });
 
