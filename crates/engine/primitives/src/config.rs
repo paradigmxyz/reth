@@ -29,7 +29,7 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 /// Default LFU hot-slot capacity for sparse trie pruning.
 ///
 /// Limits the number of `(address, slot)` pairs retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 10000;
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
 
 /// Default LFU hot-account capacity for sparse trie pruning.
 ///
