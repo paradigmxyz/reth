@@ -2748,7 +2748,7 @@ mod tests {
         HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
     };
     use std::{collections::BTreeMap, iter::once};
-    use tracing::{trace, trace_span};
+    use tracing::{info, trace, trace_span};
 
     /// A fixed hashed address used by the harness for all storage trie operations.
     const HASHED_ADDRESS: B256 = B256::ZERO;
@@ -3080,11 +3080,11 @@ mod tests {
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             changeset2_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
-            delete_pct in 0.0..=0.33f64,
+            delete_pct in 0.0..=0.33f64, // precent of overlapping changeset which are deletes
             shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();
-            trace!(target: TRACE_TARGET, "==== PROPTEST START ====");
+            info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
 
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
