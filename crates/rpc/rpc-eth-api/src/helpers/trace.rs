@@ -2,6 +2,7 @@
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
+use reth_rpc_eth_types::EthApiError;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
@@ -268,7 +269,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let block =
                 if block.is_some() { block } else { self.recovered_block(block_id).await? };
 
-            let Some(block) = block else { return Ok(None) };
+            let Some(block) = block else {
+                return Err(EthApiError::HeaderNotFound(block_id).into())
+            };
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             if block.body().transactions().is_empty() {
