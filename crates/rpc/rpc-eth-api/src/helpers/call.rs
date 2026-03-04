@@ -332,12 +332,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     .into();
             }
 
-            let ((evm_env, _), block) = futures::try_join!(
-                self.evm_env_at(target_block),
-                self.recovered_block(target_block)
-            )?;
-
-            let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let block = self
+                .recovered_block(target_block)
+                .await?
+                .ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we're essentially replaying the transactions in the block here, hence we need the
             // state that points to the beginning of the block, which is the state at

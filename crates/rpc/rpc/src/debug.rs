@@ -204,12 +204,12 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
     }
@@ -404,13 +404,15 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((mut evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(target_block),
-            self.eth_api().recovered_block(target_block),
-        )?;
+        let block = self
+            .eth_api()
+            .recovered_block(target_block)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
+        let mut evm_env =
+            self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
