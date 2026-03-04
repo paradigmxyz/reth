@@ -4,23 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub use thread_priority::{self, *};
 
-/// Runs the given expression exactly once per call site.
-///
-/// Each invocation expands to its own `static Once`, so two `once!` calls in the same function
-/// are independent. Useful for one-time thread setup (priority, affinity) on threads that may
-/// be re-entered (e.g. tokio blocking pool).
-#[macro_export]
-macro_rules! once {
-    (|| $body:block) => {{
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| $body);
-    }};
-    (|| $body:expr) => {{
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| { $body });
-    }};
-}
-
 /// Increases the current thread's priority.
 ///
 /// Tries [`ThreadPriority::Max`] first. If that fails (e.g. missing `CAP_SYS_NICE`),
@@ -55,12 +38,12 @@ pub fn pin_current_thread_to_core() {
     _pin_current_thread_to_core();
 }
 
-/// Counter used to round-robin across available cores.
-static CORE_INDEX: AtomicUsize = AtomicUsize::new(0);
-
 #[cfg(target_os = "linux")]
 fn _pin_current_thread_to_core() {
     use std::mem;
+
+    /// Counter used to round-robin across available cores.
+    static CORE_INDEX: AtomicUsize = AtomicUsize::new(0);
 
     let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
 
