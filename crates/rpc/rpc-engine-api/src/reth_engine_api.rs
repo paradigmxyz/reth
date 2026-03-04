@@ -12,8 +12,8 @@ use tracing::trace;
 /// Standalone implementation of the `reth_` engine API namespace.
 ///
 /// Provides the `reth_newPayload` endpoint that accepts either `ExecutionData` directly or an
-/// RLP-encoded block, waits for persistence, execution cache, and sparse trie locks before
-/// processing, and returns timing breakdowns with server-measured execution latency.
+/// RLP-encoded block, optionally waiting for persistence, execution cache, and sparse trie locks
+/// before processing, and returns timing breakdowns with server-measured execution latency.
 #[derive(Debug)]
 pub struct RethEngineApi<Payload: PayloadTypes> {
     beacon_engine_handle: ConsensusEngineHandle<Payload>,
@@ -31,8 +31,10 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
     async fn reth_new_payload(
         &self,
         input: RethNewPayloadInput<Payload::ExecutionData>,
+        wait: Option<bool>,
     ) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayload");
+        let wait = wait.unwrap_or(true);
+        trace!(target: "rpc::engine", wait, "Serving reth_newPayload");
 
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
@@ -45,7 +47,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let (status, timings) = self
             .beacon_engine_handle
-            .reth_new_payload(payload)
+            .reth_new_payload(payload, wait)
             .await
             .map_err(EngineApiError::from)?;
         Ok(RethPayloadStatus {
