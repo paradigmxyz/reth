@@ -56,12 +56,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts from machine-1
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: checksum-machine-1
           path: machine-1/
       - name: Download artifacts from machine-2
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: checksum-machine-2
           path: machine-2/
