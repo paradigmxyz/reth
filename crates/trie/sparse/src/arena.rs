@@ -2445,14 +2445,13 @@ impl Default for ArenaParallelSparseTrie {
 impl ArenaParallelSparseTrie {
     /// Hashes a subtrie at `head_idx` and collects its update actions.
     fn update_upper_subtrie(&mut self, head_idx: Index) {
-        if self.upper_arena[head_idx].is_cached() {
-            return;
-        }
-
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()
         };
-        subtrie.update_cached_rlp();
+
+        if !subtrie.arena[subtrie.root].is_cached() {
+            subtrie.update_cached_rlp();
+        }
 
         if let Some(actions) = self.buffers.update_actions.as_mut() &&
             let Some(subtrie_actions) = subtrie.buffers.update_actions.as_mut()
