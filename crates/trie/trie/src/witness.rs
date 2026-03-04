@@ -354,6 +354,11 @@ where
             if !state.accounts.contains_key(&hashed_address) {
                 targets.account_targets.push(ProofV2Target::new(hashed_address));
             }
+            // Skip accounts with no storage slot changes — an empty target set would produce
+            // an empty proof vec which cannot be revealed (no root node).
+            if storage.storage.is_empty() {
+                continue;
+            }
             let storage_keys = storage.storage.keys().map(|k| ProofV2Target::new(*k)).collect();
             targets.storage_targets.insert(hashed_address, storage_keys);
         }

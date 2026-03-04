@@ -300,6 +300,16 @@ where
 
             let retain_updates = self.retain_updates;
 
+            for (account, proofs) in &multiproof.storage_proofs {
+                if proofs.is_empty() {
+                    tracing::error!(
+                        target: "trie::sparse",
+                        ?account,
+                        "reveal_decoded_multiproof_v2: storage_proofs entry has empty vec"
+                    );
+                }
+            }
+
             // Process all storage trie revealings in parallel, having first removed the
             // `RevealableSparseTrie`s for each account from their HashMaps. These will be
             // returned after processing.

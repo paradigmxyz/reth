@@ -174,6 +174,14 @@ where
                 hashed_storage_cursor,
             );
             let proofs = storage_calculator.storage_proof(hashed_address, &mut targets)?;
+            if proofs.is_empty() {
+                tracing::error!(
+                    target: "trie::proof",
+                    ?hashed_address,
+                    target_count = targets.len(),
+                    "multiproof_v2: storage_proof returned empty vec"
+                );
+            }
             storage_proofs.insert(hashed_address, proofs);
         }
 
