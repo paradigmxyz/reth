@@ -1702,7 +1702,11 @@ impl ArenaParallelSparseTrie {
                         let mut new_key = prefix;
                         new_key.extend(key);
                         *key = new_key;
+                        let was_clean = !matches!(state, ArenaSparseNodeState::Dirty);
                         *state = ArenaSparseNodeState::Dirty;
+                        if was_clean {
+                            subtrie.num_dirty_leaves += 1;
+                        }
                     }
                     _ => {
                         unreachable!("subtrie root must be a Branch or Leaf during collapse_branch")
