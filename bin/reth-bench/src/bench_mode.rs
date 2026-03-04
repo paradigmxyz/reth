@@ -35,7 +35,7 @@ impl BenchMode {
 
     /// Create a [`BenchMode`] from optional `from` and `to` fields.
     ///
-    /// If only `--to` is provided, `from` is derived as `latest_block + 1`.
+    /// If only `--to` is provided, `from` is derived from the engine head.
     pub const fn new(from: Option<u64>, to: Option<u64>, latest_block: u64) -> Self {
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.

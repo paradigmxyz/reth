@@ -112,7 +112,7 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
             let head_number = head_block.header.number;
             info!(target: "reth-bench", "No --from provided, derived from engine head: {}", head_number);
-            (Some(head_number + 1), bench_args.to)
+            (Some(head_number), bench_args.to)
         } else {
             (bench_args.from, bench_args.to)
         };
