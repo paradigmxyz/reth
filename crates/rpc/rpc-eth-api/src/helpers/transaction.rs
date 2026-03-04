@@ -257,25 +257,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: 'static,
     {
         async move {
-            // First, try the RPC cache
-            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(receipts) = &cached.receipts &&
-                let Some(receipt) = receipts.get(cached.tx_index).cloned() &&
-                let Some(tx) = cached.block.body().transactions().get(cached.tx_index).cloned()
+            if let Some(cached) = self
+                .cache()
+                .get_transaction_with_receipts(hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
             {
-                let meta = TransactionMeta {
-                    tx_hash: hash,
-                    index: cached.tx_index as u64,
-                    block_hash: cached.block.hash(),
-                    block_number: cached.block.number(),
-                    base_fee: cached.block.base_fee_per_gas(),
-                    excess_blob_gas: cached.block.header().excess_blob_gas(),
-                    timestamp: cached.block.timestamp(),
-                };
-                return Ok(Some((tx, meta, receipt)));
+                if let Some(result) = cached.into_tx_and_receipt(hash) {
+                    return Ok(Some(result));
+                }
             }
 
-            // Cache miss - fall back to DB lookup
+            // Cache miss — fall back to the provider.
             let (tx, meta) = match self
                 .spawn_blocking_io(move |this| {
                     this.provider()

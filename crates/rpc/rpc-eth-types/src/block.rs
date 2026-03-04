@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader, TxReceipt,
+};
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
     Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock,
@@ -52,6 +55,43 @@ impl<B: Block, R> CachedTransaction<B, R> {
             block_number: self.block.number(),
             base_fee: self.block.base_fee_per_gas(),
         })
+    }
+
+    /// Returns the receipt at the cached transaction index, if receipts are available.
+    pub fn receipt(&self) -> Option<&R> {
+        self.receipts.as_ref()?.get(self.tx_index)
+    }
+
+    /// Constructs a [`TransactionMeta`] for this cached transaction using the given tx hash.
+    pub fn transaction_meta(&self, tx_hash: TxHash) -> TransactionMeta
+    where
+        B::Header: BlockHeader,
+    {
+        TransactionMeta {
+            tx_hash,
+            index: self.tx_index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+            excess_blob_gas: self.block.header().excess_blob_gas(),
+            timestamp: self.block.timestamp(),
+        }
+    }
+
+    /// Consumes self and returns the transaction, its metadata, and receipt.
+    ///
+    /// Returns `None` if the receipt or transaction is not available at the cached index.
+    pub fn into_tx_and_receipt(
+        self,
+        tx_hash: TxHash,
+    ) -> Option<(<B::Body as BlockBody>::Transaction, TransactionMeta, R)>
+    where
+        B::Header: BlockHeader,
+        R: Clone,
+    {
+        let receipt = self.receipt().cloned()?;
+        let tx = self.block.body().transactions().get(self.tx_index)?.clone();
+        Some((tx, self.transaction_meta(tx_hash), receipt))
     }
 
     /// Converts this cached transaction into an RPC receipt using the given converter.

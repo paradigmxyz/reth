@@ -265,6 +265,28 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ = self.to_service.send(CacheAction::GetTransactionByHash { tx_hash, response_tx });
         rx.await.ok()?
     }
+
+    /// Looks up a transaction by its hash, always returning receipts.
+    ///
+    /// If the transaction is found in the cache but receipts are missing, they are fetched and
+    /// returned alongside the cached block. Returns `None` if the transaction is not in the
+    /// cache index.
+    pub async fn get_transaction_with_receipts(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<CachedTransaction<N::Block, N::Receipt>>> {
+        let Some(cached) = self.get_transaction_by_hash(tx_hash).await else {
+            return Ok(None);
+        };
+
+        if cached.receipts.is_some() {
+            return Ok(Some(cached));
+        }
+
+        // Block is cached but receipts are not — fetch them so the caller always has both.
+        let receipts = self.get_receipts(cached.block.hash()).await?;
+        Ok(Some(CachedTransaction::new(cached.block, cached.tx_index, receipts)))
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
