@@ -532,9 +532,8 @@ async fn to_ipc_service<S, T>(
                break
             }
             item = rx_item.next() => {
-                if let Some(item) = item {
-                    conn.push_back(item.to_string());
-                }
+                let Some(item) = item else { break };
+                conn.push_back(item.to_string());
             }
             _ = &mut stopped => {
                 // shutdown

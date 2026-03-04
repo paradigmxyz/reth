@@ -241,6 +241,7 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            ctx.task_executor().clone(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -256,11 +257,11 @@ impl EngineNodeLauncher {
 
         ctx.task_executor().spawn_critical_task(
             "events task",
-            Box::pin(node::handle_events(
+            node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            )),
+            ),
         );
 
         let RpcHandle {
@@ -375,7 +376,7 @@ impl EngineNodeLauncher {
 
             let _ = exit.send(res);
         };
-        ctx.task_executor().spawn_critical_task("consensus engine", Box::pin(consensus_engine));
+        ctx.task_executor().spawn_critical_task("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 

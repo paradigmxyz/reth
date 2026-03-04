@@ -170,6 +170,7 @@ rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2024_incompatible_pat = "warn"
+rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 
@@ -454,7 +455,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.28.0", default-features = false }
+alloy-evm = { version = "0.28.1", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -518,6 +519,7 @@ humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
+libc = "0.2"
 lz4 = "1.28.1"
 modular-bitfield = "0.13.1"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }

@@ -448,7 +448,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 this.create_access_list_with(evm_env, at, request, state_override).await
             })
             .await
@@ -467,7 +467,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
 
@@ -564,7 +564,7 @@ pub trait Call:
         R: Send + 'static,
         F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             f(this, state)
         })
@@ -651,7 +651,7 @@ pub trait Call:
         R: Send + 'static,
     {
         let at = at.into();
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))

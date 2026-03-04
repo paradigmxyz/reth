@@ -603,7 +603,7 @@ where
                 from_multi_proof,
                 proof_worker_handle,
                 trie_metrics.clone(),
-                sparse_state_trie.with_skip_proof_node_filtering(true),
+                sparse_state_trie,
                 chunk_size,
             );
 
@@ -653,6 +653,12 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
+                trie_metrics
+                    .sparse_trie_retained_memory_bytes
+                    .set(trie.memory_size() as f64);
+                trie_metrics
+                    .sparse_trie_retained_storage_tries
+                    .set(trie.retained_storage_tries_count() as f64);
                 guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {

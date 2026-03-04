@@ -18,16 +18,12 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseTrieCursorFactory,
-    DatabaseTrieWitness,
 };
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbTrieWitness<'a, TX, A> =
-    TrieWitness<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-
 #[test]
 fn includes_empty_node_preimage() {
     let factory = create_test_provider_factory();
@@ -40,12 +36,15 @@ fn includes_empty_node_preimage() {
     reth_trie_db::with_adapter!(provider, |A| {
         // witness includes empty state trie root node
         assert_eq!(
-            DbTrieWitness::<_, A>::from_tx(provider.tx_ref())
-                .compute(HashedPostState {
-                    accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                    storages: HashMap::default(),
-                })
-                .unwrap(),
+            TrieWitness::new(
+                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            )
+            .compute(HashedPostState {
+                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+                storages: HashMap::default(),
+            })
+            .unwrap(),
             HashMap::from_iter([(EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))])
         );
 
@@ -61,15 +60,18 @@ fn includes_empty_node_preimage() {
             )]))
             .unwrap();
 
-        let witness = DbTrieWitness::<_, A>::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
-                )]),
-            })
-            .unwrap();
+        let witness = TrieWitness::new(
+            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+        )
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::from_iter([(
+                hashed_address,
+                HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
+            )]),
+        })
+        .unwrap();
         assert!(witness.contains_key(&state_root));
         for node in multiproof.account_subtree.values() {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
@@ -105,7 +107,11 @@ fn includes_nodes_for_destroyed_storage_nodes() {
             )]))
             .unwrap();
 
-        let witness = DbTrieWitness::<_, A>::from_tx(provider.tx_ref())
+        let witness =
+            TrieWitness::new(
+                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            )
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::from_iter([(
@@ -155,19 +161,21 @@ fn correctly_decodes_branch_node_values() {
             )]))
             .unwrap();
 
-        let witness = DbTrieWitness::<_, A>::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    HashedStorage::from_iter(
-                        false,
-                        [hashed_slot1, hashed_slot2]
-                            .map(|hashed_slot| (hashed_slot, U256::from(2))),
-                    ),
-                )]),
-            })
-            .unwrap();
+        let witness = TrieWitness::new(
+            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+        )
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::from_iter([(
+                hashed_address,
+                HashedStorage::from_iter(
+                    false,
+                    [hashed_slot1, hashed_slot2].map(|hashed_slot| (hashed_slot, U256::from(2))),
+                ),
+            )]),
+        })
+        .unwrap();
         assert!(witness.contains_key(&state_root));
         for node in multiproof.account_subtree.values() {
             assert_eq!(witness.get(&keccak256(node)), Some(node));

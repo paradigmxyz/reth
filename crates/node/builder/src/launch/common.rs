@@ -557,13 +557,10 @@ where
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking_task(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
+            self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
+                let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                let _ = tx.send(result);
+            });
             rx.await?.inspect_err(|err| {
                 error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
@@ -1105,7 +1102,7 @@ where
         // If engine events are provided, spawn listener for new payload reporting
         let ethstats_for_events = ethstats.clone();
         let task_executor = self.task_executor().clone();
-        task_executor.spawn_task(Box::pin(async move {
+        task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
@@ -1128,10 +1125,10 @@ where
                     }
                 }
             }
-        }));
+        });
 
         // Spawn main ethstats service
-        task_executor.spawn_task(Box::pin(async move { ethstats.run().await }));
+        task_executor.spawn_task(async move { ethstats.run().await });
 
         Ok(())
     }
