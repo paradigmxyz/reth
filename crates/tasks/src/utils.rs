@@ -2,6 +2,23 @@
 
 pub use thread_priority::{self, *};
 
+/// Runs the given expression exactly once per call site.
+///
+/// Each invocation expands to its own `static Once`, so two `once!` calls in the same function
+/// are independent. Useful for one-time thread setup (priority, affinity) on threads that may
+/// be re-entered (e.g. tokio blocking pool).
+#[macro_export]
+macro_rules! once {
+    (|| $body:block) => {{
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| $body);
+    }};
+    (|| $body:expr) => {{
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| { $body });
+    }};
+}
+
 /// Increases the current thread's priority.
 ///
 /// Tries [`ThreadPriority::Max`] first. If that fails (e.g. missing `CAP_SYS_NICE`),
