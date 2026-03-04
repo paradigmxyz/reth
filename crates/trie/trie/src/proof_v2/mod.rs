@@ -548,7 +548,9 @@ where
                     let rlp_child = self.child_stack.pop().expect("checked num_children == 1");
                     let ProofTrieBranchChild::RlpNode(rlp_node) = rlp_child else { unreachable!() };
 
-                    let new_short_key = prefix;
+                    let old_short_key = Nibbles::new();
+                    let mut new_short_key = prefix;
+                    new_short_key.extend(&old_short_key);
 
                     let mut stack = self.take_rlp_nodes_buf();
                     stack.push(rlp_node);
@@ -557,9 +559,6 @@ where
                     BranchNodeRef::new(&stack, branch.state_mask).encode(&mut self.rlp_encode_buf);
                     let branch_rlp = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
 
-                    // Drop masks: the collapsed branch no longer represents a node in the
-                    // original trie structure, so the cached masks (hash_mask/tree_mask) are
-                    // stale and must not be propagated.
                     self.child_stack.push(ProofTrieBranchChild::Branch {
                         node: BranchNodeV2::new(
                             new_short_key,
@@ -567,7 +566,7 @@ where
                             branch.state_mask,
                             branch_rlp,
                         ),
-                        masks: None,
+                        masks: branch.masks,
                     });
                 } else {
                     let child = self.child_stack.last_mut().expect("checked num_children == 1");
@@ -579,16 +578,13 @@ where
                         ProofTrieBranchChild::Leaf { short_key, .. } => {
                             *short_key = new_short_key;
                         }
-                        ProofTrieBranchChild::Branch { node, masks: child_masks } => {
+                        ProofTrieBranchChild::Branch { node, .. } => {
                             node.key = new_short_key;
                             // Recompute the branch_rlp_node since the extension key changed.
                             self.rlp_encode_buf.clear();
                             BranchNodeRef::new(&node.stack, node.state_mask)
                                 .encode(&mut self.rlp_encode_buf);
                             node.branch_rlp_node = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
-                            // Drop masks: the collapsed branch no longer represents a node
-                            // in the original trie structure.
-                            *child_masks = None;
                         }
                         ProofTrieBranchChild::RlpNode(_) => unreachable!(),
                     }
@@ -602,15 +598,10 @@ where
 
             // If the branch had 0 children, the parent's `state_mask` bit for this branch's
             // nibble must be unset so the parent doesn't expect a child on the stack.
-            // Also clear the corresponding bits in the parent's masks to keep them consistent.
             if num_children == 0 {
                 if let Some(parent) = self.branch_stack.last_mut() {
                     let nibble = self.branch_path.get_unchecked(new_path_len);
                     parent.state_mask.unset_bit(nibble);
-                    if let Some(ref mut masks) = parent.masks {
-                        masks.hash_mask.unset_bit(nibble);
-                        masks.tree_mask.unset_bit(nibble);
-                    }
                 }
             }
 
