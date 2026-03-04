@@ -157,10 +157,23 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized)?;
+                // Clamp to the highest persisted block so that on restart
+                // `last_finalized_block_number` never points past available state.
+                // When `memory_block_buffer_target > 0` the batch may not include
+                // the finalized block yet — keep the original value pending for the
+                // next `save_blocks` call.
+                let clamped = finalized.min(last.number);
+                provider_rw.save_finalized_block_number(clamped)?;
+                if finalized > last.number {
+                    self.pending_finalized_block = Some(finalized);
+                }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe)?;
+                let clamped = safe.min(last.number);
+                provider_rw.save_safe_block_number(clamped)?;
+                if safe > last.number {
+                    self.pending_safe_block = Some(safe);
+                }
             }
 
             if self.pruner.is_pruning_needed(last.number) {
