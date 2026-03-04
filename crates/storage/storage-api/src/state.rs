@@ -2,7 +2,7 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
@@ -46,6 +46,28 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get storage values for multiple keys of a given account.
+    ///
+    /// Returns a `Vec` of `(StorageKey, StorageValue)` pairs for keys that exist in storage.
+    /// Keys with no value are omitted from the result.
+    ///
+    /// The default implementation loops over individual [`storage`](Self::storage) calls.
+    /// Providers may override this to batch lookups using a single cursor.
+    /// Overriding implementations must preserve this contract: keys with no value are omitted.
+    fn storage_range(
+        &self,
+        account: Address,
+        keys: &[StorageKey],
+    ) -> ProviderResult<Vec<(StorageKey, StorageValue)>> {
+        let mut result = Vec::with_capacity(keys.len());
+        for &key in keys {
+            if let Some(value) = self.storage(account, key)? {
+                result.push((key, value));
+            }
+        }
+        Ok(result)
+    }
 
     /// Get account code by its address.
     ///
