@@ -11,7 +11,7 @@ use crate::tree::{
     StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{total_bal_items, BlockAccessList, ITEM_COST};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -823,42 +823,22 @@ where
 
         let has_bal = input.block_access_list().is_some();
         if has_bal {
-            let bal = alloy_eip7928::bal::Bal::from(
-                input
-                    .block_access_list()
-                    .transpose()
-                    .map_err(BlockExecutionError::other)?
-                    .unwrap_or_default(),
-            );
-            let mut bal_items: u64 = 0;
+            let bal = input
+                .block_access_list()
+                .transpose()
+                .map_err(BlockExecutionError::other)?
+                .unwrap_or_default();
 
-            for account in bal.into_inner() {
-                // Count address
-                bal_items += 1;
+            let bal_items = total_bal_items(&bal);
 
-                // Collect unique storage slots across reads + writes
-                let mut unique_slots = alloy_primitives::map::HashSet::new();
-
-                for change in account.storage_changes() {
-                    unique_slots.insert(change.slot);
-                }
-
-                for slot in account.storage_reads() {
-                    unique_slots.insert(*slot);
-                }
-
-                // Count unique storage keys
-                bal_items += unique_slots.len() as u64;
-            }
-
-            let item_cost = 2000;
-            if bal_items > input.gas_limit() / item_cost {
+            if bal_items > input.gas_limit() / ITEM_COST as u64 {
                 debug!(target: "engine::tree::payload_validator", bal_items, "{} {}", input.gas_limit(), "BAL is invalid since it contains more items than the gas limit allows");
                 return Err(InsertBlockErrorKind::Consensus(
                     ConsensusError::BlockAccessListCostMoreThanGasLimit,
                 ));
             }
         }
+
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
