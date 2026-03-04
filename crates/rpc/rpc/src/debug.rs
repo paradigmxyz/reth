@@ -168,7 +168,7 @@ where
 
         let bal = self.eth_api().get_block_access_list(block_hash).await?;
 
-        Ok(alloy_rlp::encode(&bal.unwrap_or_default()).into())
+        Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
     }
 
     /// Replays the given block and returns the trace of each transaction.
