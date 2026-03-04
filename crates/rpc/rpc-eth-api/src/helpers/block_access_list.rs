@@ -2,15 +2,18 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
-use reth_evm::ConfigureEvm;
+use reth_errors::RethError;
+use reth_evm::{block::BlockExecutor, ConfigureEvm};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
 };
 use reth_storage_api::StateProviderFactory;
-use revm::DatabaseCommit;
 
-use crate::helpers::{Call, LoadBlock, Trace};
+use crate::{
+    helpers::{Call, LoadBlock, Trace},
+    RpcNodeCore,
+};
 
 /// Helper trait for `eth_blockAccessList` RPC method.
 pub trait GetBlockAccessList: Trace + Call + LoadBlock {
@@ -20,12 +23,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
         block_hash: B256,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
-            let ((evm_env, _), block) = futures::try_join!(
-                self.evm_env_at(block_hash.into()),
-                self.recovered_block(block_hash.into()),
-            )?;
-
-            let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
+            let block = self
+                .recovered_block(block_hash.into())
+                .await?
+                .ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
 
             self.spawn_blocking_io(move |eth_api| {
                 let state = eth_api
@@ -38,15 +39,19 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                     .with_bal_builder()
                     .build();
 
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+                let block_txs = block.transactions_recovered();
+                let mut executor = RpcNodeCore::evm_config(&eth_api)
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
 
-                for tx in block.transactions_recovered() {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit(res.state);
+                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+
+                // replay all transactions prior to the targeted transaction
+                for block_tx in block_txs {
+                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
-
-                eth_api.apply_post_execution_changes(&block, &mut db)?;
+                let _ = executor.apply_post_execution_changes();
 
                 let bal = db.take_built_alloy_bal().ok_or_else(|| {
                     EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))

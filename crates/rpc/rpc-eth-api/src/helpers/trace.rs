@@ -426,19 +426,4 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         Ok(())
     }
-
-    /// Applies chain-specific state transitions required after executing a block.
-    fn apply_post_execution_changes(
-        &self,
-        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
-        db: &mut StateCacheDb,
-    ) -> Result<(), Self::Error> {
-        self.evm_config()
-            .executor_for_block(db, block.sealed_block())
-            .map_err(RethError::other)
-            .map_err(Self::Error::from_eth_err)?
-            .apply_post_execution_changes()
-            .map_err(Self::Error::from_eth_err)?;
-        Ok(())
-    }
 }
