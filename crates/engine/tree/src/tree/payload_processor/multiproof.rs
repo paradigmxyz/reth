@@ -191,6 +191,15 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
 
+    /// Account leaf updates where the path was already revealed (cache hit, no proof needed).
+    pub sparse_trie_account_cache_hits: Histogram,
+    /// Account leaf updates where a blinded node was hit (cache miss, proof requested).
+    pub sparse_trie_account_cache_misses: Histogram,
+    /// Storage leaf updates where the path was already revealed (cache hit, no proof needed).
+    pub sparse_trie_storage_cache_hits: Histogram,
+    /// Storage leaf updates where a blinded node was hit (cache miss, proof requested).
+    pub sparse_trie_storage_cache_misses: Histogram,
+
     /// Retained memory of the preserved sparse trie cache in bytes.
     pub sparse_trie_retained_memory_bytes: Gauge,
     /// Number of storage tries retained in the preserved sparse trie cache.

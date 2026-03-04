@@ -98,6 +98,15 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     /// `update_leaves`.
     pending_updates: usize,
 
+    /// Accumulated account cache hits (path already revealed, no proof needed).
+    account_cache_hits: u64,
+    /// Accumulated account cache misses (blinded node, proof requested).
+    account_cache_misses: u64,
+    /// Accumulated storage cache hits (path already revealed, no proof needed).
+    storage_cache_hits: u64,
+    /// Accumulated storage cache misses (blinded node, proof requested).
+    storage_cache_misses: u64,
+
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -144,6 +153,10 @@ where
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
             pending_updates: Default::default(),
+            account_cache_hits: 0,
+            account_cache_misses: 0,
+            storage_cache_hits: 0,
+            storage_cache_misses: 0,
             metrics,
         }
     }
@@ -332,6 +345,11 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
+        self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
+        self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
+        self.metrics.sparse_trie_storage_cache_hits.record(self.storage_cache_hits as f64);
+        self.metrics.sparse_trie_storage_cache_misses.record(self.storage_cache_misses as f64);
+
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
@@ -505,18 +523,28 @@ where
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
 
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
+            let total_before = updates.len() as u64;
+            let mut misses = 0u64;
+
+            trie.update_leaves(updates, |path, min_len| {
+                misses += 1;
+                match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
                         entry.insert(min_len);
                         targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                }
             })?;
+
+            let hits = total_before.saturating_sub(misses);
+            self.storage_cache_hits += hits;
+            self.storage_cache_misses += misses;
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
@@ -544,8 +572,11 @@ where
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
         let updates_len_before = account_updates.len();
+        let total_before = updates_len_before as u64;
+        let mut misses = 0u64;
 
         self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
+            misses += 1;
             match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
@@ -561,6 +592,10 @@ where
                 }
             }
         })?;
+
+        let hits = total_before.saturating_sub(misses);
+        self.account_cache_hits += hits;
+        self.account_cache_misses += misses;
 
         Ok(account_updates.len() < updates_len_before)
     }
