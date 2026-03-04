@@ -16,7 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::{bal::EvmDatabaseError, State},
 };
-use reth_rpc_eth_types::{cache::db::StateCacheDb, EthApiError};
+use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -268,9 +268,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let block =
                 if block.is_some() { block } else { self.recovered_block(block_id).await? };
 
-            let Some(block) = block else {
-                return Err(EthApiError::HeaderNotFound(block_id).into())
-            };
+            let Some(block) = block else { return Ok(None) };
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             if block.body().transactions().is_empty() {
