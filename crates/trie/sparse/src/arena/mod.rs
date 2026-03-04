@@ -116,12 +116,72 @@ impl ArenaSparseSubtrie {
 
     /// Prunes nodes beyond `max_depth` within this subtrie.
     fn prune(&mut self, max_depth: usize) -> usize {
-        let (pruned_nodes, pruned_leaves) =
-            Self::prune_arena(&mut self.arena, self.root, max_depth);
+        // Only branches can have pruneable children.
+        if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
+            return 0;
+        }
+
+        let mut pruned: usize = 0;
+        let mut pruned_leaves: u64 = 0;
+
+        self.buffers.cursor.clear();
+        self.buffers.cursor.push(&self.arena, self.root, self.path);
+
+        loop {
+            let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
+            // depth is 0 at root; cursor has root at stack position 0.
+            let depth = self.buffers.cursor.len() - 1;
+
+            // At max_depth, prune revealed children that have a cached hash RLP
+            // instead of descending further.
+            if depth >= max_depth {
+                let branch = self.arena[head_idx].branch_ref();
+                let state_mask = branch.state_mask;
+
+                // Collect (dense_idx, child_idx, rlp_node) to avoid holding an immutable
+                // borrow across the mutable removal/replacement below.
+                let to_prune: SmallVec<[(usize, Index, RlpNode); 16]> = state_mask
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(dense_idx, _nibble)| {
+                        let child_idx = match &branch.children[dense_idx] {
+                            ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
+                            ArenaSparseNodeBranchChild::Blinded(_) => return None,
+                        };
+                        let cached_rlp = match &self.arena[child_idx] {
+                            ArenaSparseNode::Branch(b) => b.state.cached_rlp_node().cloned(),
+                            ArenaSparseNode::Leaf { state, .. } => state.cached_rlp_node().cloned(),
+                            _ => None,
+                        };
+                        cached_rlp
+                            .filter(|n| n.is_hash())
+                            .map(|rlp_node| (dense_idx, child_idx, rlp_node))
+                    })
+                    .collect();
+
+                for (dense_idx, child_idx, rlp_node) in to_prune {
+                    pruned_leaves += Self::count_and_remove_leaves(&mut self.arena, child_idx);
+                    self.arena[head_idx].branch_mut().children[dense_idx] =
+                        ArenaSparseNodeBranchChild::Blinded(rlp_node);
+                    pruned += 1;
+                }
+            }
+
+            let result = self.buffers.cursor.next(&mut self.arena, |node| {
+                depth < max_depth && matches!(node, ArenaSparseNode::Branch(_))
+            });
+
+            match result {
+                NextResult::Done => break,
+                NextResult::Descended | NextResult::Popped => continue,
+                NextResult::NonBranch => unreachable!("should_descend only accepts branches"),
+            }
+        }
+
         self.num_leaves -= pruned_leaves;
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
-        pruned_nodes
+        pruned
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
@@ -286,82 +346,6 @@ impl ArenaSparseSubtrie {
             }
             _ => 0,
         }
-    }
-
-    /// Prunes nodes beyond `max_depth` in the given arena, replacing them with blinded
-    /// (hash) stubs. Returns `(nodes_pruned, leaves_pruned)`.
-    ///
-    /// Depth counts nodes traversed (not nibbles). Embedded nodes (RLP < 32 bytes) are
-    /// preserved since they have no hash representation.
-    fn prune_arena(
-        arena: &mut Arena<ArenaSparseNode>,
-        root: Index,
-        max_depth: usize,
-    ) -> (usize, u64) {
-        // Only branches can have pruneable children.
-        if !matches!(&arena[root], ArenaSparseNode::Branch(_)) {
-            return (0, 0);
-        }
-
-        let mut pruned = 0;
-        let mut pruned_leaves: u64 = 0;
-        // Stack of (node_index, depth, start_nibble).
-        let mut stack: Vec<(Index, usize, u8)> = vec![(root, 0, 0)];
-
-        while let Some(&mut (head_idx, depth, ref mut start_nibble)) = stack.last_mut() {
-            let start = *start_nibble;
-
-            let state_mask = arena[head_idx].branch_ref().state_mask;
-
-            let mut descended = false;
-            for (dense_idx, nibble) in state_mask.iter().enumerate() {
-                if nibble < start {
-                    continue;
-                }
-
-                let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
-                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
-                };
-
-                // At max_depth, prune revealed children that have a cached hash RLP.
-                if depth >= max_depth {
-                    let cached_rlp = match &arena[child_idx] {
-                        ArenaSparseNode::Branch(b) => b.state.cached_rlp_node().cloned(),
-                        ArenaSparseNode::Leaf { state, .. } => state.cached_rlp_node().cloned(),
-                        _ => None,
-                    };
-
-                    if let Some(rlp_node) = cached_rlp.filter(|n| n.is_hash()) {
-                        // Remove the child subtree and count leaves removed.
-                        pruned_leaves += Self::count_and_remove_leaves(arena, child_idx);
-
-                        // Replace parent's child with a blinded reference.
-                        arena[head_idx].branch_mut().children[dense_idx] =
-                            ArenaSparseNodeBranchChild::Blinded(rlp_node);
-
-                        pruned += 1;
-                    }
-                    continue;
-                }
-
-                // depth < max_depth: descend into branch children.
-                if matches!(&arena[child_idx], ArenaSparseNode::Branch(_)) {
-                    *start_nibble = nibble + 1;
-                    stack.push((child_idx, depth + 1, 0));
-                    descended = true;
-                    break;
-                }
-            }
-
-            if descended {
-                continue;
-            }
-
-            stack.pop();
-        }
-
-        (pruned, pruned_leaves)
     }
 }
 
