@@ -64,7 +64,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         }
 
         let highest_static_file_block = provider_factory.provider()?.last_block_number()?;
-        info!(target: "reth::cli", ?target, ?highest_static_file_block, prune_config=?config.prune,  "Executing a pipeline unwind.");
+        info!(
+            target: "reth::cli",
+            ?target,
+            ?highest_static_file_block,
+            prune_config=?config.prune,
+            "Executing a pipeline unwind."
+        );
 
         // This will build an offline-only pipeline if the `offline` flag is enabled
         let mut pipeline =

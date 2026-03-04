@@ -914,13 +914,26 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 network.run_until_graceful_shutdown(shutdown, |network| {
                     if let Some(peers_file) = known_peers_file {
                         let num_known_peers = network.num_known_peers();
-                        trace!(target: "reth::cli", peers_file=?peers_file, num_peers=%num_known_peers, "Saving current peers");
+                        trace!(
+                            target: "reth::cli",
+                            peers_file=?peers_file,
+                            num_peers=%num_known_peers,
+                            "Saving current peers"
+                        );
                         match network.write_peers_to_file(peers_file.as_path()) {
                             Ok(_) => {
-                                info!(target: "reth::cli", peers_file=?peers_file, "Wrote network peers to file");
+                                info!(
+                                    target: "reth::cli",
+                                    peers_file=?peers_file,
+                                    "Wrote network peers to file"
+                                );
                             }
                             Err(err) => {
-                                warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                                warn!(
+                                    target: "reth::cli",
+                                    %err,
+                                    "Failed to write network peers to file"
+                                );
                             }
                         }
                     }

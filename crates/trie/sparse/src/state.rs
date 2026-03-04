@@ -367,7 +367,11 @@ where
             self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
         };
         trie.reserve_nodes(capacity);
-        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+        trace!(
+            target: "trie::sparse",
+            total_nodes = ?nodes.len(),
+            "Revealing account nodes from V2 proof"
+        );
         trie.reveal_nodes(&mut nodes)?;
 
         self.deferred_drops.proof_nodes_bufs.push(nodes);
@@ -414,13 +418,23 @@ where
 
         let root_node = nodes.iter().find(|n| n.path.is_empty());
         let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
+            trace!(
+                target: "trie::sparse",
+                ?account,
+                ?root_node,
+                "Revealing root storage node from V2 proof"
+            );
             trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
         } else {
             trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
         };
         trie.reserve_nodes(capacity);
-        trace!(target: "trie::sparse", ?account, total_nodes, "Revealing storage nodes from V2 proof");
+        trace!(
+            target: "trie::sparse",
+            ?account,
+            total_nodes,
+            "Revealing storage nodes from V2 proof"
+        );
         trie.reveal_nodes(&mut nodes)?;
 
         bufs.push(nodes);
@@ -592,7 +606,11 @@ where
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
         } else if self.is_account_revealed(address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
+            trace!(
+                target: "trie::sparse",
+                ?address,
+                "Retrieving storage root from account leaf to update account"
+            );
             // The account was revealed, either...
             if let Some(value) = self.get_account_value(&address) {
                 // ..it exists and we should take its current storage root or...
@@ -640,7 +658,11 @@ where
             .map(|v| TrieAccount::decode(&mut &v[..]))
             .transpose()?
         else {
-            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
+            trace!(
+                target: "trie::sparse",
+                ?address,
+                "Account not found in trie, skipping storage root update"
+            );
             return Ok(true)
         };
 

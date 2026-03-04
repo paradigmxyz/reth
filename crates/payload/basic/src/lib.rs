@@ -336,7 +336,11 @@ where
 {
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
-        trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
+        trace!(
+            target: "payload_builder",
+            id = %self.config.payload_id(),
+            "spawn new payload build task"
+        );
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
@@ -387,16 +391,27 @@ where
                     Poll::Ready(Ok(outcome)) => match outcome {
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                            debug!(
+                                target: "payload_builder",
+                                value = %payload.fees(),
+                                "built better payload"
+                            );
                             this.best_payload = PayloadState::Best(payload);
                         }
                         BuildOutcome::Freeze(payload) => {
-                            debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                            debug!(
+                                target: "payload_builder",
+                                "payload frozen, no further building will occur"
+                            );
                             this.best_payload = PayloadState::Frozen(payload);
                         }
                         BuildOutcome::Aborted { fees, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
+                            trace!(
+                                target: "payload_builder",
+                                worse_fees = %fees,
+                                "skipped payload build of worse block"
+                            );
                         }
                         BuildOutcome::Cancelled => {
                             unreachable!("the cancel signal never fired")
@@ -476,7 +491,11 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
-            debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
+            debug!(
+                target: "payload_builder",
+                id=%self.config.payload_id(),
+                "no best payload yet to resolve, building empty payload"
+            );
 
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
@@ -487,10 +506,18 @@ where
 
             match self.builder.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
+                    debug!(
+                        target: "payload_builder",
+                        id=%self.config.payload_id(),
+                        "awaiting in progress payload build job"
+                    );
                 }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing empty payload");
+                    debug!(
+                        target: "payload_builder",
+                        id=%self.config.payload_id(),
+                        "racing empty payload"
+                    );
 
                     // if no payload has been built yet
                     self.metrics.inc_requested_empty_payload();
@@ -506,7 +533,11 @@ where
                     empty_payload = Some(rx);
                 }
                 MissingPayloadBehaviour::RacePayload(job) => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
+                    debug!(
+                        target: "payload_builder",
+                        id=%self.config.payload_id(),
+                        "racing fallback payload"
+                    );
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
                     self.executor.spawn_blocking_task(async move {

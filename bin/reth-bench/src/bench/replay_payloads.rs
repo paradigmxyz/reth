@@ -172,11 +172,19 @@ struct GasRampPayload {
 impl Command {
     /// Execute the `replay-payloads` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth-bench", payload_dir = %self.payload_dir.display(), "Replaying payloads");
+        info!(
+            target: "reth-bench",
+            payload_dir = %self.payload_dir.display(),
+            "Replaying payloads"
+        );
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(
+                target: "reth-bench",
+                "Using wait-time mode with {}ms delay between blocks",
+                duration.as_millis()
+            );
         }
         if self.wait_for_persistence {
             info!(
@@ -251,7 +259,11 @@ impl Command {
             if payloads.is_empty() {
                 return Err(eyre::eyre!("No gas ramp payload files found in {:?}", gas_ramp_dir));
             }
-            info!(target: "reth-bench", count = payloads.len(), "Loaded gas ramp payloads from disk");
+            info!(
+                target: "reth-bench",
+                count = payloads.len(),
+                "Loaded gas ramp payloads from disk"
+            );
             payloads
         } else {
             Vec::new()
@@ -290,7 +302,11 @@ impl Command {
             };
             call_forkchoice_updated_with_reth(&auth_provider, payload.version, fcu_state).await?;
 
-            info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
+            info!(
+                target: "reth-bench",
+                gas_ramp_payload = i + 1,
+                "Gas ramp payload executed successfully"
+            );
 
             if let Some(w) = &mut waiter {
                 w.on_block(payload.block_number).await?;
@@ -300,7 +316,11 @@ impl Command {
         }
 
         if !gas_ramp_payloads.is_empty() {
-            info!(target: "reth-bench", count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
+            info!(
+                target: "reth-bench",
+                count = gas_ramp_payloads.len(),
+                "All gas ramp payloads replayed"
+            );
         }
 
         let mut results = Vec::new();

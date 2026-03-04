@@ -128,7 +128,10 @@ impl Environment {
             if matches!(&res, Err(Error::Busy)) {
                 if !warned {
                     warned = true;
-                    warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
+                    warn!(
+                        target: "libmdbx",
+                        "Process stalled, awaiting read-write transaction lock."
+                    );
                 }
                 sleep(Duration::from_millis(250));
                 continue

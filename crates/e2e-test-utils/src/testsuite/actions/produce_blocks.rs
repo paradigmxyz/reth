@@ -319,7 +319,9 @@ where
                 if let Some(payload_id) = fresh_fcu_result.payload_id {
                     payload_id
                 } else {
-                    debug!("Engine considers the fork base already canonical, skipping payload generation");
+                    debug!(
+                        "Engine considers the fork base already canonical, skipping payload generation"
+                    );
                     return Ok(());
                 }
             };

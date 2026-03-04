@@ -253,7 +253,13 @@ where
                     .root_with_progress()
             })
             .map_err(|e| {
-                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                error!(
+                    target: "sync::stages::merkle",
+                    %e,
+                    ?current_block_number,
+                    ?to_block,
+                    "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+                );
                 StageError::Fatal(Box::new(e))
             })?;
             match progress {
@@ -309,7 +315,12 @@ where
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
+            debug!(
+                target: "sync::stages::merkle::exec",
+                current = ?current_block_number,
+                target = ?to_block,
+                "Updating trie in chunks"
+            );
             let mut final_root = None;
             for start_block in range.step_by(incremental_threshold as usize) {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
@@ -326,7 +337,13 @@ where
                     DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
                 })
                 .map_err(|e| {
-                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    error!(
+                        target: "sync::stages::merkle",
+                        %e,
+                        ?current_block_number,
+                        ?to_block,
+                        "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+                    );
                     StageError::Fatal(Box::new(e))
                 })?;
                 provider.write_trie_updates(updates)?;
@@ -442,7 +459,13 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     if got == expected.state_root() {
         Ok(())
     } else {
-        error!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+        error!(
+            target: "sync::stages::merkle",
+            ?target_block,
+            ?got,
+            ?expected,
+            "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+        );
         Err(StageError::Block {
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
                 GotExpected { got, expected: expected.state_root() }.into(),

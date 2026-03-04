@@ -104,7 +104,10 @@ where
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
-            warn!(prev_percentile = ?oracle_config.percentile, "Invalid configured gas price percentile, assuming 100.");
+            warn!(
+                prev_percentile = ?oracle_config.percentile,
+                "Invalid configured gas price percentile, assuming 100."
+            );
             oracle_config.percentile = 100;
         }
         let ignore_price = oracle_config.ignore_price.map(|price| price.saturating_to());

@@ -78,7 +78,12 @@ impl PersistenceState {
         last_persisted_block_hash: B256,
         last_persisted_block_number: u64,
     ) {
-        trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
+        trace!(
+            target: "engine::tree",
+            block= %last_persisted_block_number,
+            hash=%last_persisted_block_hash,
+            "updating persistence state"
+        );
         self.rx = None;
         self.last_persisted_block =
             BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);

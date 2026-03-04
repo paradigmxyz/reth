@@ -122,7 +122,12 @@ where
                     (safe_block_hash, finalized_block_hash)
                 }
                 (safe_block_hash, finalized_block_hash) => {
-                    warn!(target: "consensus::debug-client", ?safe_block_hash, ?finalized_block_hash, "failed to fetch safe or finalized hash from etherscan");
+                    warn!(
+                        target: "consensus::debug-client",
+                        ?safe_block_hash,
+                        ?finalized_block_hash,
+                        "failed to fetch safe or finalized hash from etherscan"
+                    );
                     continue;
                 }
             };

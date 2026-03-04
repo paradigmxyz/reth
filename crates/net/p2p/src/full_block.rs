@@ -202,14 +202,24 @@ where
                                 if header.hash() == this.hash {
                                     this.header = Some(header);
                                 } else {
-                                    debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
+                                    debug!(
+                                        target: "downloaders",
+                                        expected=?this.hash,
+                                        received=?header.hash(),
+                                        "Received wrong header"
+                                    );
                                     // received a different header than requested
                                     this.client.report_bad_message(peer)
                                 }
                             }
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.hash, "Header download failed");
+                            debug!(
+                                target: "downloaders",
+                                %err,
+                                ?this.hash,
+                                "Header download failed"
+                            );
                         }
                     }
 
@@ -409,7 +419,12 @@ where
                         if let Err(err) =
                             self.consensus.validate_body_against_header(resp.data(), header)
                         {
-                            debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body in range response");
+                            debug!(
+                                target: "downloaders",
+                                %err,
+                                hash=?header.hash(),
+                                "Received wrong body in range response"
+                            );
                             self.client.report_bad_message(resp.peer_id());
 
                             // get body that doesn't match, put back into vecdeque, and retry it
@@ -461,7 +476,12 @@ where
                 let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
                 // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
-                    debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
+                    debug!(
+                        target: "downloaders",
+                        %err,
+                        ?self.start_hash,
+                        "Received bad header response"
+                    );
                     self.client.report_bad_message(peer);
                 }
 
@@ -528,7 +548,12 @@ where
                             this.on_headers_response(headers);
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.start_hash, "Header range download failed");
+                            debug!(
+                                target: "downloaders",
+                                %err,
+                                ?this.start_hash,
+                                "Header range download failed"
+                            );
                         }
                     }
 
@@ -568,7 +593,12 @@ where
                             }
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.start_hash, "Body range download failed");
+                            debug!(
+                                target: "downloaders",
+                                %err,
+                                ?this.start_hash,
+                                "Body range download failed"
+                            );
                         }
                     }
                     if this.request.bodies.is_none() && !this.is_bodies_complete() {

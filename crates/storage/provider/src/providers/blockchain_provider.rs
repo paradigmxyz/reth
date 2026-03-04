@@ -515,7 +515,10 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
             Ok(self.block_state_provider(&state)?.boxed())
         } else {
-            trace!(target: "providers::blockchain", "Using database state for latest state provider");
+            trace!(
+                target: "providers::blockchain",
+                "Using database state for latest state provider"
+            );
             self.database.latest()
         }
     }

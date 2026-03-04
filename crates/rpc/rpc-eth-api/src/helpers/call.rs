@@ -853,7 +853,12 @@ pub trait Call:
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                warn!(
+                    target: "rpc::eth::call",
+                    ?request,
+                    ?global_gas_cap,
+                    "Capping gas limit to global gas cap"
+                );
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
         } else {
@@ -906,7 +911,11 @@ pub trait Call:
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
-                trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
+                trace!(
+                    target: "rpc::eth::call",
+                    ?tx_env,
+                    "Applying gas limit cap with caller allowance"
+                );
                 let cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));

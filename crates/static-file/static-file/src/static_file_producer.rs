@@ -136,7 +136,12 @@ where
         }
 
         segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
-            debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
+            debug!(
+                target: "static_file",
+                segment = %segment.segment(),
+                ?block_range,
+                "StaticFileProducer segment"
+            );
             let start = Instant::now();
 
             // Create a new database transaction on every segment to prevent long-lived read-only
@@ -145,7 +150,13 @@ where
             segment.copy_to_static_files(provider,  block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-            debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
+            debug!(
+                target: "static_file",
+                segment = %segment.segment(),
+                ?block_range,
+                ?elapsed,
+                "Finished StaticFileProducer segment"
+            );
 
             Ok(())
         })?;

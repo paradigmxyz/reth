@@ -63,7 +63,11 @@ where
                 Some(size)
             }
             Err(err) => {
-                debug!(target: "exex::wal::storage", ?err, "Failed to remove notification from the storage");
+                debug!(
+                    target: "exex::wal::storage",
+                    ?err,
+                    "Failed to remove notification from the storage"
+                );
                 None
             }
         }

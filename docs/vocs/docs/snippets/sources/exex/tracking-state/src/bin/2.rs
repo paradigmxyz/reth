@@ -58,7 +58,11 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
             }
 
             if let Some(first_block) = this.first_block {
-                info!(%first_block, transactions = %this.transactions, "Total number of transactions");
+                info!(
+                    %first_block,
+                    transactions = %this.transactions,
+                    "Total number of transactions"
+                );
             }
         }
 

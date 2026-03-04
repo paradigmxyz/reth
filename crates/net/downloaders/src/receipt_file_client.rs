@@ -108,7 +108,11 @@ where
                 match receipt {
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
                         if block_number > number {
-                            warn!(target: "downloaders::file", previous_block_number = block_number, "skipping receipt from a lower block: {number}");
+                            warn!(
+                                target: "downloaders::file",
+                                previous_block_number = block_number,
+                                "skipping receipt from a lower block: {number}"
+                            );
                             continue
                         }
 

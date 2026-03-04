@@ -623,7 +623,13 @@ where
         to_block: u64,
         limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
-        trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+        trace!(
+            target: "rpc::eth::filter",
+            from=from_block,
+            to=to_block,
+            ?filter,
+            "finding logs in range"
+        );
 
         // perform boundary checks first
         if to_block < from_block {

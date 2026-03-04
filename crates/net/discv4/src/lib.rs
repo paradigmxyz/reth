@@ -1162,7 +1162,11 @@ impl Discv4Service {
                         // we received a ping but the corresponding bucket for the peer is already
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
-                        trace!(target: "discv4", ?record, "discovered new record but bucket is full");
+                        trace!(
+                            target: "discv4",
+                            ?record,
+                            "discovered new record but bucket is full"
+                        );
                         self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
                         needs_bond = true;
                     }
@@ -1295,7 +1299,13 @@ impl Discv4Service {
                 {
                     let request = entry.get();
                     if request.echo_hash != pong.echo {
-                        trace!(target: "discv4", from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
+                        trace!(
+                            target: "discv4",
+                            from=?remote_addr,
+                            expected=?request.echo_hash,
+                            echo_hash=?pong.echo,
+                            "Got unexpected Pong"
+                        );
                         return
                     }
                 }
@@ -1429,7 +1439,12 @@ impl Discv4Service {
                     if total <= MAX_NODES_PER_BUCKET {
                         request.response_count = total;
                     } else {
-                        trace!(target: "discv4", total, from=?remote_addr, "Received neighbors packet entries exceeds max nodes per bucket");
+                        trace!(
+                            target: "discv4",
+                            total,
+                            from=?remote_addr,
+                            "Received neighbors packet entries exceeds max nodes per bucket"
+                        );
                         return
                     }
                 };
@@ -1465,7 +1480,12 @@ impl Discv4Service {
         for node in msg.nodes.into_iter().map(NodeRecord::into_ipv4_mapped) {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
-                trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
+                trace!(
+                    target: "discv4",
+                    peer_id=?node.id,
+                    ip=?node.address,
+                    "ignoring banned record"
+                );
                 continue
             }
 
@@ -1586,7 +1606,11 @@ impl Discv4Service {
 
         if !failed_lookups.is_empty() {
             // remove nodes that failed the e2e lookup process, so we can restart it
-            trace!(target: "discv4", num=%failed_lookups.len(), "evicting nodes due to failed lookup");
+            trace!(
+                target: "discv4",
+                num=%failed_lookups.len(),
+                "evicting nodes due to failed lookup"
+            );
             for node_id in failed_lookups {
                 self.remove_node(node_id);
             }
@@ -1773,7 +1797,11 @@ impl Discv4Service {
                         self.ban_ip(ip);
                     }
                     Discv4Command::SetEIP868RLPPair { key, rlp } => {
-                        debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
+                        debug!(
+                            target: "discv4",
+                            key=%String::from_utf8_lossy(&key),
+                            "Update EIP-868 extension pair"
+                        );
 
                         let _ = self.local_eip_868_enr.insert_raw_rlp(key, rlp, &self.secret_key);
                     }
@@ -1804,10 +1832,21 @@ impl Discv4Service {
                         debug!(target: "discv4", %err, "failed to read datagram");
                     }
                     IngressEvent::BadPacket(from, err, data) => {
-                        trace!(target: "discv4", ?from, %err, packet=?hex::encode(&data), "bad packet");
+                        trace!(
+                            target: "discv4",
+                            ?from,
+                            %err,
+                            packet=?hex::encode(&data),
+                            "bad packet"
+                        );
                     }
                     IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
-                        trace!(target: "discv4", r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+                        trace!(
+                            target: "discv4",
+                            r#type=?msg.msg_type(),
+                            from=?remote_addr,
+                            "received packet"
+                        );
                         let event = match msg {
                             Message::Ping(ping) => {
                                 self.on_ping(ping, remote_addr, node_id, hash);
@@ -1841,7 +1880,11 @@ impl Discv4Service {
 
                 udp_message_budget -= 1;
                 if udp_message_budget < 0 {
-                    trace!(target: "discv4", budget=UDP_MESSAGE_POLL_LOOP_BUDGET, "exhausted message poll budget");
+                    trace!(
+                        target: "discv4",
+                        budget=UDP_MESSAGE_POLL_LOOP_BUDGET,
+                        "exhausted message poll budget"
+                    );
                     if self.queued_events.is_empty() {
                         // we've exceeded the message budget and have no events to process
                         // this will make sure we're woken up again

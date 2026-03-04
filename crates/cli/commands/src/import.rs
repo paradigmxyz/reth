@@ -78,7 +78,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
 
         // Import each file sequentially
         for (index, path) in self.paths.iter().enumerate() {
-            info!(target: "reth::cli", "Importing file {} of {}: {}", index + 1, self.paths.len(), path.display());
+            info!(
+                target: "reth::cli",
+                "Importing file {} of {}: {}",
+                index + 1,
+                self.paths.len(),
+                path.display()
+            );
 
             let result = import_blocks_from_file(
                 path,

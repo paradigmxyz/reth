@@ -130,12 +130,22 @@ where
         while this.tasks.len() < this.parallelism {
             // Get the next block number from the range. If it is empty, we are done.
             let Some(block_number) = this.range.next() else {
-                debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more single blocks to backfill");
+                debug!(
+                    target: "exex::backfill",
+                    tasks = %this.tasks.len(),
+                    range = ?this.range,
+                    "No more single blocks to backfill"
+                );
                 break;
             };
 
             // Spawn a new task for that block
-            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
+            debug!(
+                target: "exex::backfill",
+                tasks = %this.tasks.len(),
+                ?block_number,
+                "Spawning new single block backfill task"
+            );
             let job = Box::new(SingleBlockBackfillJob {
                 evm_config: this.evm_config.clone(),
                 provider: this.provider.clone(),
@@ -169,12 +179,22 @@ where
 
                 // Create the range from the range bounds. If it is empty, we are done.
                 let Some(range) = range_bounds.map(|(first, last)| first..=last) else {
-                    debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more block batches to backfill");
+                    debug!(
+                        target: "exex::backfill",
+                        tasks = %this.tasks.len(),
+                        range = ?this.range,
+                        "No more block batches to backfill"
+                    );
                     break;
                 };
 
                 // Spawn a new task for that range
-                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
+                debug!(
+                    target: "exex::backfill",
+                    tasks = %this.tasks.len(),
+                    ?range,
+                    "Spawning new block batch backfill task"
+                );
                 let job = Box::new(BackfillJob {
                     evm_config: this.evm_config.clone(),
                     provider: this.provider.clone(),

@@ -195,7 +195,10 @@ impl LaunchContext {
                 should_save = true;
             }
         } else if !reth_config.prune.is_default() {
-            warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
+            warn!(
+                target: "reth::cli",
+                "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file."
+            );
         }
 
         if should_save {
@@ -352,7 +355,12 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
             if etl_path.exists() {
                 // Remove etl-path files on launch
                 if let Err(err) = fs::remove_dir_all(&etl_path) {
-                    warn!(target: "reth::cli", ?etl_path, %err, "Failed to remove ETL path on launch");
+                    warn!(
+                        target: "reth::cli",
+                        ?etl_path,
+                        %err,
+                        "Failed to remove ETL path on launch"
+                    );
                 }
             }
             self.toml_config_mut().stages.etl.dir = Some(etl_path);
@@ -531,7 +539,12 @@ where
 
             let unwind_target = PipelineTarget::Unwind(unwind_block);
 
-            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
+            info!(
+                target: "reth::cli",
+                %unwind_target,
+                %inconsistency_source,
+                "Executing unwind after consistency check."
+            );
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -562,7 +575,13 @@ where
                 let _ = tx.send(result);
             });
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
+                error!(
+                    target: "reth::cli",
+                    %unwind_target,
+                    %inconsistency_source,
+                    %err,
+                    "failed to run unwind"
+                )
             })?;
         }
 

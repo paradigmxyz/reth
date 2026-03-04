@@ -143,7 +143,13 @@ pub trait EstimateCall: Call {
             }
         }
 
-        trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
+        trace!(
+            target: "rpc::eth::estimate",
+            ?tx_env,
+            gas_limit = tx_env.gas_limit(),
+            is_basic_transfer,
+            "Starting gas estimation"
+        );
 
         // Execute the transaction with the highest possible gas limit.
         let mut res = match evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err) {
@@ -236,7 +242,13 @@ pub trait EstimateCall: Call {
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        trace!(target: "rpc::eth::estimate", ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
+        trace!(
+            target: "rpc::eth::estimate",
+            ?highest_gas_limit,
+            ?lowest_gas_limit,
+            ?mid_gas_limit,
+            "Starting binary search for gas"
+        );
 
         // Binary search narrows the range to find the minimum gas limit needed for the transaction
         // to succeed.

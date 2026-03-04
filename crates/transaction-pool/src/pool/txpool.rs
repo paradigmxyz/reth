@@ -327,7 +327,12 @@ impl<T: TransactionOrdering> TxPool<T> {
                         on_promoted(&tx);
                     }
 
-                    trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?subpool, "Adding transaction to a subpool");
+                    trace!(
+                        target: "txpool",
+                        hash=%tx.transaction.hash(),
+                        pool=?subpool,
+                        "Adding transaction to a subpool"
+                    );
                     match subpool {
                         SubPool::Queued => self.queued_pool.add_transaction(tx),
                         SubPool::Pending => {
@@ -339,7 +344,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                         SubPool::BaseFee => {
                             // This should be unreachable as transactions from BaseFee pool with decreased
                             // basefee are guaranteed to become Pending
-                            warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
+                            warn!(
+                                target: "txpool",
+                                "BaseFee transactions should become Pending after basefee decrease"
+                            );
                         }
                     }
                 });
@@ -1000,7 +1008,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                     if matches!(move_to, SubPool::Pending) &&
                         let Some(tx) = moved
                     {
-                        trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
+                        trace!(
+                            target: "txpool",
+                            hash=%tx.transaction.hash(),
+                            "Promoted transaction to pending"
+                        );
                         outcome.promoted.push(tx);
                     }
                 }
@@ -1162,7 +1174,12 @@ impl<T: TransactionOrdering> TxPool<T> {
             // We trace here instead of in subpool structs directly, because the `ParkedPool` type
             // is generic and it would not be possible to distinguish whether a transaction is
             // being removed from the `BaseFee` pool, or the `Queued` pool.
-            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Removed transaction from a subpool");
+            trace!(
+                target: "txpool",
+                hash=%tx.transaction.hash(),
+                ?pool,
+                "Removed transaction from a subpool"
+            );
         }
 
         tx
@@ -1202,7 +1219,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         // We trace here instead of in structs directly, because the `ParkedPool` type is
         // generic and it would not be possible to distinguish whether a transaction is being
         // added to the `BaseFee` pool, or the `Queued` pool.
-        trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Adding transaction to a subpool");
+        trace!(
+            target: "txpool",
+            hash=%tx.transaction.hash(),
+            ?pool,
+            "Adding transaction to a subpool"
+        );
         match pool {
             SubPool::Queued => self.queued_pool.add_transaction(tx),
             SubPool::Pending => {

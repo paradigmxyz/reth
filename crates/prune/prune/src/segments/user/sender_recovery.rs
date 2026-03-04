@@ -56,7 +56,10 @@ where
             debug!(target: "pruner", "Pruning transaction senders from static files.");
 
             if self.mode.is_full() {
-                debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
+                debug!(
+                    target: "pruner",
+                    "PruneMode::Full: deleting all transaction senders static files."
+                );
                 return segments::delete_static_files_segment(
                     provider,
                     input,

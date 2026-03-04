@@ -314,7 +314,12 @@ where
             });
 
             let elapsed = start.elapsed();
-            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            debug!(
+                target: "engine::caching",
+                parent_hash=?hash,
+                elapsed=?elapsed,
+                "Updated execution cache"
+            );
 
             metrics.cache_saving_duration.set(elapsed.as_secs_f64());
         }
@@ -455,7 +460,10 @@ where
                     self.ctx.stop();
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
-                    trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Received termination signal"
+                    );
                     final_execution_outcome =
                         Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
@@ -465,7 +473,10 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
-                    trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Finished prewarm execution signal"
+                    );
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 

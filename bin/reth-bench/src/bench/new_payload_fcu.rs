@@ -104,7 +104,11 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(
+                target: "reth-bench",
+                "Using wait-time mode with {}ms delay between blocks",
+                duration.as_millis()
+            );
         }
         if self.wait_for_persistence {
             info!(

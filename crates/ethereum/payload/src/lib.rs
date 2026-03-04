@@ -175,7 +175,13 @@ where
 
     let chain_spec = client.chain_spec();
 
-    debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    debug!(
+        target: "payload_builder",
+        id=%attributes.id,
+        parent_header = ?parent_header.hash(),
+        parent_number = parent_header.number,
+        "building new payload"
+    );
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
     let base_fee = builder.evm_mut().block().basefee();
@@ -261,7 +267,12 @@ where
                 // invalid, which removes its dependent transactions from
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
-                trace!(target: "payload_builder", tx=?tx.hash(), ?block_blob_count, "skipping blob transaction because it would exceed the max blob count per block");
+                trace!(
+                    target: "payload_builder",
+                    tx=?tx.hash(),
+                    ?block_blob_count,
+                    "skipping blob transaction because it would exceed the max blob count per block"
+                );
                 best_txs.mark_invalid(
                     &pool_tx,
                     &InvalidPoolTransactionError::Eip4844(
@@ -310,11 +321,21 @@ where
             })) => {
                 if error.is_nonce_too_low() {
                     // if the nonce is too low, we can skip this transaction
-                    trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
+                    trace!(
+                        target: "payload_builder",
+                        %error,
+                        ?tx,
+                        "skipping nonce too low transaction"
+                    );
                 } else {
                     // if the transaction is invalid, we can skip it and all of its
                     // descendants
-                    trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
+                    trace!(
+                        target: "payload_builder",
+                        %error,
+                        ?tx,
+                        "skipping invalid transaction and its descendants"
+                    );
                     best_txs.mark_invalid(
                         &pool_tx,
                         &InvalidPoolTransactionError::Consensus(
@@ -368,7 +389,12 @@ where
         .then_some(execution_result.requests);
 
     let sealed_block = Arc::new(block.sealed_block().clone());
-    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+    debug!(
+        target: "payload_builder",
+        id=%attributes.id,
+        sealed_block_header = ?sealed_block.sealed_header(),
+        "sealed built block"
+    );
 
     if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
         return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {

@@ -188,7 +188,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 }
                             }
                             Err(error) if error.is_retryable() => {
-                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                                warn!(
+                                    target: "reth::cli",
+                                    "Error requesting header: {error}. Retrying..."
+                                )
                             }
                             Err(error) => return Err(error.into()),
                         }

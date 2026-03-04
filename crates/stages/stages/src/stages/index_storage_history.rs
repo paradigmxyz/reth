@@ -124,7 +124,12 @@ where
             range = 0..=*input.next_block_range().end();
         }
 
-        info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+        info!(
+            target: "sync::stages::index_storage_history::exec",
+            ?first_sync,
+            ?use_rocksdb,
+            "Collecting indices"
+        );
         let collector = if provider.cached_storage_settings().storage_v2 {
             collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
         } else {

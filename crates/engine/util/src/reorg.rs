@@ -114,16 +114,32 @@ where
             if let Poll::Ready(Some(response)) = this.reorg_responses.poll_next_unpin(cx) {
                 match response {
                     Ok(Either::Left(Ok(payload_status))) => {
-                        debug!(target: "engine::stream::reorg", ?payload_status, "Received response for reorg new payload");
+                        debug!(
+                            target: "engine::stream::reorg",
+                            ?payload_status,
+                            "Received response for reorg new payload"
+                        );
                     }
                     Ok(Either::Left(Err(payload_error))) => {
-                        error!(target: "engine::stream::reorg", %payload_error, "Error on reorg new payload");
+                        error!(
+                            target: "engine::stream::reorg",
+                            %payload_error,
+                            "Error on reorg new payload"
+                        );
                     }
                     Ok(Either::Right(Ok(fcu_status))) => {
-                        debug!(target: "engine::stream::reorg", ?fcu_status, "Received response for reorg forkchoice update");
+                        debug!(
+                            target: "engine::stream::reorg",
+                            ?fcu_status,
+                            "Received response for reorg forkchoice update"
+                        );
                     }
                     Ok(Either::Right(Err(fcu_error))) => {
-                        error!(target: "engine::stream::reorg", %fcu_error, "Error on reorg forkchoice update");
+                        error!(
+                            target: "engine::stream::reorg",
+                            %fcu_error,
+                            "Error on reorg forkchoice update"
+                        );
                     }
                     Err(_) => {}
                 };
@@ -167,7 +183,11 @@ where
                     ) {
                         Ok(result) => result,
                         Err(error) => {
-                            error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
+                            error!(
+                                target: "engine::stream::reorg",
+                                %error,
+                                "Error attempting to create reorg head"
+                            );
                             // Forward the payload and attempt to create reorg on top of
                             // the next one
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
@@ -276,7 +296,12 @@ where
         .sealed_header_by_hash(reorg_target.header().parent_hash())?
         .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash().into()))?;
 
-    debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
+    debug!(
+        target: "engine::stream::reorg",
+        number = reorg_target.header().number(),
+        hash = %previous_hash,
+        "Selected reorg target"
+    );
 
     // Configure state
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
@@ -306,7 +331,12 @@ where
                 hash,
                 error,
             })) => {
-                trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
+                trace!(
+                    target: "engine::stream::reorg",
+                    hash = %hash,
+                    ?error,
+                    "Error executing transaction from next block"
+                );
                 continue
             }
             // Treat error as fatal

@@ -300,10 +300,20 @@ async fn fetch_batch_with_retry<S: TransactionSource>(
             Ok(result) => return Some(result),
             Err(e) => {
                 if attempt == MAX_FETCH_RETRIES {
-                    warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions after max retries");
+                    warn!(
+                        target: "reth-bench",
+                        attempt,
+                        error = %e,
+                        "Failed to fetch transactions after max retries"
+                    );
                     return None;
                 }
-                warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions, retrying...");
+                warn!(
+                    target: "reth-bench",
+                    attempt,
+                    error = %e,
+                    "Failed to fetch transactions, retrying..."
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
@@ -343,7 +353,12 @@ impl TxBuffer {
 impl Command {
     /// Execute the `generate-big-block` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth-bench", target_gas = self.target_gas, count = self.count, "Generating big block(s)");
+        info!(
+            target: "reth-bench",
+            target_gas = self.target_gas,
+            count = self.count,
+            "Generating big block(s)"
+        );
 
         // Set up authenticated engine provider
         let jwt =
@@ -364,7 +379,13 @@ impl Command {
         let testing_provider = RootProvider::<AnyNetwork>::new(testing_client);
 
         // Get the parent block (latest canonical block)
-        info!(target: "reth-bench", endpoint = "engine", method = "eth_getBlockByNumber", block = "latest", "RPC call");
+        info!(
+            target: "reth-bench",
+            endpoint = "engine",
+            method = "eth_getBlockByNumber",
+            block = "latest",
+            "RPC call"
+        );
         let parent_block = auth_provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await?
@@ -419,7 +440,12 @@ impl Command {
             .await?;
         }
 
-        info!(target: "reth-bench", count = self.count, output_dir = %self.output_dir.display(), "All payloads generated");
+        info!(
+            target: "reth-bench",
+            count = self.count,
+            output_dir = %self.output_dir.display(),
+            "All payloads generated"
+        );
         Ok(())
     }
 
@@ -450,7 +476,13 @@ impl Command {
             self.save_payload(&built)?;
 
             if self.execute || self.count > 1 {
-                info!(target: "reth-bench", payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+                info!(
+                    target: "reth-bench",
+                    payload = i + 1,
+                    block_hash = %built.block_hash,
+                    gas_used = built.gas_used,
+                    "Executing payload (newPayload + FCU)"
+                );
                 self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
                 info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
             }
@@ -509,7 +541,11 @@ impl Command {
             }
         }
 
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
+        warn!(
+            target: "reth-bench",
+            payload = index + 1,
+            "Retry loop exited without returning a payload"
+        );
         Err(eyre::eyre!("build_with_retry exhausted retries without result"))
     }
 
@@ -547,7 +583,11 @@ impl Command {
 
             while let Some(batch) = fetch_batch_with_retry(&collector, current_block).await {
                 if batch.transactions.is_empty() {
-                    info!(target: "reth-bench", block = current_block, "Reached chain tip, stopping fetcher");
+                    info!(
+                        target: "reth-bench",
+                        block = current_block,
+                        "Reached chain tip, stopping fetcher"
+                    );
                     break;
                 }
 
@@ -614,7 +654,13 @@ impl Command {
             let current_timestamp = built.timestamp;
 
             // Execute payload
-            info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+            info!(
+                target: "reth-bench",
+                payload = i + 1,
+                block_hash = %current_block_hash,
+                gas_used = built.gas_used,
+                "Executing payload (newPayload + FCU)"
+            );
             self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
             info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
 
@@ -673,7 +719,10 @@ impl Command {
                             result.gas_sent = result.gas_sent.saturating_add(batch.gas_sent);
                             result.next_block = batch.next_block;
                         } else {
-                            warn!(target: "reth-bench", "Transaction fetcher exhausted, proceeding with available transactions");
+                            warn!(
+                                target: "reth-bench",
+                                "Transaction fetcher exhausted, proceeding with available transactions"
+                            );
                             break;
                         }
                     }
@@ -681,7 +730,11 @@ impl Command {
             }
         }
 
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
+        warn!(
+            target: "reth-bench",
+            payload = index + 1,
+            "Retry loop exited without returning a payload"
+        );
         Err(eyre::eyre!("build_with_retry_buffered exhausted retries without result"))
     }
 
@@ -808,7 +861,13 @@ impl Command {
         let json = serde_json::to_string_pretty(&payload.envelope)?;
         std::fs::write(&filepath, &json)
             .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-        info!(target: "reth-bench", block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
+        info!(
+            target: "reth-bench",
+            block_number = payload.block_number,
+            block_hash = %payload.block_hash,
+            path = %filepath.display(),
+            "Payload saved"
+        );
         Ok(())
     }
 

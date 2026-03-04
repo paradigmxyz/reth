@@ -194,7 +194,12 @@ where
 
         ensure_consistency(provider, None)?;
 
-        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, "Commencing sync");
+        debug!(
+            target: "sync::stages::bodies",
+            stage_progress = from_block,
+            target = to_block,
+            "Commencing sync"
+        );
 
         let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");

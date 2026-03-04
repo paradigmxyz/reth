@@ -491,7 +491,10 @@ where
         &self,
         _request: BuilderBlockValidationRequest,
     ) -> RpcResult<()> {
-        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV1` is not supported");
+        warn!(
+            target: "rpc::flashbots",
+            "Method `flashbots_validateBuilderSubmissionV1` is not supported"
+        );
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -499,7 +502,10 @@ where
         &self,
         _request: BuilderBlockValidationRequestV2,
     ) -> RpcResult<()> {
-        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV2` is not supported");
+        warn!(
+            target: "rpc::flashbots",
+            "Method `flashbots_validateBuilderSubmissionV2` is not supported"
+        );
         Err(internal_rpc_err("unimplemented"))
     }
 

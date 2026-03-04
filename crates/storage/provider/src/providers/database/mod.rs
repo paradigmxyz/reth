@@ -305,7 +305,11 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
         let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
+        trace!(
+            target: "providers::db",
+            ?block_number,
+            "Returning historical state provider for block number"
+        );
         Ok(state_provider)
     }
 
@@ -318,7 +322,12 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
         let state_provider = provider.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
+        trace!(
+            target: "providers::db",
+            ?block_number,
+            %block_hash,
+            "Returning historical state provider for block hash"
+        );
         Ok(state_provider)
     }
 

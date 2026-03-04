@@ -598,7 +598,12 @@ impl PeersManager {
     pub(crate) fn on_active_session_gracefully_closed(&mut self, peer_id: PeerId) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
-                trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
+                trace!(
+                    target: "net::peers",
+                    ?peer_id,
+                    direction=?entry.get().state,
+                    "active session gracefully closed"
+                );
                 self.connection_info.decr_state(entry.get().state);
 
                 if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
@@ -622,7 +627,13 @@ impl PeersManager {
                         peer_id,
                         std::time::Instant::now() + self.incoming_ip_throttle_duration,
                     );
-                    trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
+                    trace!(
+                        target: "net::peers",
+                        ?peer_id,
+                        kind=?peer.kind,
+                        duration=?self.incoming_ip_throttle_duration,
+                        "backing off on gracefully closed session"
+                    );
                 }
             }
             Entry::Vacant(_) => return,
@@ -728,14 +739,25 @@ impl PeersManager {
                         // have us registered as a trusted peer.
                         let backoff = self.backoff_durations.low;
                         backoff_until = Some(std::time::Instant::now() + backoff);
-                        trace!(target: "net::peers", ?peer_id, ?backoff, "backing off trusted peer");
+                        trace!(
+                            target: "net::peers",
+                            ?peer_id,
+                            ?backoff,
+                            "backing off trusted peer"
+                        );
                     } else {
                         // Increment peer.backoff_counter
                         if kind.is_severe() {
                             peer.severe_backoff_counter =
                                 peer.severe_backoff_counter.saturating_add(1);
                         }
-                        trace!(target: "net::peers", ?peer_id, ?kind, severe_backoff_counter=peer.severe_backoff_counter, "backing off basic peer");
+                        trace!(
+                            target: "net::peers",
+                            ?peer_id,
+                            ?kind,
+                            severe_backoff_counter=peer.severe_backoff_counter,
+                            "backing off basic peer"
+                        );
 
                         let backoff_time =
                             self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
@@ -834,7 +856,12 @@ impl PeersManager {
 
         // Check if the IP is in the allowed ranges (netrestrict)
         if !self.ip_filter.is_allowed(&ip_addr) {
-            trace!(target: "net", ?peer_id, ?ip_addr, "Skipping peer from IP not in allowed ranges");
+            trace!(
+                target: "net",
+                ?peer_id,
+                ?ip_addr,
+                "Skipping peer from IP not in allowed ranges"
+            );
             return
         }
 
@@ -927,7 +954,12 @@ impl PeersManager {
 
         // Check if the IP is in the allowed ranges (netrestrict)
         if !self.ip_filter.is_allowed(&ip_addr) {
-            trace!(target: "net", ?peer_id, ?ip_addr, "Skipping outbound connection to IP not in allowed ranges");
+            trace!(
+                target: "net",
+                ?peer_id,
+                ?ip_addr,
+                "Skipping outbound connection to IP not in allowed ranges"
+            );
             return
         }
 
@@ -1048,7 +1080,12 @@ impl PeersManager {
                     _ => break,
                 };
 
-                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
+                trace!(
+                    target: "net::peers",
+                    ?peer_id,
+                    addr=?peer.addr,
+                    "schedule outbound connection"
+                );
 
                 peer.state = PeerConnectionState::PendingOut;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }
@@ -1070,7 +1107,12 @@ impl PeersManager {
 
             if peer.addr != new_addr {
                 peer.addr = new_addr;
-                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
+                trace!(
+                    target: "net::peers",
+                    ?peer_id,
+                    addr=?peer.addr,
+                    "Updated resolved trusted peer address"
+                );
             }
         }
     }

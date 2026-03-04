@@ -706,7 +706,11 @@ where
         return Ok(())
     }
 
-    debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
+    debug!(
+        target: "txpool",
+        txs_file =?file_path,
+        "Check local persistent storage for saved transactions"
+    );
     let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
@@ -750,7 +754,12 @@ where
     )
     .await;
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
+    info!(
+        target: "txpool",
+        txs_file =?file_path,
+        num_txs=%inserted.len(),
+        "Successfully reinserted local transactions from file"
+    );
     reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
@@ -778,12 +787,22 @@ where
     let json_data = match serde_json::to_string(&local_transactions) {
         Ok(data) => data,
         Err(err) => {
-            warn!(target: "txpool", %err, txs_file=?file_path, "failed to serialize local transactions to json");
+            warn!(
+                target: "txpool",
+                %err,
+                txs_file=?file_path,
+                "failed to serialize local transactions to json"
+            );
             return
         }
     };
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%local_transactions.len(), "Saving current local transactions");
+    info!(
+        target: "txpool",
+        txs_file =?file_path,
+        num_txs=%local_transactions.len(),
+        "Saving current local transactions"
+    );
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
     match parent_dir.map(|_| reth_fs_util::write(file_path, json_data)) {
@@ -791,7 +810,12 @@ where
             info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
         }
         Err(err) => {
-            warn!(target: "txpool", %err, txs_file=?file_path, "Failed to write local transactions to file");
+            warn!(
+                target: "txpool",
+                %err,
+                txs_file=?file_path,
+                "Failed to write local transactions to file"
+            );
         }
     }
 }

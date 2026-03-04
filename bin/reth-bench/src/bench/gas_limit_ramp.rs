@@ -201,7 +201,12 @@ impl Command {
             };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
-            info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
+            info!(
+                target: "reth-bench",
+                block_number = block.header.number,
+                path = %payload_path.display(),
+                "Saved payload"
+            );
 
             let _ = call_new_payload_with_reth(&provider, version, params).await?;
 
@@ -223,7 +228,13 @@ impl Command {
                     format!("{pct:.1}%")
                 }
             };
-            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
+            info!(
+                target: "reth-bench",
+                progress,
+                block_number = parent_header.number,
+                gas_limit = parent_header.gas_limit,
+                "Block processed"
+            );
         }
 
         let final_gas_limit = parent_header.gas_limit;

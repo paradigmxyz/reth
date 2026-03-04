@@ -232,7 +232,12 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Removes canonical blocks below the upper bound, only if the last persisted hash is
     /// part of the canonical chain.
     pub fn remove_canonical_until(&mut self, upper_bound: BlockNumber, last_persisted_hash: B256) {
-        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
+        debug!(
+            target: "engine::tree",
+            ?upper_bound,
+            ?last_persisted_hash,
+            "Removing canonical blocks from the tree"
+        );
 
         // If the last persisted hash is not canonical, then we don't want to remove any canonical
         // blocks yet.
@@ -247,11 +252,20 @@ impl<N: NodePrimitives> TreeState<N> {
             current_block = executed.recovered_block().parent_hash();
             if executed.recovered_block().number() <= upper_bound {
                 let num_hash = executed.recovered_block().num_hash();
-                debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
+                debug!(
+                    target: "engine::tree",
+                    ?num_hash,
+                    "Attempting to remove block walking back from the head"
+                );
                 self.remove_by_hash(executed.recovered_block().hash());
             }
         }
-        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
+        debug!(
+            target: "engine::tree",
+            ?upper_bound,
+            ?last_persisted_hash,
+            "Removed canonical blocks from the tree"
+        );
     }
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
@@ -274,7 +288,11 @@ impl<N: NodePrimitives> TreeState<N> {
             .collect::<Vec<_>>();
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
+                debug!(
+                    target: "engine::tree",
+                    num_hash=?removed.recovered_block().num_hash(),
+                    "Removed finalized sidechain block"
+                );
             }
         }
 
@@ -300,7 +318,11 @@ impl<N: NodePrimitives> TreeState<N> {
             .collect::<VecDeque<_>>();
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
+                debug!(
+                    target: "engine::tree",
+                    num_hash=?removed.recovered_block().num_hash(),
+                    "Removed finalized sidechain child block"
+                );
                 blocks_to_remove.extend(children);
             }
         }
@@ -322,7 +344,12 @@ impl<N: NodePrimitives> TreeState<N> {
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
     ) {
-        debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
+        debug!(
+            target: "engine::tree",
+            ?upper_bound,
+            ?finalized_num_hash,
+            "Removing blocks from the tree"
+        );
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
         // that the only blocks removed, are canonical blocks less than the upper bound

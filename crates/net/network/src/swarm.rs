@@ -203,10 +203,18 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 if let Err(err) = self.peers_mut().on_incoming_pending_session(remote_addr.ip()) {
                     match err {
                         InboundConnectionError::IpBanned => {
-                            trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
+                            trace!(
+                                target: "net",
+                                ?remote_addr,
+                                "The incoming ip address is in the ban list"
+                            );
                         }
                         InboundConnectionError::ExceedsCapacity => {
-                            trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                            trace!(
+                                target: "net",
+                                ?remote_addr,
+                                "No capacity for incoming connection"
+                            );
                             self.sessions.try_disconnect_incoming_connection(
                                 stream,
                                 DisconnectReason::TooManyPeers,
@@ -222,7 +230,11 @@ impl<N: NetworkPrimitives> Swarm<N> {
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        trace!(target: "net", %err, "Incoming connection rejected, capacity already reached.");
+                        trace!(
+                            target: "net",
+                            %err,
+                            "Incoming connection rejected, capacity already reached."
+                        );
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();
@@ -277,7 +289,13 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 if self.sessions.is_valid_fork_id(fork_id) {
                     self.peers_mut().add_peer(peer_id, addr, Some(fork_id));
                 } else {
-                    trace!(target: "net", ?peer_id, remote_fork_id=?fork_id, our_fork_id=?self.sessions.fork_id(), "fork id mismatch, removing peer");
+                    trace!(
+                        target: "net",
+                        ?peer_id,
+                        remote_fork_id=?fork_id,
+                        our_fork_id=?self.sessions.fork_id(),
+                        "fork id mismatch, removing peer"
+                    );
                     self.peers_mut().remove_peer(peer_id);
                 }
             }

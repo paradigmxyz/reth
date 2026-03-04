@@ -979,7 +979,12 @@ where
                 propagated.record(hash, PropagateKind::Hash(peer_id));
             }
 
-            trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
+            trace!(
+                target: "net::tx::propagation",
+                ?peer_id,
+                ?new_pooled_hashes,
+                "Propagating transactions to peer"
+            );
 
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
@@ -1042,7 +1047,11 @@ where
             }
 
             if builder.is_empty() {
-                trace!(target: "net::tx", ?peer_id, "Nothing to propagate to peer; has seen all transactions");
+                trace!(
+                    target: "net::tx",
+                    ?peer_id,
+                    "Nothing to propagate to peer; has seen all transactions"
+                );
                 continue
             }
 
@@ -1061,7 +1070,12 @@ where
                     peer.seen_transactions.insert(hash);
                 }
 
-                trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+                trace!(
+                    target: "net::tx",
+                    ?peer_id,
+                    num_txs=?new_pooled_hashes.len(),
+                    "Propagating tx hashes to peer"
+                );
 
                 // send hashes of transactions
                 self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
@@ -1075,7 +1089,12 @@ where
                     peer.seen_transactions.insert(*tx.tx_hash());
                 }
 
-                trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+                trace!(
+                    target: "net::tx",
+                    ?peer_id,
+                    num_txs=?new_full_transactions.len(),
+                    "Propagating full transactions to peer"
+                );
 
                 // send full transactions
                 self.network.send_transactions(*peer_id, new_full_transactions);
@@ -1124,7 +1143,11 @@ where
                     self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
-            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
+            trace!(
+                target: "net::tx::propagation",
+                sent_txs=?transactions.iter().map(|tx| tx.tx_hash()),
+                "Sending requested transactions to peer"
+            );
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
@@ -1211,7 +1234,11 @@ where
         // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
         // transactions in the pool.
         if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
-            trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            trace!(
+                target: "net::tx",
+                ?peer_id,
+                "Skipping transaction broadcast: node syncing or gossip disabled"
+            );
             return
         }
 
@@ -1231,7 +1258,12 @@ where
             msg_builder.push_pooled(pooled_tx);
         }
 
-        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
+        debug!(
+            target: "net::tx",
+            ?peer_id,
+            tx_count = msg_builder.len(),
+            "Broadcasting transaction hashes"
+        );
         let msg = msg_builder.build();
         self.network.send_transactions_hashes(peer_id, msg);
     }
@@ -1284,7 +1316,12 @@ where
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 if !self.accepts_incoming_from(&peer_id) {
-                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
+                    trace!(
+                        target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        policy=?self.config.ingress_policy,
+                        "Ignoring full transactions from peer blocked by ingress policy"
+                    );
                     return;
                 }
 
@@ -1302,13 +1339,22 @@ where
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
                 if has_blob_txs {
-                    debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
+                    debug!(
+                        target: "net::tx",
+                        ?peer_id,
+                        "received bad full blob transaction broadcast"
+                    );
                     self.report_peer_bad_transactions(peer_id);
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
                 if !self.accepts_incoming_from(&peer_id) {
-                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring transaction hashes from peer blocked by ingress policy");
+                    trace!(
+                        target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        policy=?self.config.ingress_policy,
+                        "Ignoring transaction hashes from peer blocked by ingress policy"
+                    );
                     return;
                 }
                 self.on_new_pooled_transaction_hashes(peer_id, msg)
@@ -1354,7 +1400,12 @@ where
             self.metrics
                 .skipped_transactions_pending_pool_imports_at_capacity
                 .increment(skipped as u64);
-            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+            trace!(
+                target: "net::tx",
+                skipped,
+                capacity,
+                "Truncated transactions batch to capacity"
+            );
         }
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
@@ -1450,7 +1501,11 @@ where
             let tx_manager_info_pending_pool_imports =
                 self.pending_pool_imports_info.pending_pool_imports.clone();
 
-            trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
+            trace!(
+                target: "net::tx::propagation",
+                new_txs_len=?new_txs.len(),
+                "Importing new transactions"
+            );
             let import = Box::pin(async move {
                 let added = new_txs.len();
                 let res = pool.add_external_transactions(new_txs).await;
@@ -1471,7 +1526,13 @@ where
             self.metrics
                 .occurrences_of_transaction_already_seen_by_peer
                 .increment(num_already_seen_by_peer);
-            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
+            trace!(
+                target: "net::tx",
+                num_txs=%num_already_seen_by_peer,
+                ?peer_id,
+                client=%client_version,
+                "Peer sent already seen transactions"
+            );
         }
 
         if has_bad_transactions {
@@ -1496,7 +1557,12 @@ where
                 }
             }
             FetchEvent::FetchError { peer_id, error } => {
-                trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
+                trace!(
+                    target: "net::tx",
+                    ?peer_id,
+                    %error,
+                    "requesting transactions from peer failed"
+                );
                 self.on_request_error(peer_id, error);
             }
             FetchEvent::EmptyResponse { peer_id } => {

@@ -874,7 +874,11 @@ where
         //
         // We will use this `Available` cached branch as our next branch.
         let cached = trie_cursor_state.take();
-        trace!(target: TRACE_TARGET, cached=?cached, "Pushed next trie node onto cached_branch_stack");
+        trace!(
+            target: TRACE_TARGET,
+            cached=?cached,
+            "Pushed next trie node onto cached_branch_stack"
+        );
 
         // If the calculated range is not caught up to the next cached branch it means there
         // are portions of the trie prior to that branch which may need to be calculated;
@@ -885,7 +889,11 @@ where
         let cached_path = &cached.0;
         if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
             let range = (*uncalculated_lower_bound, Some(*cached_path));
-            trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
+            trace!(
+                target: TRACE_TARGET,
+                ?range,
+                "Returning key range to calculate in order to catch up to cached branch"
+            );
 
             // Push the cached branch onto the stack so it's available once the leaf range is done
             // being calculated.
@@ -948,7 +956,11 @@ where
                     // If cached branches are exhausted it's possible that there is still an
                     // unbounded range of leaves to be processed. `uncalculated_lower_bound` is
                     // used to return that range.
-                    trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
+                    trace!(
+                        target: TRACE_TARGET,
+                        ?uncalculated_lower_bound,
+                        "Exhausted cached trie nodes"
+                    );
                     return Ok(uncalculated_lower_bound
                         .map(|lower| (lower, sub_trie_upper_bound.copied())));
                 }

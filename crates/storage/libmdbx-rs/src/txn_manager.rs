@@ -273,7 +273,12 @@ mod read_transactions {
                                     ));
                                 }
                                 Err(err) => {
-                                    error!(target: "libmdbx", %err, ?backtrace, "Failed to abort the long-lived read transaction")
+                                    error!(
+                                        target: "libmdbx",
+                                        %err,
+                                        ?backtrace,
+                                        "Failed to abort the long-lived read transaction"
+                                    )
                                 }
                             }
                         } else {
@@ -292,11 +297,22 @@ mod read_transactions {
                             if was_in_active {
                                 // If the transaction was in the list of active transactions,
                                 // then user didn't abort it and we failed to do so.
-                                error!(target: "libmdbx", %err, ?open_duration, ?backtrace, "Failed to time out the long-lived read transaction");
+                                error!(
+                                    target: "libmdbx",
+                                    %err,
+                                    ?open_duration,
+                                    ?backtrace,
+                                    "Failed to time out the long-lived read transaction"
+                                );
                             }
                         } else {
                             // Happy path, the transaction has been timed out by us with no errors.
-                            warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
+                            warn!(
+                                target: "libmdbx",
+                                ?open_duration,
+                                ?backtrace,
+                                "Long-lived read transaction has been timed out"
+                            );
                             // Add transaction to the list of timed out transactions that were not
                             // aborted by the user yet.
                             self.timed_out_not_aborted.insert(ptr as usize);
@@ -324,7 +340,12 @@ mod read_transactions {
                     let sleep_duration = READ_TRANSACTIONS_CHECK_INTERVAL.min(
                         self.max_duration - max_active_transaction_duration.unwrap_or_default(),
                     );
-                    trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
+                    trace!(
+                        target: "libmdbx",
+                        ?sleep_duration,
+                        elapsed = ?now.elapsed(),
+                        "Putting transaction monitor to sleep"
+                    );
                     std::thread::sleep(sleep_duration);
                 }
             };

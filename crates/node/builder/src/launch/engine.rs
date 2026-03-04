@@ -108,7 +108,12 @@ impl EngineNodeLauncher {
             })
             .with_prometheus_server().await?
             .inspect(|this| {
-                debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
+                debug!(
+                    target: "reth::cli",
+                    chain=%this.chain_id(),
+                    genesis=?this.genesis_hash(),
+                    "Initializing genesis"
+                );
             })
             .with_genesis()?
             .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, _>>| {
@@ -316,7 +321,10 @@ impl EngineNodeLauncher {
                         match event {
                             ChainEvent::BackfillSyncFinished => {
                                 if terminate_after_backfill {
-                                    debug!(target: "reth::cli", "Terminating after initial backfill");
+                                    debug!(
+                                        target: "reth::cli",
+                                        "Terminating after initial backfill"
+                                    );
                                     break
                                 }
                                 if startup_sync_state_idle {
@@ -359,7 +367,11 @@ impl EngineNodeLauncher {
                     }
                     payload = built_payloads.select_next_some(), if !built_payloads.is_terminated() => {
                         if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                            debug!(
+                                target: "reth::cli",
+                                block=?executed_block.recovered_block.num_hash(),
+                                "inserting built payload"
+                            );
                             orchestrator.handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
                         }
                     }

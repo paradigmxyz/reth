@@ -250,7 +250,11 @@ pub(crate) fn write_benchmark_results(
     fs::create_dir_all(output_dir)?;
 
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
-    info!(target: "reth-bench", "Writing engine api call latency output to file: {:?}", output_path);
+    info!(
+        target: "reth-bench",
+        "Writing engine api call latency output to file: {:?}",
+        output_path
+    );
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
         writer.serialize(result)?;

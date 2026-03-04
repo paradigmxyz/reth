@@ -67,7 +67,9 @@ impl BenchmarkRunner {
                     warn!(
                         "For optimal benchmarking, configure passwordless sudo for cache clearing:"
                     );
-                    warn!("  echo '$USER ALL=(ALL) NOPASSWD: /bin/sh -c echo\\\\ [0-9]\\\\ \\\\>\\\\ /proc/sys/vm/drop_caches' | sudo tee /etc/sudoers.d/drop_caches");
+                    warn!(
+                        "  echo '$USER ALL=(ALL) NOPASSWD: /bin/sh -c echo\\\\ [0-9]\\\\ \\\\>\\\\ /proc/sys/vm/drop_caches' | sudo tee /etc/sudoers.d/drop_caches"
+                    );
                     Ok(())
                 } else {
                     Err(eyre!("Failed to clear filesystem caches: {}", stderr))

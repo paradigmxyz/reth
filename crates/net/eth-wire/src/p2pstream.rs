@@ -130,7 +130,11 @@ where
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                debug!(%err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                debug!(
+                    %err,
+                    msg=%hex::encode(&first_message_bytes),
+                    "Failed to decode first message from peer"
+                );
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {

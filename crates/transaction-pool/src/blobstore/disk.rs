@@ -347,7 +347,11 @@ impl DiskFileBlobStoreInner {
     fn delete_all(&self) -> Result<(), DiskFileBlobStoreError> {
         match fs::remove_dir_all(&self.blob_dir) {
             Ok(_) => {
-                debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Removed blob store directory");
+                debug!(
+                    target:"txpool::blob",
+                    blob_dir = ?self.blob_dir,
+                    "Removed blob store directory"
+                );
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(err) => return Err(DiskFileBlobStoreError::Open(self.blob_dir.clone(), err)),

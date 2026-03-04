@@ -1008,7 +1008,12 @@ where
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
-        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+        debug!(
+            target: "reth::cli",
+            http=?module_config.http(),
+            ws=?module_config.ws(),
+            "Using RPC module config"
+        );
 
         let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
             .with_provider(node.provider().clone())
@@ -1096,7 +1101,12 @@ where
             .inspect(|handle| {
                 let addr = handle.local_addr();
                 if let Some(ipc_endpoint) = handle.ipc_endpoint() {
-                    info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint, "RPC auth server started");
+                    info!(
+                        target: "reth::cli",
+                        url=%addr,
+                        ipc_endpoint=%ipc_endpoint,
+                        "RPC auth server started"
+                    );
                 } else {
                     info!(target: "reth::cli", url=%addr, "RPC auth server started");
                 }

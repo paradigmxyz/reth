@@ -222,24 +222,42 @@ impl<
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
         let guard = self.logs.init_tracing_with_layers(layers)?;
-        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+        info!(
+            target: "reth::cli",
+            "Initialized tracing, debug log directory: {}",
+            self.logs.log_file_directory
+        );
 
         match otlp_status {
             OtlpInitStatus::Started(endpoint) => {
-                info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.traces.protocol);
+                info!(
+                    target: "reth::cli",
+                    "Started OTLP {:?} tracing export to {endpoint}",
+                    self.traces.protocol
+                );
             }
             OtlpInitStatus::NoFeature => {
-                warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
+                warn!(
+                    target: "reth::cli",
+                    "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature"
+                )
             }
             OtlpInitStatus::Disabled => {}
         }
 
         match otlp_logs_status {
             OtlpLogsStatus::Started(endpoint) => {
-                info!(target: "reth::cli", "Started OTLP {:?} logs export to {endpoint}", self.traces.protocol);
+                info!(
+                    target: "reth::cli",
+                    "Started OTLP {:?} logs export to {endpoint}",
+                    self.traces.protocol
+                );
             }
             OtlpLogsStatus::NoFeature => {
-                warn!(target: "reth::cli", "Provided OTLP logs arguments do not have effect, compile with the `otlp-logs` feature")
+                warn!(
+                    target: "reth::cli",
+                    "Provided OTLP logs arguments do not have effect, compile with the `otlp-logs` feature"
+                )
             }
             OtlpLogsStatus::Disabled => {}
         }
