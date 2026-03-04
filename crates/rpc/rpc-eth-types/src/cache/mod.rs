@@ -288,6 +288,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         Ok(Some(CachedTransaction::new(cached.block, cached.tx_index, receipts)))
     }
 }
+
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
 #[error("cache service task stopped")]
