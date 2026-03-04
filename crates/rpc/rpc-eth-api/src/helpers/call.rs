@@ -327,7 +327,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let Some(block_hash) = self
                     .provider()
                     .block_hash_for_id(target_block)
-                    .map_err(|err| Self::Error::from_eth_err(EthApiError::Internal(err.into())))?
+                    .map_err(|err| Self::Error::from_eth_err::<ProviderError>(err))?
                 else {
                     return Err(EthApiError::HeaderNotFound(target_block).into())
                 };

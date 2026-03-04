@@ -765,7 +765,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_call_many_propagates_provider_error_for_block_lookup() {
+    async fn test_call_many_maps_provider_block_lookup_error_with_eth_api_conversion() {
         let eth_api = build_test_eth_api(MockEthProvider::default());
         let bundles = vec![Bundle {
             transactions: vec![TransactionRequest::default()],
@@ -780,12 +780,12 @@ mod tests {
         let err = response.expect_err("call_many should fail when latest block lookup errors");
         let message = err.message().to_ascii_lowercase();
         assert!(
-            message.contains("best block does not exist"),
-            "expected provider error to propagate, got: {message}"
+            message.contains("block not found"),
+            "best block lookup should map via EthApiError::from(ProviderError): {message}"
         );
         assert!(
-            !message.contains("block not found"),
-            "provider error must not be rewritten to block-not-found: {message}"
+            !message.contains("best block does not exist"),
+            "provider implementation detail should not leak from converted error: {message}"
         );
     }
 
