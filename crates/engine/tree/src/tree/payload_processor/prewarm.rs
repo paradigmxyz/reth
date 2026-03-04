@@ -75,6 +75,8 @@ where
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
     parent_span: Span,
+    /// Whether to disable BAL-driven parallel state root computation.
+    disable_bal_parallel_state_root: bool,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -89,6 +91,7 @@ where
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        disable_bal_parallel_state_root: bool,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -107,6 +110,7 @@ where
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
+                disable_bal_parallel_state_root,
             },
             actions_tx,
         )
@@ -371,6 +375,9 @@ where
     /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
     /// multiproof task.
     fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
+        if self.disable_bal_parallel_state_root {
+            return;
+        }
         let Some(to_multi_proof) = &self.to_multi_proof else { return };
 
         let provider = match self.ctx.provider.build() {
