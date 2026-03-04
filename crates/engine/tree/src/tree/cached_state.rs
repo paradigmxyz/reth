@@ -6,7 +6,7 @@ use alloy_primitives::{
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -362,7 +362,7 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
 
         if PREWARM {
             for &key in keys {
-                if let Some(value) = self.caches.0.storage_cache.get(&(account, key)) {
+                if let Some(value) = self.caches.get_storage(account, key) {
                     if !value.is_zero() {
                         result.push((key, value));
                     }
@@ -373,37 +373,34 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
 
             // Batch-fetch all uncached keys from the inner provider
             if !uncached_keys.is_empty() {
-                let fetched = self.state_provider.storage_range(account, &uncached_keys)?;
-                for (key, value) in &fetched {
-                    self.caches.insert_storage(account, *key, Some(*value));
-                }
-                // Insert zero entries for keys that weren't found
-                let fetched_set: std::collections::HashSet<StorageKey> =
-                    fetched.iter().map(|(k, _)| *k).collect();
+                let mut fetched = self.state_provider.storage_range(account, &uncached_keys)?;
+                // Sort by raw key to align with uncached_keys for the merge-join below.
+                // The inner provider may return results in a different order (e.g. hashed state
+                // iterates by hashed slot).
+                fetched.sort_unstable_by_key(|(k, _)| *k);
+                // Merge-join to find zero slots without allocating a HashSet.
+                let mut fetched_iter = fetched.iter();
+                let mut next = fetched_iter.next();
                 for &key in &uncached_keys {
-                    if !fetched_set.contains(&key) {
-                        self.caches.insert_storage(account, key, Some(StorageValue::ZERO));
+                    if let Some(&(fk, fv)) = next &&
+                        fk == key
+                    {
+                        let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                            Ok::<_, ProviderError>(fv)
+                        });
+                        result.push((key, fv));
+                        next = fetched_iter.next();
+                        continue;
                     }
+                    // key not returned by inner provider → zero slot
+                    let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                        Ok::<_, ProviderError>(StorageValue::ZERO)
+                    });
                 }
-                result.extend(fetched);
             }
         } else {
-            for &key in keys {
-                if let Some(value) = self.caches.0.storage_cache.get(&(account, key)) {
-                    self.metrics.storage_cache_hits.increment(1);
-                    if !value.is_zero() {
-                        result.push((key, value));
-                    }
-                } else {
-                    self.metrics.storage_cache_misses.increment(1);
-                    uncached_keys.push(key);
-                }
-            }
-
-            if !uncached_keys.is_empty() {
-                let fetched = self.state_provider.storage_range(account, &uncached_keys)?;
-                result.extend(fetched);
-            }
+            // Not called on the execution path; delegate directly.
+            return self.state_provider.storage_range(account, keys);
         }
 
         Ok(result)
@@ -678,6 +675,11 @@ impl ExecutionCache {
         } else {
             Ok(CachedStatus::Cached(result))
         }
+    }
+
+    /// Returns a cached storage value if present, without inserting.
+    pub fn get_storage(&self, address: Address, key: StorageKey) -> Option<StorageValue> {
+        self.0.storage_cache.get(&(address, key))
     }
 
     /// Insert storage value into cache.

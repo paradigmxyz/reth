@@ -277,12 +277,15 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(account);
             let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
-            for &key in keys {
-                let hashed_slot = alloy_primitives::keccak256(key);
+            // Sort by hashed slot so cursor seeks are sequential (forward-only).
+            let mut hashed_keys: Vec<(B256, StorageKey)> =
+                keys.iter().map(|&k| (alloy_primitives::keccak256(k), k)).collect();
+            hashed_keys.sort_unstable_by_key(|(h, _)| *h);
+            for (hashed_slot, original_key) in hashed_keys {
                 if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
                     entry.key == hashed_slot
                 {
-                    result.push((key, entry.value));
+                    result.push((original_key, entry.value));
                 }
             }
         } else {
