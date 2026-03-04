@@ -214,14 +214,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         value: Vec<u8>,
         provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or_else(|| {
-            tracing::error!(
-                target: "trie::sparse",
-                ?path,
-                "RevealableSparseTrie::update_leaf: trie is blind"
-            );
-            SparseTrieErrorKind::Blind
-        })?;
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value, provider)?;
         Ok(())
     }
