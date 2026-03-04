@@ -1163,14 +1163,17 @@ impl SparseTrie for ParallelSparseTrie {
         stack.push(Nibbles::default());
 
         while let Some(path) = stack.pop() {
-            let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path) else { continue };
-            let Some(node) = subtrie.nodes.get_mut(&path) else { continue };
+            let Some(node) =
+                self.subtrie_for_path(&path).and_then(|subtrie| subtrie.nodes.get(&path).cloned())
+            else {
+                continue;
+            };
 
             match node {
                 SparseNode::Empty | SparseNode::Leaf { .. } => {}
                 SparseNode::Extension { key, state, .. } => {
                     let mut child = path;
-                    child.extend(key);
+                    child.extend(&key);
 
                     if has_retained_descendant(&retained_leaves, &child) {
                         stack.push(child);
@@ -1183,11 +1186,20 @@ impl SparseTrie for ParallelSparseTrie {
                     }
 
                     let Some(hash) = state.cached_hash() else { continue };
-                    subtrie.nodes.remove(&path);
+                    self.subtrie_for_path_mut_untracked(&path)
+                        .expect("node subtrie exists")
+                        .nodes
+                        .remove(&path);
 
                     let parent_path = path.slice(0..path.len() - 1);
-                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
-                        subtrie.nodes.get_mut(&parent_path).unwrap()
+                    // Parent can live in a different subtrie when `path` is the root of a lower
+                    // subtrie, so resolve it by `parent_path` rather than reusing `path`'s subtrie.
+                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
+                        .subtrie_for_path_mut_untracked(&parent_path)
+                        .expect("parent subtrie exists")
+                        .nodes
+                        .get_mut(&parent_path)
+                        .expect("expected parent branch node")
                     else {
                         panic!("expected branch node at path {parent_path:?}");
                     };
@@ -1198,8 +1210,8 @@ impl SparseTrie for ParallelSparseTrie {
                     effective_pruned_roots.push(path);
                 }
                 SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
-                    let mut blinded_mask = *blinded_mask;
-                    let mut blinded_hashes = blinded_hashes.clone();
+                    let mut blinded_mask = blinded_mask;
+                    let mut blinded_hashes = blinded_hashes;
                     for nibble in state_mask.iter() {
                         if blinded_mask.is_bit_set(nibble) {
                             continue;
