@@ -565,8 +565,8 @@ where
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
-            increase_thread_priority();
-            pin_current_thread_to_core();
+            reth_tasks::once!(|| increase_thread_priority());
+            reth_tasks::once!(|| pin_current_thread_to_core());
 
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
