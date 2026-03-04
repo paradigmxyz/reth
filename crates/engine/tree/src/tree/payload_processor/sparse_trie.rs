@@ -237,6 +237,11 @@ where
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        let mut total_state_updates: u64 = 0;
+        let mut total_proofs_processed: u64 = 0;
+        let mut first_update_wait_time = None;
+        let mut last_proof_wait_time = std::time::Duration::ZERO;
+
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
@@ -244,6 +249,10 @@ where
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
                         .record(t.elapsed());
+
+                    if first_update_wait_time.is_none() {
+                        first_update_wait_time = Some(now.elapsed());
+                    }
 
                     let update = match message {
                         Ok(m) => m,
@@ -254,15 +263,26 @@ where
                         }
                     };
 
+                    if matches!(&update, SparseTrieTaskMessage::HashedState(_)) {
+                        total_state_updates += 1;
+                    }
+
                     self.on_message(update);
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
+                    let wait_duration = phase_end.duration_since(t);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
-                        .record(phase_end.duration_since(t));
+                        .record(wait_duration);
                     t = phase_end;
+
+                    if first_update_wait_time.is_none() {
+                        first_update_wait_time = Some(now.elapsed());
+                    }
+                    last_proof_wait_time = wait_duration;
+                    total_proofs_processed += 1;
 
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
@@ -272,6 +292,7 @@ where
                     while let Ok(next) = self.proof_result_rx.try_recv() {
                         let res = next.result?;
                         result.extend(res);
+                        total_proofs_processed += 1;
                     }
 
                     let phase_end = Instant::now();
@@ -331,6 +352,14 @@ where
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+
+        self.metrics.state_updates_received_histogram.record(total_state_updates as f64);
+        self.metrics.proofs_processed_histogram.record(total_proofs_processed as f64);
+        self.metrics.multiproof_task_total_duration_histogram.record(end.duration_since(now));
+        if let Some(first_wait) = first_update_wait_time {
+            self.metrics.first_update_wait_time_histogram.record(first_wait);
+        }
+        self.metrics.last_proof_wait_time_histogram.record(last_proof_wait_time);
 
         Ok(StateRootComputeOutcome {
             state_root,
