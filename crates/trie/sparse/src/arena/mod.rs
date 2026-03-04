@@ -2227,17 +2227,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor.push(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
-            let Some(result) =
-                self.buffers.cursor.next(&mut self.upper_arena, |child| match child {
-                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                    ArenaSparseNode::TakenSubtrie => true,
-                    _ => false,
-                })
-            else {
-                break;
-            };
+            let result = self.buffers.cursor.next(&mut self.upper_arena, |child| match child {
+                ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
+                ArenaSparseNode::TakenSubtrie => true,
+                _ => false,
+            });
 
             match result {
+                NextResult::Done => break,
                 NextResult::Descended | NextResult::Popped => continue,
                 NextResult::NonBranch => {}
             }
@@ -2350,13 +2347,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut pruned = 0;
 
         loop {
-            let Some(result) = cursor.next(&mut self.upper_arena, |child| {
+            let result = cursor.next(&mut self.upper_arena, |child| {
                 matches!(child, ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_))
-            }) else {
-                break;
-            };
+            });
 
             match result {
+                NextResult::Done => break,
                 NextResult::Descended | NextResult::Popped => continue,
                 NextResult::NonBranch => {}
             }
@@ -2384,8 +2380,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             cursor.pop(&mut self.upper_arena);
         }
 
-        // Drain remaining cursor entries from the upper-trie walk.
-        cursor.drain(&mut self.upper_arena);
         self.buffers.cursor = cursor;
 
         if !taken.is_empty() {
@@ -2998,7 +2992,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
         fn arena_trie_proptest(
-            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=1000usize),
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             changeset2_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,

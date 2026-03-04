@@ -47,6 +47,8 @@ pub(super) enum NextResult {
     /// No more qualifying children in the head branch — the head was popped.
     /// If the stack is now empty, the traversal is complete.
     Popped,
+    /// The stack is empty — the traversal is complete.
+    Done,
 }
 
 /// A cursor for depth-first traversal of an arena-based sparse trie.
@@ -219,12 +221,14 @@ impl ArenaCursor {
         &mut self,
         arena: &mut Arena<ArenaSparseNode>,
         should_descend: impl Fn(&ArenaSparseNode) -> bool,
-    ) -> Option<NextResult> {
-        let head = self.stack.last_mut()?;
+    ) -> NextResult {
+        let Some(head) = self.stack.last_mut() else {
+            return NextResult::Done;
+        };
         let head_idx = head.index;
 
         let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
-            return Some(NextResult::NonBranch);
+            return NextResult::NonBranch;
         };
 
         let state_mask = branch.state_mask;
@@ -245,13 +249,13 @@ impl ArenaCursor {
                 self.stack.last_mut().expect("head exists").next_dense_idx = dense_idx + 1;
                 let path = self.child_path(arena, nibble);
                 self.push(arena, child_idx, path);
-                return Some(NextResult::Descended);
+                return NextResult::Descended;
             }
         }
 
         // No qualifying children remain — pop.
         self.pop(arena);
-        Some(NextResult::Popped)
+        NextResult::Popped
     }
 
     /// Pops the stack until the head is an ancestor of `full_path`, then descends from that head
