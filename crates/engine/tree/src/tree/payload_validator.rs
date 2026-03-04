@@ -1575,7 +1575,18 @@ where
         // persistence could advance and evict changeset cache entries between factory
         // creation and the task actually running, causing expensive DB fallback
         // computations when building the overlay.
-        let changeset_provider = overlay_factory.database_provider_ro().ok();
+        let changeset_provider = match overlay_factory.database_provider_ro() {
+            Ok(provider) => Some(provider),
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    ?block_number,
+                    %err,
+                    "Failed to create overlay provider for deferred changeset computation"
+                );
+                None
+            }
+        };
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1615,23 +1626,12 @@ where
                 // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                let changeset_result = changeset_provider
-                    .as_ref()
-                    .ok_or_else(|| {
-                        ProviderError::other(std::io::Error::other(
-                            "overlay provider was not created during validation",
-                        ))
-                    })
-                    .and_then(|provider| {
-                        reth_trie::changesets::compute_trie_changesets(
-                            provider,
-                            &computed.trie_updates,
-                        )
-                        .map_err(ProviderError::Database)
-                    });
+                let changeset_result = changeset_provider.as_ref().map(|provider| {
+                    reth_trie::changesets::compute_trie_changesets(provider, &computed.trie_updates)
+                });
 
                 match changeset_result {
-                    Ok(changesets) => {
+                    Some(Ok(changesets)) => {
                         debug!(
                             target: "engine::tree::changeset",
                             ?block_number,
@@ -1641,13 +1641,16 @@ where
 
                         pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         warn!(
                             target: "engine::tree::changeset",
                             ?block_number,
                             ?e,
                             "Failed to compute changesets in deferred trie task"
                         );
+                    }
+                    None => {
+                        // Provider creation failed; already logged at spawn time
                     }
                 }
             }));
