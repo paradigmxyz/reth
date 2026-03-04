@@ -343,7 +343,7 @@ fn event_loop(
 fn format_selection(sel: &ComponentSelection) -> String {
     match sel {
         ComponentSelection::All => "All".to_string(),
-        ComponentSelection::Distance(d) => format!("Last {d}"),
+        ComponentSelection::Distance(d) => format!("Last {d} blocks"),
         ComponentSelection::None => "None".to_string(),
     }
 }
