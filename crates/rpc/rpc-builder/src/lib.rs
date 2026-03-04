@@ -719,6 +719,7 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthTransactions + TraceExt,
+        EthApi::Provider: ChangeSetReader,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -874,6 +875,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
+    EthApi::Provider: ChangeSetReader,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
 {

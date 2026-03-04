@@ -5,7 +5,7 @@ use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
-use reth_provider::BlockReader;
+use reth_provider::{BlockReader, ChangeSetReader};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
@@ -20,7 +20,7 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>> + ChangeSetReader>
         + EthTransactions
         + TraceExt,
 {

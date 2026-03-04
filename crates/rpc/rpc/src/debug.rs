@@ -32,8 +32,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, ChangeSetReader, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -633,6 +634,7 @@ where
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
+    Eth::Provider: ChangeSetReader,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -949,18 +951,41 @@ where
 
     async fn debug_get_modified_accounts_by_hash(
         &self,
-        _start_hash: B256,
-        _end_hash: B256,
-    ) -> RpcResult<()> {
-        Ok(())
+        start_hash: B256,
+        end_hash: B256,
+    ) -> RpcResult<Vec<Address>> {
+        let start_header = self
+            .provider()
+            .header(start_hash)
+            .to_rpc_result()?
+            .ok_or_else(|| internal_rpc_err(format!("block {start_hash} not found")))?;
+        let end_header = self
+            .provider()
+            .header(end_hash)
+            .to_rpc_result()?
+            .ok_or_else(|| internal_rpc_err(format!("block {end_hash} not found")))?;
+        self.debug_get_modified_accounts_by_number(start_header.number(), end_header.number()).await
     }
 
     async fn debug_get_modified_accounts_by_number(
         &self,
-        _start_number: u64,
-        _end_number: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        start_number: u64,
+        end_number: u64,
+    ) -> RpcResult<Vec<Address>> {
+        if start_number >= end_number {
+            return Err(internal_rpc_err(format!(
+                "start block height ({start_number}) must be less than end block height ({end_number})"
+            )));
+        }
+
+        let mut accounts = std::collections::BTreeSet::new();
+        for block in start_number + 1..=end_number {
+            let changesets = self.provider().account_block_changeset(block).to_rpc_result()?;
+            for changeset in changesets {
+                accounts.insert(changeset.address);
+            }
+        }
+        Ok(accounts.into_iter().collect())
     }
 
     async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {

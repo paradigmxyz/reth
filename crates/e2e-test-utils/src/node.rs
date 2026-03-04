@@ -18,7 +18,7 @@ use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    HeaderProvider, StageCheckpointReader,
+    ChangeSetReader, HeaderProvider, StageCheckpointReader,
 };
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -89,7 +89,7 @@ where
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
     ) -> eyre::Result<Vec<Payload::BuiltPayload>>
     where
-        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>> + ChangeSetReader>
             + EthTransactions
             + TraceExt,
     {

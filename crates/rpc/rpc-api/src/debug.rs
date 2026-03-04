@@ -266,7 +266,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         start_hash: B256,
         end_hash: B256,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<Address>>;
 
     /// Returns all accounts that have changed between the two blocks specified. A change is defined
     /// as a difference in nonce, balance, code hash or storage hash.
@@ -275,7 +275,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         start_number: u64,
         end_number: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<Address>>;
 
     /// Turns on Go runtime tracing for the given duration and writes trace data to disk.
     #[method(name = "goTrace")]
