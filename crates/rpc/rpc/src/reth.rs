@@ -10,11 +10,12 @@ use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
 };
+use reth_chainspec::{ChainSpecProvider, ForkCondition, Hardforks};
 use reth_errors::RethResult;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_rpc_api::RethApiServer;
+use reth_rpc_api::{ForkInfo, ForkSchedule, RethApiServer};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
@@ -185,6 +186,64 @@ where
     }
 }
 
+impl<Provider, EvmConfig> RethApi<Provider, EvmConfig>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    Provider::ChainSpec: Hardforks,
+    EvmConfig: Send + Sync + 'static,
+{
+    /// Returns the fork schedule from the chain spec with active status.
+    ///
+    /// Iterates all forks via [`Hardforks::forks_iter`], capturing both standard Ethereum
+    /// hardforks and any custom chain forks.
+    pub fn fork_schedule(&self) -> EthResult<ForkSchedule> {
+        let chain_spec = self.provider().chain_spec();
+        let chain_info = self.provider().chain_info()?;
+        let best_block = chain_info.best_number;
+        let best_header = self
+            .provider()
+            .header_by_number(best_block)?
+            .ok_or(EthApiError::HeaderNotFound(best_block.into()))?;
+        let best_timestamp = best_header.timestamp();
+
+        let mut latest_active = None;
+
+        let schedule: Vec<ForkInfo> = chain_spec
+            .forks_iter()
+            .map(|(fork, condition)| {
+                let (condition_type, activation_value, active) = match condition {
+                    ForkCondition::Block(block) => {
+                        ("block", Some(U256::from(block)), best_block >= block)
+                    }
+                    ForkCondition::TTD { activation_block_number, .. } => (
+                        "ttd",
+                        Some(U256::from(activation_block_number)),
+                        best_block >= activation_block_number,
+                    ),
+                    ForkCondition::Timestamp(ts) => {
+                        ("timestamp", Some(U256::from(ts)), best_timestamp >= ts)
+                    }
+                    ForkCondition::Never => ("never", None, false),
+                };
+
+                let name = fork.name().to_string();
+                if active {
+                    latest_active = Some(name.clone());
+                }
+
+                ForkInfo {
+                    name,
+                    condition_type: condition_type.to_string(),
+                    activation_value,
+                    active,
+                }
+            })
+            .collect();
+
+        Ok(ForkSchedule { schedule, active: latest_active.unwrap_or_default() })
+    }
+}
+
 #[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
@@ -195,7 +254,9 @@ where
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
+        + ChainSpecProvider
         + 'static,
+    Provider::ChainSpec: Hardforks,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
@@ -263,6 +324,11 @@ where
         ));
 
         Ok(())
+    }
+
+    /// Handler for `reth_forkSchedule`
+    async fn reth_fork_schedule(&self) -> RpcResult<ForkSchedule> {
+        Ok(Self::fork_schedule(self)?)
     }
 }
 

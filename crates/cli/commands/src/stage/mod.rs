@@ -38,7 +38,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     Unwind(unwind::Command<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks + Hardforks>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, Comp>(
         self,

@@ -53,7 +53,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
+    pub fn execute<N: ProviderNodeTypes<ChainSpec: reth_chainspec::Hardforks>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -61,7 +61,9 @@ impl Command {
     ) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
-            let chain_name = tool.provider_factory.chain_spec().chain().to_string();
+            let spec = tool.provider_factory.chain_spec();
+            let chain_name = spec.chain().to_string();
+            let chain_spec_info = ChainSpecInfo::from_hardforks(chain_name, &*spec);
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 
@@ -76,7 +78,7 @@ impl Command {
                         target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                         build_profile: version_metadata().build_profile_name.as_ref(),
                     },
-                    ChainSpecInfo { name: chain_name },
+                    chain_spec_info,
                     executor,
                     Hooks::builder().build(),
                     pprof_dump_dir,

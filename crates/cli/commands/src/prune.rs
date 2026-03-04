@@ -1,7 +1,7 @@
 //! Command that runs pruning.
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
@@ -30,7 +30,7 @@ pub struct PruneCommand<C: ChainSpecParser> {
     metrics: MetricArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
@@ -52,7 +52,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                {
+                    let spec = provider_factory.chain_spec();
+                    ChainSpecInfo::from_hardforks(spec.chain().to_string(), &*spec)
+                },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

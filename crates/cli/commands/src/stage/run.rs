@@ -6,7 +6,7 @@ use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, 
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -99,7 +99,7 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, Comp, F>(self, ctx: CliContext, components: F) -> eyre::Result<()>
     where
@@ -137,7 +137,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                {
+                    let spec = provider_factory.chain_spec();
+                    ChainSpecInfo::from_hardforks(spec.chain().to_string(), &*spec)
+                },
                 ctx.task_executor,
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),
