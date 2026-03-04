@@ -528,8 +528,8 @@ where
                 self.pending_targets.extend_storage_targets(address, targets);
             }
         }
-        self.metrics.sparse_trie_storage_cache_hits.record(storage_cache_hits as f64);
-        self.metrics.sparse_trie_storage_cache_misses.record(storage_cache_misses as f64);
+        self.metrics.sparse_trie_storage_cache_hits.increment(storage_cache_hits);
+        self.metrics.sparse_trie_storage_cache_misses.increment(storage_cache_misses);
 
         drop(span);
 
@@ -571,10 +571,10 @@ where
         })?;
 
         let updates_len_after = account_updates.len();
-        let cache_hits = (updates_len_before - updates_len_after) as f64;
-        let cache_misses = updates_len_after as f64;
-        self.metrics.sparse_trie_account_cache_hits.record(cache_hits);
-        self.metrics.sparse_trie_account_cache_misses.record(cache_misses);
+        let cache_hits = (updates_len_before - updates_len_after) as u64;
+        let cache_misses = updates_len_after as u64;
+        self.metrics.sparse_trie_account_cache_hits.increment(cache_hits);
+        self.metrics.sparse_trie_account_cache_misses.increment(cache_misses);
 
         Ok(updates_len_after < updates_len_before)
     }
