@@ -495,6 +495,8 @@ where
 
         // Process all storage updates, skipping tries with no pending updates.
         let span = debug_span!("process_storage_leaf_updates").entered();
+        let mut storage_cache_hits = 0u64;
+        let mut storage_cache_misses = 0u64;
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
@@ -505,6 +507,7 @@ where
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
 
+            let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
@@ -517,11 +520,16 @@ where
                     targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
+            let updates_len_after = updates.len();
+            storage_cache_hits += (updates_len_before - updates_len_after) as u64;
+            storage_cache_misses += updates_len_after as u64;
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
             }
         }
+        self.metrics.sparse_trie_storage_cache_hits.record(storage_cache_hits as f64);
+        self.metrics.sparse_trie_storage_cache_misses.record(storage_cache_misses as f64);
 
         drop(span);
 
@@ -562,7 +570,13 @@ where
             }
         })?;
 
-        Ok(account_updates.len() < updates_len_before)
+        let updates_len_after = account_updates.len();
+        let cache_hits = (updates_len_before - updates_len_after) as f64;
+        let cache_misses = updates_len_after as f64;
+        self.metrics.sparse_trie_account_cache_hits.record(cache_hits);
+        self.metrics.sparse_trie_account_cache_misses.record(cache_misses);
+
+        Ok(updates_len_after < updates_len_before)
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
