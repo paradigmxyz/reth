@@ -1381,6 +1381,16 @@ where
         Ok(())
     }
 
+    /// Clears internal computation state. Called after errors to ensure the calculator is not
+    /// left in a partially-computed state when reused.
+    fn clear_computation_state(&mut self) {
+        self.branch_stack.clear();
+        self.branch_path = Nibbles::new();
+        self.child_stack.clear();
+        self.cached_branch_stack.clear();
+        self.retained_proofs.clear();
+    }
+
     /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
@@ -1402,12 +1412,15 @@ where
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
-            self.proof_subtrie(
+            if let Err(err) = self.proof_subtrie(
                 value_encoder,
                 &mut trie_cursor_state,
                 &mut hashed_cursor_current,
                 sub_trie_targets,
-            )?;
+            ) {
+                self.clear_computation_state();
+                return Err(err);
+            }
         }
 
         trace!(
@@ -1480,12 +1493,15 @@ where
         let sub_trie_targets =
             SubTrieTargets { prefix: Nibbles::new(), targets: &EMPTY_TARGETS, retain_root: true };
 
-        self.proof_subtrie(
+        if let Err(err) = self.proof_subtrie(
             value_encoder,
             &mut trie_cursor_state,
             &mut hashed_cursor_current,
             sub_trie_targets,
-        )?;
+        ) {
+            self.clear_computation_state();
+            return Err(err);
+        }
 
         // proof_subtrie will retain the root node if retain_proof is true, regardless of if there
         // are any targets.
@@ -1950,6 +1966,79 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    /// Tests that `clear_computation_state` properly resets internal stacks, allowing a
+    /// `ProofCalculator` to be reused after a mid-computation error left stale state.
+    /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
+    /// could cause a `usize` underflow panic in `pop_branch`.
+    #[test]
+    fn test_proof_calculator_reuse_after_error() {
+        use alloy_primitives::U256;
+
+        reth_tracing::init_test_tracing();
+
+        let mut post_state = HashedPostState::default();
+        let addresses = [
+            B256::right_padding_from(&[0x10]),
+            B256::right_padding_from(&[0x20]),
+            B256::right_padding_from(&[0x30]),
+            B256::right_padding_from(&[0x40]),
+        ];
+        for addr in &addresses {
+            let account =
+                Account { nonce: 1, balance: U256::from(100u64), bytecode_hash: Some(B256::ZERO) };
+            post_state.accounts.insert(*addr, Some(account));
+        }
+
+        let harness = ProofTestHarness::new(post_state);
+
+        let trie_cursor = harness.trie_cursor_factory.account_trie_cursor().unwrap();
+        let hashed_cursor = harness.hashed_cursor_factory.hashed_account_cursor().unwrap();
+        let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+
+        // Simulate stale state left by a mid-computation error: push fake entries onto internal
+        // stacks and set a non-empty branch_path.
+        proof_calculator.branch_stack.push(ProofTrieBranch {
+            ext_len: 2,
+            state_mask: TrieMask::new(0b1111),
+            masks: None,
+        });
+        proof_calculator.branch_stack.push(ProofTrieBranch {
+            ext_len: 0,
+            state_mask: TrieMask::new(0b11),
+            masks: None,
+        });
+        proof_calculator
+            .child_stack
+            .push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&B256::ZERO)));
+        proof_calculator.branch_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+
+        // clear_computation_state should reset everything so a subsequent proof() call works.
+        proof_calculator.clear_computation_state();
+
+        let mut value_encoder = SyncAccountValueEncoder::new(
+            harness.trie_cursor_factory.clone(),
+            harness.hashed_cursor_factory.clone(),
+        );
+        let mut sorted_addresses = addresses.to_vec();
+        sorted_addresses.sort();
+        let mut targets: Vec<ProofV2Target> =
+            sorted_addresses.iter().copied().map(ProofV2Target::new).collect();
+
+        let result = proof_calculator.proof(&mut value_encoder, &mut targets).unwrap();
+
+        // Compare against a fresh calculator to verify correctness.
+        let trie_cursor = harness.trie_cursor_factory.account_trie_cursor().unwrap();
+        let hashed_cursor = harness.hashed_cursor_factory.hashed_account_cursor().unwrap();
+        let mut fresh_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+        let mut value_encoder = SyncAccountValueEncoder::new(
+            harness.trie_cursor_factory.clone(),
+            harness.hashed_cursor_factory.clone(),
+        );
+        let fresh_result = fresh_calculator.proof(&mut value_encoder, &mut targets).unwrap();
+
+        pretty_assertions::assert_eq!(fresh_result, result);
     }
 
     mod proptest_tests {
