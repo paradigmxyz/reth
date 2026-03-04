@@ -4,7 +4,6 @@
 //! reloadable layers (stdout, file, etc.). `set_log_verbosity` and `set_log_vmodule`
 //! update every registered layer in one shot.
 
-use std::sync::OnceLock;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
@@ -47,22 +46,19 @@ impl LogFilterHandle {
 }
 
 /// Single global log handle shared by all reloadable layers.
-static LOG_HANDLE: OnceLock<std::sync::Mutex<LogFilterHandle>> = OnceLock::new();
-
-fn global_handle() -> &'static std::sync::Mutex<LogFilterHandle> {
-    LOG_HANDLE.get_or_init(|| std::sync::Mutex::new(LogFilterHandle::new()))
-}
+static LOG_HANDLE: std::sync::Mutex<LogFilterHandle> =
+    std::sync::Mutex::new(LogFilterHandle::new());
 
 /// Registers a reload handle for a layer (stdout, file, etc.).
 ///
 /// Can be called multiple times — each handle is appended.
 pub fn install_log_handle(handle: LogFilterReloadHandle) {
-    global_handle().lock().expect("log handle poisoned").push(handle);
+    LOG_HANDLE.lock().expect("log handle poisoned").push(handle);
 }
 
 /// Returns `true` if at least one global log handle is available.
 pub fn log_handle_available() -> bool {
-    global_handle().lock().expect("log handle poisoned").is_available()
+    LOG_HANDLE.lock().expect("log handle poisoned").is_available()
 }
 
 /// Sets the global log verbosity level.
@@ -78,7 +74,7 @@ pub fn log_handle_available() -> bool {
 ///
 /// Returns an error if no log handle is installed or if the reload fails.
 pub fn set_log_verbosity(level: usize) -> Result<(), String> {
-    let guard = global_handle().lock().expect("log handle poisoned");
+    let guard = LOG_HANDLE.lock().expect("log handle poisoned");
 
     if !guard.is_available() {
         return Err("Log filter reload not available".to_string());
@@ -111,7 +107,7 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
 ///
 /// Returns an error if no log handle is installed or if parsing fails.
 pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
-    let guard = global_handle().lock().expect("log handle poisoned");
+    let guard = LOG_HANDLE.lock().expect("log handle poisoned");
 
     if !guard.is_available() {
         return Err("Log filter reload not available".to_string());
