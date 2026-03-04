@@ -4,7 +4,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use derive_more::derive::Deref;
-use metrics::{Counter, Gauge, Histogram};
+use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -192,13 +192,13 @@ pub(crate) struct MultiProofTaskMetrics {
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
 
     /// Number of account leaf updates applied without needing a new proof (cache hits).
-    pub sparse_trie_account_cache_hits: Counter,
+    pub sparse_trie_account_cache_hits: Histogram,
     /// Number of account leaf updates that required a new proof (cache misses).
-    pub sparse_trie_account_cache_misses: Counter,
+    pub sparse_trie_account_cache_misses: Histogram,
     /// Number of storage leaf updates applied without needing a new proof (cache hits).
-    pub sparse_trie_storage_cache_hits: Counter,
+    pub sparse_trie_storage_cache_hits: Histogram,
     /// Number of storage leaf updates that required a new proof (cache misses).
-    pub sparse_trie_storage_cache_misses: Counter,
+    pub sparse_trie_storage_cache_misses: Histogram,
 
     /// Retained memory of the preserved sparse trie cache in bytes.
     pub sparse_trie_retained_memory_bytes: Gauge,

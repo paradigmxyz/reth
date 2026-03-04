@@ -344,10 +344,10 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
-        self.metrics.sparse_trie_account_cache_hits.increment(self.account_cache_hits);
-        self.metrics.sparse_trie_account_cache_misses.increment(self.account_cache_misses);
-        self.metrics.sparse_trie_storage_cache_hits.increment(self.storage_cache_hits);
-        self.metrics.sparse_trie_storage_cache_misses.increment(self.storage_cache_misses);
+        self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
+        self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
+        self.metrics.sparse_trie_storage_cache_hits.record(self.storage_cache_hits as f64);
+        self.metrics.sparse_trie_storage_cache_misses.record(self.storage_cache_misses as f64);
         self.account_cache_hits = 0;
         self.account_cache_misses = 0;
         self.storage_cache_hits = 0;
