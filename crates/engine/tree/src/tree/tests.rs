@@ -2165,3 +2165,53 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
         other => panic!("Expected MakeCanonical for head block, got: {other:?}"),
     }
 }
+
+/// Ensures buffered sync-target blocks still become canonical when they are already present in the
+/// tree and reconnecting yields `AlreadySeen(Valid)`.
+#[test]
+fn test_try_connect_buffered_blocks_canonicalizes_already_seen_valid_sync_target() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
+    let genesis = &blocks[0];
+    let child = &blocks[1];
+
+    test_harness = test_harness.with_blocks(vec![genesis.clone(), child.clone()]);
+
+    let genesis_num_hash = genesis.recovered_block().num_hash();
+    let genesis_hash = genesis.recovered_block().hash();
+    let child_hash = child.recovered_block().hash();
+
+    // Make child non-canonical while keeping it in executed tree state.
+    test_harness.tree.state.tree_state.set_canonical_head(genesis_num_hash);
+    test_harness
+        .tree
+        .canonical_in_memory_state
+        .set_canonical_head(genesis.recovered_block().clone_sealed_header());
+
+    // Mark the child as current sync target so reconnecting should canonicalize it.
+    let fcu_state = ForkchoiceState {
+        head_block_hash: child_hash,
+        safe_block_hash: child_hash,
+        finalized_block_hash: genesis_hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    // Insert a duplicate into the buffer: reconnect path will hit `AlreadySeen(Valid)`.
+    test_harness.tree.state.buffer.insert_block(child.recovered_block().clone_sealed_block());
+
+    test_harness.tree.try_connect_buffered_blocks(genesis_num_hash).unwrap();
+
+    assert_eq!(
+        test_harness.tree.state.tree_state.canonical_block_hash(),
+        child_hash,
+        "Sync-target block should become canonical even when reconnect result is AlreadySeen(Valid)"
+    );
+}
