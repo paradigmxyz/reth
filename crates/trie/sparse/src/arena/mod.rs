@@ -1,7 +1,7 @@
 mod cursor;
 mod nodes;
 
-use cursor::{ArenaCursor, SeekResult};
+use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
@@ -2222,84 +2222,37 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor.clear();
         self.buffers.cursor.push(&self.upper_arena, self.root, Nibbles::default());
 
-        let mut start_nibble: u8 = 0;
-
         loop {
-            let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
-
-            match &self.upper_arena[head_idx] {
-                ArenaSparseNode::TakenSubtrie => {
-                    let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
-                    debug_assert_eq!(
-                        subtrie.path,
-                        self.buffers.cursor.head().expect("cursor is non-empty").path,
-                        "taken subtrie path mismatch",
-                    );
-                    self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
-                    self.update_upper_subtrie(head_idx);
-
-                    let popped_path = self.buffers.cursor.pop(&mut self.upper_arena);
-                    if self.buffers.cursor.is_empty() {
-                        break;
-                    }
-                    start_nibble = popped_path.last().expect("popped non-root entry") + 1;
-                    continue;
-                }
-                ArenaSparseNode::Subtrie(_) => {
-                    self.update_upper_subtrie(head_idx);
-
-                    let popped_path = self.buffers.cursor.pop(&mut self.upper_arena);
-                    if self.buffers.cursor.is_empty() {
-                        break;
-                    }
-                    start_nibble = popped_path.last().expect("popped non-root entry") + 1;
-                    continue;
-                }
-                ArenaSparseNode::Branch(_) => {}
-                _ => unreachable!("unexpected node on stack: {:?}", self.upper_arena[head_idx]),
-            }
-
-            // Head is a branch — iterate its children looking for dirty subtries to
-            // descend into. Skip children that are clean: non-dirty branches cannot
-            // contain dirty subtries, and non-dirty subtries need no rehashing.
-            let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
-
-            let mut descended = false;
-            for (dense_idx, nibble) in state_mask.iter().enumerate() {
-                if nibble < start_nibble {
-                    continue;
-                }
-
-                let child_idx = match &self.upper_arena[head_idx].branch_ref().children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
-                };
-
-                let child = &self.upper_arena[child_idx];
-                let needs_visit = match child {
+            let Some(result) =
+                self.buffers.cursor.next(&mut self.upper_arena, |child| match child {
                     ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
                     ArenaSparseNode::TakenSubtrie => true,
                     _ => false,
-                };
-
-                if needs_visit {
-                    let path = self.buffers.cursor.child_path(&self.upper_arena, nibble);
-                    self.buffers.cursor.push(&self.upper_arena, child_idx, path);
-                    start_nibble = 0;
-                    descended = true;
-                    break;
-                }
-            }
-
-            if descended {
-                continue;
-            }
-
-            let popped_path = self.buffers.cursor.pop(&mut self.upper_arena);
-            if self.buffers.cursor.is_empty() {
+                })
+            else {
                 break;
+            };
+
+            match result {
+                NextResult::Descended | NextResult::Popped => continue,
+                NextResult::NonBranch => {}
             }
-            start_nibble = popped_path.last().expect("popped non-root entry") + 1;
+
+            // Head is a subtrie or taken-subtrie — process it and pop.
+            let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
+
+            if matches!(&self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie) {
+                let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
+                debug_assert_eq!(
+                    subtrie.path,
+                    self.buffers.cursor.head().expect("cursor is non-empty").path,
+                    "taken subtrie path mismatch",
+                );
+                self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
+            }
+
+            self.update_upper_subtrie(head_idx);
+            self.buffers.cursor.pop(&mut self.upper_arena);
         }
     }
 
@@ -2391,75 +2344,40 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
 
         let mut pruned = 0;
-        let mut start_nibble: u8 = 0;
 
         loop {
+            let Some(result) = cursor.next(&mut self.upper_arena, |child| {
+                matches!(child, ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_))
+            }) else {
+                break;
+            };
+
+            match result {
+                NextResult::Descended | NextResult::Popped => continue,
+                NextResult::NonBranch => {}
+            }
+
+            // Head is a subtrie — either take for parallel pruning or prune inline.
             let head_idx = cursor.head().expect("cursor is non-empty").index;
 
-            // If the current head is a subtrie, either take or prune inline.
-            if matches!(&self.upper_arena[head_idx], ArenaSparseNode::Subtrie(_)) {
-                let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+            let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+                unreachable!("NonBranch in prune walk must be a Subtrie")
+            };
+            if subtrie.num_leaves >= threshold {
+                let ArenaSparseNode::Subtrie(subtrie) =
+                    mem::replace(&mut self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie)
+                else {
                     unreachable!()
                 };
-                if subtrie.num_leaves >= threshold {
-                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                        &mut self.upper_arena[head_idx],
-                        ArenaSparseNode::TakenSubtrie,
-                    ) else {
-                        unreachable!()
-                    };
-                    taken.push((head_idx, subtrie));
-                } else {
-                    let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
-                        unreachable!()
-                    };
-                    pruned += subtrie.prune(max_depth);
-                }
-
-                let popped_path = cursor.pop(&mut self.upper_arena);
-                if cursor.is_empty() {
-                    break;
-                }
-                start_nibble = popped_path.last().expect("popped non-root entry") + 1;
-                continue;
-            }
-
-            // Head is a branch — iterate its children looking for branches/subtries.
-            let state_mask = self.upper_arena[head_idx].branch_ref().state_mask;
-
-            let mut descended = false;
-            for (dense_idx, nibble) in state_mask.iter().enumerate() {
-                if nibble < start_nibble {
-                    continue;
-                }
-
-                let child_idx = match &self.upper_arena[head_idx].branch_ref().children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                taken.push((head_idx, subtrie));
+            } else {
+                let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
+                    unreachable!()
                 };
-
-                match &self.upper_arena[child_idx] {
-                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => {
-                        let path = cursor.child_path(&self.upper_arena, nibble);
-                        cursor.push(&self.upper_arena, child_idx, path);
-                        start_nibble = 0;
-                        descended = true;
-                        break;
-                    }
-                    _ => {}
-                }
+                pruned += subtrie.prune(max_depth);
             }
 
-            if descended {
-                continue;
-            }
-
-            // All children processed; pop.
-            let popped_path = cursor.pop(&mut self.upper_arena);
-            if cursor.is_empty() {
-                break;
-            }
-            start_nibble = popped_path.last().expect("popped non-root entry") + 1;
+            cursor.pop(&mut self.upper_arena);
         }
 
         // Drain remaining cursor entries from the upper-trie walk.
