@@ -36,6 +36,15 @@ on:
         required: false
         default: "false"
         type: boolean
+      tracy:
+        description: "Tracy profiling mode (off/on/full)"
+        required: false
+        default: "off"
+        type: choice
+        options:
+          - "off"
+          - "on"
+          - "full"
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
@@ -72,6 +81,7 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
+      tracy: ${{ steps.args.outputs.tracy }}
       cores: ${{ steps.args.outputs.cores }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
@@ -100,7 +110,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature, samply, cores;
+            let pr, actor, blocks, warmup, baseline, feature, samply, tracy, cores;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -109,6 +119,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+              tracy = '${{ github.event.inputs.tracy }}' || 'off';
               cores = '${{ github.event.inputs.cores }}' || '0';
 
               // Find PR for the selected branch
@@ -132,7 +143,8 @@ jobs:
               const intArgs = new Set(['blocks', 'warmup', 'cores']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0' };
+              const choiceArgs = new Map([['tracy', new Set(['off', 'on', 'full'])]]);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', tracy: 'off', cores: '0' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -141,6 +153,9 @@ jobs:
                 if (eq === -1) {
                   if (boolArgs.has(part)) {
                     defaults[part] = 'true';
+                  } else if (choiceArgs.has(part)) {
+                    // bare word "tracy" means "on"
+                    defaults[part] = 'on';
                   } else {
                     unknown.push(part);
                   }
@@ -160,6 +175,12 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
+                } else if (choiceArgs.has(key)) {
+                  if (!choiceArgs.get(key).has(value)) {
+                    invalid.push(`\`${key}=${value}\` (must be one of: ${[...choiceArgs.get(key)].join(', ')})`);
+                  } else {
+                    defaults[key] = value;
+                  }
                 } else {
                   unknown.push(key);
                 }
@@ -168,7 +189,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracy[=off|on|full]] [cores=N]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -183,7 +204,14 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
+              tracy = defaults.tracy;
               cores = defaults.cores;
+            }
+
+            // samply and tracy=full are mutually exclusive (both use perf sampling)
+            // — samply takes precedence
+            if (samply === 'true' && tracy === 'full') {
+              tracy = 'off';
             }
 
             // Resolve display names for baseline/feature
@@ -211,6 +239,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
+            core.setOutput('tracy', tracy);
             core.setOutput('cores', cores);
 
       - name: Acknowledge request
@@ -270,9 +299,11 @@ jobs:
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracy = '${{ steps.args.outputs.tracy }}';
+            const tracyNote = tracy && tracy !== 'off' ? `, tracy: \`${tracy}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracyNote}${coresNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -298,9 +329,11 @@ jobs:
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracy = '${{ steps.args.outputs.tracy }}';
+            const tracyNote = tracy && tracy !== 'off' ? `, tracy: \`${tracy}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracyNote}${coresNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -363,6 +396,7 @@ jobs:
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
+      BENCH_TRACY: ${{ needs.reth-bench-ack.outputs.tracy }}
       BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
@@ -418,9 +452,11 @@ jobs:
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracy = process.env.BENCH_TRACY || 'off';
+            const tracyNote = tracy !== 'off' ? `, tracy: \`${tracy}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracyNote}${coresNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -478,6 +514,16 @@ jobs:
           if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
             cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
+          fi
+
+          # tracy-capture (optional Tracy profiler capture tool)
+          if [ "${BENCH_TRACY:-off}" != "off" ] && ! command -v tracy-capture &>/dev/null; then
+            sudo apt-get install -y --no-install-recommends cmake
+            git clone --depth 1 https://github.com/wolfpld/tracy /tmp/tracy
+            cmake -B /tmp/tracy/capture/build -S /tmp/tracy/capture -DCMAKE_BUILD_TYPE=Release -DNO_ISA_EXTENSIONS=ON
+            cmake --build /tmp/tracy/capture/build --config Release --parallel
+            sudo install /tmp/tracy/capture/build/tracy-capture /usr/local/bin/
+            rm -rf /tmp/tracy
           fi
 
       # Verify all required tools are available
@@ -672,6 +718,7 @@ jobs:
       - name: Pre-flight cleanup
         run: |
           sudo pkill -9 reth || true
+          sudo pkill -9 tracy-capture || true
           sleep 1
           if mountpoint -q "$SCHELK_MOUNT"; then
             sudo umount -l "$SCHELK_MOUNT" || true
@@ -912,6 +959,22 @@ jobs:
               }
               if (links.length > 0) {
                 comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
+            }
+
+            // Tracy profile info (profiles are in the workflow artifact)
+            if (process.env.BENCH_TRACY && process.env.BENCH_TRACY !== 'off') {
+              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const profiles = [];
+              for (const run of runs) {
+                try {
+                  const profilePath = `${process.env.BENCH_WORK_DIR}/${run}/tracy-profile.tracy`;
+                  fs.statSync(profilePath);
+                  profiles.push(`- **${run}**: \`tracy-profile.tracy\``);
+                } catch (e) {}
+              }
+              if (profiles.length > 0) {
+                comment += `\n\n### Tracy Profiles\n\nAvailable in the \`bench-reth-results\` artifact:\n${profiles.join('\n')}\n`;
               }
             }
 

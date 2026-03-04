@@ -15,8 +15,23 @@ DATADIR="$SCHELK_MOUNT/datadir"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
+# Tracy profiling: resolve effective mode (samply+tracy=full are mutually exclusive)
+TRACY_MODE="${BENCH_TRACY:-off}"
+if [ "${BENCH_SAMPLY:-false}" = "true" ] && [ "$TRACY_MODE" = "full" ]; then
+  echo "Warning: samply and tracy=full are mutually exclusive, disabling tracy"
+  TRACY_MODE="off"
+fi
+USE_TRACY=false
+[ "$TRACY_MODE" != "off" ] && USE_TRACY=true
+
+TRACY_CAPTURE_PID=""
+
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
+
+  # Stop reth (and samply if profiling) FIRST — tracy-capture auto-exits
+  # when the instrumented process disconnects, so reth must die before we
+  # wait for tracy-capture.
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       # Send SIGINT to the inner reth process by exact name (not -f which
@@ -45,6 +60,34 @@ cleanup() {
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
     sleep 1
   fi
+
+  # Now wait for tracy-capture to finish writing the profile (it auto-exits
+  # when the Tracy client in reth disconnects).
+  if [ -n "$TRACY_CAPTURE_PID" ]; then
+    echo "Waiting for tracy-capture (pid=$TRACY_CAPTURE_PID)..."
+    for i in $(seq 1 60); do
+      kill -0 "$TRACY_CAPTURE_PID" 2>/dev/null || break
+      if [ $((i % 10)) -eq 0 ]; then
+        echo "tracy-capture still running... (${i}s)"
+      fi
+      sleep 1
+    done
+    if kill -0 "$TRACY_CAPTURE_PID" 2>/dev/null; then
+      echo "tracy-capture still running after 60s, sending SIGKILL..."
+      kill -9 "$TRACY_CAPTURE_PID" 2>/dev/null || true
+    else
+      wait "$TRACY_CAPTURE_PID" 2>/dev/null || true
+    fi
+    echo "tracy-capture exited"
+    # Verify tracy profile
+    if [ -f "$OUTPUT_DIR/tracy-profile.tracy" ]; then
+      TRACY_SIZE=$(du -h "$OUTPUT_DIR/tracy-profile.tracy" | cut -f1)
+      echo "Tracy profile created: ${TRACY_SIZE}"
+    else
+      echo "Warning: Tracy profile was NOT created"
+    fi
+  fi
+
   # Fix ownership of reth-created files (reth runs as root)
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
   if mountpoint -q "$SCHELK_MOUNT"; then
@@ -62,6 +105,18 @@ sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 echo "=== Cache state after drop ==="
 free -h
 grep Cached /proc/meminfo
+
+# Mount tracefs for tracy=full mode (required for CPU sampling and context
+# switch tracing). In "on" mode we set TRACY_NO_SYS_TRACE=1 so this is not
+# needed.
+if [ "$TRACY_MODE" = "full" ]; then
+  if ! mount | grep -q tracefs; then
+    echo "Mounting tracefs for Tracy CPU sampling..."
+    sudo mount -t tracefs -o mode=755 tracefs /sys/kernel/tracing 2>&1 || true
+  else
+    sudo mount -o remount,mode=755 /sys/kernel/tracing 2>&1 || true
+  fi
+fi
 
 # Start reth
 # CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
@@ -87,13 +142,31 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
+# Add Tracy tracing args to reth if enabled
+if [ "$USE_TRACY" = true ]; then
+  RETH_ARGS+=(--log.tracy --log.tracy.filter debug)
+fi
+
+# Set Tracy environment variables
+TRACY_ENV=""
+if [ "$USE_TRACY" = true ]; then
+  if [ "$TRACY_MODE" = "full" ]; then
+    TRACY_ENV="TRACY_SAMPLING_HZ=1"
+  else
+    TRACY_ENV="TRACY_NO_SYS_TRACE=1"
+  fi
+fi
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo env $TRACY_ENV taskset -c "$RETH_CPUS" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
+    > "$LOG" 2>&1 &
+elif [ -n "$TRACY_ENV" ]; then
+  sudo env $TRACY_ENV taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
   sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
@@ -131,6 +204,15 @@ $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --jwt-secret "$DATADIR/jwt.hex" \
   --advance "${BENCH_WARMUP_BLOCKS:-50}" \
   --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
+
+# Start tracy-capture AFTER warmup so the profile only covers the
+# actual benchmark, not the warmup phase.
+if [ "$USE_TRACY" = true ]; then
+  echo "Starting tracy-capture..."
+  sleep 0.5
+  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+  TRACY_CAPTURE_PID=$!
+fi
 
 # Benchmark
 $BENCH_NICE "$RETH_BENCH" new-payload-fcu \

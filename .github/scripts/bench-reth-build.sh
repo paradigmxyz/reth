@@ -22,6 +22,25 @@ MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"
 
+# Tracy profiling support: when BENCH_TRACY is "on" or "full", build with
+# tracy features and frame pointers for profiling.
+# Samply and tracy=full are mutually exclusive (both use perf sampling) —
+# samply takes precedence. Samply and tracy=on can coexist.
+TRACY_MODE="${BENCH_TRACY:-off}"
+if [ "${BENCH_SAMPLY:-false}" = "true" ] && [ "$TRACY_MODE" = "full" ]; then
+  echo "Warning: samply and tracy=full are mutually exclusive, disabling tracy"
+  TRACY_MODE="off"
+fi
+
+EXTRA_FEATURES=""
+EXTRA_RUSTFLAGS=""
+if [ "$TRACY_MODE" != "off" ]; then
+  EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  EXTRA_RUSTFLAGS="-Cforce-frame-pointers=yes"
+elif [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+  EXTRA_RUSTFLAGS="-Cforce-frame-pointers=yes"
+fi
+
 # Verify a cached reth binary was built from the expected commit.
 # `reth --version` outputs "Commit SHA: <full-sha>" on its own line.
 verify_binary() {
@@ -42,12 +61,14 @@ verify_binary() {
 
 case "$MODE" in
   baseline|main)
-    BUCKET="minio/reth-binaries/${COMMIT}"
+    CACHE_SUFFIX=""
+    [ -n "$EXTRA_FEATURES" ] && CACHE_SUFFIX="-tracy"
+    BUCKET="minio/reth-binaries/${COMMIT}${CACHE_SUFFIX}"
     mkdir -p "${SOURCE_DIR}/target/profiling"
 
     CACHE_VALID=false
     if $MC stat "${BUCKET}/reth" &>/dev/null; then
-      echo "Cache hit for baseline (${COMMIT}), downloading binary..."
+      echo "Cache hit for baseline (${COMMIT}${CACHE_SUFFIX}), downloading binary..."
       $MC cp "${BUCKET}/reth" "${SOURCE_DIR}/target/profiling/reth"
       chmod +x "${SOURCE_DIR}/target/profiling/reth"
       if verify_binary "${SOURCE_DIR}/target/profiling/reth" "${COMMIT}"; then
@@ -59,18 +80,22 @@ case "$MODE" in
     if [ "$CACHE_VALID" = false ]; then
       echo "Building baseline (${COMMIT}) from source..."
       cd "${SOURCE_DIR}"
-      cargo build --profile profiling --bin reth
+      FEATURES_ARG=""
+      [ -n "$EXTRA_FEATURES" ] && FEATURES_ARG="--features ${EXTRA_FEATURES}"
+      RUSTFLAGS="-C target-cpu=native ${EXTRA_RUSTFLAGS}" cargo build --profile profiling --bin reth $FEATURES_ARG
       $MC cp target/profiling/reth "${BUCKET}/reth"
     fi
     ;;
 
   feature|branch)
     BRANCH_SHA="${4:-$COMMIT}"
-    BUCKET="minio/reth-binaries/${BRANCH_SHA}"
+    CACHE_SUFFIX=""
+    [ -n "$EXTRA_FEATURES" ] && CACHE_SUFFIX="-tracy"
+    BUCKET="minio/reth-binaries/${BRANCH_SHA}${CACHE_SUFFIX}"
 
     CACHE_VALID=false
     if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
-      echo "Cache hit for ${BRANCH_SHA}, downloading binaries..."
+      echo "Cache hit for ${BRANCH_SHA}${CACHE_SUFFIX}, downloading binaries..."
       mkdir -p "${SOURCE_DIR}/target/profiling"
       $MC cp "${BUCKET}/reth" "${SOURCE_DIR}/target/profiling/reth"
       $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
@@ -85,10 +110,12 @@ case "$MODE" in
       echo "Building feature (${COMMIT}) from source..."
       cd "${SOURCE_DIR}"
       rustup show active-toolchain || rustup default stable
-      make profiling
-      make install-reth-bench
+      FEATURES_ARG=""
+      [ -n "$EXTRA_FEATURES" ] && FEATURES_ARG="--features ${EXTRA_FEATURES}"
+      RUSTFLAGS="-C target-cpu=native ${EXTRA_RUSTFLAGS}" cargo build --profile profiling --workspace --bin reth --bin reth-bench $FEATURES_ARG
+      install target/profiling/reth-bench /home/ubuntu/.cargo/bin/reth-bench
       $MC cp target/profiling/reth "${BUCKET}/reth"
-      $MC cp "$(which reth-bench)" "${BUCKET}/reth-bench"
+      $MC cp target/profiling/reth-bench "${BUCKET}/reth-bench"
     fi
     ;;
 
