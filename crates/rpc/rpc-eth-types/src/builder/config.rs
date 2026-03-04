@@ -103,7 +103,8 @@ pub struct EthConfig {
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
     pub raw_tx_forwarder: ForwardConfig,
-    /// Timeout duration for `send_raw_transaction_sync` RPC method.
+    /// Max timeout duration for `send_raw_transaction_sync` RPC method.
+    /// Client-requested timeouts are capped to this value.
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub rpc_evm_memory_limit: u64,

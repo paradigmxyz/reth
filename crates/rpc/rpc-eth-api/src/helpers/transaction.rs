@@ -14,7 +14,7 @@ use alloy_consensus::{
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
@@ -97,15 +97,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// And awaits the receipt.
+    ///
+    /// If `timeout_ms` is provided, the effective timeout is `min(timeout_ms, server_max)`.
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
+        timeout_ms: Option<U64>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
-        let timeout_duration = self.send_raw_transaction_sync_timeout();
+        let server_max = self.send_raw_transaction_sync_timeout();
+        let timeout_duration = match timeout_ms {
+            Some(ms) => server_max.min(Duration::from_millis(ms.to::<u64>())),
+            None => server_max,
+        };
         async move {
             let mut stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
