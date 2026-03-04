@@ -268,16 +268,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             // Cache miss — fall back to the provider.
-            let (tx, meta) = match self
+            let Some((tx, meta)) = self
                 .spawn_blocking_io(move |this| {
                     this.provider()
                         .transaction_by_hash_with_meta(hash)
                         .map_err(Self::Error::from_eth_err)
                 })
                 .await?
-            {
-                Some(res) => res,
-                None => return Ok(None),
+            else {
+                return Ok(None);
             };
 
             let receipt = self
@@ -287,10 +286,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .map_err(Self::Error::from_eth_err)?
                 .and_then(|receipts| receipts.get(meta.index as usize).cloned());
 
-            match receipt {
-                Some(receipt) => Ok(Some((tx, meta, receipt))),
-                None => Ok(None),
-            }
+            Ok(receipt.map(|receipt| (tx, meta, receipt)))
         }
     }
 
