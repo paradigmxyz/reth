@@ -17,7 +17,6 @@ use std::sync::Arc;
 ///
 /// Reproduces <https://github.com/paradigmxyz/reth/issues/21809>
 #[tokio::test]
-#[ignore = "depends on alloy-rs/alloy#3651"]
 async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

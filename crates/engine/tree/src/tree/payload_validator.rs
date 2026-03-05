@@ -27,7 +27,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    OnStateHook, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -43,16 +43,20 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
+        Arc,
+    },
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
@@ -292,7 +296,7 @@ where
         let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block) {
+        if let Err(consensus_err) = self.validate_block_inner(&block, None) {
             // Header validation error takes precedence over execution error
             return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
@@ -334,9 +338,10 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        // Spawn block conversion on a background thread so it runs concurrently with the
+        // Spawn payload conversion on a background thread so it runs concurrently with the
         // rest of the function (setup + execution). For payloads this overlaps the cost of
-        // RLP decoding + header hashing; for already-converted blocks this is a no-op.
+        // RLP decoding + header hashing.
+        let is_payload = matches!(&input, BlockOrPayload::Payload(_));
         let convert_to_block = match &input {
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
@@ -527,18 +532,44 @@ where
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
             });
 
-        let block = convert_to_block(input)?.with_senders(senders);
+        let block = convert_to_block(input)?;
+        let transaction_root = is_payload.then(|| {
+            let block = block.clone();
+            let parent_span = Span::current();
+            let num_hash = block.num_hash();
+            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
+                let _span =
+                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
+                        .entered();
+                block.body().calculate_tx_root()
+            })
+        });
+        let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = receipt_root_rx
-            .blocking_recv()
-            .inspect_err(|_| {
-                tracing::error!(
-                    target: "engine::tree::payload_validator",
-                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                );
-            })
-            .ok();
+        let receipt_root_bloom = {
+            let _enter = debug_span!(
+                target: "engine::tree::payload_validator",
+                "wait_receipt_root",
+            )
+            .entered();
+
+            receipt_root_rx
+                .blocking_recv()
+                .inspect_err(|_| {
+                    tracing::error!(
+                        target: "engine::tree::payload_validator",
+                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                    );
+                })
+                .ok()
+        };
+        let transaction_root = transaction_root.map(|handle| {
+            let _span =
+                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
+                    .entered();
+            handle.try_into_inner().expect("sole handle")
+        });
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -546,6 +577,7 @@ where
                 &parent_block,
                 &output,
                 &mut ctx,
+                transaction_root,
                 receipt_root_bloom,
                 hashed_state,
             ),
@@ -591,7 +623,7 @@ where
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
-                                trie_updates.clone(),
+                                trie_updates.as_ref().clone(),
                             );
                             #[cfg(feature = "trie-debug")]
                             if _has_diff {
@@ -637,7 +669,7 @@ where
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, elapsed));
+                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -672,7 +704,7 @@ where
                 self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
             }
 
-            (root, updates, root_time.elapsed())
+            (root, Arc::new(updates), root_time.elapsed())
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -708,13 +740,20 @@ where
             let _ = valid_block_tx.send(());
         }
 
+        // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
+        // eviction cannot race with us. If we deferred this to the background task, persistence
+        // could advance and evict changeset cache entries between factory creation and the task
+        // actually running, causing expensive DB fallback computations when building the overlay.
+        let changeset_provider =
+            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+
         Ok(self.spawn_deferred_trie_task(
             block,
             output,
             &ctx,
             hashed_state,
             trie_output,
-            overlay_factory,
+            changeset_provider,
         ))
     }
 
@@ -737,13 +776,19 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block_inner(
+        &self,
+        block: &SealedBlock<N::Block>,
+        transaction_root: Option<B256>,
+    ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) =
+            self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
+        {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -787,7 +832,6 @@ where
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .build()
         });
 
@@ -804,19 +848,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -830,7 +876,10 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
+        let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let executor = executor.with_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        );
 
         let execution_start = Instant::now();
 
@@ -840,6 +889,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
+            &executed_tx_index,
         )?;
         drop(receipt_tx);
 
@@ -879,6 +929,7 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
@@ -924,6 +975,9 @@ where
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            // advance the shared counter so prewarm workers skip already-executed txs
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -1070,7 +1124,7 @@ where
                             let (state_root, trie_updates) = result?;
                             return Ok(Ok(StateRootComputeOutcome {
                                 state_root,
-                                trie_updates,
+                                trie_updates: Arc::new(trie_updates),
                                 #[cfg(feature = "trie-debug")]
                                 debug_recorders: Vec::new(),
                             }));
@@ -1087,7 +1141,7 @@ where
                         let (state_root, trie_updates) = result?;
                         return Ok(Ok(StateRootComputeOutcome {
                             state_root,
-                            trie_updates,
+                            trie_updates: Arc::new(trie_updates),
                             #[cfg(feature = "trie-debug")]
                             debug_recorders: Vec::new(),
                         }));
@@ -1208,12 +1262,14 @@ where
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::too_many_arguments)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
+        transaction_root: Option<B256>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         hashed_state: LazyHashedPostState,
     ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
@@ -1224,7 +1280,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
-        if let Err(e) = self.validate_block_inner(block) {
+        if let Err(e) = self.validate_block_inner(block, transaction_root) {
             return Err(e.into())
         }
 
@@ -1251,10 +1307,15 @@ where
         }
         drop(_enter);
 
+        // Wait for the background keccak256 hashing task to complete. This blocks until
+        // all changed addresses and storage slots have been hashed.
+        let hashed_state_ref =
+            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                .in_scope(|| hashed_state.get());
+
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) = self
-            .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
+        if let Err(err) =
+            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1479,8 +1540,8 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: LazyHashedPostState,
-        trie_output: TrieUpdates,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        trie_output: Arc<TrieUpdates>,
+        changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1502,14 +1563,18 @@ where
             Err(handle) => Arc::new(handle.get().clone()),
         };
         let deferred_trie_data =
-            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
+            DeferredTrieData::pending(hashed_state, trie_output, anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info and cache handle for changeset computation
         let block_hash = block.hash();
         let block_number = block.number();
-        let changeset_cache = self.changeset_cache.clone();
+
+        // Register a pending changeset entry so that concurrent readers will wait for
+        // this computation to finish rather than falling back to the expensive DB path.
+        // The guard ensures the pending entry is cancelled if the task panics.
+        let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1544,20 +1609,15 @@ where
                         .record(anchored.trie_input.state.total_len() as f64);
                 }
 
-                // Compute and cache changesets using the computed trie_updates
+                // Compute and cache changesets using the computed trie_updates.
+                // Use the pre-created provider to avoid races with changeset cache
+                // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                // Get a provider from the overlay factory for trie cursor access
-                let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
-                        reth_trie::changesets::compute_trie_changesets(
-                            &provider,
-                            &computed.trie_updates,
-                        )
-                        .map_err(ProviderError::Database)
-                    });
-
-                match changeset_result {
+                match reth_trie::changesets::compute_trie_changesets(
+                    &changeset_provider,
+                    &computed.trie_updates,
+                ) {
                     Ok(changesets) => {
                         debug!(
                             target: "engine::tree::changeset",
@@ -1566,7 +1626,7 @@ where
                             "Computed and caching changesets"
                         );
 
-                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
+                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                     }
                     Err(e) => {
                         warn!(

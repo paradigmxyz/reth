@@ -8,7 +8,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -77,10 +77,11 @@ pub enum MultiProofMessage {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub(super) struct StateHookSender(CrossbeamSender<MultiProofMessage>);
+pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
 
 impl StateHookSender {
-    pub(crate) const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
+    /// Creates a new [`StateHookSender`] wrapping the given channel sender.
+    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
         Self(inner)
     }
 }
@@ -162,6 +163,14 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of durations spent revealing multiproof results into the sparse trie.
+    pub sparse_trie_reveal_multiproof_duration_histogram: Histogram,
+    /// Histogram of durations spent coalescing multiple proof results from the channel.
+    pub sparse_trie_proof_coalesce_duration_histogram: Histogram,
+    /// Histogram of durations the event loop spent blocked waiting on channels.
+    pub sparse_trie_channel_wait_duration_histogram: Histogram,
+    /// Histogram of durations spent processing trie updates and promoting pending accounts.
+    pub sparse_trie_process_updates_duration_histogram: Histogram,
     /// Histogram of sparse trie final update durations.
     pub sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
@@ -181,6 +190,20 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+
+    /// Number of account leaf updates applied without needing a new proof (cache hits).
+    pub sparse_trie_account_cache_hits: Histogram,
+    /// Number of account leaf updates that required a new proof (cache misses).
+    pub sparse_trie_account_cache_misses: Histogram,
+    /// Number of storage leaf updates applied without needing a new proof (cache hits).
+    pub sparse_trie_storage_cache_hits: Histogram,
+    /// Number of storage leaf updates that required a new proof (cache misses).
+    pub sparse_trie_storage_cache_misses: Histogram,
+
+    /// Retained memory of the preserved sparse trie cache in bytes.
+    pub sparse_trie_retained_memory_bytes: Gauge,
+    /// Number of storage tries retained in the preserved sparse trie cache.
+    pub sparse_trie_retained_storage_tries: Gauge,
 }
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
@@ -189,7 +212,7 @@ pub(crate) struct MultiProofTaskMetrics {
 pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
-    chunk_size: Option<usize>,
+    chunk_size: usize,
     max_targets_for_chunking: usize,
     available_account_workers: usize,
     available_storage_workers: usize,
@@ -203,10 +226,7 @@ where
         available_account_workers > 1 ||
         available_storage_workers > 1;
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
+    if should_chunk && chunking_len > chunk_size {
         let mut num_chunks = 0usize;
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);

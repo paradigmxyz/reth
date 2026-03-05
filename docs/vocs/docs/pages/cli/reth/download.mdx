@@ -133,6 +133,50 @@ Storage:
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
+      --manifest-url <URL>
+          URL to a snapshot manifest.json for modular component downloads.
+
+          When provided, fetches this manifest instead of discovering it from the default base URL. Useful for testing with custom or local manifests.
+
+      --manifest-path <PATH>
+          Local path to a snapshot manifest.json for modular component downloads
+
+      --with-txs
+          Include transaction static files
+
+      --with-receipts
+          Include receipt static files
+
+      --with-state-history
+          Include account and storage history static files
+
+      --archive
+          Download all available components (archive node, no pruning)
+
+      --minimal
+          Download the minimal component set (same default as --non-interactive)
+
+      --full
+          Download the full node component set (matches default full prune settings)
+
+      --without-rocksdb
+          Skip optional RocksDB indices even when archive components are selected.
+
+          This affects `--archive`/`--all` and TUI archive preset (`a`).
+
+  -y, --non-interactive
+          Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
+
+      --resumable
+          Use resumable two-phase downloads (download to disk first, then extract).
+
+          Archives are downloaded to a .part file with HTTP Range resume support before extraction. Slower but tolerates network interruptions without restarting. By default, archives stream directly into the extractor.
+
+      --download-concurrency <DOWNLOAD_CONCURRENCY>
+          Maximum number of concurrent modular archive workers
+
+          [default: 8]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

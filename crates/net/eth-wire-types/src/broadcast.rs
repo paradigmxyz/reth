@@ -16,7 +16,17 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -31,12 +41,7 @@ pub struct NewBlockHashes(
 impl NewBlockHashes {
     /// Returns the latest block in the list of blocks.
     pub fn latest(&self) -> Option<&BlockHashNumber> {
-        self.0.iter().fold(None, |latest, block| {
-            if let Some(latest) = latest {
-                return if latest.number > block.number { Some(latest) } else { Some(block) }
-            }
-            Some(block)
-        })
+        self.iter().max_by_key(|b| b.number)
     }
 }
 
@@ -99,7 +104,17 @@ generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBloc
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 10)]
@@ -111,7 +126,7 @@ pub struct Transactions<T = TransactionSigned>(
 impl<T: SignedTransaction> Transactions<T> {
     /// Returns `true` if the list of transactions contains any blob transactions.
     pub fn has_eip4844(&self) -> bool {
-        self.0.iter().any(|tx| tx.is_eip4844())
+        self.iter().any(|tx| tx.is_eip4844())
     }
 }
 
@@ -131,7 +146,9 @@ impl<T> From<Transactions<T>> for Vec<T> {
 ///
 /// The list of transactions is constructed on per-peers basis, but the underlying transaction
 /// objects are shared.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Deref, IntoIterator,
+)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 20)]
 pub struct SharedTransactions<T = TransactionSigned>(
@@ -180,7 +197,7 @@ impl NewPooledTransactionHashes {
     /// Returns an iterator over all transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &B256> + '_ {
         match self {
-            Self::Eth66(msg) => msg.0.iter(),
+            Self::Eth66(msg) => msg.iter(),
             Self::Eth68(msg) => msg.hashes.iter(),
         }
     }
@@ -212,7 +229,7 @@ impl NewPooledTransactionHashes {
     /// Returns an iterator over all transaction hashes.
     pub fn into_iter_hashes(self) -> impl Iterator<Item = B256> {
         match self {
-            Self::Eth66(msg) => msg.0.into_iter(),
+            Self::Eth66(msg) => msg.into_iter(),
             Self::Eth68(msg) => msg.hashes.into_iter(),
         }
     }
@@ -310,7 +327,17 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]

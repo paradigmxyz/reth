@@ -301,6 +301,20 @@ impl Discovery {
     }
 }
 
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.terminate();
+        }
+        if let Some(handle) = self._discv4_service.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self._dns_disc_service.take() {
+            handle.abort();
+        }
+    }
+}
+
 impl Stream for Discovery {
     type Item = DiscoveryEvent;
 

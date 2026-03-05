@@ -557,7 +557,7 @@ pub struct DiscoveryArgs {
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
-    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
 
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
@@ -1104,9 +1104,9 @@ mod tests {
 
         let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
 
-        // Assert basic_nodes contains our node
+        // Assert persisted_peers contains our node (legacy format is auto-converted)
         let node: NodeRecord = enode.parse().unwrap();
-        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+        assert!(net_cfg.peers_config.persisted_peers.iter().any(|p| p.record == node));
 
         // Cleanup
         let _ = fs::remove_file(&peers_file);

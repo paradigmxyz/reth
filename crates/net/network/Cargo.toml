@@ -33,8 +33,9 @@ reth-storage-api.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
-reth-network-types.workspace = true
+reth-network-types = { workspace = true, features = ["serde"] }
 reth-bal-store.workspace = true
+
 
 # ethereum
 alloy-consensus.workspace = true
@@ -98,15 +99,11 @@ alloy-genesis.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
-## Benchmarks
-criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
-
 [features]
 serde = [
     "dep:serde",
     "secp256k1/serde",
     "enr/serde",
-    "reth-network-types/serde",
     "reth-dns-discovery/serde",
     "reth-eth-wire/serde",
     "reth-eth-wire-types/serde",
@@ -126,6 +123,7 @@ serde = [
     "reth-network-api/serde",
     "rand_08/serde",
     "reth-storage-api/serde",
+    "reth-network-types/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",
@@ -142,13 +140,3 @@ test-utils = [
     "reth-evm-ethereum?/test-utils",
     "reth-tasks/test-utils",
 ]
-
-[[bench]]
-name = "broadcast"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "tx_manager_hash_fetching"
-required-features = ["test-utils"]
-harness = false
