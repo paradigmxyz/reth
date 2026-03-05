@@ -977,8 +977,11 @@ where
                 return
             }
 
-            for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.record(hash, PropagateKind::Hash(peer_id));
+            if let Some(peer) = self.peers.get_mut(&peer_id) {
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    propagated.record(hash, PropagateKind::Hash(peer_id));
+                    peer.seen_transactions.insert(hash);
+                }
             }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
