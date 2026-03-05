@@ -23,15 +23,6 @@ use std::{
 use thiserror::Error;
 use tracing::{debug, error, instrument};
 
-/// Result of a persistence save-blocks operation, returned to the engine tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SaveBlocksResult {
-    /// The last block that was persisted.
-    pub last_block: BlockNumHash,
-    /// Total duration of the database commit for this batch of blocks.
-    pub commit_duration: Duration,
-}
-
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
@@ -106,8 +97,12 @@ where
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
                     let result_number = result.as_ref().map(|r| r.last_block.number);
+
+                    // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
+
                     if let Some(block_number) = result_number {
+                        // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
@@ -147,12 +142,8 @@ where
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<SaveBlocksResult>, PersistenceError> {
-        let Some(first_block) = blocks.first().map(|b| b.recovered_block.num_hash()) else {
-            return Ok(None)
-        };
-        let Some(last_block) = blocks.last().map(|b| b.recovered_block.num_hash()) else {
-            return Ok(None)
-        };
+        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
+        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
 
         let pending_finalized = self.pending_finalized_block.take();
@@ -160,43 +151,36 @@ where
 
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
-        let total_commit_duration = {
-            let start = Instant::now();
+        let start_time = Instant::now();
+
+        if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                // Clamp to the highest persisted block so that on restart
-                // `last_finalized_block_number` never points past available state.
-                provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
-                if finalized > last_block.number {
-                    self.pending_finalized_block = Some(finalized);
-                }
+                provider_rw.save_finalized_block_number(finalized)?;
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last_block.number))?;
-                if safe > last_block.number {
-                    self.pending_safe_block = Some(safe);
-                }
+                provider_rw.save_safe_block_number(safe)?;
             }
 
-            if self.pruner.is_pruning_needed(last_block.number) {
-                debug!(target: "engine::persistence", block_num=?last_block.number, "Running pruner");
+            if self.pruner.is_pruning_needed(last.number) {
+                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
                 let prune_start = Instant::now();
-                let _ = self.pruner.run_with_provider(&provider_rw, last_block.number)?;
+                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
 
             provider_rw.commit()?;
-            start.elapsed()
-        };
+        }
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
+        let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(total_commit_duration);
+        self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(Some(SaveBlocksResult { last_block, commit_duration: total_commit_duration }))
+        Ok(last_block.map(|last_block| SaveBlocksResult { last_block, commit_duration: elapsed }))
     }
 }
 
@@ -233,6 +217,15 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+}
+
+/// Result of a persistence save-blocks operation, returned to the engine tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveBlocksResult {
+    /// The last block that was persisted.
+    pub last_block: BlockNumHash,
+    /// Total duration of the database commit for this batch of blocks.
+    pub commit_duration: Duration,
 }
 
 /// A handle to the persistence service

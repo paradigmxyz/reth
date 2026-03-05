@@ -66,7 +66,7 @@ type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
 
 /// Result type for block validation with optional timing stats.
 type InsertPayloadResult<N> = Result<
-    (ExecutedBlock<N>, Option<ExecutionTimingStats>),
+    (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
     InsertPayloadError<<N as NodePrimitives>::Block>,
 >;
 
@@ -1706,7 +1706,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         execution_duration: Duration,
         state_hash_duration: Duration,
-    ) -> ExecutionTimingStats {
+    ) -> Box<ExecutionTimingStats> {
         let accounts_read = instrumented_handle.total_account_fetches();
         let storage_read = instrumented_handle.total_storage_fetches();
         let code_read = instrumented_handle.total_code_fetches();
@@ -1814,7 +1814,7 @@ where
             .unwrap_or((0, 0, 0, 0, 0, 0));
 
         // Build execution timing stats for slow block logging
-        ExecutionTimingStats {
+        Box::new(ExecutionTimingStats {
             block_number: block.number(),
             block_hash: block.hash(),
             gas_used: output.result.gas_used,
@@ -1840,13 +1840,13 @@ where
             storage_cache_misses,
             code_cache_hits,
             code_cache_misses,
-        }
+        })
     }
 }
 
 /// Output of block or payload validation.
 pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
-    Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), E>;
+    Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

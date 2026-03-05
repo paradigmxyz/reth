@@ -277,7 +277,7 @@ where
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
-    execution_timing_stats: HashMap<B256, ExecutionTimingStats>,
+    execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
     /// Whether the node uses hashed state as canonical storage (v2 mode).
     /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
     use_hashed_state: bool,
@@ -1914,28 +1914,27 @@ where
     /// Removes timing stats for blocks at or below the given block number.
     /// If `commit_duration` is provided, checks for slow blocks and emits events before removing.
     fn purge_timing_stats(&mut self, below_number: u64, commit_duration: Option<Duration>) {
-        let mut persisted_stats = Vec::new();
-        self.execution_timing_stats.retain(|_, stats| {
-            if stats.block_number <= below_number {
-                if commit_duration.is_some() {
-                    persisted_stats.push(stats.clone());
-                }
-                false
-            } else {
-                true
-            }
-        });
+        let threshold = self.config.slow_block_threshold();
+        let check_slow = commit_duration.is_some() && threshold.is_some();
 
-        if let Some(commit_dur) = commit_duration &&
-            let Some(threshold) = self.config.slow_block_threshold()
-        {
-            for stats in persisted_stats {
+        // Collect keys to remove so we can drain values without cloning.
+        let keys_to_remove: Vec<B256> = self
+            .execution_timing_stats
+            .iter()
+            .filter(|(_, stats)| stats.block_number <= below_number)
+            .map(|(k, _)| *k)
+            .collect();
+
+        for key in keys_to_remove {
+            let stats = self.execution_timing_stats.remove(&key).expect("key just found");
+            if check_slow {
+                let commit_dur = commit_duration.expect("checked above");
                 let total_duration = stats.execution_duration +
                     stats.state_read_duration +
                     stats.state_hash_duration +
                     commit_dur;
 
-                if total_duration > threshold {
+                if total_duration > threshold.expect("checked above") {
                     self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
                         stats,
                         commit_duration: commit_dur,
@@ -2826,7 +2825,7 @@ where
             &mut V,
             Input,
             TreeCtx<'_, N>,
-        ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), Err>,
+        ) -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where

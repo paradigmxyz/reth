@@ -133,7 +133,9 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
-    /// Threshold for logging slow blocks during persistence.
+    /// When set, blocks whose total processing time (execution + state reads + state root +
+    /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
+    /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
     slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
@@ -487,7 +489,11 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the slow block threshold.
+    /// Returns the slow block threshold, if configured.
+    ///
+    /// When `Some`, blocks whose total processing time exceeds this duration emit a structured
+    /// warning with timing, state-operation, and cache-hit-rate details. `Duration::ZERO` logs
+    /// every block.
     pub const fn slow_block_threshold(&self) -> Option<Duration> {
         self.slow_block_threshold
     }

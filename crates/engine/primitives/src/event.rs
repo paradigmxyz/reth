@@ -21,7 +21,7 @@ pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
 #[derive(Clone, Debug)]
 pub struct SlowBlockInfo {
     /// The timing statistics for the slow block.
-    pub stats: ExecutionTimingStats,
+    pub stats: Box<ExecutionTimingStats>,
     /// The commit duration for the batch containing this block.
     pub commit_duration: Duration,
     /// The total duration (execution + `state_read` + `state_hash` + commit).
