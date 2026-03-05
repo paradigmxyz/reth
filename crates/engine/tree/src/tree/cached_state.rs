@@ -173,9 +173,9 @@ pub struct CachedStateMetrics {
     /// Account cache collisions (hash collisions causing eviction)
     account_cache_collisions: Gauge,
 
-    // Cache statistics
+    // Cache statistics for slow block logging (not a prometheus metric).
     #[metric(skip)]
-    pub(crate) stats: Arc<CacheStats>,
+    stats: Arc<CacheStats>,
 }
 
 impl CachedStateMetrics {
@@ -255,6 +255,51 @@ impl CachedStateMetrics {
     fn record_code_miss(&self) {
         self.code_cache_misses.increment(1);
         self.stats.record_code_miss();
+    }
+
+    /// Record account cache hit in stats only (used during prewarm).
+    pub(crate) fn record_account_hit_stat(&self) {
+        self.stats.record_account_hit();
+    }
+
+    /// Record account cache miss in stats only (used during prewarm).
+    pub(crate) fn record_account_miss_stat(&self) {
+        self.stats.record_account_miss();
+    }
+
+    /// Record storage cache hit in stats only (used during prewarm).
+    pub(crate) fn record_storage_hit_stat(&self) {
+        self.stats.record_storage_hit();
+    }
+
+    /// Record storage cache miss in stats only (used during prewarm).
+    pub(crate) fn record_storage_miss_stat(&self) {
+        self.stats.record_storage_miss();
+    }
+
+    /// Record code cache hit in stats only (used during prewarm).
+    pub(crate) fn record_code_hit_stat(&self) {
+        self.stats.record_code_hit();
+    }
+
+    /// Record code cache miss in stats only (used during prewarm).
+    pub(crate) fn record_code_miss_stat(&self) {
+        self.stats.record_code_miss();
+    }
+
+    /// Returns account cache hit/miss counts from stats.
+    pub(crate) fn account_stats(&self) -> (usize, usize) {
+        (self.stats.account_hits(), self.stats.account_misses())
+    }
+
+    /// Returns storage cache hit/miss counts from stats.
+    pub(crate) fn storage_stats(&self) -> (usize, usize) {
+        (self.stats.storage_hits(), self.stats.storage_misses())
+    }
+
+    /// Returns code cache hit/miss counts from stats.
+    pub(crate) fn code_stats(&self) -> (usize, usize) {
+        (self.stats.code_hits(), self.stats.code_misses())
     }
 }
 
@@ -422,11 +467,11 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
             })? {
                 // We record cache hits and misses during prewarm only in stats, not in metrics
                 CachedStatus::NotCached(value) => {
-                    self.metrics.stats.record_account_miss();
+                    self.metrics.record_account_miss_stat();
                     Ok(value)
                 }
                 CachedStatus::Cached(value) => {
-                    self.metrics.stats.record_account_hit();
+                    self.metrics.record_account_hit_stat();
                     Ok(value)
                 }
             }
@@ -461,13 +506,13 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             })? {
                 // We record cache hits and misses during prewarm only in stats, not in metrics
                 CachedStatus::NotCached(value) => {
-                    self.metrics.stats.record_storage_miss();
+                    self.metrics.record_storage_miss_stat();
                     // The slot that was never written to is indistinguishable from a slot
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
                 CachedStatus::Cached(value) => {
-                    self.metrics.stats.record_storage_hit();
+                    self.metrics.record_storage_hit_stat();
                     // The slot that was never written to is indistinguishable from a slot
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
@@ -491,11 +536,11 @@ impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvi
             })? {
                 // We record cache hits and misses during prewarm only in stats, not in metrics
                 CachedStatus::NotCached(code) => {
-                    self.metrics.stats.record_code_miss();
+                    self.metrics.record_code_miss_stat();
                     Ok(code)
                 }
                 CachedStatus::Cached(code) => {
-                    self.metrics.stats.record_code_hit();
+                    self.metrics.record_code_hit_stat();
                     Ok(code)
                 }
             }
