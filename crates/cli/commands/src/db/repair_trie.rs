@@ -162,9 +162,14 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
         }
     }
 
-    info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
-
-    Ok(())
+    if inconsistent_nodes > 0 {
+        Err(eyre::eyre!(
+            "Found {inconsistent_nodes} inconsistencies (dry run - no changes made)"
+        ))
+    } else {
+        info!("No inconsistencies found (dry run)");
+        Ok(())
+    }
 }
 
 /// Checks that the merkle stage has completed running up to the account and storage hashing stages.
