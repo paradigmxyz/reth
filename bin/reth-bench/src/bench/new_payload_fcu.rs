@@ -22,7 +22,8 @@ use crate::{
         },
     },
     valid_payload::{
-        block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+        block_to_new_payload_data, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+        create_reorg_payload,
     },
 };
 use alloy_provider::{ext::DebugApi, Provider};
@@ -95,6 +96,14 @@ pub struct Command {
     )]
     rpc_block_buffer_size: usize,
 
+    /// Simulate 1-block deep reorgs at each height.
+    ///
+    /// When enabled, for each block the benchmark first sends a modified (non-canonical)
+    /// payload and makes it the head via FCU, then sends the canonical payload and
+    /// switches back. This measures how the engine handles chain reorganizations.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reorg: bool,
+
     #[command(flatten)]
     benchmark: BenchmarkArgs,
 }
@@ -113,6 +122,9 @@ impl Command {
                 self.persistence_threshold + 1,
                 self.persistence_threshold
             );
+        }
+        if self.reorg {
+            info!(target: "reth-bench", "Reorg mode enabled: each block will trigger a 1-block deep reorg");
         }
 
         // Set up waiter based on configured options
@@ -232,6 +244,8 @@ impl Command {
             }
         });
 
+        let reorg = self.reorg;
+
         let mut results = Vec::new();
         let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
@@ -256,8 +270,54 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) =
-                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
+            let payload_data =
+                block_to_new_payload_data(block, is_optimism, rlp, use_reth_namespace)?;
+
+            // Reorg path: send a modified block first, make it head, then send the canonical
+            let mut reorg_new_payload_latency = None;
+            let mut reorg_fcu_latency = None;
+
+            if reorg {
+                if let (Some(payload), Some(sidecar)) =
+                    (&payload_data.payload, &payload_data.sidecar)
+                {
+                    let (reorg_hash, reorg_version, reorg_params) = create_reorg_payload(
+                        payload,
+                        sidecar,
+                        payload_data.is_optimism,
+                        payload_data.withdrawals_root,
+                        use_reth_namespace,
+                    )?;
+
+                    debug!(target: "reth-bench", ?block_number, ?reorg_hash, "Sending reorg payload");
+
+                    let reorg_np_start = Instant::now();
+                    call_new_payload_with_reth(&auth_provider, reorg_version, reorg_params).await?;
+                    reorg_new_payload_latency = Some(reorg_np_start.elapsed());
+
+                    let reorg_fcu_state = ForkchoiceState {
+                        head_block_hash: reorg_hash,
+                        safe_block_hash: safe,
+                        finalized_block_hash: finalized,
+                    };
+                    let reorg_fcu_start = Instant::now();
+                    call_forkchoice_updated_with_reth(
+                        &auth_provider,
+                        reorg_version,
+                        reorg_fcu_state,
+                    )
+                    .await?;
+                    reorg_fcu_latency = Some(reorg_fcu_start.elapsed());
+
+                    debug!(target: "reth-bench", ?block_number, "Reorg block adopted, now sending canonical");
+                } else {
+                    warn!(target: "reth-bench", ?block_number, "Reorg mode skipped: RLP blocks don't support reorg");
+                }
+            }
+
+            let version = payload_data.version;
+            let params = payload_data.params;
+
             let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
@@ -297,6 +357,8 @@ impl Command {
                 new_payload_result,
                 fcu_latency,
                 total_latency,
+                reorg_new_payload_latency,
+                reorg_fcu_latency,
             };
 
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.

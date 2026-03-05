@@ -103,6 +103,10 @@ pub(crate) struct CombinedResult {
     pub(crate) fcu_latency: Duration,
     /// The latency of both calls combined.
     pub(crate) total_latency: Duration,
+    /// Latency of the reorg `newPayload` call (only when `--reorg` is enabled).
+    pub(crate) reorg_new_payload_latency: Option<Duration>,
+    /// Latency of the reorg `forkchoiceUpdated` call (only when `--reorg` is enabled).
+    pub(crate) reorg_fcu_latency: Option<Duration>,
 }
 
 impl CombinedResult {
@@ -134,6 +138,12 @@ impl std::fmt::Display for CombinedResult {
         if let Some(d) = np.persistence_wait {
             write!(f, ", persistence wait: {d:?}")?;
         }
+        if let Some(d) = self.reorg_new_payload_latency {
+            write!(f, ", reorg newPayload: {d:?}")?;
+        }
+        if let Some(d) = self.reorg_fcu_latency {
+            write!(f, ", reorg fcu: {d:?}")?;
+        }
         Ok(())
     }
 }
@@ -149,7 +159,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 10)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 12)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -171,6 +181,12 @@ impl Serialize for CombinedResult {
             "sparse_trie_wait",
             &self.new_payload_result.sparse_trie_wait.as_micros(),
         )?;
+        state.serialize_field(
+            "reorg_new_payload_latency",
+            &self.reorg_new_payload_latency.map(|d| d.as_micros()),
+        )?;
+        state
+            .serialize_field("reorg_fcu_latency", &self.reorg_fcu_latency.map(|d| d.as_micros()))?;
         state.end()
     }
 }
