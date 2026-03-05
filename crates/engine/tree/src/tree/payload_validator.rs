@@ -18,7 +18,7 @@ use alloy_primitives::B256;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
-use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use crate::tree::payload_processor::post_exec::PostExecHandle;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -497,9 +497,9 @@ where
         }
 
         // Execute the block and handle any execution errors.
-        // The receipt root task is spawned before execution and receives receipts incrementally
-        // as transactions complete, allowing parallel computation during execution.
-        let (output, senders, receipt_root_rx) =
+        // The post-exec handle manages receipt root computation in a background worker,
+        // receiving receipts incrementally as transactions complete.
+        let (output, senders, mut post_exec) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -517,59 +517,40 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
+        // Spawn hashed post state and (for payloads) transaction root on separate threads,
+        // in parallel with receipt-root finalization. Dropping the channel closes the receipt
+        // stream.
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
+        let block = convert_to_block(input)?;
+        let tx_root_fn = is_payload.then(|| {
+            let block = block.clone();
+            let parent_span = Span::current();
+            let num_hash = block.num_hash();
+            move || {
+                let _span =
+                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
+                        .entered();
+                block.body().calculate_tx_root()
+            }
+        });
+        post_exec.finish(
+            move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",
                 )
                 .entered();
                 hashed_state_provider.hashed_post_state(&hashed_state_output.state)
-            });
+            },
+            tx_root_fn,
+        );
 
-        let block = convert_to_block(input)?;
-        let transaction_root = is_payload.then(|| {
-            let block = block.clone();
-            let parent_span = Span::current();
-            let num_hash = block.num_hash();
-            self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
-                let _span =
-                    debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
-                        .entered();
-                block.body().calculate_tx_root()
-            })
-        });
         let block = block.with_senders(senders);
 
-        // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = {
-            let _enter = debug_span!(
-                target: "engine::tree::payload_validator",
-                "wait_receipt_root",
-            )
-            .entered();
-
-            receipt_root_rx
-                .blocking_recv()
-                .inspect_err(|_| {
-                    tracing::error!(
-                        target: "engine::tree::payload_validator",
-                        "Receipt root task dropped sender without result, receipt root calculation likely aborted"
-                    );
-                })
-                .ok()
-        };
-        let transaction_root = transaction_root.map(|handle| {
-            let _span =
-                debug_span!(target: "engine::tree::payload_validator", "wait_payload_tx_root")
-                    .entered();
-            handle.try_into_inner().expect("sole handle")
-        });
+        let receipt_root_bloom = post_exec.receipt_root_bloom();
+        let transaction_root = post_exec.transaction_root();
+        let hashed_state: LazyHashedPostState = post_exec.into_lazy_hashed_state();
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -812,11 +793,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, PostExecHandle<N::Receipt>),
         InsertBlockErrorKind,
     >
     where
@@ -865,15 +842,10 @@ where
             );
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
+        // Create a unified post-exec handle that manages receipt root, hashed post state,
+        // and transaction root computation in parallel background tasks.
         let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        let post_exec = self.payload_processor.post_exec_handle(receipts_len);
 
         let transaction_count = input.transaction_count();
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
@@ -888,10 +860,9 @@ where
             executor,
             transaction_count,
             handle.iter_transactions(),
-            &receipt_tx,
+            &post_exec,
             &executed_tx_index,
         )?;
-        drop(receipt_tx);
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -911,10 +882,10 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
 
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
-        Ok((output, senders, result_rx))
+        Ok((output, senders, post_exec))
     }
 
-    /// Executes transactions and collects senders, streaming receipts to a background task.
+    /// Executes transactions and collects senders, streaming receipts to the post-exec worker.
     ///
     /// This method handles:
     /// - Applying pre-execution changes (e.g., beacon root updates)
@@ -928,7 +899,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        post_exec: &PostExecHandle<N::Receipt>,
         executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -982,10 +953,11 @@ where
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
-                // Send the latest receipt to the background task for incremental root computation.
+                // Stream the latest receipt to the post-exec worker for incremental root
+                // computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    post_exec.push_receipt(tx_index, receipt.clone());
                 }
             }
         }
