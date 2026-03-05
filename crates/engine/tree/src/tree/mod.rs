@@ -655,7 +655,7 @@ where
 
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
-        self.emit_event(EngineApiEvent::BeaconConsensus(Box::new(engine_event)));
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = num_hash.hash;
 
@@ -1519,9 +1519,9 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
-                        self.emit_event(EngineApiEvent::BeaconConsensus(Box::new(
+                        self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
-                        )));
+                        ));
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -2919,7 +2919,7 @@ where
         } else {
             ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
-        self.emit_event(EngineApiEvent::BeaconConsensus(Box::new(engine_event)));
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         self.metrics
             .engine
@@ -2958,9 +2958,9 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
-        self.emit_event(EngineApiEvent::BeaconConsensus(Box::new(
+        self.emit_event(EngineApiEvent::BeaconConsensus(
             ConsensusEngineEvent::InvalidBlock(Box::new(block)),
-        )));
+        ));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },

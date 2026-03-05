@@ -206,7 +206,7 @@ where
 
         let ev = match ev {
             EngineApiEvent::BeaconConsensus(ev) => {
-                RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(*ev))
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
             }
             EngineApiEvent::BackfillAction(action) => {
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
@@ -278,7 +278,7 @@ impl<T: PayloadTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
 pub enum EngineApiEvent<N: NodePrimitives = EthPrimitives> {
     /// Event from the consensus engine.
     // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
-    BeaconConsensus(Box<ConsensusEngineEvent<N>>),
+    BeaconConsensus(ConsensusEngineEvent<N>),
     /// Backfill action is needed.
     BackfillAction(BackfillAction),
     /// Block download is needed.
@@ -294,7 +294,7 @@ impl<N: NodePrimitives> EngineApiEvent<N> {
 
 impl<N: NodePrimitives> From<ConsensusEngineEvent<N>> for EngineApiEvent<N> {
     fn from(event: ConsensusEngineEvent<N>) -> Self {
-        Self::BeaconConsensus(Box::new(event))
+        Self::BeaconConsensus(event)
     }
 }
 

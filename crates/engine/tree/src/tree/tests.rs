@@ -326,13 +326,12 @@ impl TestHarness {
         // check for ForkchoiceUpdated event
         let event = self.from_tree_rx.recv().await.unwrap();
         match event {
-            EngineApiEvent::BeaconConsensus(ev) => match *ev {
-                ConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
-                    assert_eq!(state, fcu_state);
-                    assert_eq!(status, fcu_status.into());
-                }
-                _ => panic!("Unexpected event: {ev:#?}"),
-            },
+            EngineApiEvent::BeaconConsensus(
+                ConsensusEngineEvent::ForkchoiceUpdated(state, status),
+            ) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, fcu_status.into());
+            }
             _ => panic!("Unexpected event: {event:#?}"),
         }
     }
