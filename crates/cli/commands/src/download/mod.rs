@@ -7,7 +7,7 @@ use crate::common::EnvironmentArgs;
 use blake3::Hasher;
 use clap::Parser;
 use config_gen::{config_for_selections, write_config};
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
 use manifest::{
@@ -1524,7 +1524,23 @@ async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
     if let Ok(parsed) = Url::parse(source) {
         return match parsed.scheme() {
             "http" | "https" => {
-                Ok(Client::new().get(source).send().await?.error_for_status()?.json().await?)
+                let response = Client::new()
+                    .get(source)
+                    .send()
+                    .await
+                    .and_then(|r| r.error_for_status())
+                    .wrap_err_with(|| {
+                        format!(
+                            "Failed to fetch snapshot manifest from {source}\n\n\
+                             The manifest endpoint may not be available for this snapshot source.\n\
+                             You can use a direct snapshot URL instead:\n\n\
+                             \treth download -u <snapshot-url>\n\n\
+                             Available snapshot sources:\n\
+                             \t- https://www.merkle.io/snapshots\n\
+                             \t- https://publicnode.com/snapshots"
+                        )
+                    })?;
+                Ok(response.json().await?)
             }
             "file" => {
                 let path = parsed
