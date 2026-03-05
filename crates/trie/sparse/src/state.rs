@@ -878,7 +878,22 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
-    fn prune_by_retained_slots(&mut self, mut retained_slots: B256Map<Vec<Nibbles>>) -> usize {
+    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<Vec<Nibbles>>) -> usize {
+        // Parallel pass: prune retained tries and clear evicted ones in place.
+        {
+            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+            self.tries.par_iter_mut().for_each(|(address, trie)| {
+                if let Some(slots) = retained_slots.get(address) {
+                    if let Some(t) = trie.as_revealed_mut() {
+                        t.prune(slots);
+                    }
+                } else {
+                    trie.clear();
+                }
+            });
+        }
+
+        // Cheap sequential drain: move already-cleared tries into the reuse pool.
         let addresses_to_evict: Vec<B256> = self
             .tries
             .keys()
@@ -887,16 +902,10 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             .collect();
 
         let evicted = addresses_to_evict.len();
+        self.cleared_tries.reserve(evicted);
         for address in &addresses_to_evict {
-            if let Some(mut trie) = self.tries.remove(address) {
-                trie.clear();
+            if let Some(trie) = self.tries.remove(address) {
                 self.cleared_tries.push(trie);
-            }
-        }
-
-        for (address, slots) in &mut retained_slots {
-            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                trie.prune(slots);
             }
         }
 
