@@ -293,19 +293,6 @@ impl CacheStats {
     pub(crate) fn code_misses(&self) -> usize {
         self.code_misses.load(Ordering::Relaxed)
     }
-
-    /// Flushes accumulated cache stats to the prometheus gauges.
-    ///
-    /// Called once at the end of block processing so we only update prometheus
-    /// in a single batch rather than on every cache access.
-    pub(crate) fn flush_to_metrics(&self, metrics: &CachedStateMetrics) {
-        metrics.account_cache_hits.increment(self.account_hits() as f64);
-        metrics.account_cache_misses.increment(self.account_misses() as f64);
-        metrics.storage_cache_hits.increment(self.storage_hits() as f64);
-        metrics.storage_cache_misses.increment(self.storage_misses() as f64);
-        metrics.code_cache_hits.increment(self.code_hits() as f64);
-        metrics.code_cache_misses.increment(self.code_misses() as f64);
-    }
 }
 
 /// A stats handler for fixed-cache that tracks collisions and size.
@@ -418,17 +405,15 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
                 }
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
+            self.metrics.account_cache_hits.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_account_hit();
-            } else {
-                self.metrics.account_cache_hits.increment(1);
             }
             Ok(account)
         } else {
+            self.metrics.account_cache_misses.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_account_miss();
-            } else {
-                self.metrics.account_cache_misses.increment(1);
             }
             self.state_provider.basic_account(address)
         }
@@ -460,17 +445,15 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
+            self.metrics.storage_cache_hits.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_hit();
-            } else {
-                self.metrics.storage_cache_hits.increment(1);
             }
             Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
+            self.metrics.storage_cache_misses.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_storage_miss();
-            } else {
-                self.metrics.storage_cache_misses.increment(1);
             }
             self.state_provider.storage(account, storage_key)
         }
@@ -498,17 +481,15 @@ impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvi
                 }
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
+            self.metrics.code_cache_hits.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_code_hit();
-            } else {
-                self.metrics.code_cache_hits.increment(1);
             }
             Ok(code)
         } else {
+            self.metrics.code_cache_misses.increment(1);
             if let Some(stats) = &self.cache_stats {
                 stats.record_code_miss();
-            } else {
-                self.metrics.code_cache_misses.increment(1);
             }
             self.state_provider.bytecode_by_hash(code_hash)
         }
