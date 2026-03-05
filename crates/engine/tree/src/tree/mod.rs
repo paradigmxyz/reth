@@ -471,11 +471,7 @@ where
                     }
                 }
                 LoopEvent::PersistenceComplete { result, start_time } => {
-                    if let Err(err) = self.on_persistence_complete(
-                        result.last_block,
-                        start_time,
-                        result.commit_duration,
-                    ) {
+                    if let Err(err) = self.on_persistence_complete(result, start_time) {
                         error!(target: "engine::tree", %err, "Persistence complete handling failed");
                         return
                     }
@@ -1336,11 +1332,7 @@ where
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.on_persistence_complete(
-                    result.last_block,
-                    start_time,
-                    result.commit_duration,
-                )?;
+                self.on_persistence_complete(result, start_time)?;
             }
 
             let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
@@ -1366,11 +1358,7 @@ where
 
         match rx.try_recv() {
             Ok(result) => {
-                self.on_persistence_complete(
-                    result.last_block,
-                    start_time,
-                    result.commit_duration,
-                )?;
+                self.on_persistence_complete(result, start_time)?;
                 Ok(true)
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
@@ -1387,16 +1375,16 @@ where
     /// Handles a completed persistence task.
     fn on_persistence_complete(
         &mut self,
-        last_persisted_hash_num: Option<BlockNumHash>,
+        result: PersistenceResult,
         start_time: Instant,
-        commit_duration: Option<Duration>,
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
+        let commit_duration = result.commit_duration;
         let Some(BlockNumHash {
             hash: last_persisted_block_hash,
             number: last_persisted_block_number,
-        }) = last_persisted_hash_num
+        }) = result.last_block
         else {
             // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
@@ -1620,11 +1608,7 @@ where
                                     let (result, start_time, wait_duration) = persistence_rx
                                         .recv()
                                         .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(
-                                        result.last_block,
-                                        start_time,
-                                        result.commit_duration,
-                                    );
+                                    let _ = self.on_persistence_complete(result, start_time);
                                     Some(wait_duration)
                                 } else {
                                     None
