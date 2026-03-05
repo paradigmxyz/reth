@@ -47,6 +47,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     pub async fn execute<N, Comp>(
         self,
         components: impl FnOnce(Arc<N::ChainSpec>) -> Comp,
+        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
@@ -54,7 +55,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } =
+            self.env.init::<N>(AccessRights::RW, runtime.clone())?;
 
         let components = components(provider_factory.chain_spec());
 
@@ -85,6 +87,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
                 &config,
                 executor.clone(),
                 consensus.clone(),
+                runtime.clone(),
             )
             .await?;
 

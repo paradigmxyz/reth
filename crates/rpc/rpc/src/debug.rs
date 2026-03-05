@@ -35,7 +35,7 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
     StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
+use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -59,7 +59,7 @@ where
     pub fn new(
         eth_api: Eth,
         blocking_task_guard: BlockingTaskGuard,
-        executor: impl TaskSpawner,
+        executor: &Runtime,
         mut stream: impl Stream<Item = ConsensusEngineEvent<Eth::Primitives>> + Send + Unpin + 'static,
     ) -> Self {
         let bad_block_store = BadBlockStore::default();
@@ -70,7 +70,7 @@ where
         });
 
         // Spawn a task caching bad blocks
-        executor.spawn_task(Box::pin(async move {
+        executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
                     let Ok(recovered) =
@@ -79,7 +79,7 @@ where
                     bad_block_store.insert(recovered);
                 }
             }
-        }));
+        });
 
         Self { inner }
     }
@@ -117,7 +117,7 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
@@ -204,12 +204,12 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
     }
@@ -226,7 +226,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -240,7 +240,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = eth_api.replay_transactions_until(
@@ -352,7 +352,7 @@ where
             .into())
         }
 
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
@@ -360,14 +360,15 @@ where
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 // 2. replay the required number of transactions
-                for tx in block.transactions_recovered().take(tx_index) {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit(res.state);
-                }
+                eth_api.replay_transactions_until(
+                    &mut db,
+                    evm_env.clone(),
+                    block.transactions_recovered(),
+                    *block.body().transactions()[tx_index].tx_hash(),
+                )?;
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
@@ -403,13 +404,15 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((mut evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(target_block),
-            self.eth_api().recovered_block(target_block),
-        )?;
+        let block = self
+            .eth_api()
+            .recovered_block(target_block)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
+        let mut evm_env =
+            self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -436,6 +439,8 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
+                    eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
                     let transactions = block.transactions_recovered().take(num_txs);
 
                     // Execute all transactions until index
@@ -1067,18 +1072,33 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: B256,
-        _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        let block = self
+            .inner
+            .bad_block_store
+            .get(block_hash)
+            .ok_or_else(|| internal_rpc_err("bad block not found in cache"))?;
+
+        let evm_env = self
+            .eth_api()
+            .evm_config()
+            .evm_env(block.header())
+            .map_err(RethError::other)
+            .to_rpc_result()?;
+
+        let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
+        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
     }
 
-    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
-        Ok(())
+    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
-    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
@@ -1149,6 +1169,12 @@ impl<B: BlockTrait> BadBlockStore<B> {
     fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
         let guard = self.inner.read();
         guard.iter().rev().cloned().collect()
+    }
+
+    /// Returns the bad block with the given hash, if cached.
+    fn get(&self, hash: B256) -> Option<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().find(|b| b.hash() == hash).cloned()
     }
 }
 

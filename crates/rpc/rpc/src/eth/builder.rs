@@ -18,7 +18,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
     DEFAULT_PROOF_PERMITS,
 };
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskPool, Runtime};
 use std::{sync::Arc, time::Duration};
 
 /// A helper to build the `EthApi` handler instance.
@@ -39,7 +39,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     gas_oracle_config: GasPriceOracleConfig,
     gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
-    task_spawner: Box<dyn TaskSpawner + 'static>,
+    task_spawner: Runtime,
     next_env: NextEnv,
     max_batch_size: usize,
     max_blocking_io_requests: usize,
@@ -147,7 +147,7 @@ where
             blocking_task_pool: None,
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            task_spawner: TokioTaskExecutor::default().boxed(),
+            task_spawner: Runtime::test(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
@@ -167,8 +167,8 @@ where
     N: RpcNodeCore,
 {
     /// Configures the task spawner used to spawn additional tasks.
-    pub fn task_spawner(mut self, spawner: impl TaskSpawner + 'static) -> Self {
-        self.task_spawner = Box::new(spawner);
+    pub fn task_spawner(mut self, spawner: Runtime) -> Self {
+        self.task_spawner = spawner;
         self
     }
 
@@ -478,7 +478,7 @@ where
 
     /// Builds the [`EthApiInner`] instance.
     ///
-    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
     ///
     /// # Panics
     ///
@@ -515,8 +515,13 @@ where
 
         let provider = components.provider().clone();
 
-        let eth_cache = eth_cache
-            .unwrap_or_else(|| EthStateCache::spawn(provider.clone(), eth_state_cache_config));
+        let eth_cache = eth_cache.unwrap_or_else(|| {
+            EthStateCache::spawn_with(
+                provider.clone(),
+                eth_state_cache_config,
+                task_spawner.clone(),
+            )
+        });
         let gas_oracle = gas_oracle.unwrap_or_else(|| {
             GasPriceOracle::new(provider.clone(), gas_oracle_config, eth_cache.clone())
         });
@@ -527,9 +532,9 @@ where
         let cache = eth_cache.clone();
         task_spawner.spawn_critical_task(
             "cache canonical blocks for fee history task",
-            Box::pin(async move {
+            async move {
                 fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
-            }),
+            },
         );
 
         EthApiInner::new(
@@ -563,7 +568,7 @@ where
 
     /// Builds the [`EthApi`] instance.
     ///
-    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
     ///
     /// # Panics
     ///

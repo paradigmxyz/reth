@@ -3,7 +3,7 @@ use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
@@ -17,7 +17,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Nanoseconds per second
@@ -140,17 +140,6 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
     ) -> ProviderResult<Option<StorageValue>> {
         let start = Instant::now();
         let res = self.state_provider.storage(account, storage_key);
-        self.handle.record_storage_fetch(start.elapsed());
-        res
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let start = Instant::now();
-        let res = self.state_provider.storage_by_hashed_key(address, hashed_storage_key);
         self.handle.record_storage_fetch(start.elapsed());
         res
     }

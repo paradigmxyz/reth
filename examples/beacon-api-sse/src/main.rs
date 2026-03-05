@@ -30,10 +30,10 @@ use tracing::{info, warn};
 
 fn main() {
     Cli::<EthereumChainSpecParser, BeaconEventsConfig>::parse()
-        .run(|builder, args| async move {
+        .run(async move |builder, args| {
             let handle = builder.node(EthereumNode::default()).launch().await?;
 
-            handle.node.task_executor.spawn_task(Box::pin(args.run()));
+            handle.node.task_executor.spawn_task(args.run());
 
             handle.wait_for_node_exit().await
         })

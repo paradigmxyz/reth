@@ -17,9 +17,9 @@ reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 # alloy
@@ -39,6 +39,7 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-ethereum-primitives.workspace = true
 reth-node-ethereum.workspace = true
 
 [features]
@@ -53,4 +54,5 @@ serde = [
     "bytes/serde",
     "reth-network/serde",
     "reth-network-api/serde",
+    "reth-ethereum-primitives/serde",
 ]

@@ -15,7 +15,6 @@ use reth_provider::{
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
-use reth_tasks::Runtime;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -66,7 +65,7 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = reth_tasks::Runtime::test();
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -149,6 +148,7 @@ pub async fn setup_engine_with_chain_import(
             &config,
             evm_config,
             consensus,
+            runtime.clone(),
         )
         .await?;
 
@@ -275,8 +275,9 @@ mod tests {
     use crate::test_rlp_utils::{create_fcu_json, generate_test_blocks, write_blocks_to_rlp};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::mdbx::DatabaseArguments;
+    use reth_ethereum_primitives::Block;
     use reth_payload_builder::EthPayloadBuilderAttributes;
-    use reth_primitives::SealedBlock;
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, BlockHashReader, BlockNumReader, BlockReaderIdExt,
     };
@@ -343,6 +344,7 @@ mod tests {
             let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
             // Use NoopConsensus to skip gas limit validation for test imports
             let consensus = reth_consensus::noop::NoopConsensus::arc();
+            let runtime = reth_tasks::Runtime::test();
 
             let result = import_blocks_from_file(
                 &rlp_path,
@@ -351,6 +353,7 @@ mod tests {
                 &config,
                 evm_config,
                 consensus,
+                runtime,
             )
             .await
             .unwrap();
@@ -446,7 +449,7 @@ mod tests {
         chain_spec: &ChainSpec,
         block_count: u64,
         temp_dir: &Path,
-    ) -> (Vec<SealedBlock>, PathBuf) {
+    ) -> (Vec<SealedBlock<Block>>, PathBuf) {
         let test_blocks = generate_test_blocks(chain_spec, block_count);
         assert_eq!(
             test_blocks.len(),
@@ -509,6 +512,7 @@ mod tests {
         let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
         // Use NoopConsensus to skip gas limit validation for test imports
         let consensus = reth_consensus::noop::NoopConsensus::arc();
+        let runtime = reth_tasks::Runtime::test();
 
         let result = import_blocks_from_file(
             &rlp_path,
@@ -517,6 +521,7 @@ mod tests {
             &config,
             evm_config,
             consensus,
+            runtime,
         )
         .await
         .unwrap();

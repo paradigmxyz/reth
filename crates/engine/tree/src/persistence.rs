@@ -4,7 +4,7 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
     DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
@@ -18,7 +18,7 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
@@ -124,7 +124,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(new_tip_num))]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
@@ -166,10 +166,18 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized)?;
+                // Clamp to the highest persisted block so that on restart
+                // `last_finalized_block_number` never points past available state.
+                provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
+                if finalized > last_block.number {
+                    self.pending_finalized_block = Some(finalized);
+                }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe)?;
+                provider_rw.save_safe_block_number(safe.min(last_block.number))?;
+                if safe > last_block.number {
+                    self.pending_safe_block = Some(safe);
+                }
             }
 
             if self.pruner.is_pruning_needed(last_block.number) {

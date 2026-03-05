@@ -4,7 +4,7 @@
 # Usage:
 #   reth: --build-arg BINARY=reth
 
-FROM rust:1 AS builder
+FROM rust:1.93 AS builder
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth

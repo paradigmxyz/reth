@@ -22,7 +22,10 @@ pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct GasRampPayloadFile {
     /// Engine API version (1-5).
-    pub(crate) version: u8,
+    ///
+    /// `None` indicates that `reth_newPayload` should be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) version: Option<u8>,
     /// The block hash for FCU.
     pub(crate) block_hash: B256,
     /// The params to pass to newPayload.
@@ -37,6 +40,12 @@ pub(crate) struct NewPayloadResult {
     pub(crate) gas_used: u64,
     /// The latency of the `newPayload` call.
     pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
 }
 
 impl NewPayloadResult {
@@ -67,9 +76,12 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 5)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
+        state.serialize_field("persistence_wait", &self.persistence_wait.map(|d| d.as_micros()))?;
+        state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
+        state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
         state.end()
     }
 }
@@ -102,16 +114,27 @@ impl CombinedResult {
 
 impl std::fmt::Display for CombinedResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let np = &self.new_payload_result;
         write!(
             f,
             "Block {} processed at {:.4} Ggas/s, used {} total gas. Combined: {:.4} Ggas/s. fcu: {:?}, newPayload: {:?}",
             self.block_number,
-            self.new_payload_result.gas_per_second() / GIGAGAS as f64,
-            self.new_payload_result.gas_used,
+            np.gas_per_second() / GIGAGAS as f64,
+            np.gas_used,
             self.combined_gas_per_second() / GIGAGAS as f64,
             self.fcu_latency,
-            self.new_payload_result.latency
-        )
+            np.latency,
+        )?;
+        if !np.execution_cache_wait.is_zero() {
+            write!(f, ", execution cache wait: {:?}", np.execution_cache_wait)?;
+        }
+        if !np.sparse_trie_wait.is_zero() {
+            write!(f, ", trie cache wait: {:?}", np.sparse_trie_wait)?;
+        }
+        if let Some(d) = np.persistence_wait {
+            write!(f, ", persistence wait: {d:?}")?;
+        }
+        Ok(())
     }
 }
 
@@ -126,7 +149,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 7)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 10)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -136,6 +159,18 @@ impl Serialize for CombinedResult {
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
         state.serialize_field("total_latency", &total_latency)?;
+        state.serialize_field(
+            "persistence_wait",
+            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+        )?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.new_payload_result.execution_cache_wait.as_micros(),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.new_payload_result.sparse_trie_wait.as_micros(),
+        )?;
         state.end()
     }
 }

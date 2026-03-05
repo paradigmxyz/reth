@@ -45,7 +45,7 @@ impl RemoteExEx for ExExService {
 // ANCHOR_END: snippet
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
+    reth::cli::Cli::parse_args().run(async move |builder, _| {
         let notifications = Arc::new(broadcast::channel(1).0);
 
         let server = Server::builder()

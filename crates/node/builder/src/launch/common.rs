@@ -85,7 +85,7 @@ use reth_tracing::{
 };
 use reth_transaction_pool::TransactionPool;
 use reth_trie_db::ChangesetCache;
-use std::{sync::Arc, thread::available_parallelism, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -228,8 +228,10 @@ impl LaunchContext {
         }
 
         // Configure the implicit global rayon pool for `par_iter` usage.
-        let num_threads = available_parallelism()
-            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
+        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
+        // sizes doesn't actually reserve CPU cores for other processes.
+        let _ = reserved_cpu_cores;
+        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
@@ -555,13 +557,10 @@ where
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking_task(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
+            self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
+                let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                let _ = tx.send(result);
+            });
             rx.await?.inspect_err(|err| {
                 error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
@@ -1103,7 +1102,7 @@ where
         // If engine events are provided, spawn listener for new payload reporting
         let ethstats_for_events = ethstats.clone();
         let task_executor = self.task_executor().clone();
-        task_executor.spawn_task(Box::pin(async move {
+        task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
@@ -1126,10 +1125,10 @@ where
                     }
                 }
             }
-        }));
+        });
 
         // Spawn main ethstats service
-        task_executor.spawn_task(Box::pin(async move { ethstats.run().await }));
+        task_executor.spawn_task(async move { ethstats.run().await });
 
         Ok(())
     }

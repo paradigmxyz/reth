@@ -98,7 +98,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns an executor handle to spawn tasks.
     ///
     /// This can be used to spawn critical, blocking tasks or register tasks that should be
-    /// terminated gracefully. See also [`TaskSpawner`](reth_tasks::TaskSpawner).
+    /// terminated gracefully.
     fn task_executor(&self) -> &TaskExecutor;
 }
 
