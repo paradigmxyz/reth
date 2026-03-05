@@ -63,13 +63,13 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
-                let _ = executor.apply_post_execution_changes();
 
-                let bal = db.take_built_alloy_bal().ok_or_else(|| {
-                    EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
-                })?;
+                let result = executor
+                    .apply_post_execution_changes()
+                    .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(Some(bal))
+                let bal = result.block_access_list;
+                Ok(bal)
             })
             .await
         }
