@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# PGO+BOLT optimized build script for reth/op-reth.
+# PGO+BOLT optimized build script for reth.
 #
 # Environment variables:
-#   BINARY       - Binary to build: reth (default) or op-reth
 #   PROFILE      - Cargo profile (default: maxperf-symbols)
 #   FEATURES     - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET       - Target triple (default: auto-detected from rustc)
@@ -15,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # Configuration from environment
-BINARY="${BINARY:-reth}"
+BINARY="reth"
 PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
@@ -26,19 +25,7 @@ else
     PROFILE_DIR=$PROFILE
 fi
 
-# Manifest path for the binary
-case "$BINARY" in
-    reth)
-        MANIFEST_PATH="bin/reth"
-        ;;
-    op-reth)
-        MANIFEST_PATH="crates/optimism/bin"
-        ;;
-    *)
-        echo "Unknown binary: $BINARY. Supported: reth, op-reth"
-        exit 1
-        ;;
-esac
+MANIFEST_PATH="bin/reth"
 
 LLVM_VERSION=$(rustc -Vv | grep -oP 'LLVM version: \K\d+')
 
