@@ -727,7 +727,7 @@ where
                 if !has_overlay {
                     // Fast path: provider result is authoritative, use it
                     // directly with limit + 1 to detect next_key.
-                    let iter = StateProvider::storage_range_iter(
+                    let entries = StateProvider::storage_range(
                         &db.database.0,
                         contract_address,
                         key_start,
@@ -737,8 +737,7 @@ where
 
                     let mut storage = BTreeMap::new();
                     let mut next_key = None;
-                    for entry in iter {
-                        let (hash, se) = entry.map_err(Eth::Error::from_eth_err)?;
+                    for (hash, se) in entries {
                         if storage.len() >= limit {
                             next_key = Some(hash);
                             break;
@@ -769,7 +768,7 @@ where
                 let overlay_size = overlay.map_or(0, |s| s.len());
                 let provider_limit = limit.saturating_add(overlay_size).saturating_add(1);
 
-                let base_iter = StateProvider::storage_range_iter(
+                let base_entries = StateProvider::storage_range(
                     &db.database.0,
                     contract_address,
                     key_start,
@@ -779,8 +778,7 @@ where
 
                 // Collect base entries keyed by plain slot for overlay merge
                 let mut merged: BTreeMap<B256, U256> = BTreeMap::new();
-                for entry in base_iter {
-                    let (_hash, se) = entry.map_err(Eth::Error::from_eth_err)?;
+                for (_hash, se) in base_entries {
                     merged.insert(se.key, se.value);
                 }
 

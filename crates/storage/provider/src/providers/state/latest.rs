@@ -275,20 +275,18 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         }
     }
 
-    fn storage_range_iter(
+    fn storage_range(
         &self,
         address: Address,
         key_start: B256,
         limit: usize,
-    ) -> ProviderResult<reth_storage_api::StorageRangeIter> {
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
         if self.0.cached_storage_settings().use_hashed_state() {
-            return Ok(reth_storage_api::StorageRangeIter::empty());
+            return Ok(Vec::new());
         }
 
         let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
         let mut result: BTreeMap<B256, StorageEntry> = BTreeMap::new();
-        // Track the highest hash so we can evict entries beyond `limit`
-        // without rebuilding the entire map.
         let mut cutoff: Option<B256> = None;
         let walker = cursor.walk_dup(Some(address), None)?;
         for entry in walker {
@@ -300,8 +298,6 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             if hashed < key_start {
                 continue;
             }
-            // Skip entries beyond the current cutoff — they can't make it
-            // into the top `limit` entries.
             if let Some(c) = cutoff &&
                 hashed >= c
             {
@@ -309,8 +305,6 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             }
             result.insert(hashed, storage_entry);
             if result.len() > limit {
-                // Remove the largest entry and update the cutoff so future
-                // entries beyond this point are skipped entirely.
                 cutoff = result.keys().next_back().copied();
                 if let Some(c) = cutoff {
                     result.remove(&c);
@@ -318,7 +312,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             }
         }
 
-        Ok(reth_storage_api::StorageRangeIter::new(result.into_iter().map(Ok)))
+        Ok(result.into_iter().collect())
     }
 }
 

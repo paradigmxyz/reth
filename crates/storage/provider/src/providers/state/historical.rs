@@ -574,18 +574,16 @@ impl<
         self.storage_by_lookup_key(address, storage_key)
     }
 
-    fn storage_range_iter(
+    fn storage_range(
         &self,
         address: Address,
         key_start: B256,
         limit: usize,
-    ) -> ProviderResult<reth_storage_api::StorageRangeIter> {
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
-        // Scan StoragesHistory to discover all unique plain slot keys for this address.
-        // The [address|key|block] key layout keeps all entries for one address contiguous.
         let slots: BTreeSet<B256> = self.provider.with_rocksdb_tx(|_rocks_tx_ref| {
             let mut slots = BTreeSet::new();
 
@@ -604,7 +602,6 @@ impl<
                 return Ok(slots);
             }
 
-            // v1: MDBX cursor
             let mut cursor = self.tx().cursor_read::<tables::StoragesHistory>()?;
             let walker = cursor.walk_range(
                 StorageShardedKey::new(address, B256::ZERO, 0)..=
@@ -617,9 +614,6 @@ impl<
             Ok(slots)
         })?;
 
-        // Phase 1 (CPU only): hash each slot, filter by key_start, sort, and
-        // truncate to `limit` so that only the needed slots proceed to the
-        // expensive history lookup in phase 2.
         let mut candidates: BTreeMap<B256, B256> = BTreeMap::new();
         for slot in &slots {
             let hashed = alloy_primitives::keccak256(slot);
@@ -627,21 +621,20 @@ impl<
                 candidates.insert(hashed, *slot);
             }
         }
-        // Phase 2 (bounded I/O): iterate candidates in hash order, look up
-        // historical values, and stop once we have `limit` non-zero entries.
-        let mut result: BTreeMap<B256, StorageEntry> = BTreeMap::new();
+
+        let mut result: Vec<(B256, StorageEntry)> = Vec::new();
         for (hashed, slot) in candidates {
             if let Some(value) = self.storage_by_lookup_key(address, slot)? &&
                 value != StorageValue::ZERO
             {
-                result.insert(hashed, StorageEntry::new(slot, value));
+                result.push((hashed, StorageEntry::new(slot, value)));
                 if result.len() == limit {
                     break;
                 }
             }
         }
 
-        Ok(reth_storage_api::StorageRangeIter::new(result.into_iter().map(Ok)))
+        Ok(result)
     }
 }
 
