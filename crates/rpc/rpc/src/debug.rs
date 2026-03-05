@@ -632,7 +632,6 @@ where
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
-    Eth::Provider: ChangeSetReader,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -952,17 +951,25 @@ where
         start_hash: B256,
         end_hash: B256,
     ) -> RpcResult<Vec<Address>> {
-        let start_header = self
-            .provider()
-            .header(start_hash)
-            .to_rpc_result()?
-            .ok_or_else(|| internal_rpc_err(format!("block {start_hash} not found")))?;
-        let end_header = self
-            .provider()
-            .header(end_hash)
-            .to_rpc_result()?
-            .ok_or_else(|| internal_rpc_err(format!("block {end_hash} not found")))?;
-        self.debug_get_modified_accounts_by_number(start_header.number(), end_header.number()).await
+        let (start_number, end_number) = self
+            .inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let start_header = this
+                    .provider()
+                    .header(start_hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(start_hash.into()))?;
+                let end_header = this
+                    .provider()
+                    .header(end_hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(end_hash.into()))?;
+                Ok((start_header.number(), end_header.number()))
+            })
+            .await
+            .map_err(Into::into)?;
+        self.debug_get_modified_accounts_by_number(start_number, end_number).await
     }
 
     async fn debug_get_modified_accounts_by_number(
@@ -976,14 +983,23 @@ where
             )));
         }
 
-        let mut accounts = std::collections::BTreeSet::new();
-        for block in start_number + 1..=end_number {
-            let changesets = self.provider().account_block_changeset(block).to_rpc_result()?;
-            for changeset in changesets {
-                accounts.insert(changeset.address);
-            }
-        }
-        Ok(accounts.into_iter().collect())
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let mut accounts = std::collections::BTreeSet::new();
+                for block in start_number + 1..=end_number {
+                    let changesets = this
+                        .provider()
+                        .account_block_changeset(block)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    for changeset in changesets {
+                        accounts.insert(changeset.address);
+                    }
+                }
+                Ok(accounts.into_iter().collect())
+            })
+            .await
+            .map_err(Into::into)
     }
 
     async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {
