@@ -3,7 +3,7 @@ use alloy_primitives::{map::B256Map, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
     prefix_set::{PrefixSet, TriePrefixSets},
-    BranchNodeCompact, Nibbles,
+    BranchNodeCompact, Nibbles, TrieMask,
 };
 use std::sync::Arc;
 
@@ -123,6 +123,19 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         }
 
         if new_hash_mask != original_hash_mask {
+            // If all children were originally hashed (state_mask == hash_mask) and only one
+            // hashed bit survived masking, clear it too. Being inside this block guarantees
+            // bits were unset, so a single remaining bit means the original had more than one.
+            // This handles the case where all but one child of a branch have been deleted —
+            // the remaining child must be revealed to collapse the branch, so its cached hash
+            // cannot be used.
+            if ((node.state_mask ^ original_hash_mask) |
+                (new_hash_mask & TrieMask::new(new_hash_mask.get().wrapping_sub(1))))
+            .is_empty()
+            {
+                new_hash_mask = TrieMask::default();
+            }
+
             // Remove hashes for unset bits in-place.
             let hashes = Arc::make_mut(&mut node.hashes);
             let mut write = 0;
@@ -242,11 +255,18 @@ mod tests {
 
     #[test]
     fn test_seek_masks_matching_child_hashes() {
-        // Node at [0x1] with children 2 and 5 hashed.
+        // Node at [0x1] with children 2 and 5 hashed, tree_mask keeps it alive.
         // Prefix set marks child 2 as changed.
+        // Since only one hashed bit (5) would remain and the original had more than one,
+        // that last bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
-            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                vec![hash(2), hash(5)],
+            ),
         )];
 
         let mut ps = PrefixSetMut::default();
@@ -258,10 +278,9 @@ mod tests {
         let result = cursor.seek(Nibbles::default()).unwrap();
         let (key, node) = result.unwrap();
         assert_eq!(key, Nibbles::from_nibbles([0x1]));
-        // Hash bit 2 should be unset, only bit 5 remains.
         assert!(!node.hash_mask.is_bit_set(2));
-        assert!(node.hash_mask.is_bit_set(5));
-        assert_eq!(&*node.hashes, &[hash(5)]);
+        assert!(!node.hash_mask.is_bit_set(5));
+        assert!(node.hashes.is_empty());
     }
 
     #[test]
@@ -317,6 +336,10 @@ mod tests {
 
     #[test]
     fn test_seek_exact_masks_hash_bits() {
+        // Node at [0x1] with children 2 and 5 hashed.
+        // Prefix set marks child 5 as changed.
+        // Since only one hashed bit (2) would remain and the original had two,
+        // the last remaining bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
             node_with_tree_mask(
@@ -335,9 +358,9 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap();
         let (_, node) = result.unwrap();
-        assert!(node.hash_mask.is_bit_set(2));
+        assert!(!node.hash_mask.is_bit_set(2));
         assert!(!node.hash_mask.is_bit_set(5));
-        assert_eq!(&*node.hashes, &[hash(2)]);
+        assert!(node.hashes.is_empty());
     }
 
     #[test]
@@ -447,8 +470,12 @@ mod tests {
 
     #[test]
     fn test_root_hash_cleared_on_mask() {
-        let mut n =
-            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]);
+        let mut n = node_with_tree_mask(
+            0b0000_0000_0010_0100,
+            0b0000_0000_0010_0100,
+            0b0000_0000_0010_0100,
+            vec![hash(2), hash(5)],
+        );
         n.root_hash = Some(hash(0xFF));
 
         let nodes = vec![(Nibbles::from_nibbles([0x1]), n)];
@@ -505,10 +532,11 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_mask_preserves_remaining_hashes() {
+    fn test_partial_mask_clears_last_remaining_hash() {
         // Node at [0x1] with children 0, 3, 7 hashed.
         // Prefix set marks children 0 and 7 as changed.
-        // Only hash for child 3 should remain.
+        // Only child 3 would remain, but since the original had more than one hashed bit,
+        // the single remaining bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
             node_with_tree_mask(
@@ -529,10 +557,42 @@ mod tests {
         let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
         assert_eq!(key, Nibbles::from_nibbles([0x1]));
         assert!(!node.hash_mask.is_bit_set(0));
+        assert!(!node.hash_mask.is_bit_set(3));
+        assert!(!node.hash_mask.is_bit_set(7));
+        assert!(node.hashes.is_empty());
+        assert_eq!(node.root_hash, None);
+    }
+
+    #[test]
+    fn test_partial_mask_preserves_last_hash_when_state_mask_wider() {
+        // Node at [0x1] with state_mask bits 0, 3, 7, 9 but only 0, 3, 7 hashed.
+        // Prefix set marks children 0 and 7 as changed.
+        // Only child 3's hash remains, but since state_mask != original_hash_mask
+        // (child 9 is a non-hashed child), this is not an all-children-deleted scenario
+        // and the last hash is preserved.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0010_1000_1001, // state_mask: bits 0, 3, 7, 9
+                0b0000_0010_1000_1001,
+                0b0000_0000_1000_1001, // hash_mask: bits 0, 3, 7
+                vec![hash(0), hash(3), hash(7)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x7]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        assert!(!node.hash_mask.is_bit_set(0));
         assert!(node.hash_mask.is_bit_set(3));
         assert!(!node.hash_mask.is_bit_set(7));
         assert_eq!(&*node.hashes, &[hash(3)]);
-        assert_eq!(node.root_hash, None);
     }
 
     mod proptest_tests {
