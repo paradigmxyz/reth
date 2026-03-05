@@ -226,7 +226,7 @@ jobs:
 
   build-pgo:
     name: build release (x86_64-linux PGO+BOLT)
-    runs-on: depot-ubuntu-24.04-16
+    runs-on: depot-ubuntu-latest-16
     needs: [extract-version, pgo-profile]
     env:
       RUSTC_WRAPPER: "sccache"
