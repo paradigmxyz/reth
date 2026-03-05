@@ -402,13 +402,11 @@ jobs:
               repo: context.repo.repo,
               pull_number: parseInt(process.env.BENCH_PR),
             });
-            // For closed/merged PRs, the merge ref doesn't exist — use head SHA
-            if (pr.state !== 'open') {
-              core.info(`PR #${process.env.BENCH_PR} is ${pr.state}, using head SHA ${pr.head.sha}`);
-              core.setOutput('ref', pr.head.sha);
-            } else {
-              core.setOutput('ref', `refs/pull/${process.env.BENCH_PR}/merge`);
-            }
+            // Always use head SHA — the merge ref (refs/pull/N/merge) may not
+            // exist if the PR has conflicts, was force-pushed, or was
+            // merged/closed between this step and checkout.
+            core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
+            core.setOutput('ref', pr.head.sha);
 
       - uses: actions/checkout@v6
         with:
@@ -708,7 +706,7 @@ jobs:
           MC="mc --config-dir /home/ubuntu/.mc"
           BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous-big-blocks.tar.zst"
           BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
-          rm -r "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
+          rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
           echo "Downloading big blocks from $BUCKET..."
           $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
           echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
