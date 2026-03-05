@@ -1,5 +1,4 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
@@ -157,6 +156,19 @@ where
                 Ok(results)
             })
             .await
+    }
+
+    /// Replays a block and generates the RLP-encoded Block Access List (EIP-7928).
+    pub async fn get_block_access_list(&self, block_id: BlockId) -> Result<Bytes, Eth::Error> {
+        let block_hash = self
+            .provider()
+            .block_hash_for_id(block_id)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let bal = self.eth_api().get_block_access_list(block_hash).await?;
+
+        Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -831,8 +843,9 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
-    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let _permit = self.acquire_trace_permit().await;
+        self.get_block_access_list(block_id).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

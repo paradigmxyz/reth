@@ -1,4 +1,3 @@
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
@@ -157,9 +156,10 @@ pub trait DebugApi<TxReq: RpcObject> {
         hash: B256,
     ) -> RpcResult<ExecutionWitness>;
 
-    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
+    /// Re-executes a block and returns the RLP-encoded Block Access List (BAL) as defined in
+    /// EIP-7928.
     #[method(name = "getBlockAccessList")]
-    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList>;
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will
