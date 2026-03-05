@@ -318,7 +318,7 @@ impl<B: Block> RecoveredBlock<B> {
             .transactions_iter()
             .enumerate()
             .find(|(_, tx)| tx.trie_hash() == tx_hash)
-            .map(|(index, tx)| IndexedTx { block: self, tx, index })
+            .map(|(index, tx)| IndexedTx { block: self, tx, index, tx_hash })
     }
 
     /// Returns an iterator over all transactions and their sender.
@@ -611,6 +611,8 @@ pub struct IndexedTx<'a, B: Block> {
     tx: &'a <B::Body as BlockBody>::Transaction,
     /// Index of the transaction in the block
     index: usize,
+    /// Cached transaction hash to avoid recomputing RLP + keccak256
+    tx_hash: TxHash,
 }
 
 impl<'a, B: Block> IndexedTx<'a, B> {
@@ -626,8 +628,8 @@ impl<'a, B: Block> IndexedTx<'a, B> {
     }
 
     /// Returns the transaction hash.
-    pub fn tx_hash(&self) -> TxHash {
-        self.tx.trie_hash()
+    pub const fn tx_hash(&self) -> TxHash {
+        self.tx_hash
     }
 
     /// Returns the block hash.
@@ -643,7 +645,7 @@ impl<'a, B: Block> IndexedTx<'a, B> {
     /// Builds a [`TransactionMeta`] for the indexed transaction.
     pub fn meta(&self) -> TransactionMeta {
         TransactionMeta {
-            tx_hash: self.tx.trie_hash(),
+            tx_hash: self.tx_hash,
             index: self.index as u64,
             block_hash: self.block.hash(),
             block_number: self.block.number(),
