@@ -210,7 +210,8 @@ rm -rf "$BOLT_DIR"
 mkdir -p "$BOLT_DIR"
 
 echo "Building BOLT-instrumented binary with PGO..."
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Crelocation-model=static ${EXTRA_RUSTFLAGS:-}" \
+# --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 # Instrument with BOLT
@@ -248,7 +249,8 @@ echo "  Phase 3: Final PGO+BOLT Optimized Build"
 echo "============================================================"
 
 echo "Building PGO-optimized binary..."
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Crelocation-model=static ${EXTRA_RUSTFLAGS:-}" \
+# --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
