@@ -1156,7 +1156,6 @@ impl SparseTrie for ParallelSparseTrie {
 
         let mut retained_leaves = retained_leaves.to_vec();
         retained_leaves.sort_unstable();
-        retained_leaves.dedup();
 
         let mut effective_pruned_roots = Vec::<Nibbles>::new();
         let mut stack: SmallVec<[Nibbles; 32]> = SmallVec::new();
