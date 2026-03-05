@@ -204,12 +204,12 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
     }
@@ -404,13 +404,15 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((mut evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(target_block),
-            self.eth_api().recovered_block(target_block),
-        )?;
+        let block = self
+            .eth_api()
+            .recovered_block(target_block)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
+        let mut evm_env =
+            self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -1091,12 +1093,12 @@ where
         self.trace_block(block, evm_env, opts).await.map_err(Into::into)
     }
 
-    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
-        Ok(())
+    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
-    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
