@@ -496,7 +496,7 @@ where
             block_access_list,
         ));
 
-        // Create optional cache stats for slow block logging
+        // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
 
@@ -1789,7 +1789,7 @@ where
             })
             .count();
 
-        // Get cache statistics for slow block logging
+        // Get cache statistics for detailed block logging
         let (account_cache_hits, account_cache_misses) = cache_stats
             .as_ref()
             .map(|s| (s.account_hits(), s.account_misses()))
@@ -1801,7 +1801,7 @@ where
         let (code_cache_hits, code_cache_misses) =
             cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
 
-        // Build execution timing stats for slow block logging
+        // Build execution timing stats for detailed block logging
         Box::new(ExecutionTimingStats {
             block_number: block.number(),
             block_hash: block.hash(),

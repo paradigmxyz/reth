@@ -503,18 +503,26 @@ where
     /// Uses biased selection to prioritize persistence completion to update in-memory state and
     /// unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
+        // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
-        if let Some((rx, start_time, action)) = maybe_persistence {
+        if let Some((persistence_rx, start_time, action)) = maybe_persistence {
+            // Biased select prioritizes persistence completion to update in memory state and
+            // unblock further writes
             crossbeam_channel::select_biased! {
-                recv(rx) -> result => {
+                recv(persistence_rx) -> result => {
+                    // Don't put it back - consumed (oneshot-like behavior)
                     match result {
-                        Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                        Ok(result) => LoopEvent::PersistenceComplete {
+                            result,
+                            start_time,
+                        },
                         Err(_) => LoopEvent::Disconnected,
                     }
                 },
                 recv(self.incoming) -> msg => {
-                    self.persistence_state.rx = Some((rx, start_time, action));
+                    // Put the persistence rx back - we didn't consume it
+                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
                     match msg {
                         Ok(m) => LoopEvent::EngineMessage(m),
                         Err(_) => LoopEvent::Disconnected,
@@ -522,6 +530,7 @@ where
                 },
             }
         } else {
+            // No persistence in progress - just wait on incoming
             match self.incoming.recv() {
                 Ok(m) => LoopEvent::EngineMessage(m),
                 Err(_) => LoopEvent::Disconnected,
@@ -1365,6 +1374,7 @@ where
                 Ok(true)
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
+                // Not ready yet, put it back
                 self.persistence_state.rx = Some((rx, start_time, action));
                 Ok(false)
             }
@@ -1877,13 +1887,17 @@ where
         Ok(())
     }
 
-    /// Removes timing stats for blocks at or below the given block number.
-    /// If `commit_duration` is provided, checks for slow blocks and emits events before removing.
+    /// Removes timing stats for blocks at or below `below_number`.
+    ///
+    /// No-op when detailed block logging is disabled (no stats are recorded in that case).
+    /// When `commit_duration` is provided and a slow block threshold is configured, checks
+    /// each removed block against the threshold and emits a [`ConsensusEngineEvent::SlowBlock`]
+    /// event for blocks that exceed it.
     fn purge_timing_stats(&mut self, below_number: u64, commit_duration: Option<Duration>) {
         let threshold = self.config.slow_block_threshold();
         let check_slow = commit_duration.is_some() && threshold.is_some();
 
-        // Collect keys to remove so we can drain values without cloning.
+        // Two-pass: collect keys first because emit_event borrows &mut self.
         let keys_to_remove: Vec<B256> = self
             .execution_timing_stats
             .iter()
@@ -2862,7 +2876,7 @@ where
 
         let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
 
-        // Store timing stats for slow block logging after persistence
+        // Store timing stats for detailed block logging after persistence
         if let Some(stats) = timing_stats {
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }

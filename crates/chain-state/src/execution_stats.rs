@@ -1,7 +1,7 @@
-//! Execution timing statistics for slow block logging.
+//! Execution timing statistics for detailed block logging.
 //!
 //! This module provides types for collecting and passing execution timing statistics
-//! through the block processing pipeline, enabling unified slow block logging after
+//! through the block processing pipeline, enabling unified detailed block logging after
 //! database commit.
 
 use std::time::Duration;

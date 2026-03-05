@@ -94,8 +94,8 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
 
-    /// Optional cache statistics for slow block logging. Only tracked when slow block threshold is
-    /// configured.
+    /// Optional cache statistics for detailed block logging. Only tracked when slow block
+    /// threshold is configured.
     cache_stats: Option<Arc<CacheStats>>,
 }
 
@@ -123,7 +123,7 @@ impl<S> CachedStateProvider<S, true> {
 }
 
 impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
-    /// Enables cache statistics tracking for slow block logging.
+    /// Enables cache statistics tracking for detailed block logging.
     pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
         self.cache_stats = stats;
         self
@@ -228,7 +228,7 @@ impl CachedStateMetrics {
     }
 }
 
-/// Cache hit/miss statistics for slow block logging.
+/// Cache hit/miss statistics for detailed block logging.
 #[derive(Debug, Default)]
 pub struct CacheStats {
     /// Account cache hits
