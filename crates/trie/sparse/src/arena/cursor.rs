@@ -40,10 +40,10 @@ pub(super) enum SeekResult {
 #[derive(Debug)]
 pub(super) enum NextResult {
     /// The head is a non-branch node (subtrie, taken-subtrie, leaf, etc.).
-    /// The caller should process it and then pop.
+    /// The caller should process it; the next call to [`ArenaCursor::next`] will pop it.
     NonBranch,
     /// The head branch has no more qualifying children. It is still on the stack;
-    /// the caller should process it and then pop.
+    /// the caller should process it. The next call to [`ArenaCursor::next`] will pop it.
     Branch,
     /// The stack is empty — the traversal is complete.
     Done,
@@ -60,6 +60,9 @@ pub(super) enum NextResult {
 #[derive(Debug, Default, Clone)]
 pub(super) struct ArenaCursor {
     stack: Vec<ArenaCursorStackEntry>,
+    /// Whether the head entry should be popped at the start of the next [`Self::next`] call.
+    /// Set when `next` returns [`NextResult::NonBranch`] or [`NextResult::Branch`].
+    needs_pop: bool,
 }
 
 impl ArenaCursor {
@@ -87,12 +90,13 @@ impl ArenaCursor {
     /// Clears the traversal stack and pushes the given root entry.
     pub(super) fn reset(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
         debug_assert!(
-            self.stack.is_empty(),
-            "cursor stack must be drained before reset; stack has {} entries: {:#?}",
+            self.stack.is_empty() && !self.needs_pop,
+            "cursor must be fully drained before reset; stack has {} entries, needs_pop={}",
             self.stack.len(),
-            self.stack,
+            self.needs_pop,
         );
         self.stack.clear();
+        self.needs_pop = false;
         self.push(arena, idx, path);
     }
 
@@ -105,13 +109,16 @@ impl ArenaCursor {
 
     /// Pops the top entry from the stack and propagates dirty state to the parent.
     /// Returns the popped entry.
+    ///
+    /// Uses `arena.get()` for the popped node because callers (e.g. pruning) may remove
+    /// the node from the arena between the time it was pushed and the time it is popped.
     #[instrument(level = "trace", target = "trie::arena", skip(self, arena))]
     pub(super) fn pop(&mut self, arena: &mut Arena<ArenaSparseNode>) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
 
         #[cfg(debug_assertions)]
-        if let ArenaSparseNode::Subtrie(s) = &arena[entry.index] {
+        if let Some(ArenaSparseNode::Subtrie(s)) = arena.get(entry.index) {
             debug_assert_eq!(
                 s.path, entry.path,
                 "subtrie cached path {:?} does not match stack entry path {:?}",
@@ -120,7 +127,7 @@ impl ArenaCursor {
         }
 
         if let Some(parent) = self.stack.last() {
-            let child_is_dirty = match &arena[entry.index] {
+            let child_is_dirty = arena.get(entry.index).is_some_and(|node| match node {
                 ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Subtrie(s) => {
@@ -129,7 +136,7 @@ impl ArenaCursor {
                         matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
                 }
                 _ => false,
-            };
+            });
             if child_is_dirty {
                 let parent_state = arena[parent.index].state_mut();
                 if !matches!(parent_state, ArenaSparseNodeState::Dirty) {
@@ -145,6 +152,7 @@ impl ArenaCursor {
     /// then removes the final (root) entry.
     pub(super) fn drain(&mut self, arena: &mut Arena<ArenaSparseNode>) {
         trace!(target: TRACE_TARGET, "Draining stack");
+        self.needs_pop = false;
         while self.stack.len() > 1 {
             self.pop(arena);
         }
@@ -217,17 +225,27 @@ impl ArenaCursor {
 
     /// Advances the DFS traversal to the next actionable node.
     ///
-    /// Internally descends through qualifying branch children until it reaches a node
-    /// that requires caller action. Returns [`NextResult::NonBranch`] when the head is
-    /// a non-branch node the caller should process and pop, or [`NextResult::Popped`]
-    /// when a branch has exhausted its qualifying children and been popped.
+    /// If a previous call returned [`NextResult::NonBranch`] or [`NextResult::Branch`],
+    /// the head entry is automatically popped (with dirty-state propagation) before
+    /// descending further. This means callers never need to call [`Self::pop`] after
+    /// `next` — it is handled internally on the subsequent call.
+    ///
+    /// Returns [`NextResult::NonBranch`] when the head is a non-branch node the caller
+    /// should process, or [`NextResult::Branch`] when a branch has exhausted its
+    /// qualifying children. In both cases the node is still on the stack so the caller
+    /// can read it via [`Self::head`].
     ///
     /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
     pub(super) fn next(
         &mut self,
-        arena: &Arena<ArenaSparseNode>,
+        arena: &mut Arena<ArenaSparseNode>,
         should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
     ) -> NextResult {
+        if self.needs_pop {
+            self.pop(arena);
+            self.needs_pop = false;
+        }
+
         loop {
             let Some(head) = self.stack.last_mut() else {
                 return NextResult::Done;
@@ -235,6 +253,7 @@ impl ArenaCursor {
             let head_idx = head.index;
 
             let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
+                self.needs_pop = true;
                 return NextResult::NonBranch;
             };
 
@@ -264,7 +283,7 @@ impl ArenaCursor {
             }
 
             if !descended {
-                // No qualifying children remain — caller should process and pop.
+                self.needs_pop = true;
                 return NextResult::Branch;
             }
         }
