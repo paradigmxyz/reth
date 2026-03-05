@@ -1,14 +1,15 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
-    EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
-    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
+    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
+    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
+    Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_network_peers::PeerId;
+use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
 use std::{
@@ -152,8 +153,13 @@ pub trait NetworkEventListenerProvider: NetworkPeersEvents {
 pub enum DiscoveryEvent {
     /// Discovered a node
     NewNode(DiscoveredEvent),
-    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId),
+    /// Retrieved a [`ForkId`] from the peer via ENR request.
+    ///
+    /// Contains the full [`NodeRecord`] (peer ID + address) and the reported [`ForkId`].
+    /// Used to verify fork compatibility before admitting the peer.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(NodeRecord, ForkId),
 }
 
 /// Represents events related to peer discovery in the network.
@@ -247,6 +253,15 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for receipts.
         response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
     },
+    /// Requests block access lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists {
+        /// The request for block access lists.
+        request: GetBlockAccessLists,
+        /// The channel to send the response for block access lists.
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -267,7 +282,17 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
+            Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
         };
+    }
+
+    /// Returns true if this request is supported for the negotiated eth protocol version.
+    #[inline]
+    pub fn is_supported_by_eth_version(&self, version: EthVersion) -> bool {
+        match self {
+            Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
+            _ => true,
+        }
     }
 
     /// Returns the [`EthMessage`] for this type
@@ -293,6 +318,12 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             }
             Self::GetReceipts70 { request, .. } => {
                 EthMessage::GetReceipts70(RequestPair { request_id, message: request.clone() })
+            }
+            Self::GetBlockAccessLists { request, .. } => {
+                EthMessage::GetBlockAccessLists(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                })
             }
         }
     }
@@ -342,5 +373,20 @@ impl<R> PeerRequestSender<R> {
 impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_block_access_lists_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetBlockAccessLists { request: GetBlockAccessLists(vec![]), response: tx };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
     }
 }

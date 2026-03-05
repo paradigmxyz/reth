@@ -20,18 +20,30 @@ impl BenchMode {
         }
     }
 
+    /// Returns the total number of blocks in the benchmark, if known.
+    ///
+    /// For [`BenchMode::Range`] this is the length of the range.
+    /// For [`BenchMode::Continuous`] the total is unbounded, so `None` is returned.
+    pub const fn total_blocks(&self) -> Option<u64> {
+        match self {
+            Self::Continuous(_) => None,
+            Self::Range(range) => {
+                Some(range.end().saturating_sub(*range.start()).saturating_add(1))
+            }
+        }
+    }
+
     /// Create a [`BenchMode`] from optional `from` and `to` fields.
-    pub fn new(from: Option<u64>, to: Option<u64>, latest_block: u64) -> Result<Self, eyre::Error> {
+    ///
+    /// If only `--to` is provided, `from` is derived as `latest_block + 1`.
+    pub const fn new(from: Option<u64>, to: Option<u64>, latest_block: u64) -> Self {
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.
         match (from, to) {
-            (Some(from), Some(to)) => Ok(Self::Range(from..=to)),
-            (None, None) => Ok(Self::Continuous(latest_block)),
-            (Some(start), None) => Ok(Self::Continuous(start)),
-            _ => {
-                // both or neither are allowed, everything else is ambiguous
-                Err(eyre::eyre!("`from` and `to` must be provided together, or not at all."))
-            }
+            (Some(from), Some(to)) => Self::Range(from..=to),
+            (None, None) => Self::Continuous(latest_block),
+            (Some(start), None) => Self::Continuous(start),
+            (None, Some(to)) => Self::Range(latest_block + 1..=to),
         }
     }
 }

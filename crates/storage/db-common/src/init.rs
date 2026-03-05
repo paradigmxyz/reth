@@ -36,6 +36,12 @@ use reth_trie::{
     IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
 };
 use reth_trie_db::DatabaseStateRoot;
+
+type DbStateRoot<'a, TX, A> = StateRootComputer<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use tracing::{debug, error, info, trace, warn};
@@ -176,7 +182,7 @@ where
                         target: "reth::storage",
                         ?stored,
                         requested = ?genesis_storage_settings,
-                        "Storage settings mismatch detected"
+                        "Storage settings mismatch detected. Using the stored settings from the existing database."
                     );
                 }
 
@@ -214,13 +220,13 @@ where
     // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
-        if genesis_storage_settings.account_changesets_in_static_files {
+        if genesis_storage_settings.storage_v2 {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
                 .set_expected_block_start(genesis_block_number);
         }
-        if genesis_storage_settings.storage_changesets_in_static_files {
+        if genesis_storage_settings.storage_v2 {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
@@ -259,7 +265,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.transaction_senders_in_static_files {
+    if genesis_storage_settings.storage_v2 {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -429,6 +435,40 @@ where
     insert_history(provider, alloc, genesis_block_number)
 }
 
+/// Inserts account history indices for genesis accounts.
+pub fn insert_genesis_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_account_history(provider, alloc, genesis_block_number)
+}
+
+/// Inserts storage history indices for genesis accounts.
+pub fn insert_genesis_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_storage_history(provider, alloc, genesis_block_number)
+}
+
 /// Inserts history indices for genesis accounts and storage.
 ///
 /// Writes to either MDBX or `RocksDB` based on storage settings configuration,
@@ -445,16 +485,50 @@ where
         + RocksDBProviderFactory
         + NodePrimitivesProvider,
 {
+    insert_account_history(provider, alloc.clone(), block)?;
+    insert_storage_history(provider, alloc, block)?;
+    Ok(())
+}
+
+/// Inserts account history indices at the given block.
+pub fn insert_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
-        for (addr, _) in alloc.clone() {
+        for (addr, _) in alloc {
             writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
         }
         trace!(target: "reth::cli", "Inserted account history");
         Ok(((), writer.into_raw_rocksdb_batch()))
     })?;
 
+    Ok(())
+}
+
+/// Inserts storage history indices at the given block.
+pub fn insert_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_storages_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
@@ -756,7 +830,20 @@ fn compute_state_root<Provider>(
     prefix_sets: Option<TriePrefixSets>,
 ) -> Result<B256, InitStorageError>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+{
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_state_root_inner::<_, A>(provider, prefix_sets)
+    })
+}
+
+fn compute_state_root_inner<Provider, A>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    A: reth_trie_db::TrieTableAdapter,
 {
     trace!(target: "reth::cli", "Computing state root");
 
@@ -766,7 +853,7 @@ where
 
     loop {
         let mut state_root =
-            StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
+            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state);
 
         if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);
@@ -900,6 +987,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                reth_tasks::Runtime::test(),
             )
             .unwrap(),
         );
@@ -983,7 +1071,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.account_history_in_rocksdb {
+            let (accounts, storages) = if settings.storage_v2 {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)
@@ -1006,10 +1094,7 @@ mod tests {
         init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
 
         // Request different settings - should warn but succeed
-        let result = init_genesis_with_settings(
-            &factory,
-            StorageSettings::v1().with_receipts_in_static_files(true),
-        );
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
@@ -1018,7 +1103,7 @@ mod tests {
     #[test]
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let settings = StorageSettings::v1().with_receipts_in_static_files(true);
+        let settings = StorageSettings::v2();
         init_genesis_with_settings(&factory, settings).unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);

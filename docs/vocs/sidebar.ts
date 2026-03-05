@@ -110,6 +110,10 @@ export const sidebar: SidebarItem[] = [
                         link: "/run/faq/pruning"
                     },
                     {
+                        text: "Storage V2 (Experimental)",
+                        link: "/run/faq/storage-v2"
+                    },
+                    {
                         text: "Ports",
                         link: "/run/faq/ports"
                     },

@@ -62,8 +62,7 @@ where
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new()
-                .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
+            EthereumBuilderConfig::new().with_extra_data(ctx.payload_builder_config().extra_data()),
         );
 
         let conf = ctx.payload_builder_config();
@@ -83,8 +82,7 @@ where
         let (payload_service, payload_builder) =
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
-        ctx.task_executor()
-            .spawn_critical("custom payload builder service", Box::pin(payload_service));
+        ctx.task_executor().spawn_critical_task("custom payload builder service", payload_service);
 
         Ok(payload_builder)
     }
@@ -92,7 +90,7 @@ where
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 .with_types::<EthereumNode>()
                 // Configure the components of the node

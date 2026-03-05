@@ -66,6 +66,10 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
+                    text: "reth db copy",
+                    link: "/cli/reth/db/copy"
+                },
+                {
                     text: "reth db diff",
                     link: "/cli/reth/db/diff"
                 },
@@ -145,34 +149,40 @@ export const rethCliSidebar: SidebarItem = {
                             collapsed: true,
                             items: [
                                 {
-                                    text: "reth db settings set receipts",
-                                    link: "/cli/reth/db/settings/set/receipts"
-                                },
-                                {
-                                    text: "reth db settings set transaction_senders",
-                                    link: "/cli/reth/db/settings/set/transaction_senders"
-                                },
-                                {
-                                    text: "reth db settings set account_changesets",
-                                    link: "/cli/reth/db/settings/set/account_changesets"
-                                },
-                                {
-                                    text: "reth db settings set storages_history",
-                                    link: "/cli/reth/db/settings/set/storages_history"
-                                },
-                                {
-                                    text: "reth db settings set transaction_hash_numbers",
-                                    link: "/cli/reth/db/settings/set/transaction_hash_numbers"
-                                },
-                                {
-                                    text: "reth db settings set account_history",
-                                    link: "/cli/reth/db/settings/set/account_history"
-                                },
-                                {
-                                    text: "reth db settings set storage_changesets",
-                                    link: "/cli/reth/db/settings/set/storage_changesets"
+                                    text: "reth db settings set v2",
+                                    link: "/cli/reth/db/settings/set/v2"
                                 }
                             ]
+                        }
+                    ]
+                },
+                {
+                    text: "reth db prune-checkpoints",
+                    link: "/cli/reth/db/prune-checkpoints",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db prune-checkpoints get",
+                            link: "/cli/reth/db/prune-checkpoints/get"
+                        },
+                        {
+                            text: "reth db prune-checkpoints set",
+                            link: "/cli/reth/db/prune-checkpoints/set"
+                        }
+                    ]
+                },
+                {
+                    text: "reth db stage-checkpoints",
+                    link: "/cli/reth/db/stage-checkpoints",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db stage-checkpoints get",
+                            link: "/cli/reth/db/stage-checkpoints/get"
+                        },
+                        {
+                            text: "reth db stage-checkpoints set",
+                            link: "/cli/reth/db/stage-checkpoints/set"
                         }
                     ]
                 },
@@ -189,6 +199,10 @@ export const rethCliSidebar: SidebarItem = {
         {
             text: "reth download",
             link: "/cli/reth/download"
+        },
+        {
+            text: "reth snapshot-manifest",
+            link: "/cli/reth/snapshot-manifest"
         },
         {
             text: "reth stage",

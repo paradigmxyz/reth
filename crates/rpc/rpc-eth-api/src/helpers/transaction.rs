@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::TransactionInfo;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -82,13 +82,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
-            self.send_transaction(WithEncoded::new(tx, recovered)).await
+            self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
+                .await
         }
     }
 
-    /// Submits the transaction to the pool.
+    /// Submits the transaction to the pool with the given [`TransactionOrigin`].
     fn send_transaction(
         &self,
+        origin: TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
 
@@ -254,23 +256,47 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        self.spawn_blocking_io(move |this| {
-            let provider = this.provider();
-            let (tx, meta) = match provider
-                .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_eth_err)?
+        async move {
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                let Some(tx) = cached.block.body().transactions().get(cached.tx_index).cloned()
             {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+                let meta = cached.transaction_meta(hash);
 
-            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                // Best case: receipts are also cached.
+                if let Some(receipt) = cached.receipt().cloned() {
+                    return Ok(Some((tx, meta, receipt)));
+                }
 
-            Ok(Some((tx, meta, receipt)))
-        })
+                // Block still cached but receipts evicted — fetch via cache since
+                // the block is recent and `build_transaction_receipt` needs all
+                // receipts for gas accounting anyway.
+                if let Some(receipts) = self
+                    .cache()
+                    .get_receipts(cached.block.hash())
+                    .await
+                    .map_err(Self::Error::from_eth_err)? &&
+                    let Some(receipt) = receipts.get(cached.tx_index).cloned()
+                {
+                    return Ok(Some((tx, meta, receipt)));
+                }
+            }
+
+            // Full cache miss — fetch both from provider.
+            self.spawn_blocking_io(move |this| {
+                let provider = this.provider();
+                let Some((tx, meta)) = provider
+                    .transaction_by_hash_with_meta(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                else {
+                    return Ok(None);
+                };
+
+                let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
+
+                Ok(receipt.map(|receipt| (tx, meta, receipt)))
+            })
+            .await
+        }
     }
 
     /// Get transaction by [`BlockId`] and index of transaction within that block.
@@ -341,9 +367,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Ok(None);
             }
 
-            let Ok(high) = self.provider().best_block_number() else {
-                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
-            };
+            let high = self.provider().best_block_number().map_err(Self::Error::from_eth_err)?;
 
             // Perform a binary search over the block range to find the block in which the sender's
             // nonce reached the requested nonce.
@@ -627,15 +651,9 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             // First, try the RPC cache
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) = cached.recovered_transaction()
+                let Some(source) = cached.to_transaction_source()
             {
-                return Ok(Some(TransactionSource::Block {
-                    transaction: tx.cloned(),
-                    index: cached.tx_index as u64,
-                    block_hash: cached.block.hash(),
-                    block_number: cached.block.number(),
-                    base_fee: cached.block.base_fee_per_gas(),
-                }));
+                return Ok(Some(source));
             }
 
             // Cache miss - try to find the transaction on disk

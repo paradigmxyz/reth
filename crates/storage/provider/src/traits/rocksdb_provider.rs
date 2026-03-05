@@ -39,7 +39,7 @@ pub trait RocksDBProviderFactory {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         {
-            if self.cached_storage_settings().any_in_rocksdb() {
+            if self.cached_storage_settings().storage_v2 {
                 let rocksdb = self.rocksdb_provider();
                 let tx = rocksdb.tx();
                 return f(Some(&tx));
@@ -183,8 +183,7 @@ mod tests {
 
     #[test]
     fn test_rocksdb_settings_create_tx() {
-        let settings =
-            StorageSettings { account_history_in_rocksdb: true, ..StorageSettings::v1() };
+        let settings = StorageSettings::v2();
         let provider = TestProvider::new(settings);
 
         let result = provider.with_rocksdb_tx(|tx| {

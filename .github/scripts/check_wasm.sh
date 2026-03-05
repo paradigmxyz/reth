@@ -63,6 +63,7 @@ exclude_crates=(
   reth-provider # tokio
   reth-prune # tokio
   reth-prune-static-files # reth-provider
+  reth-tasks # tokio rt-multi-thread
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg

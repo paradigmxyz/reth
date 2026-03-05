@@ -23,7 +23,7 @@ use reth_tracing::tracing::{debug, info};
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 // use the default ethereum node types
                 .with_types::<EthereumNode>()
@@ -96,7 +96,7 @@ where
             );
 
             // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
+            ctx.task_executor().spawn_critical_task(
                 "txpool maintenance task",
                 reth_ethereum::pool::maintain::maintain_transaction_pool_future(
                     client,

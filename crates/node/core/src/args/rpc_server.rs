@@ -483,7 +483,8 @@ pub struct RpcServerArgs {
     /// This will enforce JWT authentication for all requests coming from the consensus layer.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
-    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
+    /// by default.
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
 
@@ -774,6 +775,18 @@ impl RpcServerArgs {
     pub const fn with_send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
         self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
+    }
+
+    /// Returns `true` if the given RPC namespace is enabled on any transport.
+    pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
+        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+            return true;
+        }
+        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+            return true;
+        }
+        // IPC exposes all modules when enabled
+        !self.ipcdisable
     }
 
     /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.

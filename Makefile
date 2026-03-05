@@ -12,15 +12,13 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 CARGO_TARGET_DIR ?= target
 
 # List of features to use when building. Can be overridden via the environment.
-# No jemalloc on Windows
-ifeq ($(OS),Windows_NT)
-    FEATURES ?= asm-keccak min-debug-logs
-else
-    FEATURES ?= jemalloc asm-keccak min-debug-logs
-endif
+FEATURES ?=
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
 PROFILE ?= release
+
+# Extra RUSTFLAGS to append to build targets (e.g., "-C target-cpu=x86-64-v3")
+EXTRA_RUSTFLAGS ?=
 
 # Extra flags for Cargo
 CARGO_INSTALL_EXTRA_FLAGS ?=
@@ -79,13 +77,13 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
 # Builds the reth binary natively.
 build-native-%:
-	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
 # These commands require that:
 #
-# - `cross` is installed (`cargo install cross`).
+# - `cross` is installed (`cargo install --locked cross`).
 # - Docker is running.
 # - The current user is in the `docker` group.
 #
@@ -97,11 +95,12 @@ build-native-%:
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+build-native-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
@@ -158,7 +157,7 @@ COV_FILE := lcov.info
 .PHONY: test-unit
 test-unit: ## Run unit tests.
 	cargo install cargo-nextest --locked
-	cargo nextest run $(UNIT_TEST_ARGS)
+	cargo nextest run --no-fail-fast $(UNIT_TEST_ARGS)
 
 
 .PHONY: cov-unit
@@ -191,7 +190,7 @@ $(EEST_TESTS_DIR):
 
 .PHONY: ef-tests
 ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
-	cargo nextest run -p ef-tests --release --features ef-tests
+	cargo nextest run --no-fail-fast -p ef-tests --release --features ef-tests
 
 ##@ reth-bench
 
@@ -238,16 +237,15 @@ update-book-cli: build-debug ## Update book cli documentation.
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
-
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-debug-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
 
 fmt:
 	cargo +nightly fmt
@@ -267,7 +265,7 @@ lint-typos: ensure-typos
 
 ensure-typos:
 	@if ! command -v typos &> /dev/null; then \
-		echo "typos not found. Please install it by running the command 'cargo install typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
+		echo "typos not found. Please install it by running the command 'cargo install --locked typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
 		exit 1; \
     fi
 
