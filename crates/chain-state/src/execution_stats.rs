@@ -17,17 +17,18 @@ use alloy_primitives::B256;
 pub struct ExecutionTimingStats {
     /// Block number
     pub block_number: u64,
-    /// Block hash as formatted string (0x-prefixed hex)
+    /// Block hash
     pub block_hash: B256,
     /// Total gas used by the block
     pub gas_used: u64,
     /// Number of transactions in the block
     pub tx_count: usize,
-    /// Time spent executing transactions (milliseconds)
+    /// Time spent executing transactions (includes state reads)
     pub execution_duration: Duration,
-    /// Time spent reading state during execution (milliseconds)
+    /// Time spent fetching state during execution (subset of `execution_duration`, includes cache
+    /// hits)
     pub state_read_duration: Duration,
-    /// Time spent computing state root hash (milliseconds)
+    /// Time spent computing state root hash
     pub state_hash_duration: Duration,
     /// Number of accounts read during execution
     pub accounts_read: usize,

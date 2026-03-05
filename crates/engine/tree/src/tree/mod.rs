@@ -65,7 +65,7 @@ pub mod precompile_cache;
 mod tests;
 mod trie_updates;
 
-use crate::tree::error::AdvancePersistenceError;
+use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
 pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
@@ -73,7 +73,6 @@ pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
-use persistence_state::{PersistenceResult, PersistenceRx};
 pub use reth_engine_primitives::TreeConfig;
 
 pub mod state;
@@ -506,54 +505,21 @@ where
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
         let maybe_persistence = self.persistence_state.rx.take();
 
-        if let Some((persistence_rx, start_time, action)) = maybe_persistence {
-            match persistence_rx {
-                PersistenceRx::SaveBlocks(rx) => {
-                    crossbeam_channel::select_biased! {
-                        recv(rx) -> result => {
-                            match result {
-                                Ok(value) => LoopEvent::PersistenceComplete {
-                                    result: PersistenceResult {
-                                        last_block: value.as_ref().map(|r| r.last_block),
-                                        commit_duration: value.as_ref().map(|r| r.commit_duration),
-                                    },
-                                    start_time,
-                                },
-                                Err(_) => LoopEvent::Disconnected,
-                            }
-                        },
-                        recv(self.incoming) -> msg => {
-                            self.persistence_state.rx = Some((PersistenceRx::SaveBlocks(rx), start_time, action));
-                            match msg {
-                                Ok(m) => LoopEvent::EngineMessage(m),
-                                Err(_) => LoopEvent::Disconnected,
-                            }
-                        },
+        if let Some((rx, start_time, action)) = maybe_persistence {
+            crossbeam_channel::select_biased! {
+                recv(rx) -> result => {
+                    match result {
+                        Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                        Err(_) => LoopEvent::Disconnected,
                     }
-                }
-                PersistenceRx::RemoveBlocks(rx) => {
-                    crossbeam_channel::select_biased! {
-                        recv(rx) -> result => {
-                            match result {
-                                Ok(value) => LoopEvent::PersistenceComplete {
-                                    result: PersistenceResult {
-                                        last_block: value,
-                                        commit_duration: None,
-                                    },
-                                    start_time,
-                                },
-                                Err(_) => LoopEvent::Disconnected,
-                            }
-                        },
-                        recv(self.incoming) -> msg => {
-                            self.persistence_state.rx = Some((PersistenceRx::RemoveBlocks(rx), start_time, action));
-                            match msg {
-                                Ok(m) => LoopEvent::EngineMessage(m),
-                                Err(_) => LoopEvent::Disconnected,
-                            }
-                        },
+                },
+                recv(self.incoming) -> msg => {
+                    self.persistence_state.rx = Some((rx, start_time, action));
+                    match msg {
+                        Ok(m) => LoopEvent::EngineMessage(m),
+                        Err(_) => LoopEvent::Disconnected,
                     }
-                }
+                },
             }
         } else {
             match self.incoming.recv() {
@@ -1929,10 +1895,9 @@ where
             let stats = self.execution_timing_stats.remove(&key).expect("key just found");
             if check_slow {
                 let commit_dur = commit_duration.expect("checked above");
-                let total_duration = stats.execution_duration +
-                    stats.state_read_duration +
-                    stats.state_hash_duration +
-                    commit_dur;
+                // state_read_duration is already included in execution_duration
+                let total_duration =
+                    stats.execution_duration + stats.state_hash_duration + commit_dur;
 
                 if total_duration > threshold.expect("checked above") {
                     self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
@@ -2052,7 +2017,6 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.purge_timing_stats(self.persistence_state.last_persisted_block.number, None);
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,

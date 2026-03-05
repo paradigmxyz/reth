@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    persistence::{PersistenceAction, SaveBlocksResult},
+    persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
@@ -760,10 +760,10 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // send the response so we can advance again
     sender
-        .send(Some(SaveBlocksResult {
-            last_block: blocks[1].recovered_block().num_hash(),
-            commit_duration: Duration::ZERO,
-        }))
+        .send(PersistenceResult {
+            last_block: Some(blocks[1].recovered_block().num_hash()),
+            commit_duration: Some(Duration::ZERO),
+        })
         .unwrap();
 
     // we should be persisting blocks[1] because we threw out the prev action
@@ -2040,10 +2040,10 @@ mod forkchoice_updated_tests {
                     last_persisted_number = last.recovered_block().number;
                 }
                 sender
-                    .send(saved_blocks.last().map(|b| SaveBlocksResult {
-                        last_block: b.recovered_block().num_hash(),
-                        commit_duration: Duration::ZERO,
-                    }))
+                    .send(PersistenceResult {
+                        last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        commit_duration: Some(Duration::ZERO),
+                    })
                     .unwrap();
             }
         }

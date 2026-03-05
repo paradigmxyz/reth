@@ -291,8 +291,13 @@ impl NodeState {
         }
 
         let stats = &info.stats;
-        let mgas_per_sec = (stats.gas_used as f64 / MGAS_TO_GAS as f64) /
-            (stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64());
+        let processing_secs =
+            stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64();
+        let mgas_per_sec = if processing_secs > 0.0 {
+            (stats.gas_used as f64 / MGAS_TO_GAS as f64) / processing_secs
+        } else {
+            0.0
+        };
 
         warn!(
             target: "reth::slow_block",
