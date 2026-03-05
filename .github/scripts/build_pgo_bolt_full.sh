@@ -211,7 +211,8 @@ mkdir -p "$BOLT_DIR"
 
 echo "Building BOLT-instrumented binary with PGO..."
 # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+# --no-pie produces a non-PIE executable so BOLT doesn't enter relocation mode (which has limited split-function support)
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs -Clink-arg=-Wl,--no-pie ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 # Instrument with BOLT
@@ -250,7 +251,8 @@ echo "============================================================"
 
 echo "Building PGO-optimized binary..."
 # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+# --no-pie produces a non-PIE executable so BOLT doesn't enter relocation mode (which has limited split-function support)
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs -Clink-arg=-Wl,--no-pie ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
