@@ -851,6 +851,9 @@ jobs:
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
+          if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
+          fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
