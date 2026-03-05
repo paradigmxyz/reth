@@ -45,8 +45,8 @@ pub(super) enum NextResult {
     /// The caller should process it and then pop.
     NonBranch,
     /// No more qualifying children in the head branch — the head was popped.
-    /// If the stack is now empty, the traversal is complete.
-    Popped,
+    /// Contains the popped entry. If the stack is now empty, the traversal is complete.
+    Popped(ArenaCursorStackEntry),
     /// The stack is empty — the traversal is complete.
     Done,
 }
@@ -86,22 +86,23 @@ impl ArenaCursor {
         self.stack.is_empty()
     }
 
-    /// Clears the traversal stack.
-    pub(super) fn clear(&mut self) {
+    /// Clears the traversal stack and pushes the given root entry.
+    pub(super) fn reset(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
         self.stack.clear();
+        self.push(arena, idx, path);
     }
 
     /// Pushes an entry onto the stack for the node at the given index and path.
-    pub(super) fn push(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
+    fn push(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
         let _ = &arena[idx];
         self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
 
     /// Pops the top entry from the stack and propagates dirty state to the parent.
-    /// Returns the popped entry's path.
+    /// Returns the popped entry.
     #[instrument(level = "trace", target = "trie::arena", skip(self, arena))]
-    pub(super) fn pop(&mut self, arena: &mut Arena<ArenaSparseNode>) -> Nibbles {
+    pub(super) fn pop(&mut self, arena: &mut Arena<ArenaSparseNode>) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
 
@@ -133,7 +134,7 @@ impl ArenaCursor {
             }
         }
 
-        entry.path
+        entry
     }
 
     /// Drains the stack, propagating dirty state from each entry to its parent.
@@ -254,8 +255,8 @@ impl ArenaCursor {
         }
 
         // No qualifying children remain — pop.
-        self.pop(arena);
-        NextResult::Popped
+        let entry = self.pop(arena);
+        NextResult::Popped(entry)
     }
 
     /// Pops the stack until the head is an ancestor of `full_path`, then descends from that head
