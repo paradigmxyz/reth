@@ -1261,7 +1261,7 @@ impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
-            ChainSpec: OpHardforks,
+            ChainSpec: OpHardforks + MantleHardforks,
             Primitives: NodePrimitives<Receipt: DepositReceipt>,
         >,
     >,

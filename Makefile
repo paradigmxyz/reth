@@ -19,6 +19,10 @@ else
     FEATURES ?= jemalloc asm-keccak min-debug-logs
 endif
 
+# OP debug-only features for `op-reth` troubleshooting targets.
+# `state-export` enables exporting full state on root mismatch.
+MANTLEDEBUG_FEATURES ?= $(FEATURES) state-export
+
 # Cargo profile for builds. Default is for local builds, CI uses an override.
 PROFILE ?= release
 
@@ -100,6 +104,10 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+
+.PHONY: build-debug-op
+build-debug-op: ## Build op-reth with mantle debug features (e.g. state-export).
+	cargo build --bin op-reth --features "$(MANTLEDEBUG_FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Builds the reth binary natively.
 build-native-%:
