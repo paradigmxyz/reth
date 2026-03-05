@@ -183,6 +183,13 @@ where
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(?path, ?check_min_len),
+        ret,
+    )]
     fn should_retain<'a>(
         &self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -194,7 +201,6 @@ where
 
         let (mut lower, mut upper) = targets.current();
 
-        trace!(target: TRACE_TARGET, ?path, target = ?lower, "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNodeV2 { path: last_retained_path, .. }| {
                     depth_first::cmp(path, last_retained_path) == Ordering::Greater
@@ -345,6 +351,12 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(child_path = ?self.last_child_path()),
+    )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -355,7 +367,8 @@ where
 
         // If the child is already an `RlpNode` then there is nothing to do, push it back on with no
         // changes.
-        if let ProofTrieBranchChild::RlpNode(_) = child {
+        if let ProofTrieBranchChild::RlpNode(_rlp_node) = &child {
+            trace!(target: TRACE_TARGET, ?_rlp_node, "Already RlpNode, pushing onto stack");
             self.child_stack.push(child);
             return Ok(())
         }
@@ -364,8 +377,10 @@ where
         // to pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
             let child_rlp_node = self.commit_child(targets, child_path, child)?;
+            trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing commited child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
+            trace!(target: TRACE_TARGET, "Pushing uncommited child onto stack");
             self.child_stack.push(child);
         }
 
@@ -486,6 +501,7 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -495,14 +511,13 @@ where
             branch = ?self.branch_stack.last(),
             branch_path = ?self.branch_path,
             child_stack_len = ?self.child_stack.len(),
-            "pop_branch: called",
+            "called",
         );
 
         // Ensure the final child on the child stack has been committed, as this method expects all
         // children of the branch to have been committed.
         self.commit_last_child(targets)?;
 
-        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
         let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
 
         // Take the branch's children off the stack, using the state mask to determine how many
@@ -516,8 +531,7 @@ where
         // If the branch has fewer than 2 children then it is not a valid branch node. This can
         // happen when children that were present in the cached `state_mask` have been deleted
         // (their hash was cleared by a `MaskedTrieCursor` and no leaf data exists in the hashed
-        // cursor). The branch collapses: its extension + nibble are absorbed into the remaining
-        // child's short key (or the branch is dropped entirely if empty).
+        // cursor).
         //
         // This only applies to branches created from cached data (`masks` is `Some`). Branches
         // built purely from leaf data should always have at least 2 children.
@@ -529,6 +543,12 @@ where
                 "pop_branch: collapsing branch with fewer than 2 children",
             );
 
+            let new_path_len =
+                self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
+
+            // If there is only one child then the branch collapses: its extension + nibble are
+            // absorbed into the remaining child's short key (or the branch is dropped entirely if
+            // empty).
             if num_children == 1 {
                 // Build the prefix to prepend to the child: the branch's extension nibbles
                 // (the last `ext_len` nibbles of `branch_path`) + the child's nibble on the
@@ -543,13 +563,13 @@ where
                 // key, so we can't absorb the branch's extension into it.
                 debug_assert!(
                     !matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))),
-                    "cannot collapse branch: remaining child is an RlpNode with unknown short key"
+                    "cannot collapse branch: remaining child {child_nibble:?} is an RlpNode with unknown short key"
                 );
 
                 let child = self.child_stack.last_mut().expect("checked num_children == 1");
-                let old_short_key = child.short_key().clone();
+                let old_short_key = child.short_key();
                 let mut new_short_key = prefix;
-                new_short_key.extend(&old_short_key);
+                new_short_key.extend(old_short_key);
 
                 match child {
                     ProofTrieBranchChild::Leaf { short_key, .. } => {
@@ -565,29 +585,26 @@ where
                     }
                     ProofTrieBranchChild::RlpNode(_) => unreachable!(),
                 }
-            }
 
-            // Update the branch_path.
-            let new_path_len =
-                self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
-            debug_assert!(self.branch_path.len() >= new_path_len);
+                // Update the branch_path.
+                debug_assert!(self.branch_path.len() >= new_path_len);
+                self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
+                return Ok(())
+            }
 
             // If the branch had 0 children, the parent's `state_mask` bit for this branch's
             // nibble must be unset so the parent doesn't expect a child on the stack.
-            if num_children == 0 {
-                if let Some(parent) = self.branch_stack.last_mut() {
-                    let nibble = self.branch_path.get_unchecked(new_path_len);
-                    parent.state_mask.unset_bit(nibble);
-                }
+            if num_children == 0 &&
+                let Some(parent) = self.branch_stack.last_mut()
+            {
+                let nibble = self.branch_path.get_unchecked(new_path_len);
+                parent.state_mask.unset_bit(nibble);
             }
-
-            self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
-
-            self.rlp_nodes_bufs.push(rlp_nodes_buf);
-            return Ok(())
         }
 
         debug_assert!(num_children > 1, "A branch must have at least two children");
+
+        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
@@ -1074,6 +1091,8 @@ where
                 curr_state_mask,
             );
 
+            let _orig_next_child_nibbles = next_child_nibbles;
+
             // Mask out any child nibbles whose ranges have already been fully processed.
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
@@ -1084,10 +1103,25 @@ where
                     // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                     let already_processed_mask = (1u16 << lower_nibble) - 1;
                     next_child_nibbles &= !already_processed_mask;
-                } else if !self.branch_path.starts_with(lower) {
+                    trace!(
+                        target: TRACE_TARGET,
+                        branch_path = ?self.branch_path,
+                        ?_orig_next_child_nibbles,
+                        ?already_processed_mask,
+                        ?next_child_nibbles,
+                        "Unset already processed key nibbles from next_child_nibbles",
+                    );
+                } else if !lower.starts_with(&self.branch_path) && lower > &self.branch_path {
                     // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                     // lower is 0x7). All remaining children have been processed.
                     next_child_nibbles = 0;
+                    trace!(
+                        target: TRACE_TARGET,
+                        branch_path = ?self.branch_path,
+                        ?_orig_next_child_nibbles,
+                        ?next_child_nibbles,
+                        "Unset all nibbles from next_child_nibbles due to branch_path being outside this subtrie",
+                    );
                 }
             }
 
