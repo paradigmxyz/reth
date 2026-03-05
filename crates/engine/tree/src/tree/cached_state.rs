@@ -93,6 +93,10 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// Optional cache statistics for slow block logging. Only tracked when slow block threshold is
+    /// configured.
+    cache_stats: Option<Arc<CacheStats>>,
 }
 
 impl<S> CachedStateProvider<S> {
@@ -102,8 +106,9 @@ impl<S> CachedStateProvider<S> {
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
+        cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self { state_provider, caches, metrics, cache_stats }
     }
 }
 
@@ -113,8 +118,9 @@ impl<S> CachedStateProvider<S, true> {
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
+        cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self { state_provider, caches, metrics, cache_stats }
     }
 }
 
@@ -181,10 +187,6 @@ pub struct CachedStateMetrics {
 
     /// Account cache collisions (hash collisions causing eviction)
     account_cache_collisions: Gauge,
-
-    // Cache statistics for slow block logging (not a prometheus metric).
-    #[metric(skip)]
-    stats: Arc<CacheStats>,
 }
 
 impl CachedStateMetrics {
@@ -204,18 +206,6 @@ impl CachedStateMetrics {
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
         self.account_cache_collisions.set(0);
-
-        self.reset_stats();
-    }
-
-    /// Resets cache statistics, does not affect metrics.
-    pub(crate) fn reset_stats(&self) {
-        self.stats.account_hits.store(0, Ordering::Relaxed);
-        self.stats.account_misses.store(0, Ordering::Relaxed);
-        self.stats.storage_hits.store(0, Ordering::Relaxed);
-        self.stats.storage_misses.store(0, Ordering::Relaxed);
-        self.stats.code_hits.store(0, Ordering::Relaxed);
-        self.stats.code_misses.store(0, Ordering::Relaxed);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
@@ -230,52 +220,11 @@ impl CachedStateMetrics {
         self.execution_cache_created_total.increment(1);
         self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
     }
-
-    /// Record account cache hit in both metrics and stats.
-    fn record_account_hit(&self) {
-        self.account_cache_hits.increment(1);
-        self.stats.record_account_hit();
-    }
-
-    /// Record account cache miss in both metrics and stats.
-    fn record_account_miss(&self) {
-        self.account_cache_misses.increment(1);
-        self.stats.record_account_miss();
-    }
-
-    /// Record storage cache hit in both metrics and stats.
-    fn record_storage_hit(&self) {
-        self.storage_cache_hits.increment(1);
-        self.stats.record_storage_hit();
-    }
-
-    /// Record storage cache miss in both metrics and stats.
-    fn record_storage_miss(&self) {
-        self.storage_cache_misses.increment(1);
-        self.stats.record_storage_miss();
-    }
-
-    /// Record code cache hit in both metrics and stats.
-    fn record_code_hit(&self) {
-        self.code_cache_hits.increment(1);
-        self.stats.record_code_hit();
-    }
-
-    /// Record code cache miss in both metrics and stats.
-    fn record_code_miss(&self) {
-        self.code_cache_misses.increment(1);
-        self.stats.record_code_miss();
-    }
-
-    /// Returns a reference to the cache statistics for slow block logging.
-    pub(crate) fn cache_stats(&self) -> &CacheStats {
-        &self.stats
-    }
 }
 
-/// Cache statistics than can be queried for logging.
+/// Cache hit/miss statistics for slow block logging.
 #[derive(Debug, Default)]
-pub(crate) struct CacheStats {
+pub struct CacheStats {
     /// Account cache hits
     account_hits: AtomicUsize,
     /// Account cache misses
@@ -435,21 +384,31 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
-                // We record cache hits and misses during prewarm only in stats, not in metrics
+                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(value) => {
-                    self.metrics.cache_stats().record_account_miss();
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_account_miss();
+                    }
                     Ok(value)
                 }
                 CachedStatus::Cached(value) => {
-                    self.metrics.cache_stats().record_account_hit();
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_account_hit();
+                    }
                     Ok(value)
                 }
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
-            self.metrics.record_account_hit();
+            self.metrics.account_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_account_hit();
+            }
             Ok(account)
         } else {
-            self.metrics.record_account_miss();
+            self.metrics.account_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_account_miss();
+            }
             self.state_provider.basic_account(address)
         }
     }
@@ -465,25 +424,31 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
-                // We record cache hits and misses during prewarm only in stats, not in metrics
+                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(value) => {
-                    self.metrics.cache_stats().record_storage_miss();
-                    // The slot that was never written to is indistinguishable from a slot
-                    // explicitly set to zero. We return `None` in both cases.
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_storage_miss();
+                    }
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
                 CachedStatus::Cached(value) => {
-                    self.metrics.cache_stats().record_storage_hit();
-                    // The slot that was never written to is indistinguishable from a slot
-                    // explicitly set to zero. We return `None` in both cases.
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_storage_hit();
+                    }
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
-            self.metrics.record_storage_hit();
+            self.metrics.storage_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_storage_hit();
+            }
             Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
-            self.metrics.record_storage_miss();
+            self.metrics.storage_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_storage_miss();
+            }
             self.state_provider.storage(account, storage_key)
         }
     }
@@ -495,21 +460,31 @@ impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvi
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
-                // We record cache hits and misses during prewarm only in stats, not in metrics
+                // During prewarm we only record stats (not prometheus metrics)
                 CachedStatus::NotCached(code) => {
-                    self.metrics.cache_stats().record_code_miss();
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_code_miss();
+                    }
                     Ok(code)
                 }
                 CachedStatus::Cached(code) => {
-                    self.metrics.cache_stats().record_code_hit();
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_code_hit();
+                    }
                     Ok(code)
                 }
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-            self.metrics.record_code_hit();
+            self.metrics.code_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_code_hit();
+            }
             Ok(code)
         } else {
-            self.metrics.record_code_miss();
+            self.metrics.code_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_code_miss();
+            }
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }
@@ -682,7 +657,7 @@ impl ExecutionCache {
     }
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
-    pub fn new(total_cache_size: usize) -> Self {
+    pub const fn new(total_cache_size: usize) -> Self {
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -931,7 +906,7 @@ pub struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+    pub const fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
         Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
     }
 
@@ -1014,7 +989,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(), None);
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1034,7 +1009,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(), None);
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());

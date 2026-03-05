@@ -2825,7 +2825,8 @@ where
             &mut V,
             Input,
             TreeCtx<'_, N>,
-        ) -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
+        )
+            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2958,9 +2959,9 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
-        self.emit_event(EngineApiEvent::BeaconConsensus(
-            ConsensusEngineEvent::InvalidBlock(Box::new(block)),
-        ));
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
+            Box::new(block),
+        )));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },

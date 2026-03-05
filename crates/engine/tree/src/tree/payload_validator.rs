@@ -1,9 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider},
+    cached_state::{CacheStats, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::{InstrumentedStateProvider, InstrumentedStateProviderHandle},
+    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -496,27 +496,27 @@ where
             block_access_list,
         ));
 
+        // Create optional cache stats for slow block logging
+        let slow_block_enabled = self.config.slow_block_threshold().is_some();
+        let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
+
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            // Reset cache stats for the new block
-            cache_metrics.reset_stats();
-            state_provider =
-                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
+            state_provider = Box::new(CachedStateProvider::new(
+                state_provider,
+                caches,
+                cache_metrics,
+                cache_stats.clone(),
+            ));
         };
 
-        let instrumented_state_provider_handle = if self.config.slow_block_threshold().is_some() ||
-            self.config.state_provider_metrics()
-        {
+        let state_provider_stats = if slow_block_enabled || self.config.state_provider_metrics() {
             let instrumented_state_provider =
                 InstrumentedStateProvider::new(state_provider, "engine");
-            let handle = self
-                .config
-                .slow_block_threshold()
-                .is_some()
-                .then(|| instrumented_state_provider.handle());
+            let stats = slow_block_enabled.then(|| instrumented_state_provider.stats());
             state_provider = Box::new(instrumented_state_provider);
-            handle
+            stats
         } else {
             None
         };
@@ -763,11 +763,11 @@ where
             .into())
         }
 
-        let timing_stats = instrumented_state_provider_handle.map(|instrumented_handle| {
+        let timing_stats = state_provider_stats.map(|stats| {
             self.calculate_timing_stats(
                 &block,
-                instrumented_handle,
-                handle.cache_metrics(),
+                stats,
+                cache_stats,
                 &output,
                 execution_duration,
                 root_elapsed,
@@ -1701,16 +1701,16 @@ where
     fn calculate_timing_stats(
         &self,
         block: &RecoveredBlock<N::Block>,
-        instrumented_handle: InstrumentedStateProviderHandle,
-        cache_metrics: Option<CachedStateMetrics>,
+        provider_stats: Arc<StateProviderStats>,
+        cache_stats: Option<Arc<CacheStats>>,
         output: &BlockExecutionOutput<N::Receipt>,
         execution_duration: Duration,
         state_hash_duration: Duration,
     ) -> Box<ExecutionTimingStats> {
-        let accounts_read = instrumented_handle.total_account_fetches();
-        let storage_read = instrumented_handle.total_storage_fetches();
-        let code_read = instrumented_handle.total_code_fetches();
-        let code_bytes_read = instrumented_handle.total_code_fetched_bytes();
+        let accounts_read = provider_stats.total_account_fetches();
+        let storage_read = provider_stats.total_storage_fetches();
+        let code_read = provider_stats.total_code_fetches();
+        let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from BundleState (final state changes)
         let accounts_changed = output.state.state.len();
@@ -1757,11 +1757,10 @@ where
             })
             .sum();
 
-        // Capture state_read_ms from TimingStatsHandle (time spent fetching state during
-        // execution)
-        let state_read_duration = instrumented_handle.total_account_fetch_latency() +
-            instrumented_handle.total_storage_fetch_latency() +
-            instrumented_handle.total_code_fetch_latency();
+        // Total time spent fetching state during execution
+        let state_read_duration = provider_stats.total_account_fetch_latency() +
+            provider_stats.total_storage_fetch_latency() +
+            provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
@@ -1793,13 +1792,16 @@ where
             .count();
 
         // Get cache statistics for slow block logging
-        let cache_stats = cache_metrics.as_ref().map(|m| m.cache_stats());
-        let (account_cache_hits, account_cache_misses) =
-            cache_stats.map(|s| (s.account_hits(), s.account_misses())).unwrap_or_default();
-        let (storage_cache_hits, storage_cache_misses) =
-            cache_stats.map(|s| (s.storage_hits(), s.storage_misses())).unwrap_or_default();
+        let (account_cache_hits, account_cache_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.account_hits(), s.account_misses()))
+            .unwrap_or_default();
+        let (storage_cache_hits, storage_cache_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.storage_hits(), s.storage_misses()))
+            .unwrap_or_default();
         let (code_cache_hits, code_cache_misses) =
-            cache_stats.map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
+            cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
 
         // Build execution timing stats for slow block logging
         Box::new(ExecutionTimingStats {
