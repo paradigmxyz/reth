@@ -16,15 +16,15 @@ use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
 };
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -92,6 +92,14 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
+    /// Accumulated account leaf update cache hits.
+    account_cache_hits: u64,
+    /// Accumulated account leaf update cache misses.
+    account_cache_misses: u64,
+    /// Accumulated storage leaf update cache hits.
+    storage_cache_hits: u64,
+    /// Accumulated storage leaf update cache misses.
+    storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
     /// Number of pending execution/prewarming updates received but not yet passed to
@@ -142,6 +150,10 @@ where
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
+            account_cache_hits: 0,
+            account_cache_misses: 0,
+            storage_cache_hits: 0,
+            storage_cache_misses: 0,
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             metrics,
@@ -332,6 +344,15 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
+        self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
+        self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
+        self.metrics.sparse_trie_storage_cache_hits.record(self.storage_cache_hits as f64);
+        self.metrics.sparse_trie_storage_cache_misses.record(self.storage_cache_misses as f64);
+        self.account_cache_hits = 0;
+        self.account_cache_misses = 0;
+        self.storage_cache_hits = 0;
+        self.storage_cache_misses = 0;
+
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
@@ -505,18 +526,22 @@ where
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
 
+            let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
+                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(Target::new(path).with_min_len(min_len));
+                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
+            let updates_len_after = updates.len();
+            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
+            self.storage_cache_misses += updates_len_after as u64;
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
@@ -551,18 +576,22 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .push_account_target(Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .push_account_target(Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                 }
             }
         })?;
 
-        Ok(account_updates.len() < updates_len_before)
+        let updates_len_after = account_updates.len();
+        self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
+        self.account_cache_misses += updates_len_after as u64;
+
+        Ok(updates_len_after < updates_len_before)
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -734,13 +763,13 @@ impl PendingTargets {
     }
 
     /// Adds a target to the account targets.
-    fn push_account_target(&mut self, target: Target) {
+    fn push_account_target(&mut self, target: ProofV2Target) {
         self.targets.account_targets.push(target);
         self.len += 1;
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<Target>) {
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }

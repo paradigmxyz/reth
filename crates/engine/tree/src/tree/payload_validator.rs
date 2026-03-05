@@ -27,7 +27,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    OnStateHook, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -43,14 +43,18 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
+        Arc,
+    },
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
@@ -736,13 +740,20 @@ where
             let _ = valid_block_tx.send(());
         }
 
+        // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
+        // eviction cannot race with us. If we deferred this to the background task, persistence
+        // could advance and evict changeset cache entries between factory creation and the task
+        // actually running, causing expensive DB fallback computations when building the overlay.
+        let changeset_provider =
+            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+
         Ok(self.spawn_deferred_trie_task(
             block,
             output,
             &ctx,
             hashed_state,
             trie_output,
-            overlay_factory,
+            changeset_provider,
         ))
     }
 
@@ -821,7 +832,6 @@ where
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .build()
         });
 
@@ -838,19 +848,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -864,7 +876,10 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
+        let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let executor = executor.with_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        );
 
         let execution_start = Instant::now();
 
@@ -874,6 +889,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
+            &executed_tx_index,
         )?;
         drop(receipt_tx);
 
@@ -913,6 +929,7 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        executed_tx_index: &AtomicUsize,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
@@ -958,6 +975,9 @@ where
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            // advance the shared counter so prewarm workers skip already-executed txs
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -1521,7 +1541,7 @@ where
         ctx: &TreeCtx<'_, N>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1550,7 +1570,11 @@ where
         // Capture block info and cache handle for changeset computation
         let block_hash = block.hash();
         let block_number = block.number();
-        let changeset_cache = self.changeset_cache.clone();
+
+        // Register a pending changeset entry so that concurrent readers will wait for
+        // this computation to finish rather than falling back to the expensive DB path.
+        // The guard ensures the pending entry is cancelled if the task panics.
+        let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1585,20 +1609,15 @@ where
                         .record(anchored.trie_input.state.total_len() as f64);
                 }
 
-                // Compute and cache changesets using the computed trie_updates
+                // Compute and cache changesets using the computed trie_updates.
+                // Use the pre-created provider to avoid races with changeset cache
+                // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                // Get a provider from the overlay factory for trie cursor access
-                let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
-                        reth_trie::changesets::compute_trie_changesets(
-                            &provider,
-                            &computed.trie_updates,
-                        )
-                        .map_err(ProviderError::Database)
-                    });
-
-                match changeset_result {
+                match reth_trie::changesets::compute_trie_changesets(
+                    &changeset_provider,
+                    &computed.trie_updates,
+                ) {
                     Ok(changesets) => {
                         debug!(
                             target: "engine::tree::changeset",
@@ -1607,7 +1626,7 @@ where
                             "Computed and caching changesets"
                         );
 
-                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
+                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                     }
                     Err(e) => {
                         warn!(

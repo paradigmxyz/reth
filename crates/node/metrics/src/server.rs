@@ -130,43 +130,39 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
-        task_executor.spawn_with_graceful_shutdown_signal(|mut signal| {
-            Box::pin(async move {
-                loop {
-                    let io = tokio::select! {
-                        _ = &mut signal => break,
-                        io = listener.accept() => {
-                            match io {
-                                Ok((stream, _remote_addr)) => stream,
-                                Err(err) => {
-                                    tracing::error!(%err, "failed to accept connection");
-                                    continue;
-                                }
-                            }
+        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
+            let io = tokio::select! {
+                _ = &mut signal => break,
+                io = listener.accept() => {
+                    match io {
+                        Ok((stream, _remote_addr)) => stream,
+                        Err(err) => {
+                            tracing::error!(%err, "failed to accept connection");
+                            continue;
                         }
-                    };
-
-                    let handle = install_prometheus_recorder();
-                    let hook = hook.clone();
-                    let pprof_dump_dir = pprof_dump_dir.clone();
-                    let service = tower::service_fn(move |req: Request<_>| {
-                        let response =
-                            handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir);
-                        async move { Ok::<_, Infallible>(response) }
-                    });
-
-                    let mut shutdown = signal.clone().ignore_guard();
-                    tokio::task::spawn(async move {
-                        let _ = jsonrpsee_server::serve_with_graceful_shutdown(
-                            io,
-                            service,
-                            &mut shutdown,
-                        )
-                        .await
-                        .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
-                    });
+                    }
                 }
-            })
+            };
+
+            let handle = install_prometheus_recorder();
+            let hook = hook.clone();
+            let pprof_dump_dir = pprof_dump_dir.clone();
+            let service = tower::service_fn(move |req: Request<_>| {
+                let hook = hook.clone();
+                let pprof_dump_dir = pprof_dump_dir.clone();
+                async move {
+                    let response =
+                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                    Ok::<_, Infallible>(response)
+                }
+            });
+
+            let mut shutdown = signal.clone().ignore_guard();
+            tokio::task::spawn(async move {
+                let _ = jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
+                    .await
+                    .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+            });
         });
 
         Ok(())
@@ -183,36 +179,34 @@ impl MetricServer {
         let client = Client::builder()
             .build()
             .wrap_err("Could not create HTTP client to push metrics to gateway")?;
-        task_executor.spawn_with_graceful_shutdown_signal(move |mut signal| {
-            Box::pin(async move {
-                tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
-                let handle = install_prometheus_recorder();
-                loop {
-                    tokio::select! {
-                        _ = &mut signal => {
-                            tracing::info!("Shutting down task to push metrics to gateway");
-                            break;
-                        }
-                        _ = tokio::time::sleep(interval) => {
-                            hooks.iter().for_each(|hook| hook());
-                            let metrics = handle.handle().render();
-                            match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
-                                Ok(response) => {
-                                    if !response.status().is_success() {
-                                        tracing::warn!(
-                                            status = %response.status(),
-                                            "Failed to push metrics to gateway"
-                                        );
-                                    }
+        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
+            tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
+            let handle = install_prometheus_recorder();
+            loop {
+                tokio::select! {
+                    _ = &mut signal => {
+                        tracing::info!("Shutting down task to push metrics to gateway");
+                        break;
+                    }
+                    _ = tokio::time::sleep(interval) => {
+                        hooks.iter().for_each(|hook| hook());
+                        let metrics = handle.handle().render();
+                        match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
+                            Ok(response) => {
+                                if !response.status().is_success() {
+                                    tracing::warn!(
+                                        status = %response.status(),
+                                        "Failed to push metrics to gateway"
+                                    );
                                 }
-                                Err(err) => {
-                                    tracing::warn!(%err, "Failed to push metrics to gateway");
-                                }
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "Failed to push metrics to gateway");
                             }
                         }
                     }
                 }
-            })
+            }
         });
         Ok(())
     }
@@ -318,7 +312,7 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
-fn handle_request(
+async fn handle_request(
     path: &str,
     hook: impl Fn(),
     handle: &crate::recorder::PrometheusRecorder,
@@ -326,6 +320,7 @@ fn handle_request(
 ) -> Response<Full<Bytes>> {
     match path {
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
+        "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
             hook();
             let metrics = handle.handle().render();
@@ -410,6 +405,31 @@ fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
 fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from_static(
         b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
+#[cfg(tokio_unstable)]
+async fn handle_tokio_dump() -> Response<Full<Bytes>> {
+    let handle = tokio::runtime::Handle::current();
+    let dump = handle.dump().await;
+
+    let mut output = String::new();
+    for (i, task) in dump.tasks().iter().enumerate() {
+        let trace = task.trace();
+        output.push_str(&format!("task {i}:\n{trace}\n\n"));
+    }
+
+    let mut response = Response::new(Full::new(Bytes::from(output)));
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+    response
+}
+
+#[cfg(not(tokio_unstable))]
+async fn handle_tokio_dump() -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"tokio task dump not available. Rebuild with RUSTFLAGS=\"--cfg tokio_unstable\" and tokio's `taskdump` feature.",
     )));
     *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
     response

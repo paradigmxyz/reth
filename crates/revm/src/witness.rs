@@ -70,8 +70,8 @@ impl ExecutionWitnessRecord {
                 }
             }
         }
-        // BTreeMap keys are ordered, so the first key is the smallest
-        self.lowest_block_number = statedb.block_hashes.keys().next().copied()
+        self.lowest_block_number =
+            statedb.block_hashes.lowest().map(|(block_number, _)| block_number)
     }
 
     /// Creates the record from the state after execution.

@@ -204,12 +204,12 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
     }
@@ -226,7 +226,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -352,7 +352,7 @@ where
             .into())
         }
 
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
@@ -404,13 +404,15 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((mut evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(target_block),
-            self.eth_api().recovered_block(target_block),
-        )?;
+        let block = self
+            .eth_api()
+            .recovered_block(target_block)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
+        let mut evm_env =
+            self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -1070,18 +1072,33 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: B256,
-        _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        let block = self
+            .inner
+            .bad_block_store
+            .get(block_hash)
+            .ok_or_else(|| internal_rpc_err("bad block not found in cache"))?;
+
+        let evm_env = self
+            .eth_api()
+            .evm_config()
+            .evm_env(block.header())
+            .map_err(RethError::other)
+            .to_rpc_result()?;
+
+        let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
+        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
     }
 
-    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
-        Ok(())
+    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
-    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
@@ -1152,6 +1169,12 @@ impl<B: BlockTrait> BadBlockStore<B> {
     fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
         let guard = self.inner.read();
         guard.iter().rev().cloned().collect()
+    }
+
+    /// Returns the bad block with the given hash, if cached.
+    fn get(&self, hash: B256) -> Option<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().find(|b| b.hash() == hash).cloned()
     }
 }
 

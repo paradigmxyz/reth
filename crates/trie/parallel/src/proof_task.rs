@@ -30,7 +30,6 @@
 
 use crate::{
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -48,7 +47,8 @@ use reth_trie::{
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
     trie_cursor::TrieCursorFactory,
-    DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
+    ProofV2Target,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -166,7 +166,7 @@ impl ProofWorkerHandle {
         let storage_avail = storage_available_workers.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
             storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -204,7 +204,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
         let account_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -1196,8 +1196,8 @@ where
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &[proof_v2::Target],
-    mut storage_targets: B256Map<Vec<proof_v2::Target>>,
+    account_targets: &[ProofV2Target],
+    mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1247,12 +1247,12 @@ pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
     pub hashed_address: B256,
     /// The set of proof targets
-    pub targets: Vec<proof_v2::Target>,
+    pub targets: Vec<ProofV2Target>,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<proof_v2::Target>) -> Self {
+    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
         Self { hashed_address, targets }
     }
 }

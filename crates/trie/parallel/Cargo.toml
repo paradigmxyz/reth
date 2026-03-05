@@ -48,7 +48,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
@@ -64,7 +63,3 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
 ]
-
-[[bench]]
-name = "root"
-harness = false

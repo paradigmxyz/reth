@@ -777,6 +777,18 @@ impl RpcServerArgs {
         self
     }
 
+    /// Returns `true` if the given RPC namespace is enabled on any transport.
+    pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
+        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+            return true;
+        }
+        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+            return true;
+        }
+        // IPC exposes all modules when enabled
+        !self.ipcdisable
+    }
+
     /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
     pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
         self.rpc_force_blob_sidecar_upcasting = true;

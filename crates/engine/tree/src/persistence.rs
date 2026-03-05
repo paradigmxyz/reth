@@ -157,10 +157,18 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized)?;
+                // Clamp to the highest persisted block so that on restart
+                // `last_finalized_block_number` never points past available state.
+                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
+                if finalized > last.number {
+                    self.pending_finalized_block = Some(finalized);
+                }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe)?;
+                provider_rw.save_safe_block_number(safe.min(last.number))?;
+                if safe > last.number {
+                    self.pending_safe_block = Some(safe);
+                }
             }
 
             if self.pruner.is_pruning_needed(last.number) {
