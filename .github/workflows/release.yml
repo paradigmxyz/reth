@@ -64,77 +64,6 @@ jobs:
           cargo_ver=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           [[ "$tag" == "$cargo_ver"* ]] || { echo "Tag $tag doesn’t match the Cargo version $cargo_ver"; exit 1; }
 
-  pgo-profile:
-    name: collect PGO profiles
-    runs-on: [self-hosted, Linux, X64]
-    needs: extract-version
-    timeout-minutes: 120
-    env:
-      SCHELK_MOUNT: /reth-bench
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
-      RUSTC_WRAPPER: "sccache"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-        continue-on-error: true
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            dmsetup linux-tools-"$(uname -r)" || \
-            sudo apt-get install -y --no-install-recommends linux-tools-generic
-
-      - name: Download snapshot if needed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BENCH_REPO: ${{ github.repository }}
-        run: |
-          if ! .github/scripts/bench-reth-snapshot.sh --check; then
-            echo "Snapshot outdated or missing, downloading..."
-            .github/scripts/bench-reth-snapshot.sh
-          fi
-
-      - name: Mount snapshot
-        run: |
-          sudo pkill -9 reth || true
-          sleep 1
-          if mountpoint -q "$SCHELK_MOUNT"; then
-            sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
-          fi
-          sudo schelk mount -y
-          sync
-          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-
-      - name: Collect PGO profiles
-        run: |
-          DATADIR="$SCHELK_MOUNT/datadir" \
-          RPC_URL="$BENCH_RPC_URL" \
-          PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
-          PROFILE=maxperf-symbols \
-          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
-          EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
-            .github/scripts/pgo-profile.sh
-
-      - name: Recover snapshot
-        if: always()
-        run: |
-          if mountpoint -q "$SCHELK_MOUNT"; then
-            sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
-          fi
-
-      - name: Upload PGO profile
-        uses: actions/upload-artifact@v6
-        with:
-          name: pgo-profdata
-          path: target/pgo-profiles/merged.profdata
-          retention-days: 1
-
   build:
     name: build release
     runs-on: ${{ matrix.configs.os }}
@@ -226,44 +155,80 @@ jobs:
 
   build-pgo:
     name: build release (x86_64-linux PGO+BOLT)
-    runs-on: depot-ubuntu-latest-16
-    needs: [extract-version, pgo-profile]
+    runs-on: [self-hosted, Linux, X64]
+    needs: extract-version
+    timeout-minutes: 180
     env:
+      SCHELK_MOUNT: /reth-bench
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: x86_64-unknown-linux-gnu
       - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Download PGO profile
-        uses: actions/download-artifact@v7
-        with:
-          name: pgo-profdata
-          path: pgo-profiles
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            dmsetup lsb-release wget linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+      - name: Download snapshot if needed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+        run: |
+          if ! .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "Snapshot outdated or missing, downloading..."
+            .github/scripts/bench-reth-snapshot.sh
+          fi
+
+      - name: Mount snapshot
+        run: |
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          sudo schelk mount -y
+          sync
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 
       - name: Build Reth with PGO+BOLT
         run: |
-          sudo apt-get update
-          sudo apt-get install -y lsb-release wget
-
-          BINARY=reth \
+          DATADIR="$SCHELK_MOUNT/datadir" \
+          RPC_URL="$BENCH_RPC_URL" \
+          PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
+          BOLT_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
           PROFILE=maxperf-symbols \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           TARGET=x86_64-unknown-linux-gnu \
           EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
-          PGO_PROFDATA="$PWD/pgo-profiles/merged.profdata" \
-            .github/scripts/build_pgo_bolt.sh
+            .github/scripts/build_pgo_bolt_full.sh
+
+      - name: Recover snapshot
+        if: always()
+        run: |
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
 
       - name: Move binary
         run: |
           mkdir artifacts
-          mv target/x86_64-unknown-linux-gnu/maxperf-symbols/reth ./artifacts
+          mv target/maxperf-symbols/reth ./artifacts
 
       - name: Configure GPG and create artifacts
         env:
