@@ -16,8 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target, RlpNode,
-    TrieNodeV2,
+    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
+    ProofV2Target, RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -87,6 +87,8 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
     rlp_encode_buf: Vec<u8>,
+    /// Prefix set for tracking changed keys.
+    prefix_set: PrefixSet,
 }
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
@@ -102,7 +104,20 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             retained_proofs: Vec::<_>::with_capacity(32),
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
+            prefix_set: PrefixSet::default(),
         }
+    }
+
+    /// Sets the prefix set and returns `self`.
+    ///
+    /// When given, all cached hashes matching the [`PrefixSet`] will be invalidated. When all but
+    /// one of a branch's children match the prefix set then that remaining child's cached hash, if
+    /// any will also be invalidated. This allows for properly handling branch collapse situations,
+    /// where all but one child of a branch is deleted and the remaining child is required to be
+    /// unrevealed in order to collapse the branch.
+    pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
+        self.prefix_set = prefix_set;
+        self
     }
 }
 
