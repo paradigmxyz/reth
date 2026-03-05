@@ -631,12 +631,12 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
