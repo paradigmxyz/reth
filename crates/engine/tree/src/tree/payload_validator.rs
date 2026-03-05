@@ -1,7 +1,7 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
-    cached_state::{CacheStats, CachedStateProvider},
+    cached_state::{CacheStats, CachedStateMetrics, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     payload_processor::PayloadProcessor,
@@ -1793,7 +1793,9 @@ where
             })
             .count();
 
-        // Get cache statistics for detailed block logging
+        // Get cache statistics for detailed block logging and flush to prometheus.
+        // When cache_stats is present, hit/miss counts were recorded there instead of
+        // inline to prometheus, so we flush them now in a single batch.
         let (account_cache_hits, account_cache_misses) = cache_stats
             .as_ref()
             .map(|s| (s.account_hits(), s.account_misses()))
@@ -1804,6 +1806,9 @@ where
             .unwrap_or_default();
         let (code_cache_hits, code_cache_misses) =
             cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
+        if let Some(stats) = &cache_stats {
+            stats.flush_to_metrics(&CachedStateMetrics::default());
+        }
 
         // Build execution timing stats for detailed block logging
         Box::new(ExecutionTimingStats {
