@@ -257,17 +257,31 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: 'static,
     {
         async move {
-            if let Some(cached) = self
-                .cache()
-                .get_transaction_with_receipts(hash)
-                .await
-                .map_err(Self::Error::from_eth_err)? &&
-                let Some(result) = cached.into_tx_and_receipt(hash)
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                let Some(tx) =
+                    cached.block.body().transactions().get(cached.tx_index).cloned()
             {
-                return Ok(Some(result));
+                let meta = cached.transaction_meta(hash);
+
+                // Best case: receipts are also cached.
+                if let Some(receipt) = cached.receipt().cloned() {
+                    return Ok(Some((tx, meta, receipt)));
+                }
+
+                // Block is cached but receipts are missing — only fetch the receipt.
+                if let Some(receipt) = self
+                    .spawn_blocking_io(move |this| {
+                        this.provider()
+                            .receipt_by_hash(hash)
+                            .map_err(Self::Error::from_eth_err)
+                    })
+                    .await?
+                {
+                    return Ok(Some((tx, meta, receipt)));
+                }
             }
 
-            // Cache miss — fall back to the provider.
+            // Full cache miss — fetch both from provider.
             self.spawn_blocking_io(move |this| {
                 let provider = this.provider();
                 let Some((tx, meta)) = provider

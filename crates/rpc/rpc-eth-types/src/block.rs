@@ -78,22 +78,6 @@ impl<B: Block, R> CachedTransaction<B, R> {
         }
     }
 
-    /// Consumes self and returns the transaction, its metadata, and receipt.
-    ///
-    /// Returns `None` if the receipt or transaction is not available at the cached index.
-    pub fn into_tx_and_receipt(
-        self,
-        tx_hash: TxHash,
-    ) -> Option<(<B::Body as BlockBody>::Transaction, TransactionMeta, R)>
-    where
-        B::Header: BlockHeader,
-        R: Clone,
-    {
-        let receipt = self.receipt().cloned()?;
-        let tx = self.block.body().transactions().get(self.tx_index)?.clone();
-        Some((tx, self.transaction_meta(tx_hash), receipt))
-    }
-
     /// Converts this cached transaction into an RPC receipt using the given converter.
     ///
     /// Returns `None` if receipts are not available or the transaction index is out of bounds.
