@@ -39,7 +39,7 @@ tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18.0"
 
-[target.'cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))'.dependencies]
+[target.'cfg(all(tokio_unstable, target_os = "linux", any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))'.dependencies]
 tokio = { workspace = true, features = ["taskdump"] }
 
 [dev-dependencies]
