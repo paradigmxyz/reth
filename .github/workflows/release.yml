@@ -16,7 +16,7 @@ on:
       pgo_blocks:
         description: "Number of blocks to execute for PGO profiling on self-hosted runner"
         type: string
-        default: "100"
+        default: "10"
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -226,7 +226,7 @@ jobs:
 
   build-pgo:
     name: build release (x86_64-linux PGO+BOLT)
-    runs-on: depot-ubuntu-24.04-4
+    runs-on: depot-ubuntu-24.04-16
     needs: [extract-version, pgo-profile]
     env:
       RUSTC_WRAPPER: "sccache"
