@@ -24,7 +24,7 @@ pub struct SlowBlockInfo {
     pub stats: ExecutionTimingStats,
     /// The commit duration for the batch containing this block.
     pub commit_duration: Duration,
-    /// The total duration (execution + state_read + state_hash + commit).
+    /// The total duration (execution + `state_read` + `state_hash` + commit).
     pub total_duration: Duration,
 }
 
@@ -53,7 +53,6 @@ impl<N: NodePrimitives> ConsensusEngineEvent<N> {
     pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
-            Self::SlowBlock(_) => None,
             _ => None,
         }
     }
