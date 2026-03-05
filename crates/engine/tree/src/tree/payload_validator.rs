@@ -64,6 +64,12 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
 
+/// Result type for block validation with optional timing stats.
+type InsertPayloadResult<N> = Result<
+    (ExecutedBlock<N>, Option<ExecutionTimingStats>),
+    InsertPayloadError<<N as NodePrimitives>::Block>,
+>;
+
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -285,7 +291,7 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
+    ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -338,7 +344,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
-    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
+    ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,

@@ -24,7 +24,7 @@ use thiserror::Error;
 use tracing::{debug, error, instrument};
 
 /// Result of a persistence save-blocks operation, returned to the engine tree.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveBlocksResult {
     /// The last block that was persisted.
     pub last_block: BlockNumHash,
