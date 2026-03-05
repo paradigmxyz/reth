@@ -258,8 +258,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) =
-                    cached.block.body().transactions().get(cached.tx_index).cloned()
+                let Some(tx) = cached.block.body().transactions().get(cached.tx_index).cloned()
             {
                 let meta = cached.transaction_meta(hash);
 
@@ -268,14 +267,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     return Ok(Some((tx, meta, receipt)));
                 }
 
-                // Block is cached but receipts are missing — only fetch the receipt.
-                if let Some(receipt) = self
-                    .spawn_blocking_io(move |this| {
-                        this.provider()
-                            .receipt_by_hash(hash)
-                            .map_err(Self::Error::from_eth_err)
-                    })
-                    .await?
+                // Block still cached but receipts evicted — fetch via cache since
+                // the block is recent and `build_transaction_receipt` needs all
+                // receipts for gas accounting anyway.
+                if let Some(receipts) = self
+                    .cache()
+                    .get_receipts(cached.block.hash())
+                    .await
+                    .map_err(Self::Error::from_eth_err)? &&
+                    let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
                     return Ok(Some((tx, meta, receipt)));
                 }
