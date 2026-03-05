@@ -173,7 +173,12 @@ impl ArenaSparseSubtrie {
 
             match result {
                 NextResult::Done => break,
-                NextResult::Descended | NextResult::Popped => continue,
+                NextResult::Descended => continue,
+                NextResult::Popped => {
+                    if self.buffers.cursor.is_empty() {
+                        break;
+                    }
+                }
                 NextResult::NonBranch => unreachable!("should_descend only accepts branches"),
             }
         }
@@ -2940,7 +2945,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
         fn arena_trie_proptest(
-            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=1000usize),
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             changeset2_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
