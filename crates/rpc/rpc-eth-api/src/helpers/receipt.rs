@@ -4,7 +4,7 @@
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
-use reth_primitives_traits::SignerRecoverable;
+use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{
     error::FromEthApiError, utils::calculate_gas_used_and_next_log_index, EthApiError,
@@ -20,7 +20,7 @@ pub trait LoadReceipt:
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     fn build_transaction_receipt(
         &self,
-        tx: ProviderTx<Self::Provider>,
+        tx: Recovered<ProviderTx<Self::Provider>>,
         meta: TransactionMeta,
         receipt: ProviderReceipt<Self::Provider>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
@@ -40,10 +40,7 @@ pub trait LoadReceipt:
             Ok(self
                 .converter()
                 .convert_receipts(vec![ConvertReceiptInput {
-                    tx: tx
-                        .try_into_recovered_unchecked()
-                        .map_err(Self::Error::from_eth_err)?
-                        .as_recovered_ref(),
+                    tx: tx.as_recovered_ref(),
                     gas_used: receipt.cumulative_gas_used() - gas_used,
                     receipt,
                     next_log_index,
