@@ -1,6 +1,7 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
+use crate::valid_payload::NewPayloadTimingBreakdown;
 use alloy_primitives::B256;
 use csv::Writer;
 use eyre::OptionExt;
@@ -103,8 +104,9 @@ pub(crate) struct CombinedResult {
     pub(crate) fcu_latency: Duration,
     /// The latency of both calls combined.
     pub(crate) total_latency: Duration,
-    /// Latency of the reorg `newPayload` call (only when `--reorg` is enabled).
-    pub(crate) reorg_new_payload_latency: Option<Duration>,
+    /// Server-side timing breakdown for the reorg `newPayload` call (only when `--reorg` is
+    /// enabled).
+    pub(crate) reorg_new_payload_timings: Option<NewPayloadTimingBreakdown>,
     /// Latency of the reorg `forkchoiceUpdated` call (only when `--reorg` is enabled).
     pub(crate) reorg_fcu_latency: Option<Duration>,
 }
@@ -138,8 +140,17 @@ impl std::fmt::Display for CombinedResult {
         if let Some(d) = np.persistence_wait {
             write!(f, ", persistence wait: {d:?}")?;
         }
-        if let Some(d) = self.reorg_new_payload_latency {
-            write!(f, ", reorg newPayload: {d:?}")?;
+        if let Some(ref reorg) = self.reorg_new_payload_timings {
+            write!(f, ", reorg newPayload: {:?}", reorg.latency)?;
+            if !reorg.execution_cache_wait.is_zero() {
+                write!(f, ", reorg execution cache wait: {:?}", reorg.execution_cache_wait)?;
+            }
+            if !reorg.sparse_trie_wait.is_zero() {
+                write!(f, ", reorg trie cache wait: {:?}", reorg.sparse_trie_wait)?;
+            }
+            if let Some(d) = reorg.persistence_wait {
+                write!(f, ", reorg persistence wait: {d:?}")?;
+            }
         }
         if let Some(d) = self.reorg_fcu_latency {
             write!(f, ", reorg fcu: {d:?}")?;
@@ -159,7 +170,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 12)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 15)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -183,7 +194,22 @@ impl Serialize for CombinedResult {
         )?;
         state.serialize_field(
             "reorg_new_payload_latency",
-            &self.reorg_new_payload_latency.map(|d| d.as_micros()),
+            &self.reorg_new_payload_timings.as_ref().map(|t| t.latency.as_micros()),
+        )?;
+        state.serialize_field(
+            "reorg_persistence_wait",
+            &self
+                .reorg_new_payload_timings
+                .as_ref()
+                .and_then(|t| t.persistence_wait.map(|d| d.as_micros())),
+        )?;
+        state.serialize_field(
+            "reorg_execution_cache_wait",
+            &self.reorg_new_payload_timings.as_ref().map(|t| t.execution_cache_wait.as_micros()),
+        )?;
+        state.serialize_field(
+            "reorg_sparse_trie_wait",
+            &self.reorg_new_payload_timings.as_ref().map(|t| t.sparse_trie_wait.as_micros()),
         )?;
         state
             .serialize_field("reorg_fcu_latency", &self.reorg_fcu_latency.map(|d| d.as_micros()))?;

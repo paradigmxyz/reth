@@ -23,7 +23,7 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload_data, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
-        create_reorg_payload,
+        create_reorg_payload, NewPayloadTimingBreakdown,
     },
 };
 use alloy_provider::{ext::DebugApi, Provider};
@@ -274,7 +274,7 @@ impl Command {
                 block_to_new_payload_data(block, is_optimism, rlp, use_reth_namespace)?;
 
             // Reorg path: send a modified block first, make it head, then send the canonical
-            let mut reorg_new_payload_latency = None;
+            let mut reorg_new_payload_timings = None;
             let mut reorg_fcu_latency = None;
 
             if reorg {
@@ -292,8 +292,14 @@ impl Command {
                     debug!(target: "reth-bench", ?block_number, ?reorg_hash, "Sending reorg payload");
 
                     let reorg_np_start = Instant::now();
-                    call_new_payload_with_reth(&auth_provider, reorg_version, reorg_params).await?;
-                    reorg_new_payload_latency = Some(reorg_np_start.elapsed());
+                    let reorg_server_timings =
+                        call_new_payload_with_reth(&auth_provider, reorg_version, reorg_params)
+                            .await?;
+                    reorg_new_payload_timings =
+                        Some(reorg_server_timings.unwrap_or_else(|| NewPayloadTimingBreakdown {
+                            latency: reorg_np_start.elapsed(),
+                            ..Default::default()
+                        }));
 
                     let reorg_fcu_state = ForkchoiceState {
                         head_block_hash: reorg_hash,
@@ -357,7 +363,7 @@ impl Command {
                 new_payload_result,
                 fcu_latency,
                 total_latency,
-                reorg_new_payload_latency,
+                reorg_new_payload_timings,
                 reorg_fcu_latency,
             };
 
