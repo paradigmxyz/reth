@@ -61,6 +61,10 @@ use std::{
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
+/// Output of block or payload validation.
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
+    Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
+
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
 
@@ -1831,10 +1835,6 @@ where
         })
     }
 }
-
-/// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
-    Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
