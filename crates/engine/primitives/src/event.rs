@@ -17,17 +17,6 @@ use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 #[deprecated(note = "Use ConsensusEngineEvent instead")]
 pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
 
-/// Information about a slow block detected after persistence.
-#[derive(Clone, Debug)]
-pub struct SlowBlockInfo {
-    /// The timing statistics for the slow block.
-    pub stats: Box<ExecutionTimingStats>,
-    /// The commit duration for the batch containing this block.
-    pub commit_duration: Duration,
-    /// The total duration (execution + `state_read` + `state_hash` + commit).
-    pub total_duration: Duration,
-}
-
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
 pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
@@ -95,4 +84,15 @@ where
             }
         }
     }
+}
+
+/// Information about a slow block detected after persistence.
+#[derive(Clone, Debug)]
+pub struct SlowBlockInfo {
+    /// The timing statistics for the slow block.
+    pub stats: Box<ExecutionTimingStats>,
+    /// The commit duration for the batch containing this block.
+    pub commit_duration: Duration,
+    /// The total duration (execution + `state_read` + `state_hash` + commit).
+    pub total_duration: Duration,
 }
