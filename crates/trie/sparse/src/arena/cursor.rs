@@ -39,8 +39,6 @@ pub(super) enum SeekResult {
 /// Result of [`ArenaCursor::next`] describing what the cursor did.
 #[derive(Debug)]
 pub(super) enum NextResult {
-    /// Descended into a qualifying child branch (now at stack head).
-    Descended,
     /// The head is a non-branch node (subtrie, taken-subtrie, leaf, etc.).
     /// The caller should process it and then pop.
     NonBranch,
@@ -88,6 +86,12 @@ impl ArenaCursor {
 
     /// Clears the traversal stack and pushes the given root entry.
     pub(super) fn reset(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
+        debug_assert!(
+            self.stack.is_empty(),
+            "cursor stack must be drained before reset; stack has {} entries: {:#?}",
+            self.stack.len(),
+            self.stack,
+        );
         self.stack.clear();
         self.push(arena, idx, path);
     }
@@ -137,12 +141,14 @@ impl ArenaCursor {
         entry
     }
 
-    /// Drains the stack, propagating dirty state from each entry to its parent.
+    /// Drains the stack, propagating dirty state from each entry to its parent,
+    /// then removes the final (root) entry.
     pub(super) fn drain(&mut self, arena: &mut Arena<ArenaSparseNode>) {
         trace!(target: TRACE_TARGET, "Draining stack");
         while self.stack.len() > 1 {
             self.pop(arena);
         }
+        self.stack.clear();
     }
 
     /// Returns the logical path of the branch at the top of the stack.
@@ -209,54 +215,59 @@ impl ArenaCursor {
         parent_branch.children[dense_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
     }
 
-    /// Advances the DFS traversal by one step.
+    /// Advances the DFS traversal to the next actionable node.
     ///
-    /// If the head is not a branch, returns [`CursorNext::NonBranch`] so the caller can process
-    /// and pop it. If the head is a branch, iterates its revealed children starting from where
-    /// the last call left off, calling `should_descend` on each child node. If a child qualifies,
-    /// it is pushed onto the stack and [`CursorNext::Descended`] is returned. If no child
-    /// qualifies, the head is popped and [`CursorNext::Popped`] is returned.
+    /// Internally descends through qualifying branch children until it reaches a node
+    /// that requires caller action. Returns [`NextResult::NonBranch`] when the head is
+    /// a non-branch node the caller should process and pop, or [`NextResult::Popped`]
+    /// when a branch has exhausted its qualifying children and been popped.
     ///
-    /// Returns `None` when the stack is empty (traversal complete).
+    /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
     pub(super) fn next(
         &mut self,
         arena: &mut Arena<ArenaSparseNode>,
         should_descend: impl Fn(&ArenaSparseNode) -> bool,
     ) -> NextResult {
-        let Some(head) = self.stack.last_mut() else {
-            return NextResult::Done;
-        };
-        let head_idx = head.index;
+        loop {
+            let Some(head) = self.stack.last_mut() else {
+                return NextResult::Done;
+            };
+            let head_idx = head.index;
 
-        let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
-            return NextResult::NonBranch;
-        };
-
-        let state_mask = branch.state_mask;
-        let start = head.next_dense_idx;
-
-        for (dense_idx, nibble) in state_mask.iter().enumerate() {
-            if dense_idx < start {
-                continue;
-            }
-
-            let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                ArenaSparseNodeBranchChild::Blinded(_) => continue,
+            let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
+                return NextResult::NonBranch;
             };
 
-            if should_descend(&arena[child_idx]) {
-                // Record where to resume iteration when we return to this entry.
-                self.stack.last_mut().expect("head exists").next_dense_idx = dense_idx + 1;
-                let path = self.child_path(arena, nibble);
-                self.push(arena, child_idx, path);
-                return NextResult::Descended;
+            let state_mask = branch.state_mask;
+            let start = head.next_dense_idx;
+
+            let mut descended = false;
+            for (dense_idx, nibble) in state_mask.iter().enumerate() {
+                if dense_idx < start {
+                    continue;
+                }
+
+                let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                if should_descend(&arena[child_idx]) {
+                    // Record where to resume iteration when we return to this entry.
+                    self.stack.last_mut().expect("head exists").next_dense_idx = dense_idx + 1;
+                    let path = self.child_path(arena, nibble);
+                    self.push(arena, child_idx, path);
+                    descended = true;
+                    break;
+                }
+            }
+
+            if !descended {
+                // No qualifying children remain — pop.
+                let entry = self.pop(arena);
+                return NextResult::Popped(entry);
             }
         }
-
-        // No qualifying children remain — pop.
-        let entry = self.pop(arena);
-        NextResult::Popped(entry)
     }
 
     /// Pops the stack until the head is an ancestor of `full_path`, then descends from that head
