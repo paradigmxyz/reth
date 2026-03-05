@@ -644,31 +644,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // 2. filter out transactions pending import to pool
         partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
 
-        // 3. filter out known hashes
+        // 3. filter out invalid entries (spam)
         //
-        // known txns have already been successfully fetched or received over gossip.
-        //
-        // most hashes will be filtered out here since the mempool protocol is a gossip
-        // protocol, healthy peers will send many of the same hashes.
-        //
-        let hashes_count_pre_pool_filter = partially_valid_msg.len();
-        self.pool.retain_unknown(&mut partially_valid_msg);
-        if hashes_count_pre_pool_filter > partially_valid_msg.len() {
-            let already_known_hashes_count =
-                hashes_count_pre_pool_filter - partially_valid_msg.len();
-            self.metrics
-                .occurrences_hashes_already_in_pool
-                .increment(already_known_hashes_count as u64);
-        }
-
-        if partially_valid_msg.is_empty() {
-            // nothing to request
-            return
-        }
-
-        // 4. filter out invalid entries (spam)
-        //
-        // validates messages with respect to the given network, e.g. allowed tx types
+        // validates messages with respect to the given network, e.g. allowed tx types.
+        // done before the pool lookup since these are cheap in-memory checks that shrink
+        // the set before acquiring the pool lock.
         //
         let mut should_report_peer = false;
         let mut tx_types_counter = TxTypesCounter::default();
@@ -725,6 +705,28 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
         if should_report_peer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+        }
+
+        // 4. filter out known hashes
+        //
+        // known txns have already been successfully fetched or received over gossip.
+        //
+        // most hashes will be filtered out here since the mempool protocol is a gossip
+        // protocol, healthy peers will send many of the same hashes.
+        //
+        let hashes_count_pre_pool_filter = partially_valid_msg.len();
+        self.pool.retain_unknown(&mut partially_valid_msg);
+        if hashes_count_pre_pool_filter > partially_valid_msg.len() {
+            let already_known_hashes_count =
+                hashes_count_pre_pool_filter - partially_valid_msg.len();
+            self.metrics
+                .occurrences_hashes_already_in_pool
+                .increment(already_known_hashes_count as u64);
+        }
+
+        if partially_valid_msg.is_empty() {
+            // nothing to request
+            return
         }
 
         let mut valid_announcement_data =
@@ -1113,11 +1115,12 @@ where
         request: GetPooledTransactions,
         response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     ) {
+        // fast exit if gossip is disabled
+        if self.network.tx_gossip_disabled() {
+            let _ = response.send(Ok(PooledTransactions::default()));
+            return
+        }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            if self.network.tx_gossip_disabled() {
-                let _ = response.send(Ok(PooledTransactions::default()));
-                return
-            }
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
