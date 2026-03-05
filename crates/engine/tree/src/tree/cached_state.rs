@@ -194,6 +194,7 @@ impl CachedStateMetrics {
         // account cache
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
+        self.account_cache_collisions.set(0);
 
         self.reset_stats();
     }
