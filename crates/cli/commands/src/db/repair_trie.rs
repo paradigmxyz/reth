@@ -163,9 +163,7 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     }
 
     if inconsistent_nodes > 0 {
-        Err(eyre::eyre!(
-            "Found {inconsistent_nodes} inconsistencies (dry run - no changes made)"
-        ))
+        Err(eyre::eyre!("Found {inconsistent_nodes} inconsistencies (dry run - no changes made)"))
     } else {
         info!("No inconsistencies found (dry run)");
         Ok(())
