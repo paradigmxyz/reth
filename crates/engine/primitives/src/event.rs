@@ -93,7 +93,7 @@ pub struct SlowBlockInfo {
     pub stats: Box<ExecutionTimingStats>,
     /// The commit duration for the batch containing this block.
     pub commit_duration: Duration,
-    /// The total duration (execution + state_root + commit).
+    /// The total duration (execution + `state_root` + commit).
     /// Note: `state_read` is a subset of execution and is not added separately.
     pub total_duration: Duration,
 }
