@@ -1793,12 +1793,13 @@ where
             .count();
 
         // Get cache statistics for slow block logging
+        let cache_stats = cache_metrics.as_ref().map(|m| m.cache_stats());
         let (account_cache_hits, account_cache_misses) =
-            cache_metrics.as_ref().map(|m| m.account_stats()).unwrap_or_default();
+            cache_stats.map(|s| (s.account_hits(), s.account_misses())).unwrap_or_default();
         let (storage_cache_hits, storage_cache_misses) =
-            cache_metrics.as_ref().map(|m| m.storage_stats()).unwrap_or_default();
+            cache_stats.map(|s| (s.storage_hits(), s.storage_misses())).unwrap_or_default();
         let (code_cache_hits, code_cache_misses) =
-            cache_metrics.as_ref().map(|m| m.code_stats()).unwrap_or_default();
+            cache_stats.map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
 
         // Build execution timing stats for slow block logging
         Box::new(ExecutionTimingStats {
