@@ -471,12 +471,7 @@ where
                     }
                 }
                 LoopEvent::Disconnected => {
-                    // Persist all remaining blocks before shutting down to avoid data
-                    // loss when the incoming channel is dropped (e.g. on SIGTERM).
-                    info!(target: "engine::tree", "Channel disconnected, persisting remaining blocks before shutdown");
-                    if let Err(err) = self.persist_until_complete() {
-                        error!(target: "engine::tree", %err, "Failed to persist blocks during shutdown");
-                    }
+                    error!(target: "engine::tree", "Channel disconnected");
                     return
                 }
             }
