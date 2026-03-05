@@ -518,93 +518,17 @@ where
         // children of the branch to have been committed.
         self.commit_last_child(targets)?;
 
+        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
         let branch = self.branch_stack.pop().expect("branch_stack cannot be empty");
 
         // Take the branch's children off the stack, using the state mask to determine how many
         // there are.
         let num_children = branch.state_mask.count_ones() as usize;
+        debug_assert!(num_children > 1, "A branch must have at least two children");
         debug_assert!(
             self.child_stack.len() >= num_children,
             "Stack is missing necessary children ({num_children:?})"
         );
-
-        // If the branch has fewer than 2 children then it is not a valid branch node. This can
-        // happen when children that were present in the cached `state_mask` have been deleted
-        // (their hash was cleared by a `MaskedTrieCursor` and no leaf data exists in the hashed
-        // cursor).
-        //
-        // This only applies to branches created from cached data (`masks` is `Some`). Branches
-        // built purely from leaf data should always have at least 2 children.
-        if num_children < 2 && branch.masks.is_some() {
-            trace!(
-                target: TRACE_TARGET,
-                ?num_children,
-                branch_path = ?self.branch_path,
-                "pop_branch: collapsing branch with fewer than 2 children",
-            );
-
-            let new_path_len =
-                self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
-
-            // If there is only one child then the branch collapses: its extension + nibble are
-            // absorbed into the remaining child's short key (or the branch is dropped entirely if
-            // empty).
-            if num_children == 1 {
-                // Build the prefix to prepend to the child: the branch's extension nibbles
-                // (the last `ext_len` nibbles of `branch_path`) + the child's nibble on the
-                // branch (the single set bit in `state_mask`).
-                let ext_start = self.branch_path.len() - branch.ext_len as usize;
-                let mut prefix =
-                    self.branch_path.slice_unchecked(ext_start, self.branch_path.len());
-                let child_nibble = branch.state_mask.get().trailing_zeros() as u8;
-                prefix.push_unchecked(child_nibble);
-
-                // The remaining child cannot be an RlpNode — we don't know its short
-                // key, so we can't absorb the branch's extension into it.
-                debug_assert!(
-                    !matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))),
-                    "cannot collapse branch: remaining child {child_nibble:?} is an RlpNode with unknown short key"
-                );
-
-                let child = self.child_stack.last_mut().expect("checked num_children == 1");
-                let old_short_key = child.short_key();
-                let mut new_short_key = prefix;
-                new_short_key.extend(old_short_key);
-
-                match child {
-                    ProofTrieBranchChild::Leaf { short_key, .. } => {
-                        *short_key = new_short_key;
-                    }
-                    ProofTrieBranchChild::Branch { node, .. } => {
-                        node.key = new_short_key;
-                        // Recompute the branch_rlp_node since the extension key changed.
-                        self.rlp_encode_buf.clear();
-                        BranchNodeRef::new(&node.stack, node.state_mask)
-                            .encode(&mut self.rlp_encode_buf);
-                        node.branch_rlp_node = Some(RlpNode::from_rlp(&self.rlp_encode_buf));
-                    }
-                    ProofTrieBranchChild::RlpNode(_) => unreachable!(),
-                }
-
-                // Update the branch_path.
-                debug_assert!(self.branch_path.len() >= new_path_len);
-                self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
-                return Ok(())
-            }
-
-            // If the branch had 0 children, the parent's `state_mask` bit for this branch's
-            // nibble must be unset so the parent doesn't expect a child on the stack.
-            if num_children == 0 &&
-                let Some(parent) = self.branch_stack.last_mut()
-            {
-                let nibble = self.branch_path.get_unchecked(new_path_len);
-                parent.state_mask.unset_bit(nibble);
-            }
-        }
-
-        debug_assert!(num_children > 1, "A branch must have at least two children");
-
-        let mut rlp_nodes_buf = self.take_rlp_nodes_buf();
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
@@ -2315,54 +2239,6 @@ mod tests {
         let root_node = calculator
             .storage_root_node(account_addr)
             .expect("storage_root_node should succeed when lower bound advances past branch");
-
-        let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
-        assert!(root_hash.is_some(), "should produce a root hash");
-    }
-
-    /// Tests that a cached branch collapses correctly when all but one of its children have been
-    /// deleted. The branch at `0x6` has `state_mask` bits 0 and 5, but nibble 5's hash is cleared
-    /// and no leaf data exists for it. Only child 0 remains, so the branch collapses: the child
-    /// absorbs the branch's extension + nibble into its short key.
-    #[test]
-    fn test_branch_collapses_to_single_child() {
-        reth_tracing::init_test_tracing();
-
-        let account_addr = B256::ZERO;
-        let val = U256::from(42u64);
-
-        let slot_60 = B256::right_padding_from(&[0x60]);
-
-        // Branch at 0x6: state_mask has bits 0 and 5. hash_mask has only bit 0 (NOT 5).
-        // Child 5 has state_mask set but no hash and no leaf data → will be empty.
-        // Child 0 has a cached hash → will be the sole remaining child.
-        let state_mask = TrieMask::new(0b0000_0000_0010_0001); // bits 0,5
-        let hash_mask = TrieMask::new(0b0000_0000_0000_0001); // bit 0 only
-        let hashes = vec![B256::repeat_byte(0xaa)];
-        let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
-
-        let mut storage_nodes = BTreeMap::new();
-        storage_nodes.insert(Nibbles::from_nibbles([0x6]), branch);
-
-        // Hashed cursor has a slot at 0x60 but NOT 0x65.
-        let post_state_storage: BTreeMap<B256, U256> = [(slot_60, val)].into_iter().collect();
-        let hashed_cursor_factory = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, post_state_storage)]),
-        );
-        let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, storage_nodes)]),
-        );
-
-        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor =
-            hashed_cursor_factory.hashed_storage_cursor(account_addr).unwrap();
-        let mut calculator =
-            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
-        let root_node = calculator
-            .storage_root_node(account_addr)
-            .expect("storage_root_node should succeed when branch collapses to single child");
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
         assert!(root_hash.is_some(), "should produce a root hash");
