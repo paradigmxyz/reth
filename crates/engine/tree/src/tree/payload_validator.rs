@@ -503,12 +503,10 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(CachedStateProvider::new(
-                state_provider,
-                caches,
-                cache_metrics,
-                cache_stats.clone(),
-            ));
+            state_provider = Box::new(
+                CachedStateProvider::new(state_provider, caches, cache_metrics)
+                    .with_cache_stats(cache_stats.clone()),
+            );
         };
 
         let state_provider_stats = if slow_block_enabled || self.config.state_provider_metrics() {

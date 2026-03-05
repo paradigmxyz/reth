@@ -106,9 +106,8 @@ impl<S> CachedStateProvider<S> {
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
-        cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats }
+        Self { state_provider, caches, metrics, cache_stats: None }
     }
 }
 
@@ -118,9 +117,16 @@ impl<S> CachedStateProvider<S, true> {
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
-        cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics, cache_stats }
+        Self { state_provider, caches, metrics, cache_stats: None }
+    }
+}
+
+impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
+    /// Enables cache statistics tracking for slow block logging.
+    pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
+        self.cache_stats = stats;
+        self
     }
 }
 
@@ -657,7 +663,7 @@ impl ExecutionCache {
     }
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
-    pub const fn new(total_cache_size: usize) -> Self {
+    pub fn new(total_cache_size: usize) -> Self {
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -906,7 +912,7 @@ pub struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub const fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+    pub fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
         Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
     }
 
@@ -989,7 +995,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(), None);
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -1009,7 +1015,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed(), None);
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
