@@ -708,7 +708,7 @@ jobs:
           MC="mc --config-dir /home/ubuntu/.mc"
           BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous-big-blocks.tar.zst"
           BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
-          mkdir -p "$BIG_BLOCKS_DIR"
+          rm -r "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
           echo "Downloading big blocks from $BUCKET..."
           $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
           echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
