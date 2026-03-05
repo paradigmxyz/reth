@@ -118,6 +118,15 @@ impl<S> CachedStateProvider<S, true> {
     }
 }
 
+/// Represents the status of a key in the cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CachedStatus<T> {
+    /// The key is not in the cache (or was invalidated). The value was recalculated.
+    NotCached(T),
+    /// The key exists in cache and has a specific value.
+    Cached(T),
+}
+
 /// Metrics for the cached state provider, showing hits / misses for each cache
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
@@ -444,15 +453,6 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
             self.state_provider.basic_account(address)
         }
     }
-}
-
-/// Represents the status of a key in the cache.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CachedStatus<T> {
-    /// The key is not in the cache (or was invalidated). The value was recalculated.
-    NotCached(T),
-    /// The key exists in cache and has a specific value.
-    Cached(T),
 }
 
 impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
