@@ -42,9 +42,9 @@ pub(super) enum NextResult {
     /// The head is a non-branch node (subtrie, taken-subtrie, leaf, etc.).
     /// The caller should process it and then pop.
     NonBranch,
-    /// No more qualifying children in the head branch — the head was popped.
-    /// Contains the popped entry. If the stack is now empty, the traversal is complete.
-    Popped(ArenaCursorStackEntry),
+    /// The head branch has no more qualifying children. It is still on the stack;
+    /// the caller should process it and then pop.
+    Branch,
     /// The stack is empty — the traversal is complete.
     Done,
 }
@@ -225,7 +225,7 @@ impl ArenaCursor {
     /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
     pub(super) fn next(
         &mut self,
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &Arena<ArenaSparseNode>,
         should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
     ) -> NextResult {
         loop {
@@ -264,9 +264,8 @@ impl ArenaCursor {
             }
 
             if !descended {
-                // No qualifying children remain — pop.
-                let entry = self.pop(arena);
-                return NextResult::Popped(entry);
+                // No qualifying children remain — caller should process and pop.
+                return NextResult::Branch;
             }
         }
     }

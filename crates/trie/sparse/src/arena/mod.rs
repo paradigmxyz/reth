@@ -130,7 +130,7 @@ impl ArenaSparseSubtrie {
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         loop {
-            let result = self.buffers.cursor.next(&mut self.arena, |depth, node| {
+            let result = self.buffers.cursor.next(&self.arena, |depth, node| {
                 if depth < max_depth {
                     // Above max_depth: only descend into branches for navigation.
                     matches!(node, ArenaSparseNode::Branch(_))
@@ -142,36 +142,23 @@ impl ArenaSparseSubtrie {
 
             match result {
                 NextResult::Done => break,
-                NextResult::NonBranch => {
-                    // NonBranch: head is still on the stack.
+                NextResult::NonBranch | NextResult::Branch => {
                     let depth = self.buffers.cursor.len() - 1;
-                    debug_assert!(
-                        depth > max_depth,
-                        "NonBranch at depth {depth} <= max_depth {max_depth}",
-                    );
                     let head = self.buffers.cursor.head().expect("cursor is non-empty");
                     let idx = head.index;
                     let nibble = head.path.last();
+                    // Pop before removing so dirty propagation can still read the node.
+                    self.buffers.cursor.pop(&mut self.arena);
+
+                    if depth <= max_depth {
+                        continue;
+                    }
+
                     if matches!(self.arena[idx], ArenaSparseNode::Leaf { .. }) {
                         pruned_leaves += 1;
                     }
-                    // Pop before removing so dirty propagation can still read the node.
-                    self.buffers.cursor.pop(&mut self.arena);
                     self.remove_pruned_child(idx, nibble, depth, max_depth);
                     pruned += (depth == max_depth + 1) as usize;
-                }
-                NextResult::Popped(entry) => {
-                    // Popped: entry was removed, so current stack length equals the
-                    // popped entry's depth.
-                    let depth = self.buffers.cursor.len();
-                    if depth > max_depth {
-                        // `next` already popped (and read) this branch; safe to remove.
-                        self.remove_pruned_child(entry.index, entry.path.last(), depth, max_depth);
-                        pruned += (depth == max_depth + 1) as usize;
-                    }
-                    if self.buffers.cursor.is_empty() {
-                        break;
-                    }
                 }
             }
         }
@@ -892,18 +879,19 @@ impl ArenaParallelSparseTrie {
                 )
             });
 
-            let entry = match result {
+            match result {
                 NextResult::Done => break,
                 NextResult::NonBranch => {
                     unreachable!("should_descend only returns true for dirty branches")
                 }
-                NextResult::Popped(entry) => entry,
+                NextResult::Branch => {}
             };
 
-            let head_idx = entry.index;
-            let head_path = entry.path;
+            let head = cursor.head().expect("cursor is non-empty");
+            let head_idx = head.index;
+            let head_path = head.path;
 
-            // The branch at `head_idx` was just popped. All its dirty child branches
+            // The branch at `head_idx` is exhausted. All its dirty child branches
             // have already been encoded and cached. Collect all children's RLP nodes
             // and encode the branch.
             trace!(
@@ -1006,6 +994,8 @@ impl ArenaParallelSparseTrie {
                     }
                 }
             }
+
+            cursor.pop(arena);
         }
 
         let ArenaSparseNodeState::Cached { rlp_node, .. } = &arena[root].branch_ref().state else {
@@ -2171,7 +2161,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
-            let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
+            let result = self.buffers.cursor.next(&self.upper_arena, |_, child| match child {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
                 ArenaSparseNode::TakenSubtrie => true,
                 _ => false,
@@ -2179,7 +2169,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             match result {
                 NextResult::Done => break,
-                NextResult::Popped(_) => continue,
+                NextResult::Branch => {
+                    self.buffers.cursor.pop(&mut self.upper_arena);
+                    continue;
+                }
                 NextResult::NonBranch => {}
             }
 
@@ -2290,13 +2283,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut pruned = 0;
 
         loop {
-            let result = cursor.next(&mut self.upper_arena, |_, child| {
+            let result = cursor.next(&self.upper_arena, |_, child| {
                 matches!(child, ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_))
             });
 
             match result {
                 NextResult::Done => break,
-                NextResult::Popped(_) => continue,
+                NextResult::Branch => {
+                    cursor.pop(&mut self.upper_arena);
+                    continue;
+                }
                 NextResult::NonBranch => {}
             }
 
