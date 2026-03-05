@@ -9251,7 +9251,6 @@ version = "1.11.0"
 dependencies = [
  "alloy-consensus",
  "alloy-contract",
- "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
