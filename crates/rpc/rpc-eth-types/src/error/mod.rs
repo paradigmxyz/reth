@@ -207,6 +207,9 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Error thrown when trying to access block access list for blocks before Amsterdam
+    #[error("Block access list not available for pre-Amsterdam blocks")]
+    BlockAccessListNotAvailablePreAmsterdam,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -344,6 +347,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     ),
                     error.data(),
                 )
+            }
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
+                rpc_error_with_code(4445, error.to_string())
             }
         }
     }
