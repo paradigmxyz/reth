@@ -115,6 +115,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     disconnections_counter: DisconnectionsCounter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// Tracks the last time a "buffer full" warning was logged for each peer,
+    /// to avoid flooding the log when a single slow peer saturates the buffer.
+    buf_full_last_logged: HashMap<PeerId, Instant>,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
     /// Shared local range information that gets propagated to active sessions.
@@ -169,6 +172,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             extra_protocols,
             disconnections_counter: Default::default(),
             metrics: Default::default(),
+            buf_full_last_logged: HashMap::new(),
             handshake,
             local_range_info,
         }
@@ -373,17 +377,27 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Sends a message to the peer's session
-    pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
+    pub fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage<N>) {
         if let Some(session) = self.active_sessions.get(peer_id) {
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
                 |e| {
                     if let TrySendError::Full(_) = e {
-                        debug!(
-                            target: "net::session",
-                            ?peer_id,
-                            "session command buffer full, dropping message"
-                        );
                         self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+
+                        let now = Instant::now();
+                        let should_log =
+                            self.buf_full_last_logged.get(peer_id).is_none_or(|last| {
+                                now.duration_since(*last) >= Duration::from_secs(30)
+                            });
+
+                        if should_log {
+                            self.buf_full_last_logged.insert(*peer_id, now);
+                            debug!(
+                                target: "net::session",
+                                ?peer_id,
+                                "session command buffer full, dropping messages"
+                            );
+                        }
                     }
                 },
             );
@@ -401,6 +415,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle<N>> {
         let session = self.active_sessions.remove(id)?;
         self.counter.dec_active(&session.direction);
+        self.buf_full_last_logged.remove(id);
         Some(session)
     }
 
