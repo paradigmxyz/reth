@@ -366,10 +366,10 @@ where
         // to pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
             let child_rlp_node = self.commit_child(targets, child_path, child)?;
-            trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing commited child RlpNode onto stack");
+            trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
-            trace!(target: TRACE_TARGET, "Pushing uncommited child onto stack");
+            trace!(target: TRACE_TARGET, "Pushing uncommitted child onto stack");
             self.child_stack.push(child);
         }
 
@@ -1014,7 +1014,7 @@ where
                     let lower_nibble = lower.get_unchecked(self.branch_path.len());
                     // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                     let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
-                    next_child_nibbles = next_child_nibbles & !already_processed_mask;
+                    next_child_nibbles &= !already_processed_mask;
                     trace!(
                         target: TRACE_TARGET,
                         branch_path = ?self.branch_path,
