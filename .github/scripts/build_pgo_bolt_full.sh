@@ -31,7 +31,7 @@ cd "$(dirname "$0")/../.."
 
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
 BOLT_BLOCKS="${BOLT_BLOCKS:-10}"
-PROFILE="${PROFILE:-maxperf-symbols}"
+PROFILE="${PROFILE:-dev}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
 
