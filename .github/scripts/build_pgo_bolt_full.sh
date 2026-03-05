@@ -178,7 +178,7 @@ rm -rf "$PGO_DIR"
 mkdir -p "$PGO_DIR"
 
 echo "Building PGO-instrumented binary..."
-RUSTFLAGS="-Cprofile-generate=$PGO_DIR ${EXTRA_RUSTFLAGS:-}" \
+RUSTFLAGS="-Cprofile-generate=$PGO_DIR -Crelocation-model=pic ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 PGO_RETH_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
