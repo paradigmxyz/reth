@@ -210,7 +210,7 @@ rm -rf "$BOLT_DIR"
 mkdir -p "$BOLT_DIR"
 
 echo "Building BOLT-instrumented binary with PGO..."
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata ${EXTRA_RUSTFLAGS:-}" \
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Crelocation-model=static ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 # Instrument with BOLT
@@ -248,7 +248,7 @@ echo "  Phase 3: Final PGO+BOLT Optimized Build"
 echo "============================================================"
 
 echo "Building PGO-optimized binary..."
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata ${EXTRA_RUSTFLAGS:-}" \
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Crelocation-model=static ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
