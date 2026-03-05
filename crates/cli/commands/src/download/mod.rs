@@ -947,6 +947,35 @@ impl CompressionFormat {
     }
 }
 
+/// Files that should be preserved across snapshot extraction.
+///
+/// These are node-specific identity and authentication files that, if overwritten
+/// by a snapshot archive, would silently break the connection with the consensus
+/// layer client or change the node's P2P identity.
+const PRESERVED_FILES: &[&str] = &["jwt.hex", "discovery-secret"];
+
+/// Backs up files that should be preserved across snapshot extraction.
+///
+/// Returns a list of `(file_path, contents)` for files that existed before extraction.
+fn backup_preserved_files(target_dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    PRESERVED_FILES
+        .iter()
+        .filter_map(|name| {
+            let path = target_dir.join(name);
+            std::fs::read(&path).ok().map(|contents| (path, contents))
+        })
+        .collect()
+}
+
+/// Restores backed-up files after snapshot extraction.
+fn restore_preserved_files(backups: Vec<(PathBuf, Vec<u8>)>) {
+    for (path, contents) in backups {
+        if let Err(err) = std::fs::write(&path, contents) {
+            warn!(target: "reth::cli", ?path, %err, "Failed to restore preserved file after extraction");
+        }
+    }
+}
+
 /// Extracts a compressed tar archive to the target directory with progress tracking.
 fn extract_archive<R: Read>(
     reader: R,
@@ -954,6 +983,7 @@ fn extract_archive<R: Read>(
     format: CompressionFormat,
     target_dir: &Path,
 ) -> Result<()> {
+    let backups = backup_preserved_files(target_dir);
     let progress_reader = ProgressReader::new(reader, total_size);
 
     match format {
@@ -967,6 +997,7 @@ fn extract_archive<R: Read>(
         }
     }
 
+    restore_preserved_files(backups);
     println!();
     Ok(())
 }
@@ -977,6 +1008,8 @@ fn extract_archive_raw<R: Read>(
     format: CompressionFormat,
     target_dir: &Path,
 ) -> Result<()> {
+    let backups = backup_preserved_files(target_dir);
+
     match format {
         CompressionFormat::Lz4 => {
             Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
@@ -985,6 +1018,8 @@ fn extract_archive_raw<R: Read>(
             Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
         }
     }
+
+    restore_preserved_files(backups);
     Ok(())
 }
 
