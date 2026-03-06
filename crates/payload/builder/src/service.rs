@@ -209,7 +209,9 @@ where
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
-    /// All active payload jobs.
+    /// All active payload jobs, each accompanied by its id and the caller's tracing span
+    /// propagated across the channel so that poll and resolve work appears as children of the
+    /// original Engine API request.
     payload_jobs: Vec<(Gen::Job, PayloadId, Span)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
@@ -488,6 +490,9 @@ where
 /// Message type for the [`PayloadBuilderService`].
 pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Start building a new payload.
+    ///
+    /// Carries the caller's [`Span`] so the service can parent payload-building work under the
+    /// originating Engine API trace.
     BuildNewPayload(
         T::PayloadBuilderAttributes,
         Span,
