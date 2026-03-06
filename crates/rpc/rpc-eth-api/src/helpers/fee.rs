@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::{Future, StreamExt};
+use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
@@ -199,22 +199,18 @@ pub trait EthFees:
                         .unwrap_or_else(BlobParams::cancun);
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
-                    blob_gas_used_ratio.push(checked_blob_gas_used_ratio(
-                        header.blob_gas_used().unwrap_or_default(),
-                        blob_params.max_blob_gas_per_block(),
-                    ));
-                }
+                    blob_gas_used_ratio.push(
+                        checked_blob_gas_used_ratio(
+                            header.blob_gas_used().unwrap_or_default(),
+                            blob_params.max_blob_gas_per_block(),
+                        )
+                    );
 
-                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
-                    // Fetch blocks and receipts with bounded concurrency (4 in flight). Drive with `while let` so we process each result as it arrives.
-                    let mut stream =
-                        futures::stream::iter(headers.iter().map(|h| h.hash()).collect::<Vec<_>>())
-                            .map(|hash| self.cache().get_block_and_receipts(hash))
-                            .buffered(4);
-                    let mut header_iter = headers.iter();
-                    while let Some(result) = stream.next().await {
-                        let header = header_iter.next().expect("stream length equals headers");
-                        let (block, receipts) = result
+                    // Percentiles were specified, so we need to collect reward percentile info
+                    if let Some(percentiles) = &reward_percentiles {
+                        let (block, receipts) = self.cache()
+                            .get_block_and_receipts(header.hash())
+                            .await
                             .map_err(Self::Error::from_eth_err)?
                             .ok_or(EthApiError::InvalidBlockRange)?;
                         rewards.push(
