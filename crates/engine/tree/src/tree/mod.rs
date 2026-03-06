@@ -1536,7 +1536,11 @@ where
                                     let mut output = self.on_new_payload(payload);
                                     self.metrics.engine.new_payload.update_response_metrics(
                                         start,
-                                        &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                        &mut self
+                                            .metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .latest_finish_at,
                                         &output,
                                         gas_used,
                                     );
@@ -1899,11 +1903,13 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
-    /// Applies persistence backpressure by waiting for any in-progress persistence to complete
-    /// and triggering a new one if the in-memory block count still exceeds the threshold.
+    /// Applies persistence backpressure by blocking until all in-memory blocks are persisted
+    /// to disk.
     ///
-    /// This is called before processing `newPayload` to prevent unbounded in-memory block
-    /// accumulation when persistence can't keep up.
+    /// This is called before processing `newPayload` / `reth_newPayload` to prevent unbounded
+    /// in-memory block accumulation when block production outpaces persistence. When triggered,
+    /// it loops — waiting for any in-progress persistence, then persisting all remaining blocks
+    /// up to the canonical head — until the in-memory count drops below the threshold.
     fn apply_persistence_backpressure(&mut self) -> Result<(), AdvancePersistenceError> {
         let Some(threshold) = self.config.persistence_backpressure_threshold() else {
             return Ok(());
@@ -1921,15 +1927,20 @@ where
             "Persistence backpressure triggered, waiting for persistence"
         );
 
-        // If persistence is not in progress, trigger it now
-        if !self.persistence_state.in_progress() {
-            self.advance_persistence()?;
-        }
+        while self.canonical_in_memory_count() > threshold {
+            // Wait for any in-progress persistence to complete first
+            if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+                self.on_persistence_complete(result, persistence_start_time)?;
+                continue;
+            }
 
-        // Wait for the in-progress persistence to complete (blocking)
-        if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
-            let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-            self.on_persistence_complete(result, persistence_start_time)?;
+            // No persistence in progress — persist all blocks up to the canonical head
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+            if blocks_to_persist.is_empty() {
+                break;
+            }
+            self.persist_blocks(blocks_to_persist);
         }
 
         let wait_duration = start.elapsed();
