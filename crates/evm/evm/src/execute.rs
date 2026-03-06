@@ -563,7 +563,6 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
-            .without_state_clear()
             .with_bal_builder_if(true)
             .build();
         Self { strategy_factory, db }
