@@ -1600,18 +1600,17 @@ where
 
                                     let cache_wait = self.payload_validator.wait_for_caches();
 
-                                    let persistence_wait =
-                                        if let Some(persistence_rx) = persistence_rx {
-                                            let (result, start_time, wait_duration) =
-                                                persistence_rx
-                                                    .recv()
-                                                    .expect("persistence result channel closed");
-                                            let _ =
-                                                self.on_persistence_complete(result, start_time);
-                                            Some(wait_duration)
-                                        } else {
-                                            None
-                                        };
+                                    let persistence_wait = if let Some(persistence_rx) =
+                                        persistence_rx
+                                    {
+                                        let (result, start_time, wait_duration) = persistence_rx
+                                            .recv()
+                                            .expect("persistence result channel closed");
+                                        let _ = self.on_persistence_complete(result, start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        None
+                                    };
 
                                     debug!(
                                         target: "engine::tree",
