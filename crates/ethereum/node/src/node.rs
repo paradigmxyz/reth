@@ -310,6 +310,7 @@ where
                 let mut testing_api = TestingApi::new(
                     container.registry.eth_api().clone(),
                     container.registry.evm_config().clone(),
+                    container.registry.pool().clone(),
                 );
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();

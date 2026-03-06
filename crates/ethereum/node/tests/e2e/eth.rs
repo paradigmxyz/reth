@@ -226,7 +226,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     let request = TestingBuildBlockRequestV1 {
         parent_block_hash: genesis_hash,
         payload_attributes,
-        transactions: vec![raw_tx],
+        transactions: Some(vec![raw_tx]),
         extra_data: None,
     };
 
