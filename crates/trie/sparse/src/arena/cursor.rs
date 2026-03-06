@@ -82,12 +82,12 @@ impl ArenaCursor {
     /// # Panics
     ///
     /// Panics if the stack is empty.
-    pub(super) fn depth(&self) -> usize {
+    pub(super) const fn depth(&self) -> usize {
         self.stack.len() - 1
     }
 
     /// Returns `true` if the stack is empty.
-    pub(super) fn is_empty(&self) -> bool {
+    pub(super) const fn is_empty(&self) -> bool {
         self.stack.is_empty()
     }
 

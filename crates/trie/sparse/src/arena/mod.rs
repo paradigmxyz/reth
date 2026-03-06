@@ -14,7 +14,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use core::mem;
+use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -337,7 +337,7 @@ impl ArenaSparseSubtrie {
             let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
             if ArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
-                &mut self.buffers.cursor,
+                &self.buffers.cursor,
                 node,
                 find_result,
             ) {
@@ -383,7 +383,7 @@ struct SubtrieCounterDeltas {
     num_dirty_leaves_delta: i64,
 }
 
-/// Result of [`upsert_leaf`] indicating whether a new child was created that the caller
+/// Result of `upsert_leaf` indicating whether a new child was created that the caller
 /// may need to wrap as a subtrie (in the upper trie).
 #[derive(Debug)]
 enum UpsertLeafResult {
@@ -396,7 +396,7 @@ enum UpsertLeafResult {
     NewChild,
 }
 
-/// Result of [`remove_leaf`] indicating whether a proof is needed to complete a branch
+/// Result of `remove_leaf` indicating whether a proof is needed to complete a branch
 /// collapse.
 #[derive(Debug)]
 enum RemoveLeafResult {
@@ -462,21 +462,21 @@ impl Default for ArenaParallelismThresholds {
 /// into two tiers:
 ///
 /// - **Upper trie** (`upper_arena`): Contains nodes whose path is shorter than
-///   [`UPPER_TRIE_MAX_DEPTH`] nibbles. These are the root and its immediate children.
-/// - **Lower subtries** ([`ArenaSparseSubtrie`]): Each child of an upper-trie branch at the depth
-///   boundary becomes the root of its own subtrie, stored as an [`ArenaSparseNode::Subtrie`] child
-///   in the upper arena. Each subtrie owns its own arena, enabling lock-free parallel mutation.
+///   `UPPER_TRIE_MAX_DEPTH` nibbles. These are the root and its immediate children.
+/// - **Lower subtries** (`ArenaSparseSubtrie`): Each child of an upper-trie branch at the depth
+///   boundary becomes the root of its own subtrie, stored as an `ArenaSparseNode::Subtrie` child in
+///   the upper arena. Each subtrie owns its own arena, enabling lock-free parallel mutation.
 ///
 /// Node placement is determined by path length (not counting a branch's short key):
 ///
-/// - Paths with **< [`UPPER_TRIE_MAX_DEPTH`]** nibbles live in `upper_arena`.
-/// - Paths with **≥ [`UPPER_TRIE_MAX_DEPTH`]** nibbles live in a subtrie.
+/// - Paths with **< `UPPER_TRIE_MAX_DEPTH`** nibbles live in `upper_arena`.
+/// - Paths with **≥ `UPPER_TRIE_MAX_DEPTH`** nibbles live in a subtrie.
 ///
 /// ## Node Revealing
 ///
 /// Nodes are lazily revealed from proof data via [`SparseTrie::reveal_nodes`]. Each node is
 /// placed into the upper arena or delegated to its subtrie based on path depth. Unrevealed
-/// children are stored as [`ArenaSparseNodeBranchChild::Blinded`] with their RLP encoding.
+/// children are stored as `ArenaSparseNodeBranchChild::Blinded` with their RLP encoding.
 /// When multiple subtries have pending reveals, they are processed in parallel using rayon
 /// (controlled by [`ArenaParallelismThresholds::min_revealed_nodes`]).
 ///
@@ -502,20 +502,20 @@ impl Default for ArenaParallelismThresholds {
 /// 2. **[`SparseTrie::root`]**: Calls `update_subtrie_hashes`, then RLP-encodes the full upper trie
 ///    depth-first to produce the root hash.
 ///
-/// Each node tracks its state via [`ArenaSparseNodeState`] (`Revealed`, `Cached`, or `Dirty`)
+/// Each node tracks its state via `ArenaSparseNodeState` (`Revealed`, `Cached`, or `Dirty`)
 /// so only modified subtrees are recomputed.
 ///
 /// ## Pruning
 ///
 /// [`SparseTrie::prune`] removes revealed nodes that are not ancestors of any retained leaf.
-/// Pruned nodes are replaced with [`ArenaSparseNodeBranchChild::Blinded`] entries using their
+/// Pruned nodes are replaced with `ArenaSparseNodeBranchChild::Blinded` entries using their
 /// cached RLP. Subtries are pruned in parallel when their leaf count exceeds
 /// [`ArenaParallelismThresholds::min_leaves_for_prune`].
 ///
 /// ## Subtrie Recycling
 ///
 /// Cleared subtries are pooled in `cleared_subtries` and reused by
-/// [`Self::take_or_create_cleared_subtrie`] to avoid repeated arena allocations.
+/// `take_or_create_cleared_subtrie` to avoid repeated arena allocations.
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
@@ -632,7 +632,7 @@ impl ArenaParallelSparseTrie {
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
     /// child slot is removed from the parent branch entirely, the subtrie is recycled, and
     /// if the parent is left with a single revealed child, it is collapsed via
-    /// [`collapse_branch`].
+    /// `collapse_branch`.
     ///
     /// The subtrie must be the cursor head and its parent the cursor's parent.
     /// Pops the subtrie entry (propagating leaf count deltas) before returning.
@@ -1029,7 +1029,7 @@ impl ArenaParallelSparseTrie {
                     } else if !new_branch_masks.is_empty() {
                         let mut compact = BranchNodeCompact::default();
                         arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
-                        trie_updates.updated_nodes.insert(logical_path.clone(), compact);
+                        trie_updates.updated_nodes.insert(logical_path, compact);
                         trie_updates.removed_nodes.remove(&logical_path);
                     }
                 }
@@ -1770,7 +1770,7 @@ impl ArenaParallelSparseTrie {
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn reveal_node(
         arena: &mut Arena<ArenaSparseNode>,
-        cursor: &mut ArenaCursor,
+        cursor: &ArenaCursor,
         node: &mut ProofTrieNodeV2,
         find_result: SeekResult,
     ) -> bool {
@@ -1861,7 +1861,7 @@ impl Drop for ArenaParallelSparseTrie {
     fn drop(&mut self) {
         Self::assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
 
-        for (_, node) in self.upper_arena.iter() {
+        for (_, node) in &self.upper_arena {
             if let Some(subtrie) = node.as_subtrie() {
                 Self::assert_no_orphaned_nodes(
                     &subtrie.arena,
@@ -2006,7 +2006,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 SeekResult::Blinded => {
                     Self::reveal_node(
                         &mut self.upper_arena,
-                        &mut cursor,
+                        &cursor,
                         &mut nodes[node_idx],
                         SeekResult::Blinded,
                     );
@@ -2194,7 +2194,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
         // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
+        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
 
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
@@ -2599,11 +2599,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 match find_result {
                     SeekResult::RevealedSubtrie => {
                         let head_idx = cursor.head().expect("cursor is non-empty").index;
-                        if let ArenaSparseNode::Subtrie(s) = &self.upper_arena[head_idx] {
-                            if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot) {
-                                self.maybe_unwrap_subtrie(&mut cursor);
-                                continue;
-                            }
+                        if let ArenaSparseNode::Subtrie(s) = &self.upper_arena[head_idx] &&
+                            matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                        {
+                            self.maybe_unwrap_subtrie(&mut cursor);
+                            continue;
                         }
                         cursor.pop(&mut self.upper_arena);
 
@@ -2990,7 +2990,7 @@ mod tests {
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             changeset2_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
             overlap_pct in 0.0..=0.5f64,
-            delete_pct in 0.0..=0.33f64, // precent of overlapping changeset which are deletes
+            delete_pct in 0.0..=0.33f64, // percent of overlapping changeset which are deletes
             shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();

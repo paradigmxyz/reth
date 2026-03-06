@@ -549,6 +549,7 @@ mod tests {
             sparse_trie_max_hot_accounts: 500,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
+            enable_arena_sparse_trie: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
         };
 
@@ -586,6 +587,7 @@ mod tests {
             "--engine.sparse-trie-max-hot-accounts",
             "500",
             "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.enable-arena-sparse-trie",
             "--engine.state-root-task-timeout",
             "2s",
         ])
