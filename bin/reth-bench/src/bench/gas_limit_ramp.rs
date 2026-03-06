@@ -65,7 +65,7 @@ pub struct Command {
     /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
     /// `reth_newPayload` endpoint, causing it to execute the payload immediately
     /// without waiting for in-flight persistence or cache updates.
-    #[arg(long, default_value = "false", requires = "reth_new_payload", verbatim_doc_comment)]
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
     no_wait: bool,
 }
 
