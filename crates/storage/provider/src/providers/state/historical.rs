@@ -625,7 +625,7 @@ impl<
         let mut result: Vec<(B256, StorageEntry)> = Vec::new();
         for (hashed, slot) in candidates {
             if let Some(value) = self.storage_by_lookup_key(address, slot)? &&
-                value != StorageValue::ZERO
+                !value.is_zero()
             {
                 result.push((hashed, StorageEntry::new(slot, value)));
                 if result.len() == limit {
