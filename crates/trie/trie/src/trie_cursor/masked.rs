@@ -92,7 +92,8 @@ impl<C> MaskedTrieCursor<C> {
 }
 
 impl<C: TrieCursor> MaskedTrieCursor<C> {
-    /// Mask hash bits on a node for children whose paths match the prefix set.
+    /// Mask hash bits on a node for children whose paths match the prefix set, and set
+    /// `state_mask` bits for new children discovered via the prefix set.
     ///
     /// Returns `true` if the node should be kept, `false` if it should be skipped (both
     /// `hash_mask` and `tree_mask` are empty after masking).
@@ -105,38 +106,52 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         node.root_hash = None;
 
         let original_hash_mask = node.hash_mask;
-        if original_hash_mask.is_empty() {
-            return true;
-        }
 
-        // Build an unset_mask based on state_mask: every child in the state_mask whose path
-        // is in the prefix set is dirty and must not use a cached hash.
-        let mut unset_mask = TrieMask::default();
+        // Check all 16 nibbles against the prefix set. For nibbles already in the state_mask
+        // that match, we build an unset_hash_mask to clear their cached hashes. For nibbles NOT in
+        // the state_mask that match, we set them on the state_mask so that consumers (e.g.
+        // proof_v2) discover new children that weren't present when the branch was persisted.
+        let mut unset_hash_mask = TrieMask::default();
+        let mut new_state_bits = TrieMask::default();
         let mut child_path = *key;
         let key_len = key.len();
 
-        for nibble in node.state_mask.iter() {
+        for nibble in 0u8..16 {
             child_path.truncate(key_len);
             child_path.push(nibble);
 
             if self.prefix_set.contains(&child_path) {
-                unset_mask.set_bit(nibble);
+                if node.state_mask.is_bit_set(nibble) {
+                    unset_hash_mask.set_bit(nibble);
+                } else {
+                    new_state_bits.set_bit(nibble);
+                }
             }
+        }
+
+        // Add newly discovered children to the state_mask.
+        node.state_mask |= new_state_bits;
+
+        if original_hash_mask.is_empty() {
+            return true;
         }
 
         // We pessimistically assume all leaves matched by the prefix set will be removed.
         //
-        // If removing dirty children leaves only a single child in the state_mask, that
-        // child must also be unset. A single-child branch is invalid in MPT — the branch
+        // If removing dirty children leaves only a single child in the original state_mask,
+        // that child must also be unset. A single-child branch is invalid in MPT — the branch
         // must collapse — so the remaining child must be revealed in order to perform the collapse.
         // Its cached hash cannot be used.
-        let remaining_bits = node.state_mask & !unset_mask;
+        //
+        // New state bits are excluded: they represent children being added, so they cannot
+        // cause the branch to collapse.
+        let remaining_bits = (node.state_mask & !new_state_bits) & !unset_hash_mask;
         if remaining_bits.count_ones() == 1 {
-            unset_mask = node.state_mask;
+            unset_hash_mask = node.state_mask;
         }
 
-        // Apply unset_mask to hash_mask.
-        let new_hash_mask = original_hash_mask & !unset_mask;
+        // Apply unset_hash_mask to hash_mask.
+        let new_hash_mask = original_hash_mask & !unset_hash_mask;
 
         if new_hash_mask != original_hash_mask {
             // Remove hashes for unset bits in-place.
