@@ -18,7 +18,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
     mem::size_of,
     sync::{
@@ -56,8 +55,17 @@ const fn fixed_cache_key_size_with_value<K>(value: usize) -> usize {
     raw_size.div_ceil(FIXED_CACHE_ALIGNMENT) * FIXED_CACHE_ALIGNMENT
 }
 
-/// Size in bytes of a single code cache entry.
-const CODE_CACHE_ENTRY_SIZE: usize = fixed_cache_key_size_with_value::<Address>(MAX_CODE_SIZE);
+/// Estimated average bytecode size for cache budget calculation.
+///
+/// The fixed-cache stores `Option<Bytecode>` inline (pointer-sized), but each cached contract
+/// also holds bytecode on the heap. For budget estimation we use 8 KiB, which is close to the
+/// observed mainnet average (~7 KiB). Using `MAX_CODE_SIZE` (48 KiB) overestimates by ~7x,
+/// yielding only 4096 entries for a 228 MB code-cache budget when 16384 fit comfortably.
+const ESTIMATED_AVG_CODE_SIZE: usize = 8 * 1024;
+
+/// Size in bytes of a single code cache entry (inline metadata + estimated heap).
+const CODE_CACHE_ENTRY_SIZE: usize =
+    fixed_cache_key_size_with_value::<Address>(ESTIMATED_AVG_CODE_SIZE);
 
 /// Size in bytes of a single storage cache entry.
 const STORAGE_CACHE_ENTRY_SIZE: usize =
