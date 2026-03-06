@@ -190,7 +190,22 @@ pub trait EthFees:
                 }
 
                 let chain_spec = self.provider().chain_spec();
-                for header in &headers {
+
+                // Fetch blocks and receipts concurrently if reward percentiles are
+                // requested, instead of awaiting each one sequentially in the loop.
+                let blocks_and_receipts = if reward_percentiles.as_ref().is_some_and(|p| !p.is_empty()) {
+                    Some(futures::future::try_join_all(
+                        headers.iter().map(|header| async {
+                            self.cache().get_block_and_receipts(header.hash()).await
+                                .map_err(Self::Error::from_eth_err)
+                                .and_then(|opt| opt.ok_or_else(|| EthApiError::InvalidBlockRange.into()))
+                        })
+                    ).await?)
+                } else {
+                    None
+                };
+
+                for (idx, header) in headers.iter().enumerate() {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
 
@@ -206,20 +221,16 @@ pub trait EthFees:
                         )
                     );
 
-                    // Percentiles were specified, so we need to collect reward percentile info
-                    if let Some(percentiles) = &reward_percentiles {
-                        let (block, receipts) = self.cache()
-                            .get_block_and_receipts(header.hash())
-                            .await
-                            .map_err(Self::Error::from_eth_err)?
-                            .ok_or(EthApiError::InvalidBlockRange)?;
+                    if let Some(percentiles) = &reward_percentiles && !percentiles.is_empty() {
+                        let (block, receipts) = &blocks_and_receipts.as_ref()
+                            .expect("populated when reward_percentiles is non-empty")[idx];
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
                                 header.gas_used(),
                                 header.base_fee_per_gas().unwrap_or_default(),
                                 block.body().transactions(),
-                                &receipts,
+                                receipts,
                             )
                             .unwrap_or_default(),
                         );
