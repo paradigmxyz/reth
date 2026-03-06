@@ -962,8 +962,8 @@ fn unpack_archive<R: Read>(mut archive: Archive<R>, target_dir: &Path) -> Result
         let path = entry.path()?.to_path_buf();
 
         // Skip preserved files that already exist in the target directory
-        if PRESERVED_FILES.iter().any(|&name| path.ends_with(name))
-            && target_dir.join(&path).exists()
+        if PRESERVED_FILES.iter().any(|&name| path.ends_with(name)) &&
+            target_dir.join(&path).exists()
         {
             debug!(target: "reth::cli", ?path, "Skipping preserved file during extraction");
             continue;
