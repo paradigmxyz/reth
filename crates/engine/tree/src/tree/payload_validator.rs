@@ -29,6 +29,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
+use reth_metrics::SpanExt;
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -894,11 +895,10 @@ where
         drop(receipt_tx);
 
         // Finish execution and get the result
-        let post_exec_start = Instant::now();
         let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
+            .metered(self.metrics.executor.post_execution_histogram.clone())
             .in_scope(|| executor.finish())
             .map(|(evm, result)| (evm.into_db(), result))?;
-        self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
@@ -940,10 +940,9 @@ where
         let mut senders = Vec::with_capacity(transaction_count);
 
         // Apply pre-execution changes (e.g., beacon root update)
-        let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
+            .metered(self.metrics.executor.pre_execution_histogram.clone())
             .in_scope(|| executor.apply_pre_execution_changes())?;
-        self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -969,12 +968,11 @@ where
                 target: "engine::tree",
                 "execute tx",
             )
+            .metered(self.metrics.executor.transaction_execution_histogram.clone())
             .entered();
             trace!(target: "engine::tree", "Executing transaction");
 
-            let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);

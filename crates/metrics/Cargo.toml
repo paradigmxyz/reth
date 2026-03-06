@@ -16,6 +16,9 @@ workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 
+# tracing
+tracing.workspace = true
+
 # async
 tokio = { workspace = true, features = ["full"], optional = true }
 futures = { workspace = true, optional = true }
