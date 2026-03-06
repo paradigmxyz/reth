@@ -315,7 +315,11 @@ where
         }
 
         let job = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id)?;
-        let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
+        let job_span = self.payload_jobs[job].2.clone();
+        let (fut, keep_alive) = {
+            let _entered = job_span.enter();
+            self.payload_jobs[job].0.resolve_kind(kind)
+        };
         let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
 
         if keep_alive == KeepPayloadJobAlive::No {
