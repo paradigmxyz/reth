@@ -93,6 +93,18 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::Other(_) => 1,
         }
     }
+
+    /// Returns `true` if this message is a broadcast (block/transaction announcement or
+    /// propagation) rather than a request/response.
+    pub const fn is_broadcast(&self) -> bool {
+        matches!(
+            self,
+            Self::NewBlockHashes(_) |
+                Self::NewBlock(_) |
+                Self::SendTransactions(_) |
+                Self::PooledTransactions(_)
+        )
+    }
 }
 
 /// Request Variants that only target block related data.

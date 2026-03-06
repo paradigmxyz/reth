@@ -35,7 +35,10 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -46,7 +49,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 use crate::session::active::RANGE_UPDATE_INTERVAL;
 pub use conn::EthRlpxConnection;
@@ -372,13 +375,26 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
-    /// Sends a message to the peer's session
+    /// Sends a message to the peer's session.
+    ///
+    /// Applies size-based backpressure: instead of relying solely on the command channel capacity,
+    /// this checks the total number of buffered broadcast items (e.g. transaction hashes) in the
+    /// session task. Many small messages carrying a single tx hash each are treated equivalently to
+    /// one large message carrying many hashes, avoiding overly aggressive drops when broadcast
+    /// volume is actually modest.
     pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
         if let Some(session) = self.active_sessions.get(peer_id) {
+            // Check size-based soft limit before sending broadcast messages.
+            if msg.is_broadcast() &&
+                session.queued_broadcast_items() >= active::MAX_QUEUED_BROADCAST_ITEMS
+            {
+                self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+                return;
+            }
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
                 |e| {
                     if let TrySendError::Full(SessionCommand::Message(msg)) = e {
-                        debug!(
+                        trace!(
                             target: "net::session",
                             ?peer_id,
                             msg_kind = msg.message_kind(),
@@ -537,6 +553,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     self.initial_internal_request_timeout.as_millis() as u64,
                 ));
 
+                let queued_broadcast_items = Arc::new(AtomicUsize::new(0));
+
                 // negotiated version
                 let version = conn.version();
 
@@ -566,6 +584,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
                     ),
+                    queued_broadcast_items: Arc::clone(&queued_broadcast_items),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
@@ -591,6 +610,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
+                    queued_broadcast_items,
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,
