@@ -1892,21 +1892,11 @@ where
 
     /// Returns the number of canonical blocks currently held in memory
     /// (i.e., not yet persisted to disk).
-    const fn num_in_memory_blocks(&self) -> u64 {
+    const fn canonical_in_memory_count(&self) -> u64 {
         self.state
             .tree_state
             .canonical_block_number()
             .saturating_sub(self.persistence_state.last_persisted_block.number)
-    }
-
-    /// Returns `true` if the number of in-memory blocks exceeds the configured
-    /// persistence backpressure threshold.
-    const fn exceeds_backpressure_threshold(&self) -> bool {
-        if let Some(threshold) = self.config.persistence_backpressure_threshold() {
-            self.num_in_memory_blocks() > threshold
-        } else {
-            false
-        }
     }
 
     /// Applies persistence backpressure by waiting for any in-progress persistence to complete
@@ -1915,16 +1905,19 @@ where
     /// This is called before processing `newPayload` to prevent unbounded in-memory block
     /// accumulation when persistence can't keep up.
     fn apply_persistence_backpressure(&mut self) -> Result<(), AdvancePersistenceError> {
-        if !self.exceeds_backpressure_threshold() {
+        let Some(threshold) = self.config.persistence_backpressure_threshold() else {
+            return Ok(());
+        };
+
+        if self.canonical_in_memory_count() <= threshold {
             return Ok(());
         }
 
         let start = Instant::now();
-        let in_memory = self.num_in_memory_blocks();
         debug!(
             target: "engine::tree",
-            in_memory_blocks = in_memory,
-            threshold = ?self.config.persistence_backpressure_threshold(),
+            in_memory_blocks = self.canonical_in_memory_count(),
+            threshold,
             "Persistence backpressure triggered, waiting for persistence"
         );
 
@@ -1945,7 +1938,7 @@ where
         debug!(
             target: "engine::tree",
             elapsed = ?wait_duration,
-            in_memory_blocks_after = self.num_in_memory_blocks(),
+            in_memory_blocks_after = self.canonical_in_memory_count(),
             "Persistence backpressure resolved"
         );
 
@@ -1961,9 +1954,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        self.canonical_in_memory_count() > self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
