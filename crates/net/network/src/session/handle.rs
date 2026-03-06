@@ -13,7 +13,15 @@ use reth_eth_wire::{
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
@@ -67,6 +75,10 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
     pub(crate) commands_to_session: mpsc::Sender<SessionCommand<N>>,
+    /// Shared counter tracking the total number of buffered broadcast items in the session task.
+    ///
+    /// Used by [`SessionManager`](super::SessionManager) for size-based backpressure.
+    pub(crate) queued_broadcast_items: Arc<AtomicUsize>,
     /// The client's name and version
     pub(crate) client_version: Arc<str>,
     /// The address we're connected to
@@ -133,6 +145,11 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
     /// Returns the address we're connected to.
     pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
+    }
+
+    /// Returns the current number of buffered broadcast items in the session task.
+    pub fn queued_broadcast_items(&self) -> usize {
+        self.queued_broadcast_items.load(Ordering::Relaxed)
     }
 
     /// Extracts the [`PeerInfo`] from the session handle.
