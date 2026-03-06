@@ -1,4 +1,4 @@
-use crate::download::manifest::generate_manifest;
+use crate::download::manifest::{generate_manifest, SnapshotManifest};
 use clap::Parser;
 use eyre::{Result, WrapErr};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, tables, Database};
@@ -41,6 +41,14 @@ pub struct SnapshotManifestCommand {
     /// If omitted, this is inferred from header static file ranges in the source datadir.
     #[arg(long)]
     blocks_per_file: Option<u64>,
+
+    /// Path to a previous manifest.json for incremental updates.
+    ///
+    /// When provided, finalized chunks (all but the tip) from the previous manifest are
+    /// reused instead of being re-archived. Only the tip chunk and any new chunks are
+    /// archived from source.
+    #[arg(long, value_name = "PATH")]
+    previous_manifest: Option<PathBuf>,
 }
 
 impl SnapshotManifestCommand {
@@ -52,6 +60,23 @@ impl SnapshotManifestCommand {
         let blocks_per_file = match self.blocks_per_file {
             Some(blocks_per_file) => blocks_per_file,
             None => infer_blocks_per_file(&self.source_datadir)?,
+        };
+
+        let previous = match &self.previous_manifest {
+            Some(path) => {
+                let contents = reth_fs_util::read_to_string(path).wrap_err_with(|| {
+                    format!("Failed to read previous manifest: {}", path.display())
+                })?;
+                let manifest: SnapshotManifest = serde_json::from_str(&contents)
+                    .wrap_err("Failed to parse previous manifest")?;
+                info!(target: "reth::cli",
+                    path = ?path,
+                    prev_block = manifest.block,
+                    "Loaded previous manifest for incremental update"
+                );
+                Some(manifest)
+            }
+            None => None,
         };
 
         info!(target: "reth::cli",
@@ -69,6 +94,7 @@ impl SnapshotManifestCommand {
             block,
             self.chain_id,
             blocks_per_file,
+            previous.as_ref(),
         )?;
 
         let num_components = manifest.components.len();
