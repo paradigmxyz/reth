@@ -1539,35 +1539,47 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let start = Instant::now();
-                                let gas_used = payload.gas_used();
-                                let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
-                                self.metrics.engine.new_payload.update_response_metrics(
-                                    start,
-                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
-                                    &output,
-                                    gas_used,
-                                );
+                                // Apply backpressure if too many blocks are in memory
+                                if let Err(err) = self.apply_persistence_backpressure() {
+                                    error!(target: "engine::tree", %err, "Persistence backpressure failed");
+                                    let _ = tx.send(Err(BeaconOnNewPayloadError::Internal(
+                                        Box::new(err),
+                                    )));
+                                } else {
+                                    let start = Instant::now();
+                                    let gas_used = payload.gas_used();
+                                    let num_hash = payload.num_hash();
+                                    let mut output = self.on_new_payload(payload);
+                                    self.metrics.engine.new_payload.update_response_metrics(
+                                        start,
+                                        &mut self
+                                            .metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .latest_finish_at,
+                                        &output,
+                                        gas_used,
+                                    );
 
-                                let maybe_event =
-                                    output.as_mut().ok().and_then(|out| out.event.take());
+                                    let maybe_event =
+                                        output.as_mut().ok().and_then(|out| out.event.take());
 
-                                // emit response
-                                if let Err(err) =
-                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
-                                {
-                                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
-                                    self.metrics
-                                        .engine
-                                        .failed_new_payload_response_deliveries
-                                        .increment(1);
+                                    // emit response
+                                    if let Err(err) =
+                                        tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                            BeaconOnNewPayloadError::Internal(Box::new(e))
+                                        }))
+                                    {
+                                        warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
+                                        self.metrics
+                                            .engine
+                                            .failed_new_payload_response_deliveries
+                                            .increment(1);
+                                    }
+
+                                    // handle the event if any
+                                    self.on_maybe_tree_event(maybe_event)?;
                                 }
-
-                                // handle the event if any
-                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
                                 // Before processing the new payload, we wait for persistence and
@@ -1936,6 +1948,68 @@ where
         );
     }
 
+    /// Returns the number of canonical blocks currently held in memory
+    /// (i.e., not yet persisted to disk).
+    const fn canonical_in_memory_count(&self) -> u64 {
+        self.state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    }
+
+    /// Applies persistence backpressure by blocking until all in-memory blocks are persisted
+    /// to disk.
+    ///
+    /// This is called before processing `newPayload` / `reth_newPayload` to prevent unbounded
+    /// in-memory block accumulation when block production outpaces persistence. When triggered,
+    /// it loops — waiting for any in-progress persistence, then persisting all remaining blocks
+    /// up to the canonical head — until the in-memory count drops below the threshold.
+    fn apply_persistence_backpressure(&mut self) -> Result<(), AdvancePersistenceError> {
+        let Some(threshold) = self.config.persistence_backpressure_threshold() else {
+            return Ok(());
+        };
+
+        if self.canonical_in_memory_count() <= threshold {
+            return Ok(());
+        }
+
+        let start = Instant::now();
+        debug!(
+            target: "engine::tree",
+            in_memory_blocks = self.canonical_in_memory_count(),
+            threshold,
+            "Persistence backpressure triggered, waiting for persistence"
+        );
+
+        while self.canonical_in_memory_count() > threshold {
+            // Wait for any in-progress persistence to complete first
+            if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+                self.on_persistence_complete(result, persistence_start_time)?;
+                continue;
+            }
+
+            // No persistence in progress — persist all blocks up to the canonical head
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+            if blocks_to_persist.is_empty() {
+                break;
+            }
+            self.persist_blocks(blocks_to_persist);
+        }
+
+        let wait_duration = start.elapsed();
+        self.metrics.engine.persistence_backpressure_count.increment(1);
+        self.metrics.engine.persistence_backpressure_duration.record(wait_duration);
+        debug!(
+            target: "engine::tree",
+            elapsed = ?wait_duration,
+            in_memory_blocks_after = self.canonical_in_memory_count(),
+            "Persistence backpressure resolved"
+        );
+
+        Ok(())
+    }
+
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold and
     /// backfill is not running.
@@ -1945,9 +2019,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        self.canonical_in_memory_count() > self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range

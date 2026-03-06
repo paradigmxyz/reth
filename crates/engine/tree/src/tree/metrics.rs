@@ -181,6 +181,10 @@ pub struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
+    /// The number of times newPayload processing was delayed due to persistence backpressure.
+    pub(crate) persistence_backpressure_count: Counter,
+    /// Duration of persistence backpressure waits.
+    pub(crate) persistence_backpressure_duration: Histogram,
 }
 
 /// Metrics for engine forkchoiceUpdated responses.
