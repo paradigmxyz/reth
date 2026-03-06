@@ -76,8 +76,19 @@ pub struct BenchmarkArgs {
     /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
     /// directly, waits for persistence and cache updates to complete before processing,
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    ///
+    /// Cannot be used with `--wait-for-persistence` because `reth_newPayload` already
+    /// waits for persistence by default.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
+
+    /// Skip waiting for persistence and cache locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
+    /// `reth_newPayload` endpoint, causing it to execute the payload immediately
+    /// without waiting for in-flight persistence or cache updates.
+    #[arg(long, default_value = "false", requires = "reth_new_payload", verbatim_doc_comment)]
+    pub no_wait: bool,
 
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]

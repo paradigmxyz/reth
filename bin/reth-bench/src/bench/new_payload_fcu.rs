@@ -5,7 +5,8 @@
 //! - **`--wait-time`**: Fixed sleep interval between blocks.
 //! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
 //!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence.
+//!   threshold. This ensures the benchmark doesn't outpace persistence. Cannot be used with
+//!   `--reth-new-payload` because `reth_newPayload` already waits for persistence by default.
 //!
 //! Both options can be used together or independently.
 
@@ -56,7 +57,10 @@ pub struct Command {
     /// doesn't outpace persistence.
     ///
     /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    ///
+    /// Cannot be used with `--reth-new-payload` because `reth_newPayload` already
+    /// waits for persistence by default.
+    #[arg(long, default_value = "false", conflicts_with = "reth_new_payload", verbatim_doc_comment)]
     wait_for_persistence: bool,
 
     /// Engine persistence threshold used for deciding when to wait for persistence.
@@ -155,6 +159,7 @@ impl Command {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -257,7 +262,7 @@ impl Command {
             };
 
             let (version, params) =
-                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
+                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace, no_wait)?;
             let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;

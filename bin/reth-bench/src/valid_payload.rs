@@ -167,16 +167,21 @@ where
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
 ///
 /// Returns `(version, versioned_params, execution_data)`.
+///
+/// When `no_wait` is `true` and using `reth_newPayload`, passes `wait: false` to skip
+/// persistence and cache waiting.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
+    no_wait: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     if let Some(rlp) = rlp {
+        let wait = reth_new_payload_wait(no_wait);
         return Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),))?,
+            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp), wait))?,
         ));
     }
     let block = block
@@ -194,9 +199,25 @@ pub(crate) fn block_to_new_payload(
         payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
 
     if reth_new_payload {
-        Ok((None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?))
+        let wait = reth_new_payload_wait(no_wait);
+        Ok((
+            None,
+            serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data), wait))?,
+        ))
     } else {
         Ok((Some(version), params))
+    }
+}
+
+/// Returns the `wait` parameter value for `reth_newPayload`.
+///
+/// When `no_wait` is `true`, returns `Some(false)` to skip waiting.
+/// When `no_wait` is `false`, returns `None` to use the server default (wait).
+pub(crate) fn reth_new_payload_wait(no_wait: bool) -> Option<bool> {
+    if no_wait {
+        Some(false)
+    } else {
+        None
     }
 }
 
