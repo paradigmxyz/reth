@@ -7,6 +7,8 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
+#               BENCH_RETH_NEW_PAYLOAD (true/false, default true)
+#               BENCH_WAIT_TIME (duration like 500ms, default empty)
 set -euo pipefail
 
 LABEL="$1"
@@ -132,12 +134,21 @@ done
 # files are not root-owned (avoids EACCES on next checkout).
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 
+# Build optional flags
+EXTRA_BENCH_ARGS=()
+if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
+  EXTRA_BENCH_ARGS+=(--reth-new-payload)
+fi
+if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+  EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+fi
+
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads with gas ramp
   BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
-    --reth-new-payload \
+    "${EXTRA_BENCH_ARGS[@]}" \
     --gas-ramp-dir "$BIG_BLOCKS_DIR/gas-ramp-dir" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
@@ -151,7 +162,7 @@ else
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
     --advance "${BENCH_WARMUP_BLOCKS:-50}" \
-    --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
+    "${EXTRA_BENCH_ARGS[@]}" 2>&1 | sed -u "s/^/[bench] /"
 
   # Benchmark
   $BENCH_NICE "$RETH_BENCH" new-payload-fcu \
@@ -159,7 +170,7 @@ else
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
     --advance "$BENCH_BLOCKS" \
-    --reth-new-payload \
+    "${EXTRA_BENCH_ARGS[@]}" \
     --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"
 fi
 
