@@ -165,8 +165,8 @@ jobs:
               const boolArgs = new Set(['samply']);
               const boolDefaultTrue = new Set(['reth_newPayload']);
               const durationArgs = new Set(['wait-time']);
-              const stringArgs = new Set(['baseline_args', 'feature_args']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0', reth_newPayload: 'true', 'wait-time': '', baseline_args: '', feature_args: '' };
+              const stringArgs = new Set(['baseline-args', 'feature-args']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0', reth_newPayload: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -236,7 +236,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N] [reth_newPayload=true|false] [wait-time=DURATION] [baseline_args="..."] [feature_args="..."]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N] [reth_newPayload=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -255,8 +255,8 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = defaults.reth_newPayload;
               var waitTime = defaults['wait-time'];
-              var baselineNodeArgs = defaults.baseline_args;
-              var featureNodeArgs = defaults.feature_args;
+              var baselineNodeArgs = defaults['baseline-args'];
+              var featureNodeArgs = defaults['feature-args'];
             }
 
             // Resolve display names for baseline/feature
@@ -356,9 +356,9 @@ jobs:
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
-            const baselineArgsNote = baselineArgsVal ? `, baseline_args: \`${baselineArgsVal}\`` : '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
-            const featureArgsNote = featureArgsVal ? `, feature_args: \`${featureArgsVal}\`` : '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
@@ -394,9 +394,9 @@ jobs:
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
-            const baselineArgsNote = baselineArgsVal ? `, baseline_args: \`${baselineArgsVal}\`` : '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
-            const featureArgsNote = featureArgsVal ? `, feature_args: \`${featureArgsVal}\`` : '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
@@ -527,9 +527,9 @@ jobs:
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
-            const baselineArgsNote = baselineArgsVal ? `, baseline_args: \`${baselineArgsVal}\`` : '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
-            const featureArgsNote = featureArgsVal ? `, feature_args: \`${featureArgsVal}\`` : '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
             core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
