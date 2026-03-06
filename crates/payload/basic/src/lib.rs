@@ -34,7 +34,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace, warn, Instrument, Span};
 
 mod better_payload_emitter;
 mod metrics;
@@ -349,14 +349,18 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking(Box::pin(async move {
-            // acquire the permit for executing the task
-            let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
-            let result = builder.try_build(args);
-            let _ = tx.send(result);
-        }));
+        let job_span = Span::current();
+        self.executor.spawn_blocking(Box::pin(
+            async move {
+                // acquire the permit for executing the task
+                let _permit = guard.acquire().await;
+                let args =
+                    BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+                let result = builder.try_build(args);
+                let _ = tx.send(result);
+            }
+            .instrument(job_span),
+        ));
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
     }
