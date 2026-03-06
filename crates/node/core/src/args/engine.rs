@@ -2,8 +2,8 @@
 
 use clap::{builder::Resettable, Args};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
-    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -39,8 +39,8 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
-    sparse_trie_prune_depth: usize,
-    sparse_trie_max_storage_tries: usize,
+    sparse_trie_max_hot_slots: usize,
+    sparse_trie_max_hot_accounts: usize,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
 }
@@ -173,15 +173,15 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the sparse trie prune depth by default
-    pub const fn with_sparse_trie_prune_depth(mut self, v: usize) -> Self {
-        self.sparse_trie_prune_depth = v;
+    /// Set the LFU hot-slot capacity for sparse trie pruning by default
+    pub const fn with_sparse_trie_max_hot_slots(mut self, v: usize) -> Self {
+        self.sparse_trie_max_hot_slots = v;
         self
     }
 
-    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
-    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
-        self.sparse_trie_max_storage_tries = v;
+    /// Set the LFU hot-account capacity for sparse trie pruning by default
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, v: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = v;
         self
     }
 
@@ -220,8 +220,8 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             prewarming_threads: None,
             cache_metrics_disabled: false,
-            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
         }
@@ -358,13 +358,13 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
 
-    /// Sparse trie prune depth.
-    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
-    pub sparse_trie_prune_depth: usize,
+    /// LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles.
+    #[arg(long = "engine.sparse-trie-max-hot-slots", alias = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_slots)]
+    pub sparse_trie_max_hot_slots: usize,
 
-    /// Maximum number of storage tries to retain after sparse trie pruning.
-    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
-    pub sparse_trie_max_storage_tries: usize,
+    /// LFU hot-account capacity: max account addresses retained across sparse trie prune cycles.
+    #[arg(long = "engine.sparse-trie-max-hot-accounts", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_accounts)]
+    pub sparse_trie_max_hot_accounts: usize,
 
     /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
     /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
@@ -411,8 +411,8 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
@@ -441,8 +441,8 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
@@ -473,8 +473,8 @@ impl EngineArgs {
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
-            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
+            .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
@@ -527,8 +527,8 @@ mod tests {
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
             cache_metrics_disabled: true,
-            sparse_trie_prune_depth: 10,
-            sparse_trie_max_storage_tries: 100,
+            sparse_trie_max_hot_slots: 100,
+            sparse_trie_max_hot_accounts: 500,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
         };
@@ -564,10 +564,10 @@ mod tests {
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",
-            "--engine.sparse-trie-prune-depth",
-            "10",
-            "--engine.sparse-trie-max-storage-tries",
+            "--engine.sparse-trie-max-hot-slots",
             "100",
+            "--engine.sparse-trie-max-hot-accounts",
+            "500",
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
