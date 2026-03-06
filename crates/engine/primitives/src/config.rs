@@ -140,6 +140,10 @@ pub struct TreeConfig {
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
     sparse_trie_max_hot_accounts: usize,
+    /// When set, blocks whose total processing time (execution + state reads + state root +
+    /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
+    /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
+    slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to use the arena-based sparse trie implementation.
@@ -176,6 +180,7 @@ impl Default for TreeConfig {
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             enable_arena_sparse_trie: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -209,6 +214,7 @@ impl TreeConfig {
         sparse_trie_prune_depth: usize,
         sparse_trie_max_hot_slots: usize,
         sparse_trie_max_hot_accounts: usize,
+        slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
@@ -234,6 +240,7 @@ impl TreeConfig {
             sparse_trie_prune_depth,
             sparse_trie_max_hot_slots,
             sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             enable_arena_sparse_trie: false,
             state_root_task_timeout,
@@ -504,6 +511,24 @@ impl TreeConfig {
     /// Setter for LFU hot-account capacity.
     pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
         self.sparse_trie_max_hot_accounts = max_hot_accounts;
+        self
+    }
+
+    /// Returns the slow block threshold, if configured.
+    ///
+    /// When `Some`, blocks whose total processing time exceeds this duration emit a structured
+    /// warning with timing, state-operation, and cache-hit-rate details. `Duration::ZERO` logs
+    /// every block.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
         self
     }
 

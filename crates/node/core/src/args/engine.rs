@@ -1,6 +1,7 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
+use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
     DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
@@ -41,6 +42,7 @@ pub struct DefaultEngineValues {
     cache_metrics_disabled: bool,
     sparse_trie_max_hot_slots: usize,
     sparse_trie_max_hot_accounts: usize,
+    slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
 }
@@ -185,6 +187,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default slow block threshold.
+    pub const fn with_slow_block_threshold(mut self, v: Option<Duration>) -> Self {
+        self.slow_block_threshold = v;
+        self
+    }
+
     /// Set whether to disable sparse trie cache pruning by default
     pub const fn with_disable_sparse_trie_cache_pruning(mut self, v: bool) -> Self {
         self.disable_sparse_trie_cache_pruning = v;
@@ -222,6 +230,7 @@ impl Default for DefaultEngineValues {
             cache_metrics_disabled: false,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
         }
@@ -357,6 +366,17 @@ pub struct EngineArgs {
     #[arg(long = "engine.sparse-trie-max-hot-accounts", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_accounts)]
     pub sparse_trie_max_hot_accounts: usize,
 
+    /// Configure the slow block logging threshold in milliseconds.
+    ///
+    /// When set, blocks that take longer than this threshold to execute will be logged
+    /// with detailed metrics including timing, state operations, and cache statistics.
+    ///
+    /// Set to 0 to log all blocks (useful for debugging/profiling).
+    ///
+    /// When not set, slow block logging is disabled (default).
+    #[arg(long = "engine.slow-block-threshold", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = Resettable::from(DefaultEngineValues::get_global().slow_block_threshold.map(|threshold| format_duration_as_secs_or_ms(threshold).into())))]
+    pub slow_block_threshold: Option<Duration>,
+
     /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
     /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
     /// the effects of retaining the full trie cache.
@@ -409,6 +429,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             sparse_trie_max_hot_slots,
             sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
@@ -438,6 +459,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             sparse_trie_max_hot_slots,
             sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             enable_arena_sparse_trie: false,
             state_root_task_timeout: state_root_task_timeout
@@ -470,6 +492,7 @@ impl EngineArgs {
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
             .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
+            .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_enable_arena_sparse_trie(self.enable_arena_sparse_trie)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
@@ -524,6 +547,7 @@ mod tests {
             cache_metrics_disabled: true,
             sparse_trie_max_hot_slots: 100,
             sparse_trie_max_hot_accounts: 500,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
         };
@@ -568,5 +592,35 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_parse_slow_block_threshold() {
+        // Test default value (None - disabled)
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.slow_block_threshold, None);
+
+        // Test setting to 0 (log all blocks)
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.slow-block-threshold", "0"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::ZERO));
+
+        // Test setting to custom value
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::from_secs(500)));
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500ms",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::from_millis(500)));
     }
 }
