@@ -102,7 +102,12 @@ pub struct Command {
     ///
     /// Cannot be used with `--reth-new-payload` because `reth_newPayload` already
     /// waits for persistence by default.
-    #[arg(long, default_value = "false", conflicts_with = "reth_new_payload", verbatim_doc_comment)]
+    #[arg(
+        long,
+        default_value = "false",
+        conflicts_with = "reth_new_payload",
+        verbatim_doc_comment
+    )]
     wait_for_persistence: bool,
 
     /// Engine persistence threshold used for deciding when to wait for persistence.
@@ -364,13 +369,7 @@ impl Command {
                     ),
                 };
                 let wait = reth_new_payload_wait(self.no_wait);
-                (
-                    None,
-                    serde_json::to_value((
-                        RethNewPayloadInput::ExecutionData(reth_data),
-                        wait,
-                    ))?,
-                )
+                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data), wait))?)
             } else {
                 (
                     Some(EngineApiMessageVersion::V4),

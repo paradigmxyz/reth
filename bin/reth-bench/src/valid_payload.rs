@@ -214,11 +214,7 @@ pub(crate) fn block_to_new_payload(
 /// When `no_wait` is `true`, returns `Some(false)` to skip waiting.
 /// When `no_wait` is `false`, returns `None` to use the server default (wait).
 pub(crate) fn reth_new_payload_wait(no_wait: bool) -> Option<bool> {
-    if no_wait {
-        Some(false)
-    } else {
-        None
-    }
+    no_wait.then_some(false)
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an
