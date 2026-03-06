@@ -285,8 +285,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.27.2"
-source = "git+https://github.com/Soubhik-10/evm?branch=devnet3#e5016f3814d5d790a4402bed5ce11044d0874a0c"
+version = "0.29.2"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#5ca2989a1fc18079ca29387c61c5e5b6d6150030"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -302,6 +302,7 @@ dependencies = [
  "op-revm",
  "revm",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -455,7 +456,7 @@ dependencies = [
  "derive_more",
  "fixed-cache",
  "foldhash 0.2.0",
- "getrandom 0.4.1",
+ "getrandom 0.4.2",
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
  "itoa",
@@ -1456,6 +1457,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-polyfill"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
+dependencies = [
+ "critical-section",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1578,26 +1588,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "bincode"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
-dependencies = [
- "bincode_derive",
- "serde",
- "unty",
-]
-
-[[package]]
-name = "bincode_derive"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
-dependencies = [
- "virtue",
 ]
 
 [[package]]
@@ -2224,6 +2214,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3311,6 +3310,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4250,20 +4261,20 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "r-efi",
+ "r-efi 5.3.0",
  "wasip2",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "getrandom"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139ef39800118c7683f2fd3c98c1b23c09ae076556b435f8e9064ae108aaeeec"
+checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 6.0.0",
  "wasip2",
  "wasip3",
 ]
@@ -4397,6 +4408,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
 
 [[package]]
+name = "hash32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4458,6 +4478,20 @@ checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
  "byteorder",
  "num-traits",
+]
+
+[[package]]
+name = "heapless"
+version = "0.7.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
+dependencies = [
+ "atomic-polyfill",
+ "hash32",
+ "rustc_version 0.4.1",
+ "serde",
+ "spin",
+ "stable_deref_trait",
 ]
 
 [[package]]
@@ -5066,9 +5100,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.11.0"
+version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
 name = "iri-string"
@@ -6363,8 +6397,8 @@ dependencies = [
 
 [[package]]
 name = "op-revm"
-version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "17.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "auto_impl",
  "revm",
@@ -6776,6 +6810,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "heapless",
+ "serde",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6855,9 +6902,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "3.4.0"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
  "toml_edit",
 ]
@@ -7067,9 +7114,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
@@ -7079,6 +7126,12 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radium"
@@ -8722,7 +8775,7 @@ dependencies = [
  "alloy-evm",
  "alloy-primitives",
  "arbitrary",
- "bincode 1.3.3",
+ "bincode",
  "derive_more",
  "rand 0.9.2",
  "reth-ethereum-primitives",
@@ -8816,7 +8869,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "arbitrary",
- "bincode 1.3.3",
+ "bincode",
  "rand 0.9.2",
  "reth-chain-state",
  "reth-ethereum-primitives",
@@ -9089,7 +9142,7 @@ name = "reth-nippy-jar"
 version = "1.11.0"
 dependencies = [
  "anyhow",
- "bincode 1.3.3",
+ "bincode",
  "derive_more",
  "lz4_flex",
  "memmap2",
@@ -9487,7 +9540,7 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "auto_impl",
- "bincode 1.3.3",
+ "bincode",
  "byteorder",
  "bytes",
  "dashmap",
@@ -10031,7 +10084,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
- "bincode 1.3.3",
+ "bincode",
  "eyre",
  "futures-util",
  "itertools 0.14.0",
@@ -10417,7 +10470,7 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "arrayvec",
- "bincode 1.3.3",
+ "bincode",
  "bytes",
  "derive_more",
  "hash-db",
@@ -10537,8 +10590,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "34.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "36.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10555,8 +10608,8 @@ dependencies = [
 
 [[package]]
 name = "revm-bytecode"
-version = "8.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "9.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "bitvec",
  "phf",
@@ -10566,8 +10619,8 @@ dependencies = [
 
 [[package]]
 name = "revm-context"
-version = "13.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "15.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10582,8 +10635,8 @@ dependencies = [
 
 [[package]]
 name = "revm-context-interface"
-version = "14.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "16.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10597,8 +10650,8 @@ dependencies = [
 
 [[package]]
 name = "revm-database"
-version = "10.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "12.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10610,8 +10663,8 @@ dependencies = [
 
 [[package]]
 name = "revm-database-interface"
-version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "10.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "auto_impl",
  "either",
@@ -10623,8 +10676,8 @@ dependencies = [
 
 [[package]]
 name = "revm-handler"
-version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "17.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10641,8 +10694,8 @@ dependencies = [
 
 [[package]]
 name = "revm-inspector"
-version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "17.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "auto_impl",
  "either",
@@ -10658,8 +10711,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.34.2"
-source = "git+https://github.com/paradigmxyz/revm-inspectors?branch=staging#e80e2eab72dfa18011e6a99abd37027290a46e83"
+version = "0.36.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfb0f462c8a3d9989d3dbc62d7cca4dfecd7072cfa5d563ab90ced60590ed1da"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -10677,8 +10731,8 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "34.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10689,8 +10743,8 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "32.1.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10712,8 +10766,8 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "22.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "22.1.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10723,8 +10777,8 @@ dependencies = [
 
 [[package]]
 name = "revm-state"
-version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=devnet3#4866ac661437b77f9034846b1d41c977e9604c4b"
+version = "10.0.0"
+source = "git+https://github.com/bluealloy/revm?rev=fa5a6914398c9b178422efc1edd1d2ab33dad923#fa5a6914398c9b178422efc1edd1d2ab33dad923"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.11.0",
@@ -11636,6 +11690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11804,7 +11867,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
 dependencies = [
  "fastrand 2.3.0",
- "getrandom 0.4.1",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -11845,9 +11908,9 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz"
-version = "7.2.5"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11e5c77910b1d5b469a342be541cf44933f0ad2c4b8d5acb32ee46697fd60546"
+checksum = "bdcc9e8244ec7140f52b55bb67ff77fe5e10f1e7651a9d7ca1187555344a212d"
 dependencies = [
  "serde",
  "serde_combinators",
@@ -11858,22 +11921,22 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz-internal"
-version = "7.2.5"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d25f2f0ee315b130411a98570dd128dfe344bfaa0a28bf33d38f4a1fe85f39b"
+checksum = "b36ec8e4151160eb1b1d42d4691c24b5a6f3891c75d41afb343346801ab60ce5"
 dependencies = [
- "bincode 2.0.1",
  "cargo_metadata 0.19.2",
+ "postcard",
  "serde",
 ]
 
 [[package]]
 name = "test-fuzz-macro"
-version = "7.2.5"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8c03ba0a9e3e4032f94d71c85e149af147843c6f212e4ca4383542d606b04a6"
+checksum = "bd45ef045619b976f1efa036aee72b6a80dc359d800e11f9d636332ebf6655f9"
 dependencies = [
- "darling 0.21.3",
+ "darling 0.23.0",
  "heck",
  "itertools 0.14.0",
  "prettyplease",
@@ -11884,9 +11947,9 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz-runtime"
-version = "7.2.5"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9a4ac481aa983d386e857a7be0006c2f0ef26e0c5326bbc7262f73c2891b91d"
+checksum = "91e243f304ded602493cfd77bee2f627f376bec4ea185cf8e9674b6150ea3837"
 dependencies = [
  "hex",
  "num-traits",
@@ -12076,9 +12139,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "bytes",
  "libc",
@@ -12093,9 +12156,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.6.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af407857209536a95c8e56f8231ef2c2e2aff839b22e07a1ffcbc617e9db9fa5"
+checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12176,7 +12239,7 @@ dependencies = [
  "indexmap 2.13.0",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow",
@@ -12192,13 +12255,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "toml_edit"
-version = "0.23.10+spec-1.0.0"
+name = "toml_datetime"
+version = "1.0.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84c8b9f757e028cee9fa244aea147aab2a9ec09d5325a9b01e0a49730c2b5269"
+checksum = "32c2555c699578a4f59f0cc68e5116c8d7cabbd45e1409b989d4be085b53f13e"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.4+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7193cbd0ce53dc966037f54351dbbcf0d5a642c7f0038c382ef9e677ce8c13f2"
 dependencies = [
  "indexmap 2.13.0",
- "toml_datetime",
+ "toml_datetime 1.0.0+spec-1.1.0",
  "toml_parser",
  "winnow",
 ]
@@ -12711,12 +12783,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "unty"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12755,11 +12821,11 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.21.0"
+version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb"
+checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
- "getrandom 0.4.1",
+ "getrandom 0.4.2",
  "js-sys",
  "wasm-bindgen",
 ]
@@ -12822,12 +12888,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "virtue"
-version = "0.0.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "visibility"
@@ -13615,9 +13675,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
