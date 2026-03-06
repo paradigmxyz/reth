@@ -606,8 +606,12 @@ where
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn compute_drained_storage_roots(&mut self) {
-        let span = debug_span!("compute_storage_roots").entered();
         let addresses_to_compute_roots: Vec<_> = self
             .storage_updates
             .iter()
@@ -628,10 +632,12 @@ where
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
         }
+
+        let parent_span = tracing::Span::current();
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::sparse_trie",
-                parent: &span,
+                parent: &parent_span,
                 "storage_root",
                 ?address
             )
@@ -644,7 +650,6 @@ where
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
             unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
         });
-        drop(span);
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
