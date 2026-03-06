@@ -1018,6 +1018,24 @@ where
                 curr_state_mask,
             );
 
+            // Also include child nibbles indicated by the prefix set. The prefix set can
+            // indicate children that need recalculation from leaves (e.g. new keys inserted
+            // under this branch). Skip nibbles already set in `curr_state_mask` since those
+            // children have already been constructed.
+            if self.prefix_set.contains(&self.branch_path) {
+                let branch_path_len = self.branch_path.len();
+                let mut child_path = self.branch_path;
+                for nibble in 0u8..16 {
+                    if !curr_state_mask.is_bit_set(nibble) {
+                        child_path.truncate(branch_path_len);
+                        child_path.push_unchecked(nibble);
+                        if self.prefix_set.contains(&child_path) {
+                            next_child_nibbles.set_bit(nibble);
+                        }
+                    }
+                }
+            }
+
             let _orig_next_child_nibbles = next_child_nibbles;
 
             // Mask out any child nibbles whose ranges have already been fully processed.
@@ -1086,7 +1104,12 @@ where
             //
             // If the child needs to be retained for a proof then we should not use the cached
             // hash, and instead continue on to calculate its node manually.
-            if cached_branch.hash_mask.is_bit_set(child_nibble) {
+            //
+            // If the child's path is in the prefix set then the cached hash is stale and must
+            // not be used.
+            if cached_branch.hash_mask.is_bit_set(child_nibble) &&
+                !self.prefix_set.contains(&child_path)
+            {
                 // Commit the last child. We do this here for two reasons:
                 // - `commit_last_child` will check if the last child needs to be retained. We need
                 //   to check that before the subsequent `should_retain` call here to prevent
@@ -2225,6 +2248,213 @@ mod tests {
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
         assert!(root_hash.is_some(), "should produce a root hash");
+    }
+
+    /// Tests that the prefix set causes `next_uncached_key_range` to add child nibbles that are
+    /// not present in the cached branch's `state_mask`.
+    ///
+    /// Setup: An original state with leaves at `0x60` and `0x61` produces a cached branch at
+    /// `0x6` with children at nibbles 0 and 1 (both with real cached hashes from `StorageRoot`).
+    /// A new leaf is then inserted at `0x63...`, which is NOT in the branch's `state_mask`.
+    /// The prefix set contains the new key. Without prefix set support, the calculator would
+    /// skip nibble 3 entirely and produce a stale root hash. With prefix set support, nibble 3
+    /// is discovered and its subtrie is recalculated from leaves.
+    #[test]
+    fn test_prefix_set_adds_child_nibbles() {
+        reth_tracing::init_test_tracing();
+        use reth_trie_common::prefix_set::PrefixSetMut;
+
+        let account_addr = B256::ZERO;
+        let val = U256::from(42u64);
+
+        let slot_60 = B256::right_padding_from(&[0x60]);
+        let slot_61 = B256::right_padding_from(&[0x61]);
+        // New key not in the original branch's state_mask.
+        let slot_63 = B256::right_padding_from(&[0x63]);
+
+        // Build original state with only slots 0x60 and 0x61.
+        let original_storage: BTreeMap<B256, U256> =
+            [slot_60, slot_61].iter().map(|s| (*s, val)).collect();
+        let original_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, original_storage)]),
+        );
+        let empty_trie = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+
+        // Use StorageRoot to compute the original root and extract real cached hashes.
+        let (_original_root, _, trie_updates) = crate::StorageRoot::new_hashed(
+            empty_trie,
+            original_hashed,
+            account_addr,
+            PrefixSet::default(),
+        )
+        .root_with_updates()
+        .expect("StorageRoot should succeed");
+
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            trie_updates.storage_nodes.into_iter().collect();
+
+        // Now the updated state includes the new leaf at 0x63.
+        let updated_storage: BTreeMap<B256, U256> =
+            [slot_60, slot_61, slot_63].iter().map(|s| (*s, val)).collect();
+        let updated_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, updated_storage)]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        // Build prefix set containing the new key.
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::unpack(slot_63));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Compute root WITH prefix set (uses cached branch + prefix set to discover nibble 3).
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
+                .with_prefix_set(prefix_set);
+        let root_node = calculator
+            .storage_root_node(account_addr)
+            .expect("storage_root_node should succeed with prefix set adding child nibbles");
+        let root_with_prefix_set =
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
+
+        // Compute reference root from scratch (no cached branches at all).
+        let empty_trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+        let storage_trie_cursor =
+            empty_trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
+        let fresh_root_node = fresh_calculator
+            .storage_root_node(account_addr)
+            .expect("fresh storage_root_node should succeed");
+        let expected_root = fresh_calculator
+            .compute_root_hash(core::slice::from_ref(&fresh_root_node))
+            .unwrap()
+            .unwrap();
+
+        pretty_assertions::assert_eq!(
+            expected_root,
+            root_with_prefix_set,
+            "Root hash with prefix set should match fresh computation"
+        );
+    }
+
+    /// Tests that `next_uncached_key_range` does not use a cached hash when the child's path
+    /// is in the prefix set, forcing recalculation from leaves.
+    ///
+    /// Setup: A cached branch at `0x6` with children at nibbles 0,1,5 — all with cached hashes.
+    /// The leaf at `0x65...` is changed (different value). The prefix set marks `0x65...` as
+    /// dirty. Without prefix set support, the calculator would use the stale cached hash for
+    /// nibble 5 and produce a wrong root. With prefix set support, the cached hash is skipped
+    /// and the subtrie is recalculated from the updated leaf data.
+    #[test]
+    fn test_prefix_set_invalidates_cached_hash() {
+        reth_tracing::init_test_tracing();
+        use reth_trie_common::prefix_set::PrefixSetMut;
+
+        let account_addr = B256::ZERO;
+
+        let slot_60 = B256::right_padding_from(&[0x60]);
+        let slot_61 = B256::right_padding_from(&[0x61]);
+        let slot_65 = B256::right_padding_from(&[0x65]);
+
+        // First, compute the correct root for the ORIGINAL state (values all = 42)
+        // so we can extract real hashes from it.
+        let original_val = U256::from(42u64);
+        let original_storage: BTreeMap<B256, U256> =
+            [slot_60, slot_61, slot_65].iter().map(|s| (*s, original_val)).collect();
+        let original_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, original_storage)]),
+        );
+        let empty_trie = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+
+        // Use StorageRoot to get correct trie updates with real hashes.
+        let (_original_root, _, trie_updates) = crate::StorageRoot::new_hashed(
+            empty_trie,
+            original_hashed.clone(),
+            account_addr,
+            PrefixSet::default(),
+        )
+        .root_with_updates()
+        .expect("StorageRoot should succeed");
+
+        // Extract the cached branch from trie updates.
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            trie_updates.storage_nodes.into_iter().collect();
+
+        // Now update the leaf at 0x65 to a different value.
+        let updated_val = U256::from(9999u64);
+        let updated_storage: BTreeMap<B256, U256> = [
+            (slot_60, original_val),
+            (slot_61, original_val),
+            (slot_65, updated_val), // changed!
+        ]
+        .into_iter()
+        .collect();
+        let updated_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, updated_storage.clone())]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        // Build prefix set marking the changed key.
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::unpack(slot_65));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Compute root WITH cached branch + prefix set.
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
+                .with_prefix_set(prefix_set);
+        let root_node = calculator
+            .storage_root_node(account_addr)
+            .expect("storage_root_node should succeed with prefix set invalidating cached hash");
+        let root_with_prefix_set =
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
+
+        // Compute reference root from scratch (no cached branches).
+        let empty_trie_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+        let storage_trie_cursor = empty_trie_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
+        let fresh_root_node = fresh_calculator
+            .storage_root_node(account_addr)
+            .expect("fresh storage_root_node should succeed");
+        let expected_root = fresh_calculator
+            .compute_root_hash(core::slice::from_ref(&fresh_root_node))
+            .unwrap()
+            .unwrap();
+
+        pretty_assertions::assert_eq!(
+            expected_root,
+            root_with_prefix_set,
+            "Root hash with prefix set invalidation should match fresh computation"
+        );
     }
 
     #[test]
