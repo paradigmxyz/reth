@@ -206,10 +206,10 @@ impl ArenaSparseSubtrie {
         pruned
     }
 
-    /// Removes a pruned node from the arena. If the parent on the cursor stack is still
-    /// present in the arena (i.e. it is a retained branch at the pruning boundary), replaces
-    /// its child slot with `Blinded`. Otherwise the parent will also be removed later, so
-    /// blinding is unnecessary.
+    /// Removes a pruned node from the arena. If the cursor's parent is still present in the
+    /// arena (i.e. it is a retained branch at the pruning boundary), replaces its child slot
+    /// with `Blinded`. Otherwise the parent will also be removed later, so blinding is
+    /// unnecessary.
     fn remove_pruned_child(&mut self, idx: Index, nibble: Option<u8>) {
         let rlp_node = self.arena[idx].state_ref().and_then(|s| s.cached_rlp_node()).cloned();
 
@@ -230,7 +230,7 @@ impl ArenaSparseSubtrie {
         }
     }
 
-    /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
+    /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
     /// [`Self::reveal_nodes`], but checks accessibility for [`LeafUpdate::Touched`] entries.
     ///
     /// `sorted_updates` must be sorted lexicographically by their nibbles path (index 1).
@@ -311,7 +311,7 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        // Drain remaining stack entries, propagating dirty state.
+        // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
         #[cfg(debug_assertions)]
@@ -345,7 +345,7 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        // Drain remaining stack entries, propagating dirty state.
+        // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
         #[cfg(debug_assertions)]
@@ -391,8 +391,8 @@ enum UpsertLeafResult {
     Updated,
     /// A new leaf was created (e.g. EmptyRoot→Leaf, or root-level split).
     NewLeaf,
-    /// A new child (branch or leaf) was created or inserted. The child is at the top of
-    /// the stack and its parent is second-to-top.
+    /// A new child (branch or leaf) was created or inserted. The child is the cursor head
+    /// and its parent is the cursor's parent.
     NewChild,
 }
 
@@ -581,10 +581,10 @@ impl ArenaParallelSparseTrie {
         path_len == UPPER_TRIE_MAX_DEPTH
     }
 
-    /// If the child at the top of the stack should be a subtrie based on its depth, pops it,
+    /// If the child at the cursor head should be a subtrie based on its depth, pops it,
     /// wraps it in [`ArenaSparseNode::Subtrie`], and updates the parent's child pointer.
     ///
-    /// The child must be at `stack.last()` and its parent at `stack[len-2]`.
+    /// The child must be the cursor head and its parent the cursor's parent.
     fn maybe_wrap_in_subtrie(&mut self, cursor: &ArenaCursor) {
         let child_entry = cursor.head().expect("cursor is non-empty");
         let child_idx = child_entry.index;
@@ -628,13 +628,13 @@ impl ArenaParallelSparseTrie {
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
 
-    /// Checks whether the subtrie at the top of the stack has become empty after updates.
+    /// Checks whether the subtrie at the cursor head has become empty after updates.
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
     /// child slot is removed from the parent branch entirely, the subtrie is recycled, and
     /// if the parent is left with a single revealed child, it is collapsed via
     /// [`collapse_branch`].
     ///
-    /// The subtrie entry must be at `stack.last()` and its parent at `stack[len-2]`.
+    /// The subtrie must be the cursor head and its parent the cursor's parent.
     /// Pops the subtrie entry (propagating leaf count deltas) before returning.
     #[instrument(
         level = "trace",
@@ -661,8 +661,8 @@ impl ArenaParallelSparseTrie {
             .expect("subtrie path must have at least one nibble");
         let parent_idx = cursor.parent().expect("cursor has parent").index;
 
-        // Pop the subtrie entry before mutating, so collapse_branch sees the parent at
-        // stack.last().
+        // Pop the subtrie entry before mutating, so collapse_branch sees the parent as
+        // the cursor head.
         cursor.pop(&mut self.upper_arena);
 
         self.recycle_subtrie(subtrie_idx);
@@ -693,7 +693,7 @@ impl ArenaParallelSparseTrie {
         self.cleared_subtries.push(*subtrie);
     }
 
-    /// Handles cascading structural changes on the branch at `stack.last()` after a child
+    /// Handles cascading structural changes on the branch at the cursor head after a child
     /// has been removed.
     ///
     /// Depending on the remaining child count:
@@ -910,9 +910,7 @@ impl ArenaParallelSparseTrie {
 
         // Step 2: Walk dirty branches depth-first using `cursor.next`. Only dirty branches
         // are descended into; all other children (leaves, cached branches, blinded, subtries)
-        // are encoded when their parent branch is popped. By the time a branch is popped,
-        // all its dirty child branches have already been encoded and cached, so every child
-        // has RLP available.
+        // are encoded when their parent branch is popped.
         loop {
             let result = cursor.next(&mut *arena, |_, node| {
                 matches!(
@@ -1284,13 +1282,13 @@ impl ArenaParallelSparseTrie {
     /// [`ArenaCursor::seek`].
     ///
     /// Handles three cases based on `find_result`:
-    /// 1. `RevealedLeaf` — the stack head is a leaf; update in place or split into a branch.
+    /// 1. `RevealedLeaf` — the cursor head is a leaf; update in place or split into a branch.
     /// 2. Diverged — the path diverges within the branch's `short_key`, split it.
     /// 3. `NoChild` — the target nibble has no child, insert a new leaf.
     ///
     /// The caller must handle [`SeekResult::Blinded`] and
     /// [`SeekResult::RevealedSubtrie`] before calling this function.
-    /// The stack must have at least one entry when called.
+    /// The cursor must be non-empty when called.
     ///
     /// Returns an [`UpsertLeafResult`] and [`SubtrieCounterDeltas`] so the caller can maintain
     /// aggregate counters and decide whether to wrap the result as a subtrie.
@@ -1334,7 +1332,7 @@ impl ArenaParallelSparseTrie {
                         *state = ArenaSparseNodeState::Dirty;
                         was_clean
                     } else {
-                        unreachable!("RevealedLeaf but stack head is not a leaf")
+                        unreachable!("RevealedLeaf but cursor head is not a leaf")
                     };
                 (
                     UpsertLeafResult::Updated,
@@ -1551,7 +1549,7 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        // The subtrie is at the top of the stack; its parent is one below.
+        // The subtrie is the cursor head; its parent is the cursor's parent.
         let subtrie_entry = cursor.head()?;
         let subtrie_num_leaves = match &arena[subtrie_entry.index] {
             ArenaSparseNode::Subtrie(s) => s.num_leaves,
@@ -1598,8 +1596,8 @@ impl ArenaParallelSparseTrie {
     ///
     /// The caller must verify that the remaining child is not blinded before calling this function.
     ///
-    /// The branch being collapsed must be the current stack head. The stack head will be replaced
-    /// with the remaining child which has taken its place.
+    /// The branch being collapsed must be the current cursor head. The cursor head will be
+    /// replaced with the remaining child which has taken its place.
     /// Returns `true` if the collapse dirtied a surviving leaf that was not already dirty.
     fn collapse_branch(
         arena: &mut Arena<ArenaSparseNode>,
