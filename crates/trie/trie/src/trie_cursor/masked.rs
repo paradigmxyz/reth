@@ -124,17 +124,19 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
             }
         }
 
+        // We pessimistically assume all leaves matched by the prefix set will be removed.
+        //
         // If removing dirty children leaves only a single child in the state_mask, that
         // child must also be unset. A single-child branch is invalid in MPT — the branch
-        // must collapse — so the remaining child's cached hash cannot be reused.
-        let surviving_state = TrieMask::new(node.state_mask.get() & !unset_mask.get());
-        let surviving_bits = surviving_state.get();
-        if surviving_bits != 0 && (surviving_bits & surviving_bits.wrapping_sub(1)) == 0 {
-            unset_mask = TrieMask::new(unset_mask.get() | surviving_bits);
+        // must collapse — so the remaining child must be revealed in order to perform the collapse.
+        // Its cached hash cannot be used.
+        let remaining_bits = node.state_mask & !unset_mask;
+        if remaining_bits.count_ones() == 1 {
+            unset_mask = node.state_mask;
         }
 
         // Apply unset_mask to hash_mask.
-        let new_hash_mask = TrieMask::new(original_hash_mask.get() & !unset_mask.get());
+        let new_hash_mask = original_hash_mask & !unset_mask;
 
         if new_hash_mask != original_hash_mask {
             // Remove hashes for unset bits in-place.
@@ -419,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_preserved_when_multiple_state_children_survive() {
+    fn test_hash_preserved_when_multiple_state_children_remain() {
         // Branch at [0x1] with children 0 (hashed), 1 (unhashed, state_mask only), 5 (hashed).
         // state_mask has bits 0,1,5; hash_mask has only bits 0,5.
         // Prefix set marks child 0 as changed → unset_mask has bit 0.
@@ -442,17 +444,17 @@ mod tests {
         let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
 
         let (_, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
-        // Child 0's hash cleared (dirty), child 5's hash preserved (two children survive).
+        // Child 0's hash cleared (dirty), child 5's hash preserved (two children remain).
         assert!(!node.hash_mask.is_bit_set(0));
         assert!(node.hash_mask.is_bit_set(5));
         assert_eq!(&*node.hashes, &[hash(5)]);
     }
 
     #[test]
-    fn test_hash_cleared_when_single_state_child_survives() {
+    fn test_hash_cleared_when_single_state_child_remains() {
         // Branch at [0x1] with children 0 (hashed), 5 (hashed).
         // state_mask and hash_mask both have bits 0 and 5.
-        // Prefix set marks child 0 as changed → only child 5 survives in state_mask.
+        // Prefix set marks child 0 as changed → only child 5 remains in state_mask.
         // Single-child branch must collapse → child 5's hash also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
@@ -622,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_preserved_when_state_mask_wider_and_multiple_survive() {
+    fn test_hash_preserved_when_state_mask_wider_and_multiple_remain() {
         // Node at [0x1] with state_mask bits 0, 3, 7, 9 but only 0, 3, 7 hashed.
         // Prefix set marks children 0 and 7 as changed.
         // Surviving state children: {3, 9} — two children, so no collapse needed.
@@ -658,7 +660,7 @@ mod tests {
         // Reproduces the panic from proof_v2: branch at [0x1] with state_mask bits {3, 7},
         // hash_mask bit {3} only. Nibble 7 has no hash (computed from leaves).
         // Prefix set marks child 7 as changed (its leaves were deleted).
-        // After masking, only child 3 survives in state_mask — single-child branch must
+        // After masking, only child 3 remains in state_mask — single-child branch must
         // collapse, so child 3's cached hash must also be cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
