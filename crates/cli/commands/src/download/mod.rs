@@ -17,6 +17,7 @@ use manifest::{
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_util::cancellation::CancellationToken;
 use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
@@ -256,7 +257,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let data_dir = self.env.datadir.clone().resolve_datadir(chain);
         fs::create_dir_all(&data_dir)?;
 
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
+        let _cancel_guard = cancel_token.drop_guard();
 
         // Legacy single-URL mode: download one archive and extract it
         if let Some(url) = self.url {
@@ -266,7 +268,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 "Starting snapshot download and extraction"
             );
 
-            stream_and_extract(&url, data_dir.data_dir(), None, self.resumable, cancelled).await?;
+            stream_and_extract(
+                &url,
+                data_dir.data_dir(),
+                None,
+                self.resumable,
+                cancel_token.clone(),
+            )
+            .await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
             return Ok(());
@@ -367,7 +376,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Downloading all archives"
         );
 
-        let shared = SharedProgress::new(total_size, total_archives as u64, cancelled.clone());
+        let shared = SharedProgress::new(total_size, total_archives as u64, cancel_token.clone());
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
 
         let target = target_dir.to_path_buf();
@@ -379,7 +388,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 let dir = target.clone();
                 let cache = cache_dir.clone();
                 let sp = Arc::clone(&shared);
-                let c = cancelled.clone();
+                let ct = cancel_token.clone();
                 async move {
                     process_modular_archive(
                         planned,
@@ -387,7 +396,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                         cache.as_deref(),
                         Some(sp),
                         resumable,
-                        c,
+                        ct,
                     )
                     .await?;
                     Ok(())
@@ -810,23 +819,23 @@ struct SharedProgress {
     total_archives: u64,
     archives_done: AtomicU64,
     done: AtomicBool,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 }
 
 impl SharedProgress {
-    fn new(total_size: u64, total_archives: u64, cancelled: Arc<AtomicBool>) -> Arc<Self> {
+    fn new(total_size: u64, total_archives: u64, cancel_token: CancellationToken) -> Arc<Self> {
         Arc::new(Self {
             downloaded: AtomicU64::new(0),
             total_size,
             total_archives,
             archives_done: AtomicU64::new(0),
             done: AtomicBool::new(false),
-            cancelled,
+            cancel_token,
         })
     }
 
     fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.cancel_token.is_cancelled()
     }
 
     fn add(&self, bytes: u64) {
@@ -917,25 +926,18 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
 struct ProgressReader<R> {
     reader: R,
     progress: DownloadProgress,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 }
 
 impl<R: Read> ProgressReader<R> {
-    fn new(reader: R, total_size: u64) -> Self {
-        Self { reader, progress: DownloadProgress::new(total_size), cancelled: None }
-    }
-
-    fn with_cancelled(mut self, cancelled: Arc<AtomicBool>) -> Self {
-        self.cancelled = Some(cancelled);
-        self
+    fn new(reader: R, total_size: u64, cancel_token: CancellationToken) -> Self {
+        Self { reader, progress: DownloadProgress::new(total_size), cancel_token }
     }
 }
 
 impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Some(c) = &self.cancelled &&
-            c.load(Ordering::Relaxed)
-        {
+        if self.cancel_token.is_cancelled() {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let bytes = self.reader.read(buf)?;
@@ -980,12 +982,9 @@ fn extract_archive<R: Read>(
     total_size: u64,
     format: CompressionFormat,
     target_dir: &Path,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
-    let mut progress_reader = ProgressReader::new(reader, total_size);
-    if let Some(c) = cancelled {
-        progress_reader = progress_reader.with_cancelled(c);
-    }
+    let progress_reader = ProgressReader::new(reader, total_size, cancel_token);
 
     match format {
         CompressionFormat::Lz4 => {
@@ -1029,7 +1028,7 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
         "Extracting local archive"
     );
     let start = Instant::now();
-    extract_archive(file, total_size, format, target_dir, None)?;
+    extract_archive(file, total_size, format, target_dir, CancellationToken::new())?;
     info!(target: "reth::cli",
         file = %path.display(),
         elapsed = %DownloadProgress::format_duration(start.elapsed()),
@@ -1046,14 +1045,12 @@ const RETRY_BACKOFF_SECS: u64 = 5;
 struct ProgressWriter<W> {
     inner: W,
     progress: DownloadProgress,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 }
 
 impl<W: Write> Write for ProgressWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Some(c) = &self.cancelled &&
-            c.load(Ordering::Relaxed)
-        {
+        if self.cancel_token.is_cancelled() {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let n = self.inner.write(buf)?;
@@ -1116,7 +1113,7 @@ fn resumable_download(
     url: &str,
     target_dir: &Path,
     shared: Option<&Arc<SharedProgress>>,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 ) -> Result<(PathBuf, u64)> {
     let file_name = Url::parse(url)
         .ok()
@@ -1243,7 +1240,7 @@ fn resumable_download(
             let mut writer = ProgressWriter {
                 inner: BufWriter::new(file),
                 progress,
-                cancelled: cancelled.clone(),
+                cancel_token: cancel_token.clone(),
             };
             copy_result = io::copy(&mut reader, &mut writer);
             flush_result = writer.inner.flush();
@@ -1277,7 +1274,7 @@ fn streaming_download_and_extract(
     format: CompressionFormat,
     target_dir: &Path,
     shared: Option<&Arc<SharedProgress>>,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let quiet = shared.is_some();
     let mut last_error: Option<eyre::Error> = None;
@@ -1318,7 +1315,7 @@ fn streaming_download_and_extract(
             extract_archive_raw(reader, format, target_dir)
         } else {
             let total_size = response.content_length().unwrap_or(0);
-            extract_archive(response, total_size, format, target_dir, Some(cancelled.clone()))
+            extract_archive(response, total_size, format, target_dir, cancel_token.clone())
         };
 
         match result {
@@ -1343,11 +1340,11 @@ fn download_and_extract(
     format: CompressionFormat,
     target_dir: &Path,
     shared: Option<&Arc<SharedProgress>>,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let quiet = shared.is_some();
     let (downloaded_path, total_size) =
-        resumable_download(url, target_dir, shared, Some(cancelled.clone()))?;
+        resumable_download(url, target_dir, shared, cancel_token.clone())?;
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
@@ -1365,7 +1362,7 @@ fn download_and_extract(
         // Skip progress tracking for extraction in parallel mode
         extract_archive_raw(file, format, target_dir)?;
     } else {
-        extract_archive(file, total_size, format, target_dir, Some(cancelled))?;
+        extract_archive(file, total_size, format, target_dir, cancel_token)?;
         info!(target: "reth::cli",
             file = %file_name,
             "Extraction complete"
@@ -1391,7 +1388,7 @@ fn blocking_download_and_extract(
     target_dir: &Path,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
@@ -1409,10 +1406,10 @@ fn blocking_download_and_extract(
         }
         result
     } else if resumable {
-        download_and_extract(url, format, target_dir, shared.as_ref(), cancelled)
+        download_and_extract(url, format, target_dir, shared.as_ref(), cancel_token)
     } else {
         let result =
-            streaming_download_and_extract(url, format, target_dir, shared.as_ref(), cancelled);
+            streaming_download_and_extract(url, format, target_dir, shared.as_ref(), cancel_token);
         if result.is_ok() &&
             let Some(sp) = shared
         {
@@ -1432,22 +1429,14 @@ async fn stream_and_extract(
     target_dir: &Path,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
-    let c = cancelled.clone();
-    let handle = task::spawn_blocking(move || {
-        blocking_download_and_extract(&url, &target_dir, shared, resumable, c)
-    });
-
-    tokio::select! {
-        result = handle => result??,
-        _ = tokio::signal::ctrl_c() => {
-            cancelled.store(true, Ordering::Relaxed);
-            eyre::bail!("Download cancelled");
-        }
-    }
+    task::spawn_blocking(move || {
+        blocking_download_and_extract(&url, &target_dir, shared, resumable, cancel_token)
+    })
+    .await??;
 
     Ok(())
 }
@@ -1458,30 +1447,22 @@ async fn process_modular_archive(
     cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let cache_dir = cache_dir.map(Path::to_path_buf);
 
-    let c = cancelled.clone();
-    let handle = task::spawn_blocking(move || {
+    task::spawn_blocking(move || {
         blocking_process_modular_archive(
             &planned,
             &target_dir,
             cache_dir.as_deref(),
             shared,
             resumable,
-            c,
+            cancel_token,
         )
-    });
-
-    tokio::select! {
-        result = handle => result??,
-        _ = tokio::signal::ctrl_c() => {
-            cancelled.store(true, Ordering::Relaxed);
-            eyre::bail!("Download cancelled");
-        }
-    }
+    })
+    .await??;
 
     Ok(())
 }
@@ -1492,7 +1473,7 @@ fn blocking_process_modular_archive(
     cache_dir: Option<&Path>,
     shared: Option<Arc<SharedProgress>>,
     resumable: bool,
-    cancelled: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let archive = &planned.archive;
     if verify_output_files(target_dir, &archive.output_files)? {
@@ -1513,7 +1494,7 @@ fn blocking_process_modular_archive(
             let archive_path = cache_dir.join(&archive.file_name);
             let part_path = cache_dir.join(format!("{}.part", archive.file_name));
             let (downloaded_path, _downloaded_size) =
-                resumable_download(&archive.url, cache_dir, shared.as_ref(), None)?;
+                resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())?;
             let file = fs::open(&downloaded_path)?;
             extract_archive_raw(file, format, target_dir)?;
             let _ = fs::remove_file(&archive_path);
@@ -1524,7 +1505,7 @@ fn blocking_process_modular_archive(
                 format,
                 target_dir,
                 shared.as_ref(),
-                cancelled.clone(),
+                cancel_token.clone(),
             )?;
         }
 
