@@ -996,7 +996,8 @@ struct HotSlotKey {
 impl BucketedLfu<HotSlotKey> {
     /// Returns retained slots grouped by address.
     fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {
-        let mut grouped = B256Map::<Vec<Nibbles>>::default();
+        let mut grouped =
+            B256Map::<Vec<Nibbles>>::with_capacity_and_hasher(self.len(), Default::default());
         for key in self.keys() {
             grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
         }
