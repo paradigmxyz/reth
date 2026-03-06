@@ -729,7 +729,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
 
             if let Some(ref mut bud) = budget_fill_request {
-                *bud -= 1;
+                *bud = bud.saturating_sub(1);
                 if *bud == 0 {
                     break
                 }
@@ -1495,7 +1495,10 @@ mod test {
     /// - NEW: iterate `seen_hashes` (small), probe `hashes_pending_fetch` (large)
     ///
     /// Verifies both produce the same result and prints timing comparison.
+    ///
+    /// Run with: `cargo test -p reth-network bench_fill_request --release -- --ignored --nocapture`
     #[test]
+    #[ignore = "benchmark, not for CI"]
     fn bench_fill_request_iteration_direction() {
         use std::time::Instant;
 
