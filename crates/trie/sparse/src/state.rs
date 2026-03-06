@@ -999,7 +999,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 
 /// Statistics from a storage tries prune operation.
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 struct StorageTriesPruneStats {
     total_tries_before: usize,
     total_tries_after: usize,
@@ -1017,7 +1016,6 @@ struct StorageTriesPruneStats {
 /// Tracks how frequently a storage trie is accessed and when it was last pruned,
 /// enabling smart pruning decisions that preserve frequently-used tries.
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)]
 struct TrieModificationState {
     /// Access frequency level (0-255). Incremented each cycle the trie is accessed.
     /// Used for prioritizing which tries to keep during pruning.
@@ -1043,7 +1041,6 @@ struct StorageTrieModifications {
     accessed_this_cycle: B256Set,
 }
 
-#[allow(dead_code)]
 impl StorageTrieModifications {
     /// Marks a storage trie as accessed this cycle.
     /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].
