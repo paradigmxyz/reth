@@ -901,6 +901,11 @@ jobs:
           fi
           if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
+            # Read gas ramp blocks count from first baseline run (same for all runs)
+            GAS_RAMP_FILE="$BENCH_WORK_DIR/baseline-1/gas_ramp_blocks.txt"
+            if [ -f "$GAS_RAMP_FILE" ]; then
+              SUMMARY_ARGS="$SUMMARY_ARGS --gas-ramp-blocks $(cat "$GAS_RAMP_FILE" | tr -d '[:space:]')"
+            fi
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
