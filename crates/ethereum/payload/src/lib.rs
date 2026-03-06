@@ -313,10 +313,15 @@ where
                         continue
                     }
 
+                    // Avoid `?` inside 'tx_loop — use `break` so duration
+                    // metrics are always recorded.
+                    let maybe_sidecar = match pool.get_blob(*tx.hash()) {
+                        Ok(sidecar) => sidecar,
+                        Err(err) => break 'tx_loop Err(PayloadBuilderError::other(err)),
+                    };
+
                     let blob_sidecar_result = 'sidecar: {
-                        let Some(sidecar) =
-                            pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
-                        else {
+                        let Some(sidecar) = maybe_sidecar else {
                             break 'sidecar Err(
                                 Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                             )
