@@ -60,20 +60,8 @@ trap cleanup EXIT
 
 # Clean up stale schelk state from a previous cancelled run.
 # If schelk thinks it's still mounted (e.g. a cancelled run skipped cleanup),
-# recover first to reset state. Also force-unmount if the mount point is
-# still live but state was partially cleaned.
-if sudo schelk -y status 2>&1 | grep -q "Mounted: yes"; then
-  echo "Stale schelk mount detected from a cancelled run, recovering..."
-  sudo schelk recover -y -k || true
-fi
-if mountpoint -q "$SCHELK_MOUNT"; then
-  echo "Mount point still active after recovery, force-unmounting..."
-  sudo umount -l "$SCHELK_MOUNT" || true
-fi
-if sudo dmsetup info bench_era &>/dev/null; then
-  echo "Stale dm-era device found, removing..."
-  sudo dmsetup remove bench_era || true
-fi
+# recover first to reset state.
+sudo schelk recover -y -k || true
 
 # Mount
 sudo schelk mount -y
