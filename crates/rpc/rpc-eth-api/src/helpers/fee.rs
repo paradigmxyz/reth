@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::Future;
+use futures::{Future, StreamExt, TryStreamExt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
@@ -194,13 +194,15 @@ pub trait EthFees:
                 // Fetch blocks and receipts concurrently if reward percentiles are
                 // requested, instead of awaiting each one sequentially in the loop.
                 let blocks_and_receipts = if reward_percentiles.as_ref().is_some_and(|p| !p.is_empty()) {
-                    Some(futures::future::try_join_all(
-                        headers.iter().map(|header| async {
-                            self.cache().get_block_and_receipts(header.hash()).await
-                                .map_err(Self::Error::from_eth_err)
-                                .and_then(|opt| opt.ok_or_else(|| EthApiError::InvalidBlockRange.into()))
-                        })
-                    ).await?)
+                    Some(futures::stream::iter(
+                        headers.iter().map(|header| header.hash()).collect::<Vec<_>>()
+                    )
+                    .map(|hash| self.cache().get_block_and_receipts(hash))
+                    .buffered(4)
+                    .map(|res| res.map_err(Self::Error::from_eth_err))
+                    .and_then(|opt| async move { opt.ok_or_else(|| EthApiError::InvalidBlockRange.into()) })
+                    .try_collect::<Vec<_>>()
+                    .await?)
                 } else {
                     None
                 };
