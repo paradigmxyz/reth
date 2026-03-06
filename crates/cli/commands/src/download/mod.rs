@@ -36,7 +36,7 @@ use std::{
 };
 use tar::Archive;
 use tokio::task;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tui::{run_selector, SelectorOutput};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
@@ -954,26 +954,24 @@ impl CompressionFormat {
 /// layer client or change the node's P2P identity.
 const PRESERVED_FILES: &[&str] = &["jwt.hex", "discovery-secret"];
 
-/// Backs up files that should be preserved across snapshot extraction.
-///
-/// Returns a list of `(file_path, contents)` for files that existed before extraction.
-fn backup_preserved_files(target_dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
-    PRESERVED_FILES
-        .iter()
-        .filter_map(|name| {
-            let path = target_dir.join(name);
-            std::fs::read(&path).ok().map(|contents| (path, contents))
-        })
-        .collect()
-}
+/// Unpacks a tar archive into `target_dir`, skipping entries that would overwrite
+/// [`PRESERVED_FILES`] already present in the target directory.
+fn unpack_archive<R: Read>(mut archive: Archive<R>, target_dir: &Path) -> Result<()> {
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_path_buf();
 
-/// Restores backed-up files after snapshot extraction.
-fn restore_preserved_files(backups: Vec<(PathBuf, Vec<u8>)>) {
-    for (path, contents) in backups {
-        if let Err(err) = std::fs::write(&path, contents) {
-            warn!(target: "reth::cli", ?path, %err, "Failed to restore preserved file after extraction");
+        // Skip preserved files that already exist in the target directory
+        if PRESERVED_FILES.iter().any(|&name| path.ends_with(name))
+            && target_dir.join(&path).exists()
+        {
+            debug!(target: "reth::cli", ?path, "Skipping preserved file during extraction");
+            continue;
         }
+
+        entry.unpack_in(target_dir)?;
     }
+    Ok(())
 }
 
 /// Extracts a compressed tar archive to the target directory with progress tracking.
@@ -983,21 +981,19 @@ fn extract_archive<R: Read>(
     format: CompressionFormat,
     target_dir: &Path,
 ) -> Result<()> {
-    let backups = backup_preserved_files(target_dir);
     let progress_reader = ProgressReader::new(reader, total_size);
 
     match format {
         CompressionFormat::Lz4 => {
             let decoder = Decoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir)?;
         }
         CompressionFormat::Zstd => {
             let decoder = ZstdDecoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir)?;
         }
     }
 
-    restore_preserved_files(backups);
     println!();
     Ok(())
 }
@@ -1008,18 +1004,14 @@ fn extract_archive_raw<R: Read>(
     format: CompressionFormat,
     target_dir: &Path,
 ) -> Result<()> {
-    let backups = backup_preserved_files(target_dir);
-
     match format {
         CompressionFormat::Lz4 => {
-            Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive(Archive::new(Decoder::new(reader)?), target_dir)?;
         }
         CompressionFormat::Zstd => {
-            Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive(Archive::new(ZstdDecoder::new(reader)?), target_dir)?;
         }
     }
-
-    restore_preserved_files(backups);
     Ok(())
 }
 
