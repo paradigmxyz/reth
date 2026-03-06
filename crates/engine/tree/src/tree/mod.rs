@@ -1536,7 +1536,11 @@ where
                                     let mut output = self.on_new_payload(payload);
                                     self.metrics.engine.new_payload.update_response_metrics(
                                         start,
-                                        &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                        &mut self
+                                            .metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .latest_finish_at,
                                         &output,
                                         gas_used,
                                     );
@@ -1562,92 +1566,107 @@ where
                                 }
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                // Before processing the new payload, we wait for persistence and
-                                // cache updates to complete. We do it in parallel, spawning
-                                // persistence and cache update wait tasks with Tokio, so that we
-                                // can get an unbiased breakdown on how long did every step take.
-                                //
-                                // If we first wait for persistence, and only then for cache
-                                // updates, we will offset the cache update waits by the duration of
-                                // persistence, which is incorrect.
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx = if let Some((rx, start_time, _action)) =
-                                    pending_persistence
-                                {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
-                                    tokio::task::spawn_blocking(move || {
-                                        let start = Instant::now();
-                                        let result =
-                                            rx.recv().expect("persistence state channel closed");
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                    Some(persistence_rx)
+                                // Apply backpressure if too many blocks are in memory
+                                if let Err(err) = self.apply_persistence_backpressure() {
+                                    error!(target: "engine::tree", %err, "Persistence backpressure failed");
+                                    let _ = tx.send(Err(BeaconOnNewPayloadError::Internal(
+                                        Box::new(err),
+                                    )));
                                 } else {
-                                    None
-                                };
+                                    // Before processing the new payload, we wait for persistence
+                                    // and cache updates to complete. We do it in parallel, spawning
+                                    // persistence and cache update wait tasks with Tokio, so that
+                                    // we can get an unbiased breakdown on how long did every step
+                                    // take.
+                                    //
+                                    // If we first wait for persistence, and only then for cache
+                                    // updates, we will offset the cache update waits by the
+                                    // duration of persistence, which is incorrect.
+                                    debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
 
-                                let cache_wait = self.payload_validator.wait_for_caches();
+                                    let pending_persistence = self.persistence_state.rx.take();
+                                    let persistence_rx = if let Some((rx, start_time, _action)) =
+                                        pending_persistence
+                                    {
+                                        let (persistence_tx, persistence_rx) =
+                                            std::sync::mpsc::channel();
+                                        tokio::task::spawn_blocking(move || {
+                                            let start = Instant::now();
+                                            let result = rx
+                                                .recv()
+                                                .expect("persistence state channel closed");
+                                            let _ = persistence_tx.send((
+                                                result,
+                                                start_time,
+                                                start.elapsed(),
+                                            ));
+                                        });
+                                        Some(persistence_rx)
+                                    } else {
+                                        None
+                                    };
 
-                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
-                                {
-                                    let (result, start_time, wait_duration) = persistence_rx
-                                        .recv()
-                                        .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(result, start_time);
-                                    Some(wait_duration)
-                                } else {
-                                    None
-                                };
+                                    let cache_wait = self.payload_validator.wait_for_caches();
 
-                                debug!(
-                                    target: "engine::tree",
-                                    ?persistence_wait,
-                                    execution_cache_wait = ?cache_wait.execution_cache,
-                                    sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Persistence finished and caches updated for reth_newPayload"
-                                );
+                                    let persistence_wait = if let Some(persistence_rx) =
+                                        persistence_rx
+                                    {
+                                        let (result, start_time, wait_duration) = persistence_rx
+                                            .recv()
+                                            .expect("persistence result channel closed");
+                                        let _ = self.on_persistence_complete(result, start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        None
+                                    };
 
-                                let start = Instant::now();
-                                let gas_used = payload.gas_used();
-                                let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
-                                let latency = start.elapsed();
-                                self.metrics.engine.new_payload.update_response_metrics(
-                                    start,
-                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
-                                    &output,
-                                    gas_used,
-                                );
+                                    debug!(
+                                        target: "engine::tree",
+                                        ?persistence_wait,
+                                        execution_cache_wait = ?cache_wait.execution_cache,
+                                        sparse_trie_wait = ?cache_wait.sparse_trie,
+                                        "Persistence finished and caches updated for reth_newPayload"
+                                    );
 
-                                let maybe_event =
-                                    output.as_mut().ok().and_then(|out| out.event.take());
+                                    let start = Instant::now();
+                                    let gas_used = payload.gas_used();
+                                    let num_hash = payload.num_hash();
+                                    let mut output = self.on_new_payload(payload);
+                                    let latency = start.elapsed();
+                                    self.metrics.engine.new_payload.update_response_metrics(
+                                        start,
+                                        &mut self
+                                            .metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .latest_finish_at,
+                                        &output,
+                                        gas_used,
+                                    );
 
-                                let timings = NewPayloadTimings {
-                                    latency,
-                                    persistence_wait,
-                                    execution_cache_wait: cache_wait.execution_cache,
-                                    sparse_trie_wait: cache_wait.sparse_trie,
-                                };
-                                if let Err(err) =
-                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
-                                        BeaconOnNewPayloadError::Internal(Box::new(e))
-                                    }))
-                                {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
-                                    self.metrics
-                                        .engine
-                                        .failed_new_payload_response_deliveries
-                                        .increment(1);
+                                    let maybe_event =
+                                        output.as_mut().ok().and_then(|out| out.event.take());
+
+                                    let timings = NewPayloadTimings {
+                                        latency,
+                                        persistence_wait,
+                                        execution_cache_wait: cache_wait.execution_cache,
+                                        sparse_trie_wait: cache_wait.sparse_trie,
+                                    };
+                                    if let Err(err) =
+                                        tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
+                                            BeaconOnNewPayloadError::Internal(Box::new(e))
+                                        }))
+                                    {
+                                        error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                        self.metrics
+                                            .engine
+                                            .failed_new_payload_response_deliveries
+                                            .increment(1);
+                                    }
+
+                                    self.on_maybe_tree_event(maybe_event)?;
                                 }
-
-                                self.on_maybe_tree_event(maybe_event)?;
                             }
                         }
                     }
@@ -1909,34 +1928,40 @@ where
         }
     }
 
-    /// Applies persistence backpressure by waiting for any in-progress persistence to complete
-    /// and triggering a new one if the in-memory block count still exceeds the threshold.
+    /// Applies persistence backpressure by blocking until all in-memory blocks are persisted
+    /// to disk.
     ///
-    /// This is called before processing `newPayload` to prevent unbounded in-memory block
-    /// accumulation when persistence can't keep up.
+    /// This is called before processing `newPayload` / `reth_newPayload` to prevent unbounded
+    /// in-memory block accumulation when block production outpaces persistence. When triggered,
+    /// it loops — waiting for any in-progress persistence, then persisting all remaining blocks
+    /// up to the canonical head — until the in-memory count drops below the threshold.
     fn apply_persistence_backpressure(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.exceeds_backpressure_threshold() {
             return Ok(());
         }
 
         let start = Instant::now();
-        let in_memory = self.num_in_memory_blocks();
         debug!(
             target: "engine::tree",
-            in_memory_blocks = in_memory,
+            in_memory_blocks = self.num_in_memory_blocks(),
             threshold = ?self.config.persistence_backpressure_threshold(),
             "Persistence backpressure triggered, waiting for persistence"
         );
 
-        // If persistence is not in progress, trigger it now
-        if !self.persistence_state.in_progress() {
-            self.advance_persistence()?;
-        }
+        while self.exceeds_backpressure_threshold() {
+            // Wait for any in-progress persistence to complete first
+            if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+                self.on_persistence_complete(result, persistence_start_time)?;
+                continue;
+            }
 
-        // Wait for the in-progress persistence to complete (blocking)
-        if let Some((rx, persistence_start_time, _action)) = self.persistence_state.rx.take() {
-            let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-            self.on_persistence_complete(result, persistence_start_time)?;
+            // No persistence in progress — persist all blocks up to the canonical head
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+            if blocks_to_persist.is_empty() {
+                break;
+            }
+            self.persist_blocks(blocks_to_persist);
         }
 
         let wait_duration = start.elapsed();
