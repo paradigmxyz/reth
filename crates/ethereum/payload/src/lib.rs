@@ -237,6 +237,8 @@ where
         if cancel.is_cancelled() {
             metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
             metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
+            drop(builder);
+            metrics.record_cache_stats(&cached_reads.drain_stats());
             return Ok(BuildOutcome::Cancelled)
         }
 
@@ -286,9 +288,18 @@ where
             }
 
             let blob_sidecar_result = 'sidecar: {
-                let Some(sidecar) =
-                    pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
-                else {
+                let blob_result = pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other);
+                let Some(sidecar) = (match blob_result {
+                    Ok(sidecar) => sidecar,
+                    Err(err) => {
+                        total_selection_time += selection_start.elapsed();
+                        metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
+                        metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
+                        drop(builder);
+                        metrics.record_cache_stats(&cached_reads.drain_stats());
+                        return Err(err)
+                    }
+                }) else {
                     break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
                 };
 
@@ -348,6 +359,8 @@ where
                 total_evm_time += evm_start.elapsed();
                 metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
                 metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
+                drop(builder);
+                metrics.record_cache_stats(&cached_reads.drain_stats());
                 return Err(PayloadBuilderError::evm(err))
             }
         };
@@ -383,12 +396,15 @@ where
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // Release db
         drop(builder);
+        metrics.record_cache_stats(&cached_reads.drain_stats());
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
     let BlockBuilderOutcome { execution_result, block, .. } =
         builder.finish(state_provider.as_ref())?;
+
+    metrics.record_cache_stats(&cached_reads.drain_stats());
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
