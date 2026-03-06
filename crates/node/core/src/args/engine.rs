@@ -363,6 +363,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
 
+    /// Enable the arena-based sparse trie implementation instead of the default hash-map-based
+    /// one.
+    #[arg(long = "engine.enable-arena-sparse-trie", default_value_t = false)]
+    pub enable_arena_sparse_trie: bool,
+
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
@@ -434,6 +439,7 @@ impl Default for EngineArgs {
             sparse_trie_max_hot_slots,
             sparse_trie_max_hot_accounts,
             disable_sparse_trie_cache_pruning,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
@@ -465,6 +471,7 @@ impl EngineArgs {
             .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
             .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
+            .with_enable_arena_sparse_trie(self.enable_arena_sparse_trie)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
 }
