@@ -211,8 +211,7 @@ mkdir -p "$BOLT_DIR"
 
 echo "Building BOLT-instrumented binary with PGO..."
 # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
-# --no-pie produces a non-PIE executable so BOLT doesn't enter relocation mode (which has limited split-function support)
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs -Clink-arg=-Wl,--no-pie ${EXTRA_RUSTFLAGS:-}" \
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 # Instrument with BOLT
@@ -220,10 +219,13 @@ BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
 BOLT_INSTRUMENTED_BIN="$BUILT_BIN-bolt-instrumented"
 
 echo "Instrumenting binary with BOLT..."
+# --skip-funcs: skip compiler-generated drop_in_place functions that BOLT can't handle
+# as split functions in relocation mode (triggered by --emit-relocs)
 llvm-bolt "$BUILT_BIN" \
     -instrument \
     --instrumentation-file-append-pid \
     --instrumentation-file="$BOLT_DIR/prof" \
+    --skip-funcs='.*drop_in_place.*' \
     -o "$BOLT_INSTRUMENTED_BIN"
 echo "BOLT-instrumented binary: $BOLT_INSTRUMENTED_BIN ($(ls -lh "$BOLT_INSTRUMENTED_BIN" | awk '{print $5}'))"
 
@@ -251,8 +253,7 @@ echo "============================================================"
 
 echo "Building PGO-optimized binary..."
 # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
-# --no-pie produces a non-PIE executable so BOLT doesn't enter relocation mode (which has limited split-function support)
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs -Clink-arg=-Wl,--no-pie ${EXTRA_RUSTFLAGS:-}" \
+RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
     cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
 BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
@@ -268,7 +269,8 @@ llvm-bolt "$BUILT_BIN" \
     -split-all-cold \
     -dyno-stats \
     -icf=1 \
-    -use-gnu-stack
+    -use-gnu-stack \
+    --skip-funcs='.*drop_in_place.*'
 
 echo "Stripping debug symbols..."
 strip "$OPTIMIZED_BIN"
