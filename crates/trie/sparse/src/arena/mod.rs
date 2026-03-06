@@ -156,9 +156,6 @@ impl ArenaSparseSubtrie {
 
         let mut pruned: usize = 0;
         let mut pruned_leaves: u64 = 0;
-        // Tracks the current position in `retained_leaves` so that each prefix_range
-        // call starts where the previous one left off, avoiding redundant scanning.
-        let mut retained_start: usize = 0;
 
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
@@ -185,10 +182,11 @@ impl ArenaSparseSubtrie {
                     let mut node_prefix = head.path;
                     node_prefix.extend(short_key);
 
-                    // Check if this node (or any descendant) is retained.
-                    let range = prefix_range(retained_leaves, retained_start, &node_prefix);
+                    // Check if this node (or any descendant) is retained. Always search
+                    // from 0 because DFS order is not lexicographic — backtracking can
+                    // revisit prefixes earlier than previously visited subtrees.
+                    let range = prefix_range(retained_leaves, 0, &node_prefix);
                     if !range.is_empty() {
-                        retained_start = range.start;
                         continue;
                     }
 
@@ -217,11 +215,12 @@ impl ArenaSparseSubtrie {
 
         self.arena.remove(idx);
 
-        // Blind the parent's child slot if the parent has a cached RLP hash for this child.
-        // At the pruning boundary, the parent is a retained branch whose child (this node)
-        // had no retained descendants. Deeper removals have parents that will also be removed,
-        // but blinding them is harmless.
-        if let Some(rlp_node) = rlp_node.filter(|r| r.is_hash()) {
+        // Blind the parent's child slot with the pruned node's cached RLP. At the pruning
+        // boundary, the parent is a retained branch whose child (this node) had no retained
+        // descendants. Deeper removals have parents that will also be removed, but blinding
+        // them is harmless. We must blind regardless of whether the RLP is a hash or inline,
+        // otherwise the parent retains a `Revealed(idx)` pointing to the removed arena entry.
+        if let Some(rlp_node) = rlp_node {
             let parent_idx = self.buffers.cursor.parent().expect("pruned child has parent").index;
             let child_nibble = nibble.expect("non-root child");
             let parent_branch = self.arena[parent_idx].branch_mut();
