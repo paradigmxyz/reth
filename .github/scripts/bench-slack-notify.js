@@ -122,8 +122,8 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   const countsParts = [];
   if (summary.big_blocks) {
     const gasRamp = summary.gas_ramp_blocks || 0;
-    if (gasRamp > 0) countsParts.push(`*Gas ramp blocks:* ${gasRamp}`);
-    countsParts.push(`*Payloads:* ${summary.blocks}`);
+    if (gasRamp > 0) countsParts.push(`*Gas Ramp:* ${gasRamp}`);
+    countsParts.push(`*Big Blocks:* ${summary.blocks}`);
   } else {
     const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
     if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
