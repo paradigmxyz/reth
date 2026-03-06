@@ -2,7 +2,7 @@
 
 pub use thread_priority::{self, *};
 
-/// Runs the given expression exactly once per call site.
+/// Runs the given closure exactly once per call site.
 ///
 /// Each invocation expands to its own `static Once`, so two `once!` calls in the same function
 /// are independent. Useful for one-time thread setup (priority, affinity) on threads that may
@@ -11,7 +11,7 @@ pub use thread_priority::{self, *};
 macro_rules! once {
     ($e:expr) => {{
         static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| $e);
+        ONCE.call_once($e);
     }};
 }
 
