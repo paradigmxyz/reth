@@ -382,6 +382,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                             target: "net::session",
                             ?peer_id,
                             msg_kind = msg.message_kind(),
+                            items = msg.message_item_count(),
                             "session command buffer full, dropping message"
                         );
                         self.metrics.total_outgoing_peer_messages_dropped.increment(1);
