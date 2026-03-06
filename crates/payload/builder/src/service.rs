@@ -28,7 +28,7 @@ use tokio::sync::{
     watch,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, debug_span, info, trace, warn};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
 
@@ -303,6 +303,13 @@ where
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
+        let _span = debug_span!(
+            target: "payload_builder",
+            "resolve",
+            %id,
+            ?kind,
+        )
+        .entered();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
         if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
@@ -428,6 +435,13 @@ where
                 match cmd {
                     PayloadServiceCommand::BuildNewPayload(attr, tx) => {
                         let id = attr.payload_id();
+                        let _span = debug_span!(
+                            target: "payload_builder",
+                            "new_payload_job",
+                            %id,
+                            parent_hash = %attr.parent(),
+                        )
+                        .entered();
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {

@@ -14,7 +14,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    PayloadBuilderMetrics, PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -28,7 +28,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, FastInstant as Instant};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -38,7 +38,7 @@ use reth_transaction_pool::{
 };
 use revm::context_interface::Block as _;
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, trace, warn};
 
 mod config;
 pub use config::*;
@@ -151,27 +151,48 @@ where
 {
     let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
     let PayloadConfig { parent_header, attributes } = config;
+    let metrics = PayloadBuilderMetrics::default();
 
-    let state_provider = client.state_by_block_hash(parent_header.hash())?;
-    let state = StateProviderDatabase::new(state_provider.as_ref());
-    let mut db =
-        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
+    let state_provider = {
+        let start = Instant::now();
+        let _span = debug_span!(target: "payload_builder", "state_provider").entered();
+        let res = client.state_by_block_hash(parent_header.hash());
+        metrics.record_state_provider_duration(start.elapsed().as_secs_f64());
+        res?
+    };
+    let mut db = {
+        let start = Instant::now();
+        let _span = debug_span!(target: "payload_builder", "build_state_db").entered();
+        let state = StateProviderDatabase::new(state_provider.as_ref());
+        let db = State::builder()
+            .with_database(cached_reads.as_db_mut(state))
+            .with_bundle_update()
+            .build();
+        metrics.record_build_state_db_duration(start.elapsed().as_secs_f64());
+        db
+    };
 
-    let mut builder = evm_config
-        .builder_for_next_block(
-            &mut db,
-            &parent_header,
-            NextBlockEnvAttributes {
-                timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient(),
-                prev_randao: attributes.prev_randao(),
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: Some(attributes.withdrawals().clone()),
-                extra_data: builder_config.extra_data,
-            },
-        )
-        .map_err(PayloadBuilderError::other)?;
+    let mut builder = {
+        let start = Instant::now();
+        let _span = debug_span!(target: "payload_builder", "create_evm").entered();
+        let res = evm_config
+            .builder_for_next_block(
+                &mut db,
+                &parent_header,
+                NextBlockEnvAttributes {
+                    timestamp: attributes.timestamp(),
+                    suggested_fee_recipient: attributes.suggested_fee_recipient(),
+                    prev_randao: attributes.prev_randao(),
+                    gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+                    parent_beacon_block_root: attributes.parent_beacon_block_root(),
+                    withdrawals: Some(attributes.withdrawals().clone()),
+                    extra_data: builder_config.extra_data,
+                },
+            )
+            .map_err(PayloadBuilderError::other);
+        metrics.record_create_evm_duration(start.elapsed().as_secs_f64());
+        res?
+    };
 
     let chain_spec = client.chain_spec();
 
@@ -186,10 +207,15 @@ where
     ));
     let mut total_fees = U256::ZERO;
 
-    builder.apply_pre_execution_changes().map_err(|err| {
-        warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    {
+        let start = Instant::now();
+        let _span = debug_span!(target: "payload_builder", "pre_execution").entered();
+        builder.apply_pre_execution_changes().map_err(|err| {
+            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+            PayloadBuilderError::Internal(err.into())
+        })?;
+        metrics.record_pre_execution_duration(start.elapsed().as_secs_f64());
+    }
 
     // initialize empty blob sidecars at first. If cancun is active then this will be populated by
     // blob sidecars if any.
@@ -212,6 +238,9 @@ where
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
     let withdrawals_rlp_length = attributes.withdrawals().length();
+
+    let execute_transactions_start = Instant::now();
+    let _execute_span = debug_span!(target: "payload_builder", "execute_transactions").entered();
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -352,6 +381,10 @@ where
         }
     }
 
+    drop(_execute_span);
+    metrics
+        .record_execute_transactions_duration(execute_transactions_start.elapsed().as_secs_f64());
+
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // Release db
@@ -360,8 +393,13 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(state_provider.as_ref())?;
+    let BlockBuilderOutcome { execution_result, block, .. } = {
+        let start = Instant::now();
+        let _span = debug_span!(target: "payload_builder", "finish_block").entered();
+        let res = builder.finish(state_provider.as_ref());
+        metrics.record_finish_block_duration(start.elapsed().as_secs_f64());
+        res?
+    };
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

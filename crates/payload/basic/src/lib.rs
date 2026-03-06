@@ -8,7 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::metrics::PayloadBuilderMetrics;
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
@@ -34,7 +33,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, trace, warn, Span};
 
 mod better_payload_emitter;
 mod metrics;
@@ -42,6 +41,8 @@ mod stack;
 
 pub use better_payload_emitter::BetterPayloadEmitter;
 pub use stack::PayloadBuilderStack;
+
+pub use metrics::PayloadBuilderMetrics;
 
 /// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
 pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
@@ -346,9 +347,18 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
+        let parent_span = Span::current();
         self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
+            // span intentionally starts after semaphore acquisition to exclude wait time
+            let _span = debug_span!(
+                target: "payload_builder",
+                parent: parent_span,
+                "build_job",
+                id = %payload_config.payload_id()
+            )
+            .entered();
             let args =
                 BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
             let result = builder.try_build(args);
