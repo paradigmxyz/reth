@@ -172,7 +172,7 @@ pub trait EstimateCall: Call {
         };
 
         let gas_refund = match res.result {
-            ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
+            ExecutionResult::Success { gas, .. } => gas.final_refunded(),
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
@@ -296,7 +296,7 @@ pub trait EstimateCall: Call {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
                 EstimateCall::estimate_gas_with(&this, evm_env, request, state, state_override)
             })

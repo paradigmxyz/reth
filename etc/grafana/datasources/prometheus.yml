@@ -5,4 +5,11 @@ datasources:
     type: prometheus
     access: proxy
     url: $PROMETHEUS_URL
+    isDefault: true
+    editable: true
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
     editable: true

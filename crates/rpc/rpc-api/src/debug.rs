@@ -288,7 +288,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<B256>>;
 
     /// Returns detailed runtime memory statistics.
     #[method(name = "memStats")]
@@ -404,7 +404,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// Sets the logging verbosity ceiling. Log messages with level up to and including the given
     /// level will be printed.

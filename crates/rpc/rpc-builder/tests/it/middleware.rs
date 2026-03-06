@@ -50,12 +50,12 @@ where
         tracing::info!("MyMiddleware processed call {}", req.method);
         let count = self.count.clone();
         let service = self.service.clone();
-        Box::pin(async move {
+        async move {
             let rp = service.call(req).await;
             // Modify the state.
             count.fetch_add(1, Ordering::Relaxed);
             rp
-        })
+        }
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {

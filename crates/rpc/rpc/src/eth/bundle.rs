@@ -77,12 +77,20 @@ where
             .into())
         }
 
+        // Validate gas limit against the configured call gas limit before any DB calls
+        let call_gas_limit = self.inner.eth_api.call_gas_limit();
+        if let Some(gas_limit) = gas_limit &&
+            gas_limit > call_gas_limit
+        {
+            return Err(
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+            )
+        }
+
         let transactions = txs
             .into_iter()
             .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
@@ -122,16 +130,8 @@ where
             }
         }
 
-        // default to call gas limit unless user requests a smaller limit
-        evm_env.block_env.inner_mut().gas_limit = self.inner.eth_api.call_gas_limit();
-        if let Some(gas_limit) = gas_limit {
-            if gas_limit > evm_env.block_env.gas_limit() {
-                return Err(
-                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                )
-            }
-            evm_env.block_env.inner_mut().gas_limit = gas_limit;
-        }
+        // Apply gas limit: default to call gas limit unless user requests a smaller limit
+        evm_env.block_env.inner_mut().gas_limit = gas_limit.unwrap_or(call_gas_limit);
 
         if let Some(base_fee) = base_fee {
             evm_env.block_env.inner_mut().basefee = base_fee.try_into().unwrap_or(u64::MAX);

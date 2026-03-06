@@ -190,6 +190,20 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+
+    /// Number of account leaf updates applied without needing a new proof (cache hits).
+    pub sparse_trie_account_cache_hits: Histogram,
+    /// Number of account leaf updates that required a new proof (cache misses).
+    pub sparse_trie_account_cache_misses: Histogram,
+    /// Number of storage leaf updates applied without needing a new proof (cache hits).
+    pub sparse_trie_storage_cache_hits: Histogram,
+    /// Number of storage leaf updates that required a new proof (cache misses).
+    pub sparse_trie_storage_cache_misses: Histogram,
+
+    /// Retained memory of the preserved sparse trie cache in bytes.
+    pub sparse_trie_retained_memory_bytes: Gauge,
+    /// Number of storage tries retained in the preserved sparse trie cache.
+    pub sparse_trie_retained_storage_tries: Gauge,
 }
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker

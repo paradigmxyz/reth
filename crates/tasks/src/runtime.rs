@@ -603,7 +603,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program
@@ -651,7 +651,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+    /// executor.spawn_with_graceful_shutdown_signal(async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program

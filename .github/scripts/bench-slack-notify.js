@@ -68,6 +68,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   function fmtMs(v) { return v.toFixed(2) + 'ms'; }
   function fmtMgas(v) { return v.toFixed(2); }
+  function fmtS(v) { return v.toFixed(2) + 's'; }
   function fmtChange(ch) {
     if (!ch.pct && !ch.ci_pct) return ' ';
     const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
@@ -169,6 +170,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
         [cell('P90'),      cell(fmtMs(b.p90_ms)),       cell(fmtMs(f.p90_ms)),       cell(fmtChange(c.p90))],
         [cell('P99'),      cell(fmtMs(b.p99_ms)),       cell(fmtMs(f.p99_ms)),       cell(fmtChange(c.p99))],
         [cell('Mgas/s'),   cell(fmtMgas(b.mean_mgas_s)), cell(fmtMgas(f.mean_mgas_s)), cell(fmtChange(c.mgas_s))],
+        [cell('Wall Clock'), cell(fmtS(b.wall_clock_s)), cell(fmtS(f.wall_clock_s)), cell(fmtChange(c.wall_clock))],
       ],
     },
     {

@@ -276,6 +276,8 @@ where
     /// Whether the node uses hashed state as canonical storage (v2 mode).
     /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
     use_hashed_state: bool,
+    /// Task runtime for spawning blocking work on named, reusable threads.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -302,6 +304,7 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("use_hashed_state", &self.use_hashed_state)
+            .field("runtime", &self.runtime)
             .finish()
     }
 }
@@ -342,6 +345,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -364,6 +368,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            runtime,
         }
     }
 
@@ -385,6 +390,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
+        runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -418,6 +424,7 @@ where
             evm_config,
             changeset_cache,
             use_hashed_state,
+            runtime,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
@@ -425,6 +432,14 @@ where
             task.run()
         });
         (incoming, outgoing)
+    }
+
+    /// Returns a [`TreeOutcome`] indicating the forkchoice head is valid and canonical.
+    fn valid_outcome(state: ForkchoiceState) -> TreeOutcome<OnForkChoiceUpdated> {
+        TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+            PayloadStatusEnum::Valid,
+            Some(state.head_block_hash),
+        )))
     }
 
     /// Returns a new [`Sender`] to send messages to this type.
@@ -1118,11 +1133,7 @@ where
         }
 
         // The head block is already canonical
-        let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-            PayloadStatusEnum::Valid,
-            Some(state.head_block_hash),
-        )));
-        Ok(Some(outcome))
+        Ok(Some(Self::valid_outcome(state)))
     }
 
     /// Applies chain update for the new head block and processes payload attributes.
@@ -1183,12 +1194,7 @@ where
 
             // The head block is already canonical and we're not processing payload attributes,
             // so we're not triggering a payload job and can return right away
-
-            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(state.head_block_hash),
-            )));
-            return Ok(Some(outcome));
+            return Ok(Some(Self::valid_outcome(state)));
         }
 
         // Ensure we can apply a new chain update for the head block
@@ -1208,11 +1214,7 @@ where
                 return Ok(Some(TreeOutcome::new(updated)));
             }
 
-            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(state.head_block_hash),
-            )));
-            return Ok(Some(outcome));
+            return Ok(Some(Self::valid_outcome(state)));
         }
 
         Ok(None)
@@ -1416,7 +1418,7 @@ where
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
         if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
-            tokio::task::spawn_blocking(move || {
+            self.runtime.spawn_blocking_named("prepare-overlay", move || {
                 let _ = overlay.get();
             });
         }
@@ -1575,7 +1577,7 @@ where
                                 {
                                     let (persistence_tx, persistence_rx) =
                                         std::sync::mpsc::channel();
-                                    tokio::task::spawn_blocking(move || {
+                                    self.runtime.spawn_blocking_named("wait-persist", move || {
                                         let start = Instant::now();
                                         let result =
                                             rx.recv().expect("persistence state channel closed");
@@ -2101,16 +2103,16 @@ where
     /// Prepares the invalid payload response for the given hash, checking the
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
-    fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
-        // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
-        // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? &&
-            !parent.difficulty().is_zero()
-        {
-            parent_hash = B256::ZERO;
-        }
+    fn prepare_invalid_response(&mut self, parent_hash: B256) -> ProviderResult<PayloadStatus> {
+        let valid_parent_hash = match self.sealed_header_by_hash(parent_hash)? {
+            // Edge case: the `latestValid` field is the zero hash if the parent block is the
+            // terminal PoW block, which we need to identify by looking at the parent's block
+            // difficulty
+            Some(parent) if !parent.difficulty().is_zero() => Some(B256::ZERO),
+            Some(_) => Some(parent_hash),
+            None => self.latest_valid_hash_for_invalid_payload(parent_hash)?,
+        };
 
-        let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
@@ -2171,18 +2173,26 @@ where
 
     /// Finds any invalid ancestor for the given payload.
     ///
-    /// This function walks up the chain of buffered ancestors from the payload's block
-    /// hash and checks if any ancestor is marked as invalid in the tree state.
+    /// This function first checks if the block itself is in the invalid headers cache (to
+    /// avoid re-executing a known-invalid block). Then it walks up the chain of buffered
+    /// ancestors and checks if any ancestor is marked as invalid.
     ///
     /// The check works by:
-    /// 1. Finding the lowest buffered ancestor for the given block hash
-    /// 2. If the ancestor is the same as the block hash itself, using the parent hash instead
-    /// 3. Checking if this ancestor is in the `invalid_headers` map
+    /// 1. Checking if the block hash itself is in the `invalid_headers` map
+    /// 2. Finding the lowest buffered ancestor for the given block hash
+    /// 3. If the ancestor is the same as the block hash itself, using the parent hash instead
+    /// 4. Checking if this ancestor is in the `invalid_headers` map
     ///
     /// Returns the invalid ancestor block info if found, or None if no invalid ancestor exists.
     fn find_invalid_ancestor(&mut self, payload: &T::ExecutionData) -> Option<BlockWithParent> {
         let parent_hash = payload.parent_hash();
         let block_hash = payload.block_hash();
+
+        // Check if the block itself is already known to be invalid, avoiding re-execution
+        if let Some(entry) = self.state.invalid_headers.get(&block_hash) {
+            return Some(entry);
+        }
+
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
             lowest_buffered_ancestor = parent_hash;

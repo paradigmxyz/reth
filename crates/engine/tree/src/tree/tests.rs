@@ -222,6 +222,7 @@ impl TestHarness {
             evm_config,
             changeset_cache,
             provider.cached_storage_settings().use_hashed_state(),
+            reth_tasks::Runtime::test(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -1579,6 +1580,39 @@ mod check_invalid_ancestors_tests {
                 "Should return invalid status for malformed payload with invalid ancestor"
             );
         }
+    }
+
+    /// Test that `find_invalid_ancestor` detects the block itself in the invalid cache
+    #[test]
+    fn test_find_invalid_ancestor_detects_block_itself() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Read block 1
+        let s1 = include_str!("../../test-data/holesky/1.rlp");
+        let data1 = Bytes::from_str(s1).unwrap();
+        let block1 = Block::decode(&mut data1.as_ref()).unwrap();
+        let sealed1 = block1.seal_slow();
+        let hash1 = sealed1.hash();
+        let parent1 = sealed1.parent_hash();
+
+        // Mark block 1 itself as invalid (simulates a block that failed execution)
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
+
+        // Create payload for block 1 (same block, sent again by CL)
+        let payload1 = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(hash1, &sealed1.into_block()).into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // find_invalid_ancestor should detect the block itself without re-execution
+        let result = test_harness.tree.find_invalid_ancestor(&payload1);
+        assert!(result.is_some(), "Should detect block itself in invalid headers cache");
     }
 
     /// Helper function to create a malformed payload that descends from a given parent

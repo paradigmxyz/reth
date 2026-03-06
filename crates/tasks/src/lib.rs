@@ -277,10 +277,10 @@ mod tests {
 
         let (signal, shutdown) = signal();
 
-        rt.spawn_task(Box::pin(async move {
+        rt.spawn_task(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
-        }));
+        });
 
         rt.graceful_shutdown();
 
@@ -293,7 +293,7 @@ mod tests {
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
-        rt.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+        rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
             let _guard = shutdown.await;
             tokio::time::sleep(Duration::from_millis(200)).await;
             c.store(true, Ordering::Relaxed);
@@ -311,7 +311,7 @@ mod tests {
         let num = 10;
         for _ in 0..num {
             let c = counter.clone();
-            rt.spawn_critical_with_graceful_shutdown_signal("grace", move |shutdown| async move {
+            rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
                 let _guard = shutdown.await;
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 c.fetch_add(1, Ordering::SeqCst);
@@ -329,7 +329,7 @@ mod tests {
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
         let val2 = val.clone();
-        rt.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+        rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
             let _guard = shutdown.await;
             tokio::time::sleep(timeout * 3).await;
             val2.store(true, Ordering::Relaxed);
@@ -354,7 +354,7 @@ mod tests {
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = task_did_shutdown_flag.clone();
 
-        let spawned_task_handle = rt.spawn_with_signal(|shutdown_signal| async move {
+        let spawned_task_handle = rt.spawn_with_signal(async move |shutdown_signal| {
             shutdown_signal.await;
             flag_clone.store(true, Ordering::SeqCst);
         });
