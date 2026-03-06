@@ -123,16 +123,12 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         }
 
         if new_hash_mask != original_hash_mask {
-            // If all children were originally hashed (state_mask == hash_mask) and only one
-            // hashed bit survived masking, clear it too. Being inside this block guarantees
-            // bits were unset, so a single remaining bit means the original had more than one.
-            // This handles the case where all but one child of a branch have been deleted —
-            // the remaining child must be revealed to collapse the branch, so its cached hash
-            // cannot be used.
-            if ((node.state_mask ^ original_hash_mask) |
-                (new_hash_mask & TrieMask::new(new_hash_mask.get().wrapping_sub(1))))
-            .is_empty()
-            {
+            // If only one hashed bit survived masking, clear it too. Being inside this block
+            // guarantees bits were unset, so a single remaining bit means the original had
+            // more than one. This handles the case where all but one child of a branch have
+            // been deleted — the remaining child must be revealed to collapse the branch, so
+            // its cached hash cannot be used.
+            if (new_hash_mask & TrieMask::new(new_hash_mask.get().wrapping_sub(1))).is_empty() {
                 new_hash_mask = TrieMask::default();
             }
 
@@ -418,6 +414,34 @@ mod tests {
     }
 
     #[test]
+    fn test_last_hash_cleared_when_state_mask_wider_than_hash_mask() {
+        // Branch at [0x1] with children 0 (hashed), 1 (unhashed, state_mask only), 5 (hashed).
+        // state_mask has bits 0,1,5; hash_mask has only bits 0,5.
+        // Prefix set marks child 0 as changed → new_hash_mask has only bit 5.
+        // Since only one hashed bit remains, it must be cleared so the branch can collapse.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0011, // state_mask: bits 0, 1, 5
+                0b0000_0000_0010_0011, // tree_mask: keeps node alive
+                0b0000_0000_0010_0001, // hash_mask: bits 0, 5 (NOT 1)
+                vec![hash(0), hash(5)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (_, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        // The last remaining hash bit (5) should also be cleared.
+        assert!(node.hash_mask.is_empty(), "expected empty hash_mask, got {:?}", node.hash_mask);
+        assert!(node.hashes.is_empty());
+    }
+
+    #[test]
     fn test_no_match_returns_unchanged() {
         let nodes = vec![(
             Nibbles::from_nibbles([0x2]),
@@ -564,12 +588,12 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_mask_preserves_last_hash_when_state_mask_wider() {
+    fn test_last_hash_cleared_when_state_mask_wider() {
         // Node at [0x1] with state_mask bits 0, 3, 7, 9 but only 0, 3, 7 hashed.
         // Prefix set marks children 0 and 7 as changed.
-        // Only child 3's hash remains, but since state_mask != original_hash_mask
-        // (child 9 is a non-hashed child), this is not an all-children-deleted scenario
-        // and the last hash is preserved.
+        // Only child 3's hash would remain, but since it's the last hashed bit it must
+        // also be cleared — the remaining child needs to be revealed to allow branch
+        // collapse.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
             node_with_tree_mask(
@@ -589,10 +613,8 @@ mod tests {
 
         let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
         assert_eq!(key, Nibbles::from_nibbles([0x1]));
-        assert!(!node.hash_mask.is_bit_set(0));
-        assert!(node.hash_mask.is_bit_set(3));
-        assert!(!node.hash_mask.is_bit_set(7));
-        assert_eq!(&*node.hashes, &[hash(3)]);
+        assert!(node.hash_mask.is_empty(), "expected empty hash_mask, got {:?}", node.hash_mask);
+        assert!(node.hashes.is_empty());
     }
 
     mod proptest_tests {

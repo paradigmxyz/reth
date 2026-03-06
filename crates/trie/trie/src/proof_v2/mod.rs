@@ -37,17 +37,6 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
-/// A [`Nibbles`] which contains 64 zero nibbles.
-static PATH_ALL_ZEROS: Nibbles = {
-    let mut path = Nibbles::new();
-    let mut i = 0;
-    while i < 64 {
-        path.push_unchecked(0);
-        i += 1;
-    }
-    path
-};
-
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -377,10 +366,10 @@ where
         // to pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
             let child_rlp_node = self.commit_child(targets, child_path, child)?;
-            trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing commited child RlpNode onto stack");
+            trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
-            trace!(target: TRACE_TARGET, "Pushing uncommited child onto stack");
+            trace!(target: TRACE_TARGET, "Pushing uncommitted child onto stack");
             self.child_stack.push(child);
         }
 
@@ -691,8 +680,7 @@ where
         // leaf value can begin ASAP.
         let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
             debug_assert_eq!(key_b256.len(), 32);
-            // SAFETY: key is a B256 and so is exactly 32-bytes.
-            let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
+            let key = Nibbles::unpack_array(key_b256.as_ref());
             let val = value_encoder.deferred_encoder(key_b256, val);
             (key, val)
         };
@@ -899,7 +887,7 @@ where
         // If the next cached branch's path is all zeros then we can skip this catch-up step,
         // because there cannot be any keys prior to that range.
         let cached_path = &cached.0;
-        if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
+        if uncalculated_lower_bound < cached_path && !cached_path.is_zeroes() {
             let range = (*uncalculated_lower_bound, Some(*cached_path));
             trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
 
@@ -1003,8 +991,8 @@ where
             let curr_branch =
                 self.branch_stack.last().expect("top of branch_stack corresponds to cached branch");
 
-            let cached_state_mask = cached_branch.state_mask.get();
-            let curr_state_mask = curr_branch.state_mask.get();
+            let cached_state_mask = cached_branch.state_mask;
+            let curr_state_mask = curr_branch.state_mask;
 
             // Determine all child nibbles which are set in the cached branch but not the
             // under-construction branch.
@@ -1025,7 +1013,7 @@ where
                 if lower.starts_with(&self.branch_path) && lower.len() > self.branch_path.len() {
                     let lower_nibble = lower.get_unchecked(self.branch_path.len());
                     // Clear all nibbles strictly below `lower_nibble` since they've been processed.
-                    let already_processed_mask = (1u16 << lower_nibble) - 1;
+                    let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
                     next_child_nibbles &= !already_processed_mask;
                     trace!(
                         target: TRACE_TARGET,
@@ -1038,7 +1026,7 @@ where
                 } else if !lower.starts_with(&self.branch_path) && lower > &self.branch_path {
                     // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                     // lower is 0x7). All remaining children have been processed.
-                    next_child_nibbles = 0;
+                    next_child_nibbles = TrieMask::default();
                     trace!(
                         target: TRACE_TARGET,
                         branch_path = ?self.branch_path,
@@ -1051,7 +1039,7 @@ where
 
             // If there are no further children to construct for this branch then pop it off both
             // stacks and loop using the parent branch.
-            if next_child_nibbles == 0 {
+            if next_child_nibbles.is_empty() {
                 trace!(
                     target: TRACE_TARGET,
                     path=?cached_path,
@@ -1067,7 +1055,7 @@ where
                 // The just-popped branch is completely processed; we know there can be no more keys
                 // with that prefix. Set the lower bound which can be returned from this method to
                 // be the next possible prefix, if any.
-                uncalculated_lower_bound = increment_and_strip_trailing_zeros(&cached_path);
+                uncalculated_lower_bound = cached_path.next_without_prefix();
 
                 continue
             }
@@ -1097,7 +1085,7 @@ where
                     // we first need to calculate the mask of which cached hashes have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
                     // index of the next hash in the array to use.
-                    let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
+                    let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
                     let hash_idx = curr_hashed_used_mask.count_ones() as usize;
                     let hash = cached_branch.hashes[hash_idx];
 
@@ -1118,7 +1106,7 @@ where
 
                     // Update the `uncalculated_lower_bound` to indicate that the child whose bit
                     // was just set is completely processed.
-                    uncalculated_lower_bound = increment_and_strip_trailing_zeros(&child_path);
+                    uncalculated_lower_bound = child_path.next_without_prefix();
 
                     // Push the current cached branch back onto the stack before looping.
                     self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1162,7 +1150,7 @@ where
             // There is no cached data for the sub-trie at this child, we must recalculate the
             // sub-trie root (this child) using the leaves. Return the range of keys based on the
             // child path.
-            let child_path_upper = increment_and_strip_trailing_zeros(&child_path);
+            let child_path_upper = child_path.next_without_prefix();
             trace!(
                 target: TRACE_TARGET,
                 lower=?child_path,
@@ -1683,26 +1671,6 @@ enum PopCachedBranchOutcome {
     CalculateLeaves((Nibbles, Option<Nibbles>)),
 }
 
-/// Increments the nibbles and strips any trailing zeros.
-///
-/// This function wraps `Nibbles::increment` and when it returns a value with trailing zeros,
-/// it strips those zeros using bit manipulation on the underlying U256.
-fn increment_and_strip_trailing_zeros(nibbles: &Nibbles) -> Option<Nibbles> {
-    let mut result = nibbles.increment()?;
-
-    // If result is empty, just return it
-    if result.is_empty() {
-        return Some(result);
-    }
-
-    // Get access to the underlying U256 to detect trailing zeros
-    let uint_val = *result.as_mut_uint_unchecked();
-    let non_zero_prefix_len = 64 - (uint_val.trailing_zeros() / 4);
-    result.truncate(non_zero_prefix_len);
-
-    Some(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1992,7 +1960,7 @@ mod tests {
         let mut fresh_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
         let mut value_encoder = SyncAccountValueEncoder::new(
             harness.trie_cursor_factory.clone(),
-            harness.hashed_cursor_factory.clone(),
+            harness.hashed_cursor_factory,
         );
         let fresh_result = fresh_calculator.proof(&mut value_encoder, &mut targets).unwrap();
 
@@ -2242,30 +2210,6 @@ mod tests {
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
         assert!(root_hash.is_some(), "should produce a root hash");
-    }
-
-    #[test]
-    fn test_increment_and_strip_trailing_zeros() {
-        let test_cases: Vec<(Nibbles, Option<Nibbles>)> = vec![
-            // Basic increment without trailing zeros
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3]), Some(Nibbles::from_nibbles([0x1, 0x2, 0x4]))),
-            // Increment with trailing zeros - should be stripped
-            (Nibbles::from_nibbles([0x0, 0x0, 0xF]), Some(Nibbles::from_nibbles([0x0, 0x1]))),
-            (Nibbles::from_nibbles([0x0, 0xF, 0xF]), Some(Nibbles::from_nibbles([0x1]))),
-            // Overflow case
-            (Nibbles::from_nibbles([0xF, 0xF, 0xF]), None),
-            // Empty nibbles
-            (Nibbles::new(), None),
-            // Single nibble
-            (Nibbles::from_nibbles([0x5]), Some(Nibbles::from_nibbles([0x6]))),
-            // All Fs except last - results in trailing zeros after increment
-            (Nibbles::from_nibbles([0xE, 0xF, 0xF]), Some(Nibbles::from_nibbles([0xF]))),
-        ];
-
-        for (input, expected) in test_cases {
-            let result = increment_and_strip_trailing_zeros(&input);
-            assert_eq!(result, expected, "Failed for input: {:?}", input);
-        }
     }
 
     #[test]
