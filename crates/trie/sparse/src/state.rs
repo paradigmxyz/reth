@@ -93,6 +93,25 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
+    /// Seeds the hot account/storage LFU caches with their configured capacities.
+    ///
+    /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
+    /// the LFUs still have zero capacity.
+    pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
+        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
+        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
+    }
+
+    /// Seeds the hot account/storage LFU caches with their configured capacities.
+    pub fn with_hot_cache_capacities(
+        mut self,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
+    ) -> Self {
+        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
+        self
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
@@ -1159,6 +1178,24 @@ mod tests {
             .unwrap()
             .get_leaf_value(&full_path_0)
             .is_none());
+    }
+
+    #[test]
+    fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
+        let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+
+        sparse.set_hot_cache_capacities(1, 1);
+        sparse.record_account_touch(account);
+        sparse.record_slot_touch(account, slot);
+        sparse.prune(1, 1);
+
+        assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
+        assert_eq!(
+            sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
+            vec![HotSlotKey { address: account, slot }]
+        );
     }
 
     #[test]
