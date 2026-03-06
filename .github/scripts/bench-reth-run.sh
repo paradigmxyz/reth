@@ -151,6 +151,10 @@ fi
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads with gas ramp
   BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
+  # Count gas ramp blocks for reporting
+  GAS_RAMP_COUNT=$(find "$BIG_BLOCKS_DIR/gas-ramp-dir" -name '*.json' | wc -l)
+  echo "$GAS_RAMP_COUNT" > "$OUTPUT_DIR/gas_ramp_blocks.txt"
+  echo "Gas ramp blocks: $GAS_RAMP_COUNT"
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
     "${EXTRA_BENCH_ARGS[@]}" \

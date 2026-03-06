@@ -118,11 +118,17 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
   if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
 
-  const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
   const cores = process.env.BENCH_CORES || '0';
   const countsParts = [];
-  if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
-  countsParts.push(`*Blocks:* ${summary.blocks}`);
+  if (summary.big_blocks) {
+    const gasRamp = summary.gas_ramp_blocks || 0;
+    if (gasRamp > 0) countsParts.push(`*Gas Ramp:* ${gasRamp}`);
+    countsParts.push(`*Big Blocks:* ${summary.blocks}`);
+  } else {
+    const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
+    if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
+    countsParts.push(`*Blocks:* ${summary.blocks}`);
+  }
   if (cores !== '0') countsParts.push(`*Cores:* ${cores}`);
   const countsLine = countsParts.join(' | ');
 
