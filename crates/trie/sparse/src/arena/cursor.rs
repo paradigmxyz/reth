@@ -77,9 +77,13 @@ impl ArenaCursor {
         (len >= 2).then(|| &self.stack[len - 2])
     }
 
-    /// Returns the number of entries on the stack.
-    pub(super) fn len(&self) -> usize {
-        self.stack.len()
+    /// Returns the depth of the head node (0 for the root).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stack is empty.
+    pub(super) fn depth(&self) -> usize {
+        self.stack.len() - 1
     }
 
     /// Returns `true` if the stack is empty.
@@ -102,7 +106,7 @@ impl ArenaCursor {
 
     /// Pushes an entry onto the stack for the node at the given index and path.
     fn push(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
-        let _ = &arena[idx];
+        debug_assert!(arena.contains(idx), "push called with invalid arena index");
         self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }

@@ -45,6 +45,7 @@ pub(super) enum ArenaSparseNodeBranchChild {
 }
 
 impl ArenaSparseNodeBranchChild {
+    /// Returns `true` if this child reference is blinded (not yet revealed in the arena).
     pub(super) const fn is_blinded(&self) -> bool {
         matches!(self, Self::Blinded(_))
     }
@@ -137,6 +138,11 @@ impl ArenaSparseNode {
         }
     }
 
+    /// Returns a mutable reference to the state of a Branch or Leaf node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-Branch/Leaf node.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
             Self::Branch(b) => &mut b.state,
@@ -159,6 +165,11 @@ impl ArenaSparseNode {
         }
     }
 
+    /// Returns a reference to the branch data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not a `Branch` node.
     pub(super) fn branch_ref(&self) -> &ArenaSparseNodeBranch {
         match self {
             Self::Branch(b) => b,
@@ -166,6 +177,11 @@ impl ArenaSparseNode {
         }
     }
 
+    /// Returns a mutable reference to the branch data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not a `Branch` node.
     pub(super) fn branch_mut(&mut self) -> &mut ArenaSparseNodeBranch {
         match self {
             Self::Branch(b) => b,
@@ -227,6 +243,12 @@ impl ArenaSparseNode {
 }
 
 impl From<ProofTrieNodeV2> for ArenaSparseNode {
+    /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node is an `Extension`, which should have been merged into a branch
+    /// by [`TrieNodeV2`].
     fn from(proof_node: ProofTrieNodeV2) -> Self {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {

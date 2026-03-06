@@ -64,7 +64,6 @@ fn prefix_range(
 struct ArenaTrieBuffers {
     /// Reusable cursor for trie traversals.
     cursor: ArenaCursor,
-
     /// Trie updates built up directly during hashing and structural changes. `Some` when
     /// tracking updates, `None` otherwise. Initialized alongside `updates` in `set_updates`.
     updates: Option<SparseTrieUpdates>,
@@ -94,7 +93,6 @@ struct ArenaSparseSubtrie {
     /// The root node of this subtrie.
     root: Index,
     /// The absolute path of this subtrie's root in the full trie.
-    /// Persists across reuse (not reset by [`Self::clear`]).
     path: Nibbles,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
@@ -168,7 +166,7 @@ impl ArenaSparseSubtrie {
                 NextResult::Done => break,
                 NextResult::NonBranch | NextResult::Branch => {
                     // Don't prune the root.
-                    if self.buffers.cursor.len() == 1 {
+                    if self.buffers.cursor.depth() == 0 {
                         continue;
                     }
 
@@ -176,7 +174,9 @@ impl ArenaSparseSubtrie {
                     let head_idx = head.index;
                     let nibble = head.path.last();
 
-                    // Compute the node's key prefix for the retention check.
+                    // Compute the node's key prefix for the retention check. We use
+                    // `short_key()` directly rather than `head_logical_branch_path()`
+                    // because the head can be a leaf.
                     let short_key =
                         self.arena[head_idx].short_key().expect("must be branch or leaf");
                     let mut node_prefix = head.path;
@@ -453,57 +453,69 @@ impl Default for ArenaParallelismThresholds {
     }
 }
 
-/// Uses arena allocation for node storage, with direct index-based child pointers. The upper trie
-/// and each subtrie maintain their own arenas, enabling parallel mutations of independent subtries.
+/// An arena-based sparse trie whose subtries can be mutated in parallel.
 ///
-/// ## Upper vs. Lower Trie Placement
+/// ## Structure
 ///
-/// Nodes are split between the upper trie and lower subtries based on their path length (not
-/// counting a branch's short key):
+/// Uses arena allocation ([`thunderdome::Arena`]) for node storage with direct index-based child
+/// pointers, avoiding the per-node hashing overhead of a `HashMap`-based trie. The trie is split
+/// into two tiers:
 ///
-/// - **Upper trie**: Nodes whose path length is **< 2** nibbles live directly in `upper_arena`.
-///   These are branch nodes at paths like `0x` or `0x3`.
-/// - **Lower subtries**: Children of upper-trie branches that would have a path length **≥ 2**
-///   become the roots of `ArenaSparseSubtrie`s, stored as `ArenaSparseNode::Subtrie` children of
-///   the upper-trie branch.
+/// - **Upper trie** (`upper_arena`): Contains nodes whose path is shorter than
+///   [`UPPER_TRIE_MAX_DEPTH`] nibbles. These are the root and its immediate children.
+/// - **Lower subtries** ([`ArenaSparseSubtrie`]): Each child of an upper-trie branch at the depth
+///   boundary becomes the root of its own subtrie, stored as an [`ArenaSparseNode::Subtrie`] child
+///   in the upper arena. Each subtrie owns its own arena, enabling lock-free parallel mutation.
 ///
-/// A branch's short key can extend its logical reach past the 2-nibble boundary. When this happens
-/// the subtrie boundary is "pulled back" to the branch itself, so the entire extension + branch
-/// lives inside a single subtrie.
+/// Node placement is determined by path length (not counting a branch's short key):
 ///
-/// ### Example 1 — short key crosses the boundary
+/// - Paths with **< [`UPPER_TRIE_MAX_DEPTH`]** nibbles live in `upper_arena`.
+/// - Paths with **≥ [`UPPER_TRIE_MAX_DEPTH`]** nibbles live in a subtrie.
 ///
-/// ```text
-/// Branch at 0x, short_key = 0x123
-/// ├── Leaf 0x123a
-/// └── Leaf 0x123b
-/// ```
+/// ## Node Revealing
 ///
-/// The branch path (`0x`) has length 0, which is < 2, but its short key `0x123` means its
-/// children land at path length 4 — well past the boundary. Because the short key crosses
-/// the boundary the branch itself becomes a `Subtrie` node in the upper trie. The subtrie's
-/// root is the branch at `0x`; everything beneath it (the two leaves) is inside that
-/// subtrie's arena.
+/// Nodes are lazily revealed from proof data via [`SparseTrie::reveal_nodes`]. Each node is
+/// placed into the upper arena or delegated to its subtrie based on path depth. Unrevealed
+/// children are stored as [`ArenaSparseNodeBranchChild::Blinded`] with their RLP encoding.
+/// When multiple subtries have pending reveals, they are processed in parallel using rayon
+/// (controlled by [`ArenaParallelismThresholds::min_revealed_nodes`]).
 ///
-/// ### Example 2 — mixed subtrie depths
+/// ## Leaf Operations
 ///
-/// ```text
-/// Branch at 0x, short_key = 0x (empty)
-/// ├── Branch at 0x1, short_key = 0x (empty)
-/// │   ├── Leaf 0x1a
-/// │   └── Leaf 0x1b
-/// └── Branch at 0x2, short_key = 0x345
-///     ├── Leaf 0x2345a
-///     └── Leaf 0x2345b
-/// ```
+/// Leaf updates and removals are applied via [`SparseTrie::update_leaves`]. The method walks
+/// the upper trie to route each update to the correct subtrie, then processes subtries in
+/// parallel when the update count exceeds [`ArenaParallelismThresholds::min_updates`].
 ///
-/// - `0x` is a regular upper-trie branch (path length 0, has child subtries so it stays in the
-///   upper trie as a plain branch).
-/// - `0x1` is also in the upper trie (path length 1, has child subtries). Its children
-///   `0x1a`/`0x1b` are at path length 2, so each becomes its own single-leaf subtrie.
-/// - `0x2` has path length 1 and short key `0x345`, which would place its children at path length
-///   5. The subtrie is pulled back to `0x2` itself, so the branch and both leaves live in one
-///   subtrie rooted at `0x2`.
+/// [`SparseTrie::update_leaf`] and [`SparseTrie::remove_leaf`] are not yet implemented.
+///
+/// After updates, structural changes (branch collapse, subtrie unwrapping) are handled by
+/// propagating dirty state back up through the upper trie.
+///
+/// ## Root Hash Calculation
+///
+/// Root hash computation follows a bottom-up approach:
+///
+/// 1. **[`SparseTrie::update_subtrie_hashes`]**: Takes dirty subtries from the upper arena and
+///    hashes them in parallel (when dirty leaf count meets
+///    [`ArenaParallelismThresholds::min_dirty_leaves`]), then walks the upper trie to restore
+///    hashed subtries and inline-hash any remaining dirty nodes.
+/// 2. **[`SparseTrie::root`]**: Calls `update_subtrie_hashes`, then RLP-encodes the full upper trie
+///    depth-first to produce the root hash.
+///
+/// Each node tracks its state via [`ArenaSparseNodeState`] (`Revealed`, `Cached`, or `Dirty`)
+/// so only modified subtrees are recomputed.
+///
+/// ## Pruning
+///
+/// [`SparseTrie::prune`] removes revealed nodes that are not ancestors of any retained leaf.
+/// Pruned nodes are replaced with [`ArenaSparseNodeBranchChild::Blinded`] entries using their
+/// cached RLP. Subtries are pruned in parallel when their leaf count exceeds
+/// [`ArenaParallelismThresholds::min_leaves_for_prune`].
+///
+/// ## Subtrie Recycling
+///
+/// Cleared subtries are pooled in `cleared_subtries` and reused by
+/// [`Self::take_or_create_cleared_subtrie`] to avoid repeated arena allocations.
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
@@ -1339,7 +1351,7 @@ impl ArenaParallelSparseTrie {
                 let split_dirtied_existing =
                     Self::split_and_insert_leaf(arena, cursor, root, full_path_from_head, value);
 
-                let result = if cursor.len() >= 2 {
+                let result = if cursor.depth() >= 1 {
                     UpsertLeafResult::NewChild
                 } else {
                     UpsertLeafResult::NewLeaf
@@ -2091,7 +2103,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         _value: Vec<u8>,
         _provider: P,
     ) -> SparseTrieResult<()> {
-        todo!()
+        unimplemented!("ArenaParallelSparseTrie uses update_leaves for batch leaf updates")
     }
 
     fn remove_leaf<P: crate::provider::TrieNodeProvider>(
@@ -2099,7 +2111,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         _full_path: &Nibbles,
         _provider: P,
     ) -> SparseTrieResult<()> {
-        todo!()
+        unimplemented!("ArenaParallelSparseTrie uses update_leaves for batch leaf removals")
     }
 
     #[instrument(level = "trace", target = "trie::arena", skip_all, ret)]

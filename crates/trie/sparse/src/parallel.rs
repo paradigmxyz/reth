@@ -1389,7 +1389,7 @@ impl ParallelSparseTrie {
         #[cfg(not(feature = "std"))]
         {
             let _ = num_nodes;
-            false
+            return false;
         }
 
         #[cfg(feature = "std")]
@@ -1404,7 +1404,7 @@ impl ParallelSparseTrie {
         #[cfg(not(feature = "std"))]
         {
             let _ = num_changed_keys;
-            false
+            return false;
         }
 
         #[cfg(feature = "std")]
@@ -3470,7 +3470,7 @@ fn starts_with_pruned_in(roots: &[Nibbles], path: &Nibbles) -> bool {
 
 /// Used by lower subtries to communicate updates to the top-level [`SparseTrieUpdates`] set.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum SparseTrieUpdatesAction {
+enum SparseTrieUpdatesAction {
     /// Remove the path from the `updated_nodes`, if it was present, and add it to `removed_nodes`.
     InsertRemoved(Nibbles),
     /// Remove the path from the `updated_nodes`, if it was present, leaving `removed_nodes`
