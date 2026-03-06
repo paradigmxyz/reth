@@ -9,6 +9,8 @@
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
 #               BENCH_RETH_NEW_PAYLOAD (true/false, default true)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
+#               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
+#               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
 set -euo pipefail
 
 LABEL="$1"
@@ -100,6 +102,18 @@ RETH_ARGS=(
 # Big blocks mode requires the testing API and skip-invalid-transactions
 if [ "$BIG_BLOCKS" = "true" ]; then
   RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions)
+fi
+
+# Append per-label extra node args (baseline or feature)
+EXTRA_NODE_ARGS=""
+case "$LABEL" in
+  baseline*) EXTRA_NODE_ARGS="${BENCH_BASELINE_ARGS:-}" ;;
+  feature*)  EXTRA_NODE_ARGS="${BENCH_FEATURE_ARGS:-}" ;;
+esac
+if [ -n "$EXTRA_NODE_ARGS" ]; then
+  # Word-split the string into individual args
+  # shellcheck disable=SC2206
+  RETH_ARGS+=($EXTRA_NODE_ARGS)
 fi
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
