@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::{Future, StreamExt, TryStreamExt};
+use futures::{Future, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
@@ -191,23 +191,7 @@ pub trait EthFees:
 
                 let chain_spec = self.provider().chain_spec();
 
-                // Fetch blocks and receipts concurrently if reward percentiles are
-                // requested, instead of awaiting each one sequentially in the loop.
-                let blocks_and_receipts = if reward_percentiles.as_ref().is_some_and(|p| !p.is_empty()) {
-                    Some(futures::stream::iter(
-                        headers.iter().map(|header| header.hash()).collect::<Vec<_>>()
-                    )
-                    .map(|hash| self.cache().get_block_and_receipts(hash))
-                    .buffered(4)
-                    .map(|res| res.map_err(Self::Error::from_eth_err))
-                    .and_then(|opt| async move { opt.ok_or_else(|| EthApiError::InvalidBlockRange.into()) })
-                    .try_collect::<Vec<_>>()
-                    .await?)
-                } else {
-                    None
-                };
-
-                for (idx, header) in headers.iter().enumerate() {
+                for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
 
@@ -216,23 +200,31 @@ pub trait EthFees:
                         .unwrap_or_else(BlobParams::cancun);
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
-                    blob_gas_used_ratio.push(
-                        checked_blob_gas_used_ratio(
-                            header.blob_gas_used().unwrap_or_default(),
-                            blob_params.max_blob_gas_per_block(),
-                        )
-                    );
+                    blob_gas_used_ratio.push(checked_blob_gas_used_ratio(
+                        header.blob_gas_used().unwrap_or_default(),
+                        blob_params.max_blob_gas_per_block(),
+                    ));
+                }
 
-                    if let Some(percentiles) = &reward_percentiles && !percentiles.is_empty() {
-                        let (block, receipts) = &blocks_and_receipts.as_ref()
-                            .expect("populated when reward_percentiles is non-empty")[idx];
+                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
+                    // Fetch blocks and receipts with bounded concurrency (4 in flight). Drive with `while let` so we process each result as it arrives.
+                    let mut stream =
+                        futures::stream::iter(headers.iter().map(|h| h.hash()).collect::<Vec<_>>())
+                            .map(|hash| self.cache().get_block_and_receipts(hash))
+                            .buffered(4);
+                    let mut header_iter = headers.iter();
+                    while let Some(result) = stream.next().await {
+                        let header = header_iter.next().expect("stream length equals headers");
+                        let (block, receipts) = result
+                            .map_err(Self::Error::from_eth_err)?
+                            .ok_or(EthApiError::InvalidBlockRange)?;
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
                                 header.gas_used(),
                                 header.base_fee_per_gas().unwrap_or_default(),
                                 block.body().transactions(),
-                                receipts,
+                                &receipts,
                             )
                             .unwrap_or_default(),
                         );
