@@ -324,16 +324,20 @@ where
             let base_fee = match base_fee {
                 Some(base_fee) => base_fee,
                 None => {
-                    // fetch pending base fee
-                    let base_fee = self
-                        .recovered_block(BlockNumberOrTag::Pending.into())
-                        .await?
-                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
-                        .base_fee_per_gas()
+                    // Derive the pending base fee from the latest header
+                    let latest = self
+                        .provider()
+                        .latest_header()
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                    let pending_base_fee = self
+                        .provider()
+                        .chain_spec()
+                        .next_block_base_fee(&latest, latest.timestamp())
                         .ok_or(EthApiError::InvalidTransaction(
                             RpcInvalidTransactionError::TxTypeNotSupported,
                         ))?;
-                    U256::from(base_fee)
+                    U256::from(pending_base_fee)
                 }
             };
 
