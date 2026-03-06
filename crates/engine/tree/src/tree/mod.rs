@@ -2220,18 +2220,26 @@ where
 
     /// Finds any invalid ancestor for the given payload.
     ///
-    /// This function walks up the chain of buffered ancestors from the payload's block
-    /// hash and checks if any ancestor is marked as invalid in the tree state.
+    /// This function first checks if the block itself is in the invalid headers cache (to
+    /// avoid re-executing a known-invalid block). Then it walks up the chain of buffered
+    /// ancestors and checks if any ancestor is marked as invalid.
     ///
     /// The check works by:
-    /// 1. Finding the lowest buffered ancestor for the given block hash
-    /// 2. If the ancestor is the same as the block hash itself, using the parent hash instead
-    /// 3. Checking if this ancestor is in the `invalid_headers` map
+    /// 1. Checking if the block hash itself is in the `invalid_headers` map
+    /// 2. Finding the lowest buffered ancestor for the given block hash
+    /// 3. If the ancestor is the same as the block hash itself, using the parent hash instead
+    /// 4. Checking if this ancestor is in the `invalid_headers` map
     ///
     /// Returns the invalid ancestor block info if found, or None if no invalid ancestor exists.
     fn find_invalid_ancestor(&mut self, payload: &T::ExecutionData) -> Option<BlockWithParent> {
         let parent_hash = payload.parent_hash();
         let block_hash = payload.block_hash();
+
+        // Check if the block itself is already known to be invalid, avoiding re-execution
+        if let Some(entry) = self.state.invalid_headers.get(&block_hash) {
+            return Some(entry);
+        }
+
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
             lowest_buffered_ancestor = parent_hash;

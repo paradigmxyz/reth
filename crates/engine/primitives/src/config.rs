@@ -26,10 +26,15 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-/// Default maximum number of storage tries to keep after pruning.
+/// Default LFU hot-slot capacity for sparse trie pruning.
 ///
-/// Storage tries beyond this limit are cleared (but allocations preserved).
-pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+/// Limits the number of `(address, slot)` pairs retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
+
+/// Default LFU hot-account capacity for sparse trie pruning.
+///
+/// Limits the number of account addresses retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -131,8 +136,10 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// Maximum number of storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
     /// When set, blocks whose total processing time (execution + state reads + state root +
     /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
     /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
@@ -169,7 +176,8 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -201,7 +209,8 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_storage_tries: usize,
+        sparse_trie_max_hot_slots: usize,
+        sparse_trie_max_hot_accounts: usize,
         slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
     ) -> Self {
@@ -226,7 +235,8 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
@@ -478,14 +488,25 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the maximum number of storage tries to retain after pruning.
-    pub const fn sparse_trie_max_storage_tries(&self) -> usize {
-        self.sparse_trie_max_storage_tries
+    /// Returns the LFU hot-slot capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
+        self.sparse_trie_max_hot_slots
     }
 
-    /// Setter for maximum storage tries to retain.
-    pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
-        self.sparse_trie_max_storage_tries = max_tries;
+    /// Setter for LFU hot-slot capacity.
+    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
+        self.sparse_trie_max_hot_slots = max_hot_slots;
+        self
+    }
+
+    /// Returns the LFU hot-account capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
+        self.sparse_trie_max_hot_accounts
+    }
+
+    /// Setter for LFU hot-account capacity.
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = max_hot_accounts;
         self
     }
 
