@@ -1910,7 +1910,7 @@ impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
+            Self::Eth66(msg) => msg.push(*pooled_tx.hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
@@ -1947,7 +1947,7 @@ impl PooledTransactionsHashesBuilder {
 
     fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(*tx.tx_hash()),
+            Self::Eth66(msg) => msg.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
@@ -1969,7 +1969,7 @@ impl PooledTransactionsHashesBuilder {
     fn build(self) -> NewPooledTransactionHashes {
         match self {
             Self::Eth66(mut msg) => {
-                msg.0.shrink_to_fit();
+                msg.shrink_to_fit();
                 msg.into()
             }
             Self::Eth68(mut msg) => {
