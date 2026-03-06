@@ -84,11 +84,13 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
     pub fn message_item_count(&self) -> usize {
         match self {
             Self::NewBlockHashes(msg) => msg.len(),
-            Self::NewBlock(_) => 1,
             Self::ReceivedTransaction(msg) => msg.len(),
             Self::SendTransactions(msg) => msg.len(),
             Self::PooledTransactions(msg) => msg.len(),
-            Self::EthRequest(_) | Self::BlockRangeUpdated(_) | Self::Other(_) => 1,
+            Self::NewBlock(_) |
+            Self::EthRequest(_) |
+            Self::BlockRangeUpdated(_) |
+            Self::Other(_) => 1,
         }
     }
 }
