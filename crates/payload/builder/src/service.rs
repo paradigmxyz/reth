@@ -439,7 +439,7 @@ where
                             target: "payload_builder",
                             "new_payload_job",
                             %id,
-                            parent_hash = %attr.parent(),
+                            parent = %attr.parent(),
                         )
                         .entered();
                         let mut res = Ok(id);
