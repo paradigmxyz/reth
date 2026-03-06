@@ -1093,4 +1093,20 @@ mod tests {
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
     }
+
+    #[test]
+    fn test_code_cache_capacity_with_default_budget() {
+        // Default cross-block cache is 4 GB; code gets 5.56% = ~228 MB.
+        let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
+        let code_budget = (total_cache_size * 556) / 10000; // 228 MB
+
+        let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
+
+        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
+        // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.
+        assert_eq!(
+            capacity, 16384,
+            "code cache should have 16384 entries with default 4 GB budget"
+        );
+    }
 }
