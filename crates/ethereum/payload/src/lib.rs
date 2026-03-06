@@ -402,7 +402,13 @@ where
     }
 
     let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(state_provider.as_ref())?;
+        match builder.finish(state_provider.as_ref()) {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                metrics.record_cache_stats(&cached_reads.drain_stats());
+                return Err(PayloadBuilderError::from(err));
+            }
+        };
 
     metrics.record_cache_stats(&cached_reads.drain_stats());
 

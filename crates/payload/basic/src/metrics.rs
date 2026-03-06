@@ -19,6 +19,22 @@ pub struct PayloadBuilderMetrics {
     pub(crate) tx_selection_duration_seconds: Histogram,
     /// Time spent on EVM transaction execution within the execution loop.
     pub(crate) evm_execution_duration_seconds: Histogram,
+    /// Number of account read cache hits during payload building.
+    pub(crate) state_cache_account_hits: Counter,
+    /// Number of account read cache misses during payload building.
+    pub(crate) state_cache_account_misses: Counter,
+    /// Number of storage read cache hits during payload building.
+    pub(crate) state_cache_storage_hits: Counter,
+    /// Number of storage read cache misses during payload building.
+    pub(crate) state_cache_storage_misses: Counter,
+    /// Number of code read cache hits during payload building.
+    pub(crate) state_cache_code_hits: Counter,
+    /// Number of code read cache misses during payload building.
+    pub(crate) state_cache_code_misses: Counter,
+    /// Number of block hash read cache hits during payload building.
+    pub(crate) state_cache_block_hash_hits: Counter,
+    /// Number of block hash read cache misses during payload building.
+    pub(crate) state_cache_block_hash_misses: Counter,
 }
 
 impl PayloadBuilderMetrics {
@@ -42,5 +58,17 @@ impl PayloadBuilderMetrics {
     /// Records the cumulative time spent on EVM transaction execution.
     pub fn record_evm_execution_duration(&self, duration_secs: f64) {
         self.evm_execution_duration_seconds.record(duration_secs);
+    }
+
+    /// Records cache hit/miss statistics from a payload build pass.
+    pub fn record_cache_stats(&self, stats: &reth_revm::cached::CacheStats) {
+        self.state_cache_account_hits.increment(stats.account_hits);
+        self.state_cache_account_misses.increment(stats.account_misses);
+        self.state_cache_storage_hits.increment(stats.storage_hits);
+        self.state_cache_storage_misses.increment(stats.storage_misses);
+        self.state_cache_code_hits.increment(stats.code_hits);
+        self.state_cache_code_misses.increment(stats.code_misses);
+        self.state_cache_block_hash_hits.increment(stats.block_hash_hits);
+        self.state_cache_block_hash_misses.increment(stats.block_hash_misses);
     }
 }

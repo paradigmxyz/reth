@@ -8,7 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;

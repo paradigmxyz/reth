@@ -54,6 +54,27 @@ pub struct CachedReads {
     pub block_hash_misses: u64,
 }
 
+/// Cache hit/miss statistics from a build pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheStats {
+    /// Number of account read cache hits.
+    pub account_hits: u64,
+    /// Number of account read cache misses.
+    pub account_misses: u64,
+    /// Number of storage read cache hits.
+    pub storage_hits: u64,
+    /// Number of storage read cache misses.
+    pub storage_misses: u64,
+    /// Number of code read cache hits.
+    pub code_hits: u64,
+    /// Number of code read cache misses.
+    pub code_misses: u64,
+    /// Number of block hash read cache hits.
+    pub block_hash_hits: u64,
+    /// Number of block hash read cache misses.
+    pub block_hash_misses: u64,
+}
+
 // === impl CachedReads ===
 
 impl CachedReads {
@@ -87,6 +108,20 @@ impl CachedReads {
         self.code_misses += other.code_misses;
         self.block_hash_hits += other.block_hash_hits;
         self.block_hash_misses += other.block_hash_misses;
+    }
+
+    /// Drains and returns cache hit/miss counters, resetting them to zero.
+    pub fn drain_stats(&mut self) -> CacheStats {
+        CacheStats {
+            account_hits: core::mem::take(&mut self.account_hits),
+            account_misses: core::mem::take(&mut self.account_misses),
+            storage_hits: core::mem::take(&mut self.storage_hits),
+            storage_misses: core::mem::take(&mut self.storage_misses),
+            code_hits: core::mem::take(&mut self.code_hits),
+            code_misses: core::mem::take(&mut self.code_misses),
+            block_hash_hits: core::mem::take(&mut self.block_hash_hits),
+            block_hash_misses: core::mem::take(&mut self.block_hash_misses),
+        }
     }
 }
 
@@ -171,6 +206,7 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
             Entry::Vacant(acc_entry) => {
                 self.cached.storage_misses += 1;
                 // acc needs to be loaded for us to access slots.
+                self.cached.account_misses += 1;
                 let info = self.db.basic_ref(address)?;
                 let (account, value) = if info.is_some() {
                     let value = self.db.storage_ref(address, index)?;
