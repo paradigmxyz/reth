@@ -159,7 +159,7 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
 mod tests {
     use super::*;
     use alloc::collections::{BTreeMap, BTreeSet};
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use proptest::prelude::*;
 
     #[derive(Clone, Copy, Debug)]
     enum Op {
@@ -276,24 +276,43 @@ mod tests {
         assert_eq!(lfu.min_freq, actual_min_freq.unwrap_or(1), "min_freq mismatch");
     }
 
-    fn safe_random_op(model: &ModelLfu, rng: &mut StdRng) -> Op {
-        let mut candidates = Vec::new();
+    fn is_safe_op(model: &ModelLfu, op: Op) -> bool {
+        match op {
+            Op::SetCapacity(capacity) => {
+                capacity >= model.entries.len() || model.has_unique_frequencies()
+            }
+            Op::Touch(key) => {
+                if model.capacity == 0 {
+                    return true;
+                }
 
-        for capacity in 0..=4 {
-            if capacity >= model.entries.len() || model.has_unique_frequencies() {
-                candidates.push(Op::SetCapacity(capacity));
+                let is_new_key = !model.entries.contains_key(&key);
+                let would_evict = is_new_key && model.entries.len() >= model.capacity;
+                !would_evict || model.has_unique_frequencies()
+            }
+        }
+    }
+
+    fn sanitize_trace(raw_ops: Vec<Op>) -> Vec<Op> {
+        let mut model = ModelLfu::default();
+        let mut safe_ops = Vec::with_capacity(raw_ops.len());
+
+        for op in raw_ops {
+            if is_safe_op(&model, op) {
+                model.apply(op);
+                safe_ops.push(op);
             }
         }
 
-        for key in 0..=5 {
-            let is_new_key = !model.entries.contains_key(&key);
-            let would_evict = is_new_key && model.entries.len() >= model.capacity;
-            if !would_evict || model.has_unique_frequencies() {
-                candidates.push(Op::Touch(key));
-            }
-        }
+        safe_ops
+    }
 
-        candidates[rng.random_range(0..candidates.len())]
+    fn raw_trace_strategy() -> impl Strategy<Value = Vec<Op>> {
+        prop::collection::vec(
+            prop_oneof![(0usize..=4).prop_map(Op::SetCapacity), (0u8..=5).prop_map(Op::Touch),],
+            0..256,
+        )
+        .prop_map(sanitize_trace)
     }
 
     fn check_trace(ops: &[Op]) {
@@ -378,19 +397,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn bucketed_lfu_model_safe_randomized_traces() {
-        for seed in 0..32 {
-            let mut rng = StdRng::seed_from_u64(seed);
-            let mut ops = Vec::new();
-            let mut model = ModelLfu::default();
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
 
-            for _ in 0..256 {
-                let op = safe_random_op(&model, &mut rng);
-                model.apply(op);
-                ops.push(op);
-            }
-
+        #[test]
+        fn bucketed_lfu_model_safe_proptest_traces(ops in raw_trace_strategy()) {
             check_trace(&ops);
         }
     }
