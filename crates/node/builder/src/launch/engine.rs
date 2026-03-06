@@ -293,7 +293,7 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        let consensus_engine = move |on_shutdown| async move {
+        let consensus_engine = move |mut on_graceful_shutdown| async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 // network_handle's sync state is already initialized at Syncing
@@ -304,7 +304,6 @@ impl EngineNodeLauncher {
 
             let mut res = Ok(());
             let mut shutdown_rx = shutdown_rx.fuse();
-            let mut on_shutdown = on_shutdown;
 
             // advance the chain and await payloads built locally to add into the engine api
             // tree handler to prevent re-execution if that block is received as payload from
@@ -365,32 +364,23 @@ impl EngineNodeLauncher {
                         }
                     }
                     shutdown_req = &mut shutdown_rx => {
-                        // Always send Terminate regardless of whether the shutdown handle was
-                        // explicitly invoked (Ok) or dropped without calling shutdown (Err).
-                        let done_tx = match shutdown_req {
-                            Ok(req) => {
-                                debug!(target: "reth::cli", "received engine shutdown request");
-                                req.done_tx
-                            }
-                            Err(_) => {
-                                debug!(target: "reth::cli", "engine shutdown handle dropped, terminating engine");
-                                let (tx, _) = oneshot::channel();
-                                tx
-                            }
-                        };
-                        orchestrator.handler_mut().handler_mut().on_event(
-                            FromOrchestrator::Terminate { tx: done_tx }.into()
-                        );
+                        if let Ok(req) = shutdown_req {
+                            debug!(target: "reth::cli", "received engine shutdown request");
+                            orchestrator.handler_mut().handler_mut().on_event(
+                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                            );
+                        }
                     }
-                    _ = &mut on_shutdown => {
+                    _ = &mut on_graceful_shutdown => {
                         // Shutdown signal received.
                         // Send Terminate so the engine OS thread can exit cleanly before we
                         // drop the orchestrator.
                         debug!(target: "reth::cli", "shutdown signal received, terminating engine");
-                        let (done_tx, _) = oneshot::channel();
+                        let (done_tx, done_rx) = oneshot::channel();
                         orchestrator.handler_mut().handler_mut().on_event(
                             FromOrchestrator::Terminate { tx: done_tx }.into()
                         );
+                        let _ = done_rx.await;
                         break;
                     }
                 }
