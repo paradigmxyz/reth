@@ -90,6 +90,7 @@ RETH_ARGS=(
   --authrpc.port 8551
   --disable-discovery
   --no-persist-peers
+  --db.read-transaction-timeout 0
 )
 
 # Big blocks mode requires the testing API and skip-invalid-transactions
