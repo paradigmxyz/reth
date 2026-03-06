@@ -243,13 +243,19 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Helper method that loads a transaction and its receipt.
+    ///
+    /// The returned transaction has its sender already recovered.
     #[expect(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
     ) -> impl Future<
         Output = Result<
-            Option<(ProviderTx<Self::Provider>, TransactionMeta, ProviderReceipt<Self::Provider>)>,
+            Option<(
+                Recovered<ProviderTx<Self::Provider>>,
+                TransactionMeta,
+                ProviderReceipt<Self::Provider>,
+            )>,
             Self::Error,
         >,
     > + Send
@@ -258,7 +264,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) = cached.block.body().transactions().get(cached.tx_index).cloned()
+                let Some(tx) = cached.recovered_transaction().map(|tx| tx.cloned())
             {
                 let meta = cached.transaction_meta(hash);
 
@@ -290,6 +296,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 else {
                     return Ok(None);
                 };
+
+                let tx = tx.try_into_recovered_unchecked().map_err(Self::Error::from_eth_err)?;
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 

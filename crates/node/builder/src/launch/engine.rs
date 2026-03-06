@@ -294,7 +294,7 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        let consensus_engine = async move {
+        let consensus_engine = move |mut on_graceful_shutdown| async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 // network_handle's sync state is already initialized at Syncing
@@ -372,12 +372,25 @@ impl EngineNodeLauncher {
                             );
                         }
                     }
+                    _ = &mut on_graceful_shutdown => {
+                        // Shutdown signal received.
+                        // Send Terminate so the engine OS thread can exit cleanly before we
+                        // drop the orchestrator.
+                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
+                        let (done_tx, done_rx) = oneshot::channel();
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                        let _ = done_rx.await;
+                        break;
+                    }
                 }
             }
 
             let _ = exit.send(res);
         };
-        ctx.task_executor().spawn_critical_task("consensus engine", consensus_engine);
+        ctx.task_executor()
+            .spawn_critical_with_shutdown_signal("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 

@@ -350,6 +350,7 @@ def generate_comparison_table(
     baseline_name: str,
     feature_name: str,
     feature_sha: str,
+    big_blocks: bool = False,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -390,7 +391,7 @@ def generate_comparison_table(
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True)} |",
         "",
-        f"*{n} blocks*",
+        f"*{n} {'big blocks' if big_blocks else 'blocks'}*",
     ]
     return "\n".join(lines)
 
@@ -466,6 +467,7 @@ def main():
     parser.add_argument("--feature-name", "--branch-name", default=None, help="Feature branch name")
     parser.add_argument("--feature-ref", "--branch-sha", "--feature-sha", default=None, help="Feature commit SHA")
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
+    parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
     args = parser.parse_args()
 
     if len(args.baseline_csv) != len(args.feature_csv):
@@ -514,6 +516,7 @@ def main():
         baseline_name=baseline_name,
         feature_name=feature_name,
         feature_sha=feature_sha,
+        big_blocks=args.big_blocks,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
