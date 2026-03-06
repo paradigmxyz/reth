@@ -25,6 +25,7 @@ use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
 };
+use tracing::debug_span;
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -485,24 +486,31 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        let (hashed_state, state_root, trie_updates) = {
+            let _span = debug_span!(target: "evm::execute", "state_root").entered();
+            let hashed_state = state.hashed_post_state(&db.bundle_state);
+            let (state_root, trie_updates) = state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?;
+            (hashed_state, state_root, trie_updates)
+        };
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
-        let block = self.assembler.assemble_block(BlockAssemblerInput {
-            evm_env,
-            execution_ctx: self.ctx,
-            parent: self.parent,
-            transactions,
-            output: &result,
-            bundle_state: &db.bundle_state,
-            state_provider: &state,
-            state_root,
-        })?;
+        let block = {
+            let _span = debug_span!(target: "evm::execute", "assemble_block").entered();
+            self.assembler.assemble_block(BlockAssemblerInput {
+                evm_env,
+                execution_ctx: self.ctx,
+                parent: self.parent,
+                transactions,
+                output: &result,
+                bundle_state: &db.bundle_state,
+                state_provider: &state,
+                state_root,
+            })?
+        };
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

@@ -36,6 +36,22 @@ pub struct CachedReads {
     pub contracts: B256Map<Bytecode>,
     /// Block hash mapped to the block number.
     pub block_hashes: HashMap<u64, B256>,
+    /// Number of account read cache hits.
+    pub account_hits: u64,
+    /// Number of account read cache misses.
+    pub account_misses: u64,
+    /// Number of storage read cache hits.
+    pub storage_hits: u64,
+    /// Number of storage read cache misses.
+    pub storage_misses: u64,
+    /// Number of code read cache hits.
+    pub code_hits: u64,
+    /// Number of code read cache misses.
+    pub code_misses: u64,
+    /// Number of block hash read cache hits.
+    pub block_hash_hits: u64,
+    /// Number of block hash read cache misses.
+    pub block_hash_misses: u64,
 }
 
 // === impl CachedReads ===
@@ -63,6 +79,14 @@ impl CachedReads {
         self.accounts.extend(other.accounts);
         self.contracts.extend(other.contracts);
         self.block_hashes.extend(other.block_hashes);
+        self.account_hits += other.account_hits;
+        self.account_misses += other.account_misses;
+        self.storage_hits += other.storage_hits;
+        self.storage_misses += other.storage_misses;
+        self.code_hits += other.code_hits;
+        self.code_misses += other.code_misses;
+        self.block_hash_hits += other.block_hash_hits;
+        self.block_hash_misses += other.block_hash_misses;
     }
 }
 
@@ -106,8 +130,12 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let basic = match self.cached.accounts.entry(address) {
-            Entry::Occupied(entry) => entry.get().info.clone(),
+            Entry::Occupied(entry) => {
+                self.cached.account_hits += 1;
+                entry.get().info.clone()
+            }
             Entry::Vacant(entry) => {
+                self.cached.account_misses += 1;
                 entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
             }
         };
@@ -116,8 +144,14 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         let code = match self.cached.contracts.entry(code_hash) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
+            Entry::Occupied(entry) => {
+                self.cached.code_hits += 1;
+                entry.get().clone()
+            }
+            Entry::Vacant(entry) => {
+                self.cached.code_misses += 1;
+                entry.insert(self.db.code_by_hash_ref(code_hash)?).clone()
+            }
         };
         Ok(code)
     }
@@ -125,10 +159,17 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.cached.accounts.entry(address) {
             Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(index) {
-                Entry::Occupied(entry) => Ok(*entry.get()),
-                Entry::Vacant(entry) => Ok(*entry.insert(self.db.storage_ref(address, index)?)),
+                Entry::Occupied(entry) => {
+                    self.cached.storage_hits += 1;
+                    Ok(*entry.get())
+                }
+                Entry::Vacant(entry) => {
+                    self.cached.storage_misses += 1;
+                    Ok(*entry.insert(self.db.storage_ref(address, index)?))
+                }
             },
             Entry::Vacant(acc_entry) => {
+                self.cached.storage_misses += 1;
                 // acc needs to be loaded for us to access slots.
                 let info = self.db.basic_ref(address)?;
                 let (account, value) = if info.is_some() {
@@ -147,8 +188,14 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         let hash = match self.cached.block_hashes.entry(number) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
+            Entry::Occupied(entry) => {
+                self.cached.block_hash_hits += 1;
+                *entry.get()
+            }
+            Entry::Vacant(entry) => {
+                self.cached.block_hash_misses += 1;
+                *entry.insert(self.db.block_hash_ref(number)?)
+            }
         };
         Ok(hash)
     }

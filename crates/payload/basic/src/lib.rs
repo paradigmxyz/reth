@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::metrics::PayloadBuilderMetrics;
+
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
@@ -38,6 +38,7 @@ use tracing::{debug, trace, warn};
 
 mod better_payload_emitter;
 mod metrics;
+pub use metrics::PayloadBuilderMetrics;
 mod stack;
 
 pub use better_payload_emitter::BetterPayloadEmitter;

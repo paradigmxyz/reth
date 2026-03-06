@@ -280,8 +280,11 @@ where
                         unreachable!("we own the sender half")
                     };
 
+                    self.metrics.proof_calculation_duration_histogram.record(result.elapsed);
+
                     let mut result = result.result?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
+                        self.metrics.proof_calculation_duration_histogram.record(next.elapsed);
                         let res = next.result?;
                         result.extend(res);
                     }

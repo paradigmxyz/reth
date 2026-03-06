@@ -14,7 +14,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    PayloadBuilderMetrics, PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -28,7 +28,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, FastInstant as Instant};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -37,7 +37,7 @@ use reth_transaction_pool::{
     ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tracing::{debug, trace, warn};
 
 mod config;
@@ -213,7 +213,13 @@ where
 
     let withdrawals_rlp_length = attributes.withdrawals().length();
 
+    let metrics = PayloadBuilderMetrics::default();
+    let mut total_selection_time = Duration::ZERO;
+    let mut total_evm_time = Duration::ZERO;
+
     while let Some(pool_tx) = best_txs.next() {
+        let selection_start = Instant::now();
+
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid
@@ -223,11 +229,14 @@ where
                 &pool_tx,
                 &InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
+            total_selection_time += selection_start.elapsed();
             continue
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
+            metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
+            metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
             return Ok(BuildOutcome::Cancelled)
         }
 
@@ -247,6 +256,7 @@ where
                     limit: MAX_RLP_BLOCK_SIZE,
                 },
             );
+            total_selection_time += selection_start.elapsed();
             continue
         }
 
@@ -271,6 +281,7 @@ where
                         },
                     ),
                 );
+                total_selection_time += selection_start.elapsed();
                 continue
             }
 
@@ -298,16 +309,24 @@ where
                 Ok(sidecar) => Some(sidecar),
                 Err(error) => {
                     best_txs.mark_invalid(&pool_tx, &InvalidPoolTransactionError::Eip4844(error));
+                    total_selection_time += selection_start.elapsed();
                     continue
                 }
             };
         }
 
+        total_selection_time += selection_start.elapsed();
+
+        let evm_start = Instant::now();
         let gas_used = match builder.execute_transaction(tx.clone()) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => {
+                total_evm_time += evm_start.elapsed();
+                gas_used
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
+                total_evm_time += evm_start.elapsed();
                 if error.is_nonce_too_low() {
                     // if the nonce is too low, we can skip this transaction
                     trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
@@ -325,7 +344,12 @@ where
                 continue
             }
             // this is an error that we should treat as fatal for this attempt
-            Err(err) => return Err(PayloadBuilderError::evm(err)),
+            Err(err) => {
+                total_evm_time += evm_start.elapsed();
+                metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
+                metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
+                return Err(PayloadBuilderError::evm(err))
+            }
         };
 
         // add to the total blob gas used if the transaction successfully executed
@@ -351,6 +375,9 @@ where
             blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
         }
     }
+
+    metrics.record_tx_selection_duration(total_selection_time.as_secs_f64());
+    metrics.record_evm_execution_duration(total_evm_time.as_secs_f64());
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
