@@ -58,6 +58,11 @@ cleanup() {
 TAIL_PID=
 trap cleanup EXIT
 
+# Clean up stale schelk state from a previous cancelled run.
+# If schelk thinks it's still mounted (e.g. a cancelled run skipped cleanup),
+# recover first to reset state.
+sudo schelk recover -y -k || true
+
 # Mount
 sudo schelk mount -y
 sync
