@@ -15,9 +15,8 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
-    pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
+    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcNodeCore, RpcTransaction,
 };
-use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::Runtime;
@@ -50,7 +49,7 @@ impl<Eth> EthPubSub<Eth> {
 
 impl<Eth> EthPubSub<Eth>
 where
-    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
+    Eth: EthSubscriptions,
 {
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -69,14 +68,14 @@ where
         self.inner.full_pending_transaction_stream()
     }
 
-    /// Returns a stream that yields all new RPC blocks.
+    /// Returns a stream that yields new block headers.
     pub fn new_headers_stream(&self) -> impl Stream<Item = RpcHeader<Eth::NetworkTypes>> {
-        self.inner.new_headers_stream()
+        self.inner.eth_api.header_stream()
     }
 
-    /// Returns a stream that yields all logs that match the given filter.
+    /// Returns a stream that yields matching logs.
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
-        self.inner.log_stream(filter)
+        self.inner.eth_api.log_stream(filter)
     }
 
     /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
@@ -196,7 +195,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
-    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
+    Eth: EthSubscriptions,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -325,51 +324,5 @@ where
         &self,
     ) -> impl Stream<Item = NewTransactionEvent<<Eth::Pool as TransactionPool>::Transaction>> {
         self.eth_api.pool().new_pending_pool_transactions_listener()
-    }
-}
-
-impl<Eth> EthPubSubInner<Eth>
-where
-    Eth: EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>> + RpcNodeCore,
-{
-    /// Returns a stream that yields all new RPC blocks.
-    fn new_headers_stream(&self) -> impl Stream<Item = RpcHeader<Eth::NetworkTypes>> {
-        let converter = self.eth_api.converter();
-        self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain
-                .committed()
-                .blocks_iter()
-                .filter_map(|block| {
-                    match converter.convert_header(block.clone_sealed_header(), block.rlp_length())
-                    {
-                        Ok(header) => Some(header),
-                        Err(err) => {
-                            error!(target = "rpc", %err, "Failed to convert header");
-                            None
-                        }
-                    }
-                })
-                .collect::<Vec<_>>();
-            futures::stream::iter(headers)
-        })
-    }
-
-    /// Returns a stream that yields all logs that match the given filter.
-    fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
-        BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
-            .map(move |canon_state| {
-                canon_state.expect("new block subscription never ends").block_receipts()
-            })
-            .flat_map(futures::stream::iter)
-            .flat_map(move |(block_receipts, removed)| {
-                let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
-                    &filter,
-                    block_receipts.block,
-                    block_receipts.timestamp,
-                    block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
-                    removed,
-                );
-                futures::stream::iter(all_logs)
-            })
     }
 }
