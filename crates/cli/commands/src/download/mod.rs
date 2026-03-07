@@ -682,7 +682,10 @@ pub(crate) struct DownloadProgress {
     downloaded: u64,
     total_size: u64,
     last_displayed: Instant,
-    started_at: Instant,
+    /// Snapshot of downloaded bytes at the start of the current ETA window.
+    window_downloaded: u64,
+    /// Timestamp when the current ETA window started.
+    window_started: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -727,7 +730,13 @@ impl DownloadProgress {
     /// Creates new progress tracker with given total size
     fn new(total_size: u64) -> Self {
         let now = Instant::now();
-        Self { downloaded: 0, total_size, last_displayed: now, started_at: now }
+        Self {
+            downloaded: 0,
+            total_size,
+            last_displayed: now,
+            window_downloaded: 0,
+            window_started: now,
+        }
     }
 
     /// Converts bytes to human readable format (B, KB, MB, GB)
@@ -764,15 +773,23 @@ impl DownloadProgress {
             let formatted_total = Self::format_size(self.total_size);
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
-            let elapsed = self.started_at.elapsed();
-            let eta = if self.downloaded > 0 {
-                let remaining = self.total_size.saturating_sub(self.downloaded);
-                let speed = self.downloaded as f64 / elapsed.as_secs_f64();
-                if speed > 0.0 {
-                    Duration::from_secs_f64(remaining as f64 / speed)
-                } else {
-                    Duration::ZERO
-                }
+            let remaining = self.total_size.saturating_sub(self.downloaded);
+            let window_elapsed = self.window_started.elapsed();
+
+            // Speed is always computed from bytes downloaded within the current
+            // window, not from cumulative totals. This avoids wildly inflated
+            // speed after a resumable download retry (where `downloaded` jumps
+            // instantly to the resume offset). The window resets every 30 s so
+            // the ETA tracks changing throughput.
+            let window_bytes = self.downloaded - self.window_downloaded;
+            let speed = window_bytes as f64 / window_elapsed.as_secs_f64().max(0.001);
+            if window_elapsed >= Duration::from_secs(30) {
+                self.window_downloaded = self.downloaded;
+                self.window_started = Instant::now();
+            }
+
+            let eta = if speed > 0.0 {
+                Duration::from_secs_f64(remaining as f64 / speed)
             } else {
                 Duration::ZERO
             };
@@ -827,6 +844,8 @@ impl SharedProgress {
 fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let started_at = Instant::now();
+        let mut window_started = Instant::now();
+        let mut window_downloaded: u64 = 0;
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await; // first tick is immediate, skip it
         loop {
@@ -848,7 +867,6 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);
 
-            let elapsed = started_at.elapsed();
             let remaining = total.saturating_sub(downloaded);
 
             if remaining == 0 {
@@ -859,15 +877,18 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
                     "Extracting remaining archives"
                 );
             } else {
-                let eta = if downloaded > 0 {
-                    let speed = downloaded as f64 / elapsed.as_secs_f64();
-                    if speed > 0.0 {
-                        DownloadProgress::format_duration(Duration::from_secs_f64(
-                            remaining as f64 / speed,
-                        ))
-                    } else {
-                        "??".to_string()
-                    }
+                let window_elapsed = window_started.elapsed();
+                let window_bytes = downloaded - window_downloaded;
+                let speed = window_bytes as f64 / window_elapsed.as_secs_f64().max(0.001);
+                if window_elapsed >= Duration::from_secs(30) {
+                    window_downloaded = downloaded;
+                    window_started = Instant::now();
+                }
+
+                let eta = if speed > 0.0 {
+                    DownloadProgress::format_duration(Duration::from_secs_f64(
+                        remaining as f64 / speed,
+                    ))
                 } else {
                     "??".to_string()
                 };
@@ -1196,6 +1217,7 @@ fn resumable_download(
             // Legacy single-download path: local progress bar
             let mut progress = DownloadProgress::new(current_total);
             progress.downloaded = start_offset;
+            progress.window_downloaded = start_offset;
             let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
             copy_result = io::copy(&mut reader, &mut writer);
             flush_result = writer.inner.flush();
