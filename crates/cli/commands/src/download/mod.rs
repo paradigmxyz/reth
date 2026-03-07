@@ -1268,7 +1268,8 @@ fn streaming_download_and_extract(
             let reader = SharedProgressReader { inner: response, progress: Arc::clone(sp) };
             extract_archive_raw(reader, format, target_dir)
         } else {
-            extract_archive_raw(response, format, target_dir)
+            let total_size = response.content_length().unwrap_or(0);
+            extract_archive(response, total_size, format, target_dir)
         };
 
         match result {
