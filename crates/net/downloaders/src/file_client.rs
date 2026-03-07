@@ -163,17 +163,10 @@ impl<B: FullBlock> FileClient<B> {
         if self.headers.is_empty() {
             return true
         }
-        let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
-        nums.sort_unstable();
-        let mut iter = nums.into_iter();
-        let mut lowest = iter.next().expect("not empty");
-        for next in iter {
-            if next != lowest + 1 {
-                return false
-            }
-            lowest = next;
-        }
-        true
+        let min = self.min_block().expect("not empty");
+        let max = self.max_block().expect("not empty");
+        // Contiguous range from min to max means no gaps
+        max - min + 1 == self.headers.len() as u64
     }
 
     /// Use the provided bodies as the file client's block body buffer.
