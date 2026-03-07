@@ -3,10 +3,10 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult, StorageResult};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -33,15 +33,18 @@ use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderFactory,
+    StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -665,6 +668,158 @@ where
             })
             .await
     }
+
+    /// Returns the contract storage for the given address at the block and transaction index.
+    ///
+    /// Replays all transactions up to the given index to build the intermediate state, then
+    /// enumerates storage slots keyed by their keccak hash.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<StorageRangeResult, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+
+        if tx_idx > block.transaction_count() {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx index {} out of range for block with {} transactions",
+                tx_idx,
+                block.transaction_count()
+            ))
+            .into())
+        }
+
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+        let parent_hash = block.parent_hash();
+
+        self.eth_api()
+            .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // Replay transactions before tx_idx to reach the desired intermediate state
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                for tx in block.transactions_recovered().take(tx_idx) {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                }
+                drop(evm);
+
+                let limit = max_result as usize;
+
+                // Check whether replayed transactions modified this contract's
+                // storage. When there is no overlay we can push both key_start
+                // AND limit into the provider and consume its iterator directly
+                // — one pass, no re-hashing, no intermediate collections.
+                let has_overlay = db
+                    .cache
+                    .accounts
+                    .get(&contract_address)
+                    .and_then(|a| a.account.as_ref())
+                    .is_some_and(|a| !a.storage.is_empty());
+
+                if !has_overlay {
+                    // Fast path: provider result is authoritative, use it
+                    // directly with limit + 1 to detect next_key.
+                    let entries = StateProvider::storage_range(
+                        &db.database.0,
+                        contract_address,
+                        key_start,
+                        limit + 1,
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                    let mut storage = BTreeMap::new();
+                    let mut next_key = None;
+                    for (hash, se) in entries {
+                        if storage.len() >= limit {
+                            next_key = Some(hash);
+                            break;
+                        }
+                        storage.insert(
+                            hash,
+                            StorageResult {
+                                key: se.key,
+                                value: B256::from(se.value.to_be_bytes()),
+                            },
+                        );
+                    }
+
+                    return Ok(StorageRangeResult { storage: storage.into(), next_key });
+                }
+
+                // Slow path: overlay exists, so we fetch extra entries from
+                // the provider to compensate for slots the overlay may delete.
+                // The overlay can remove at most `overlay_size` base entries,
+                // so `limit + overlay_size` guarantees enough candidates.
+                let overlay = db
+                    .cache
+                    .accounts
+                    .get(&contract_address)
+                    .and_then(|a| a.account.as_ref())
+                    .map(|a| &a.storage);
+
+                let overlay_size = overlay.map_or(0, |s| s.len());
+                let provider_limit = limit.saturating_add(overlay_size).saturating_add(1);
+
+                let base_entries = StateProvider::storage_range(
+                    &db.database.0,
+                    contract_address,
+                    key_start,
+                    provider_limit,
+                )
+                .map_err(Eth::Error::from_eth_err)?;
+
+                // Collect base entries keyed by plain slot for overlay merge
+                let mut merged: BTreeMap<B256, U256> = BTreeMap::new();
+                for (_hash, se) in base_entries {
+                    merged.insert(se.key, se.value);
+                }
+
+                // Apply overlay — writes override base, zeroes delete
+                if let Some(overlay) = overlay {
+                    for (slot, value) in overlay {
+                        let key = B256::from(*slot);
+                        if value.is_zero() {
+                            merged.remove(&key);
+                        } else {
+                            merged.insert(key, *value);
+                        }
+                    }
+                }
+
+                // Hash, filter by key_start, sort, and paginate
+                let mut hashed: BTreeMap<B256, (B256, U256)> = BTreeMap::new();
+                for (slot, value) in &merged {
+                    let h = keccak256(slot);
+                    if h >= key_start {
+                        hashed.insert(h, (*slot, *value));
+                    }
+                }
+
+                let mut storage = BTreeMap::new();
+                let mut next_key = None;
+                for (hash, (slot, value)) in &hashed {
+                    if storage.len() >= limit {
+                        next_key = Some(*hash);
+                        break;
+                    }
+                    storage.insert(
+                        *hash,
+                        StorageResult { key: *slot, value: B256::from(value.to_be_bytes()) },
+                    );
+                }
+
+                Ok(StorageRangeResult { storage: storage.into(), next_key })
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -1100,13 +1255,23 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<StorageRangeResult> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_storage_range_at(
+            self,
+            block_hash,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(
