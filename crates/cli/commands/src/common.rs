@@ -103,11 +103,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let sf_path = data_dir.static_files();
         let rocksdb_path = data_dir.rocksdb();
 
-        if access.is_read_write() {
-            reth_fs_util::create_dir_all(&db_path)?;
-            reth_fs_util::create_dir_all(&sf_path)?;
-            reth_fs_util::create_dir_all(&rocksdb_path)?;
-        }
+        reth_fs_util::create_dir_all(&db_path)?;
+        reth_fs_util::create_dir_all(&sf_path)?;
+        reth_fs_util::create_dir_all(&rocksdb_path)?;
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
