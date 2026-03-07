@@ -4,14 +4,16 @@ use super::*;
 pub struct StructHandler<'a> {
     fields_iterator: std::iter::Peekable<std::slice::Iter<'a, FieldTypes>>,
     lines: Vec<TokenStream2>,
+    out: TokenStream2,
     pub is_wrapper: bool,
 }
 
 impl<'a> StructHandler<'a> {
-    pub fn new(fields: &'a FieldList) -> Self {
+    pub fn new(fields: &'a FieldList, out: TokenStream2) -> Self {
         StructHandler {
             lines: vec![],
             fields_iterator: fields.iter().peekable(),
+            out,
             is_wrapper: false,
         }
     }
@@ -57,8 +59,9 @@ impl<'a> StructHandler<'a> {
         if name.is_empty() {
             self.is_wrapper = true;
 
+            let out = &self.out;
             self.lines.push(quote! {
-                let _len = self.0.#to_compact_ident(&mut buffer);
+                let _len = self.0.#to_compact_ident(#out);
             });
 
             if is_flag_type(ftype) {
@@ -74,6 +77,8 @@ impl<'a> StructHandler<'a> {
         let set_len_method = format_ident!("set_{name}_len");
         let len = format_ident!("{name}_len");
 
+        let out = &self.out;
+
         // B256 with #[maybe_zero] attribute for example
         if *is_compact && !is_flag_type(ftype) {
             let itype = format_ident!("{ftype}");
@@ -81,12 +86,12 @@ impl<'a> StructHandler<'a> {
             self.lines.push(quote! {
                 if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
-                    self.#name.#to_compact_ident(&mut buffer);
+                    self.#name.#to_compact_ident(#out);
                 };
             });
         } else {
             self.lines.push(quote! {
-                let #len = self.#name.#to_compact_ident(&mut buffer);
+                let #len = self.#name.#to_compact_ident(#out);
             });
         }
         if is_flag_type(ftype) {

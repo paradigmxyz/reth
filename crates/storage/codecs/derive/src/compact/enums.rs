@@ -5,14 +5,16 @@ pub struct EnumHandler<'a> {
     current_variant_index: u8,
     fields_iterator: std::iter::Peekable<std::slice::Iter<'a, FieldTypes>>,
     enum_lines: Vec<TokenStream2>,
+    out: TokenStream2,
 }
 
 impl<'a> EnumHandler<'a> {
-    pub fn new(fields: &'a FieldList) -> Self {
+    pub fn new(fields: &'a FieldList, out: TokenStream2) -> Self {
         EnumHandler {
             current_variant_index: 0u8,
             enum_lines: vec![],
             fields_iterator: fields.iter().peekable(),
+            out,
         }
     }
 
@@ -103,10 +105,11 @@ impl<'a> EnumHandler<'a> {
                         format_ident!("to_compact")
                     };
 
+                    let out = &self.out;
                     // Unnamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {
-                            field.#to_compact_ident(&mut buffer);
+                            field.#to_compact_ident(#out);
                             #current_variant_index
                         },
                     });

@@ -89,7 +89,7 @@ fn generate_from_compact(
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     if is_enum {
-        let enum_lines = EnumHandler::new(fields).generate_from(ident);
+        let enum_lines = EnumHandler::new(fields, quote!()).generate_from(ident);
 
         // Builds the object instantiation.
         lines.push(quote! {
@@ -99,7 +99,7 @@ fn generate_from_compact(
             };
         });
     } else {
-        let mut struct_handler = StructHandler::new(fields);
+        let mut struct_handler = StructHandler::new(fields, quote!());
         lines.append(&mut struct_handler.generate_from(known_types.as_slice()));
 
         // Builds the object instantiation.
@@ -161,14 +161,34 @@ fn generate_to_compact(
     zstd: Option<ZstdConfig>,
     reth_codecs: &syn::Path,
 ) -> Vec<TokenStream2> {
-    let mut lines = vec![quote! {
-        let mut buffer = #reth_codecs::__private::bytes::BytesMut::new();
-    }];
-
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
+    if let Some(zstd) = zstd {
+        // zstd path: keep intermediate buffer since we need to check length before deciding
+        // whether to compress.
+        generate_to_compact_zstd(fields, ident, zstd, reth_codecs, is_enum)
+    } else {
+        // Non-zstd path: write directly to `buf` without intermediate allocation.
+        // Reserve placeholder bytes for the flags, encode fields directly, then patch flags.
+        generate_to_compact_direct(fields, ident, is_enum)
+    }
+}
+
+/// Generates `to_compact` that writes directly to `buf` without an intermediate buffer.
+fn generate_to_compact_direct(
+    fields: &FieldList,
+    ident: &Ident,
+    is_enum: bool,
+) -> Vec<TokenStream2> {
+    let out = quote!(&mut *buf);
+
+    let mut lines = vec![quote! {
+        let __flags_pos = buf.as_mut().len();
+        buf.put_bytes(0, Self::bitflag_encoded_bytes());
+    }];
+
     if is_enum {
-        let enum_lines = EnumHandler::new(fields).generate_to(ident);
+        let enum_lines = EnumHandler::new(fields, out).generate_to(ident);
 
         lines.push(quote! {
             flags.set_variant(match self {
@@ -176,45 +196,68 @@ fn generate_to_compact(
             });
         })
     } else {
-        lines.append(&mut StructHandler::new(fields).generate_to());
+        lines.append(&mut StructHandler::new(fields, out).generate_to());
     }
 
-    // Just because a type supports compression, doesn't mean all its values are to be compressed.
-    // We skip the smaller ones, and thus require a flag` __zstd` to specify if this value is
-    // compressed or not.
-    if zstd.is_some() {
+    lines.push(quote! {
+        let __flags_bytes = flags.into_bytes();
+        buf.as_mut()[__flags_pos..__flags_pos + __flags_bytes.len()].copy_from_slice(&__flags_bytes);
+        total_length = buf.as_mut().len() - __flags_pos;
+    });
+
+    lines
+}
+
+/// Generates `to_compact` with an intermediate buffer for zstd-compressed types.
+fn generate_to_compact_zstd(
+    fields: &FieldList,
+    ident: &Ident,
+    zstd: ZstdConfig,
+    reth_codecs: &syn::Path,
+    is_enum: bool,
+) -> Vec<TokenStream2> {
+    let out = quote!(&mut buffer);
+
+    let mut lines = vec![quote! {
+        let mut buffer = #reth_codecs::__private::bytes::BytesMut::new();
+    }];
+
+    if is_enum {
+        let enum_lines = EnumHandler::new(fields, out).generate_to(ident);
+
         lines.push(quote! {
-            let mut zstd = buffer.len() > 7;
-            if zstd {
-                flags.set___zstd(1);
-            }
-        });
+            flags.set_variant(match self {
+                #(#enum_lines)*
+            });
+        })
+    } else {
+        lines.append(&mut StructHandler::new(fields, out).generate_to());
     }
 
-    // Places the flag bits.
+    lines.push(quote! {
+        let mut zstd = buffer.len() > 7;
+        if zstd {
+            flags.set___zstd(1);
+        }
+    });
+
+    let compressor = zstd.compressor;
     lines.push(quote! {
         let flags = flags.into_bytes();
         total_length += flags.len() + buffer.len();
         buf.put_slice(&flags);
     });
 
-    if let Some(zstd) = zstd {
-        let compressor = zstd.compressor;
-        lines.push(quote! {
-            if zstd {
-                #compressor(|compressor| {
-                    let compressed = compressor.compress(&buffer).expect("Failed to compress.");
-                    buf.put(compressed.as_slice());
-                });
-            } else {
-                buf.put(buffer);
-            }
-        });
-    } else {
-        lines.push(quote! {
+    lines.push(quote! {
+        if zstd {
+            #compressor(|compressor| {
+                let compressed = compressor.compress(&buffer).expect("Failed to compress.");
+                buf.put(compressed.as_slice());
+            });
+        } else {
             buf.put(buffer);
-        })
-    }
+        }
+    });
 
     lines
 }
