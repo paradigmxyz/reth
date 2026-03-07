@@ -389,7 +389,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // install a listener for new __pending__ transactions that are allowed to be propagated
         // over the network
         let pending = pool.pending_transactions_listener();
-        let pending_pool_imports_info = PendingPoolImportsInfo::default();
+        let pending_pool_imports_info = PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
         let metrics = TransactionsManagerMetrics::default();
         metrics
             .capacity_pending_pool_imports
@@ -402,9 +402,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
-            pending_pool_imports_info: PendingPoolImportsInfo::new(
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-            ),
+            pending_pool_imports_info,
             bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
