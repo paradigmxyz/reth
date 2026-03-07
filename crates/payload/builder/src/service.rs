@@ -460,6 +460,7 @@ where
                                         &*this.cached_payload_rx.borrow() &&
                                         *cached_id == id
                                     {
+                                        trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
                                         let _ = this.cached_payload_tx.send(None);
                                     }
                                 }
