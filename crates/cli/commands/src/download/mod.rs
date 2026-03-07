@@ -683,6 +683,7 @@ pub(crate) struct DownloadProgress {
     total_size: u64,
     last_displayed: Instant,
     started_at: Instant,
+    phase: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -724,10 +725,10 @@ fn summarize_download_startup(
 }
 
 impl DownloadProgress {
-    /// Creates new progress tracker with given total size
-    fn new(total_size: u64) -> Self {
+    /// Creates new progress tracker with given total size and phase label.
+    fn new(total_size: u64, phase: &'static str) -> Self {
         let now = Instant::now();
-        Self { downloaded: 0, total_size, last_displayed: now, started_at: now }
+        Self { downloaded: 0, total_size, last_displayed: now, started_at: now, phase }
     }
 
     /// Converts bytes to human readable format (B, KB, MB, GB)
@@ -778,8 +779,9 @@ impl DownloadProgress {
             };
             let eta_str = Self::format_duration(eta);
 
+            let phase = self.phase;
             print!(
-                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
+                "\r{phase} {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
             );
             io::stdout().flush()?;
             self.last_displayed = Instant::now();
@@ -904,8 +906,8 @@ struct ProgressReader<R> {
 }
 
 impl<R: Read> ProgressReader<R> {
-    fn new(reader: R, total_size: u64) -> Self {
-        Self { reader, progress: DownloadProgress::new(total_size) }
+    fn new(reader: R, total_size: u64, phase: &'static str) -> Self {
+        Self { reader, progress: DownloadProgress::new(total_size, phase) }
     }
 }
 
@@ -954,7 +956,7 @@ fn extract_archive<R: Read>(
     format: CompressionFormat,
     target_dir: &Path,
 ) -> Result<()> {
-    let progress_reader = ProgressReader::new(reader, total_size);
+    let progress_reader = ProgressReader::new(reader, total_size, "Extracting...");
 
     match format {
         CompressionFormat::Lz4 => {
@@ -1194,7 +1196,7 @@ fn resumable_download(
             flush_result = writer.inner.flush();
         } else {
             // Legacy single-download path: local progress bar
-            let mut progress = DownloadProgress::new(current_total);
+            let mut progress = DownloadProgress::new(current_total, "Downloading...");
             progress.downloaded = start_offset;
             let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
             copy_result = io::copy(&mut reader, &mut writer);
