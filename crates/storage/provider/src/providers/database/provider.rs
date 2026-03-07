@@ -3403,6 +3403,70 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
+impl<TX: DbTx + Sync + 'static, N: NodeTypes> reth_storage_api::CallTraceIndexReader
+    for DatabaseProvider<TX, N>
+{
+    fn call_trace_from_blocks(
+        &self,
+        address: Address,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockNumber>> {
+        collect_blocks_from_sharded_index::<tables::CallTraceFromIndex>(&self.tx, address, range)
+    }
+
+    fn call_trace_to_blocks(
+        &self,
+        address: Address,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockNumber>> {
+        collect_blocks_from_sharded_index::<tables::CallTraceToIndex>(&self.tx, address, range)
+    }
+}
+
+/// Collects block numbers from a sharded index table for a given address within a range.
+fn collect_blocks_from_sharded_index<T>(
+    tx: &impl DbTx,
+    address: Address,
+    range: RangeInclusive<BlockNumber>,
+) -> ProviderResult<Vec<BlockNumber>>
+where
+    T: Table<Key = ShardedKey<Address>, Value = BlockNumberList>,
+{
+    let mut blocks = Vec::new();
+    let mut cursor = tx.cursor_read::<T>()?;
+
+    // Seek to the first shard that could contain blocks >= range.start()
+    let start_key = ShardedKey::new(address, *range.start());
+    let mut item = cursor.seek(start_key)?;
+
+    while let Some((sharded_key, list)) = item {
+        // Stop if we've moved past this address
+        if sharded_key.as_ref().key != address {
+            break;
+        }
+
+        // Collect block numbers within the requested range
+        for block in list.iter() {
+            if block > *range.end() {
+                // All remaining blocks in subsequent shards will also be > end
+                return Ok(blocks);
+            }
+            if block >= *range.start() {
+                blocks.push(block);
+            }
+        }
+
+        // If this shard's highest block is u64::MAX, this was the last shard
+        if sharded_key.as_ref().highest_block_number == u64::MAX {
+            break;
+        }
+
+        item = cursor.next()?;
+    }
+
+    Ok(blocks)
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {

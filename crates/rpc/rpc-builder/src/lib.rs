@@ -67,6 +67,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower_http::cors::CorsLayer;
@@ -805,6 +806,7 @@ where
             self.blocking_pool_guard.clone(),
             self.eth_config.clone(),
         )
+        .with_call_trace_index(Arc::new(self.provider.clone()))
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1006,6 +1008,7 @@ where
                             self.blocking_pool_guard.clone(),
                             self.eth_config.clone(),
                         )
+                        .with_call_trace_index(Arc::new(self.provider.clone()))
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),

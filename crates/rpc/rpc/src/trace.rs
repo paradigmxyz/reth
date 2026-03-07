@@ -27,7 +27,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockNumReader, BlockReader, CallTraceIndexReader, TransactionVariant};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -56,7 +56,29 @@ impl<Eth> TraceApi<Eth> {
         blocking_task_guard: BlockingTaskGuard,
         eth_config: EthConfig,
     ) -> Self {
-        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard, eth_config });
+        let inner = Arc::new(TraceApiInner {
+            eth_api,
+            blocking_task_guard,
+            eth_config,
+            call_trace_index: None,
+        });
+        Self { inner }
+    }
+
+    /// Enables the call trace index for optimized `trace_filter` queries.
+    ///
+    /// When set, `trace_filter` will use the index to narrow down candidate blocks
+    /// instead of scanning every block in the requested range.
+    pub fn with_call_trace_index(self, index: Arc<dyn CallTraceIndexReader>) -> Self
+    where
+        Eth: Clone,
+    {
+        let inner = Arc::new(TraceApiInner {
+            eth_api: self.inner.eth_api.clone(),
+            blocking_task_guard: self.inner.blocking_task_guard.clone(),
+            eth_config: self.inner.eth_config.clone(),
+            call_trace_index: Some(index),
+        });
         Self { inner }
     }
 
@@ -70,6 +92,90 @@ impl<Eth> TraceApi<Eth> {
     /// Access the underlying `Eth` API.
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
+    }
+
+    /// Queries the call trace index to find candidate blocks for a `trace_filter` request.
+    ///
+    /// Returns `Some(blocks)` if the index can narrow down the set of blocks to trace,
+    /// or `None` if a full scan is needed (e.g., no address filters specified or no index
+    /// configured).
+    fn candidate_blocks_for_trace_filter(
+        &self,
+        filter: &TraceFilter,
+        start: u64,
+        end: u64,
+    ) -> Result<Option<Vec<u64>>, EthApiError> {
+        let Some(index) = self.inner.call_trace_index.as_ref() else {
+            return Ok(None);
+        };
+
+        let from_addrs = &filter.from_address;
+        let to_addrs = &filter.to_address;
+
+        // If no addresses specified, we can't narrow down — need full scan
+        if from_addrs.is_empty() && to_addrs.is_empty() {
+            return Ok(None)
+        }
+
+        let range = start..=end;
+        let max_blocks = self.inner.eth_config.max_trace_filter_blocks as usize;
+
+        let mut from_blocks = HashSet::<u64>::default();
+        let mut to_blocks = HashSet::<u64>::default();
+
+        for addr in from_addrs {
+            match index.call_trace_from_blocks(*addr, range.clone()) {
+                Ok(blocks) => from_blocks.extend(blocks),
+                Err(err) => {
+                    // Index read failed — fall back to full block scan so results are
+                    // correct rather than silently incomplete.
+                    tracing::warn!(target: "rpc::trace", %err, "Failed to read call trace from-index, falling back to full scan");
+                    return Ok(None);
+                }
+            }
+            if from_blocks.len() > max_blocks {
+                return Err(EthApiError::InvalidParams(format!(
+                    "Too many candidate blocks for trace_filter; currently limited to {max_blocks} blocks",
+                )));
+            }
+        }
+
+        for addr in to_addrs {
+            match index.call_trace_to_blocks(*addr, range.clone()) {
+                Ok(blocks) => to_blocks.extend(blocks),
+                Err(err) => {
+                    tracing::warn!(target: "rpc::trace", %err, "Failed to read call trace to-index, falling back to full scan");
+                    return Ok(None);
+                }
+            }
+            if to_blocks.len() > max_blocks {
+                return Err(EthApiError::InvalidParams(format!(
+                    "Too many candidate blocks for trace_filter; currently limited to {max_blocks} blocks",
+                )));
+            }
+        }
+
+        // Combine based on filter mode
+        let result = match filter.mode {
+            alloy_rpc_types_trace::filter::TraceFilterMode::Union => {
+                let mut combined = from_blocks;
+                combined.extend(to_blocks);
+                combined
+            }
+            alloy_rpc_types_trace::filter::TraceFilterMode::Intersection => {
+                if from_addrs.is_empty() {
+                    to_blocks
+                } else if to_addrs.is_empty() {
+                    from_blocks
+                } else {
+                    from_blocks.intersection(&to_blocks).copied().collect()
+                }
+            }
+        };
+
+        let mut blocks: Vec<u64> = result.into_iter().collect();
+        blocks.sort_unstable();
+        Ok(Some(blocks))
     }
 }
 
@@ -344,15 +450,14 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
-        let start = from_block.unwrap_or(0);
+        let start = filter.from_block.unwrap_or(0);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         if start > latest_block {
             // can't trace that range
             return Err(EthApiError::HeaderNotFound(start.into()).into());
         }
-        let end = to_block.unwrap_or(latest_block);
+        let end = filter.to_block.unwrap_or(latest_block);
         if end > latest_block {
             return Err(EthApiError::HeaderNotFound(end.into()).into());
         }
@@ -364,9 +469,30 @@ where
             .into())
         }
 
-        // ensure that the range is not too large, since we need to fetch all blocks in the range
-        let distance = end.saturating_sub(start);
-        if distance > self.inner.eth_config.max_trace_filter_blocks {
+        // Use the call trace index to narrow down candidate blocks when address
+        // filters are specified. This avoids tracing every block in the range.
+        let candidate_blocks = self.candidate_blocks_for_trace_filter(&filter, start, end)?;
+
+        // Check the range size before allocating the full block list to avoid OOM
+        // on huge ranges (e.g. fromBlock:0, toBlock:latest with no address filter).
+        let is_full_range = candidate_blocks.is_none();
+        if is_full_range {
+            let distance = end.saturating_sub(start);
+            if distance > self.inner.eth_config.max_trace_filter_blocks {
+                return Err(EthApiError::InvalidParams(format!(
+                    "Block range too large; currently limited to {} blocks",
+                    self.inner.eth_config.max_trace_filter_blocks
+                ))
+                .into())
+            }
+        }
+
+        // Build the list of block number ranges to trace. When the index provides
+        // candidate blocks we trace only those; otherwise we fall back to the full range.
+        let block_numbers: Vec<u64> = candidate_blocks.unwrap_or_else(|| (start..=end).collect());
+
+        // ensure that the number of blocks to trace is not too large
+        if block_numbers.len() as u64 > self.inner.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(format!(
                 "Block range too large; currently limited to {} blocks",
                 self.inner.eth_config.max_trace_filter_blocks
@@ -374,29 +500,48 @@ where
             .into())
         }
 
+        let mut after = filter.after;
+        let count = filter.count;
+
         let mut all_traces = Vec::new();
         let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end = std::cmp::min(
-                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
-                end,
-            );
 
-            // fetch all blocks in that chunk
+        for chunk in block_numbers.chunks(self.inner.eth_config.max_tracing_requests) {
+            let chunk = chunk.to_vec();
+
+            // fetch blocks for this chunk
             let blocks = self
                 .eth_api()
                 .spawn_blocking_io(move |this| {
-                    Ok(this
-                        .provider()
-                        .recovered_block_range(chunk_start..=chunk_end)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .into_iter()
-                        .map(Arc::new)
-                        .collect::<Vec<_>>())
+                    if is_full_range {
+                        // Contiguous range: use the optimized bulk fetch
+                        let chunk_start = chunk[0];
+                        let chunk_end = chunk[chunk.len() - 1];
+                        Ok(this
+                            .provider()
+                            .recovered_block_range(chunk_start..=chunk_end)
+                            .map_err(Eth::Error::from_eth_err)?
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>())
+                    } else {
+                        // Sparse candidate blocks: fetch individually
+                        let mut result = Vec::with_capacity(chunk.len());
+                        for block_num in chunk {
+                            if let Some(block) = this
+                                .provider()
+                                .recovered_block(block_num.into(), TransactionVariant::WithHash)
+                                .map_err(Eth::Error::from_eth_err)?
+                            {
+                                result.push(Arc::new(block));
+                            }
+                        }
+                        Ok(result)
+                    }
                 })
                 .await?;
 
-            // trace all blocks
+            // trace all blocks in the chunk
             for block in &blocks {
                 let matcher = matcher.clone();
                 let traces = self.eth_api().trace_block_until(
@@ -701,8 +846,9 @@ where
     ///
     /// This is similar to `eth_getLogs` but for traces.
     ///
-    /// # Limitations
-    /// This currently requires block filter fields, since reth does not have address indices yet.
+    /// When `fromAddress` or `toAddress` filters are specified, the call trace index
+    /// (`CallTraceFromIndex`/`CallTraceToIndex`) is used to narrow down candidate blocks,
+    /// avoiding full block range scans.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
         let _permit = self.inner.blocking_task_guard.clone().acquire_many_owned(2).await;
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
@@ -764,6 +910,8 @@ struct TraceApiInner<Eth> {
     blocking_task_guard: BlockingTaskGuard,
     // eth config settings
     eth_config: EthConfig,
+    /// Optional call trace index reader for optimizing `trace_filter` queries.
+    call_trace_index: Option<Arc<dyn CallTraceIndexReader>>,
 }
 
 /// Response type for storage tracing that contains all accessed storage slots
@@ -808,5 +956,173 @@ fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTr
             error: None,
             result: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, map::HashMap};
+    use alloy_rpc_types_trace::filter::{TraceFilter, TraceFilterMode};
+    use reth_storage_api::CallTraceIndexReader;
+
+    struct MockCallTraceIndex {
+        from_blocks: HashMap<Address, Vec<u64>>,
+        to_blocks: HashMap<Address, Vec<u64>>,
+    }
+
+    impl CallTraceIndexReader for MockCallTraceIndex {
+        fn call_trace_from_blocks(
+            &self,
+            address: Address,
+            range: std::ops::RangeInclusive<u64>,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<u64>> {
+            Ok(self
+                .from_blocks
+                .get(&address)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|b| range.contains(b))
+                .collect())
+        }
+
+        fn call_trace_to_blocks(
+            &self,
+            address: Address,
+            range: std::ops::RangeInclusive<u64>,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Vec<u64>> {
+            Ok(self
+                .to_blocks
+                .get(&address)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|b| range.contains(b))
+                .collect())
+        }
+    }
+
+    fn make_trace_api(index: Option<MockCallTraceIndex>) -> TraceApi<()> {
+        let inner = Arc::new(TraceApiInner {
+            eth_api: (),
+            blocking_task_guard: BlockingTaskGuard::new(10),
+            eth_config: EthConfig::default(),
+            call_trace_index: index.map(|i| Arc::new(i) as Arc<dyn CallTraceIndexReader>),
+        });
+        TraceApi { inner }
+    }
+
+    fn make_filter(
+        from_address: Vec<Address>,
+        to_address: Vec<Address>,
+        mode: TraceFilterMode,
+    ) -> TraceFilter {
+        TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address,
+            to_address,
+            mode,
+            after: None,
+            count: None,
+        }
+    }
+
+    #[test]
+    fn test_no_index_returns_none() {
+        let api = make_trace_api(None);
+        let filter = make_filter(
+            vec![address!("0x0000000000000000000000000000000000000001")],
+            vec![],
+            TraceFilterMode::Union,
+        );
+        assert!(api.candidate_blocks_for_trace_filter(&filter, 0, 100).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_no_addresses_returns_none() {
+        let index =
+            MockCallTraceIndex { from_blocks: HashMap::default(), to_blocks: HashMap::default() };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![], vec![], TraceFilterMode::Union);
+        assert!(api.candidate_blocks_for_trace_filter(&filter, 0, 100).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_union_both_sides() {
+        let addr_a = address!("0x000000000000000000000000000000000000000a");
+        let addr_b = address!("0x000000000000000000000000000000000000000b");
+
+        let index = MockCallTraceIndex {
+            from_blocks: HashMap::from_iter([(addr_a, vec![1, 3, 5])]),
+            to_blocks: HashMap::from_iter([(addr_b, vec![2, 3, 6])]),
+        };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![addr_a], vec![addr_b], TraceFilterMode::Union);
+
+        let result = api.candidate_blocks_for_trace_filter(&filter, 0, 10).unwrap();
+        assert_eq!(result, Some(vec![1, 2, 3, 5, 6]));
+    }
+
+    #[test]
+    fn test_intersection_both_sides() {
+        let addr_a = address!("0x000000000000000000000000000000000000000a");
+        let addr_b = address!("0x000000000000000000000000000000000000000b");
+
+        let index = MockCallTraceIndex {
+            from_blocks: HashMap::from_iter([(addr_a, vec![1, 3, 5])]),
+            to_blocks: HashMap::from_iter([(addr_b, vec![2, 3, 6])]),
+        };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![addr_a], vec![addr_b], TraceFilterMode::Intersection);
+
+        let result = api.candidate_blocks_for_trace_filter(&filter, 0, 10).unwrap();
+        assert_eq!(result, Some(vec![3]));
+    }
+
+    #[test]
+    fn test_intersection_from_only() {
+        let addr_a = address!("0x000000000000000000000000000000000000000a");
+
+        let index = MockCallTraceIndex {
+            from_blocks: HashMap::from_iter([(addr_a, vec![1, 3, 5])]),
+            to_blocks: HashMap::default(),
+        };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![addr_a], vec![], TraceFilterMode::Intersection);
+
+        let result = api.candidate_blocks_for_trace_filter(&filter, 0, 10).unwrap();
+        assert_eq!(result, Some(vec![1, 3, 5]));
+    }
+
+    #[test]
+    fn test_intersection_to_only() {
+        let addr_b = address!("0x000000000000000000000000000000000000000b");
+
+        let index = MockCallTraceIndex {
+            from_blocks: HashMap::default(),
+            to_blocks: HashMap::from_iter([(addr_b, vec![2, 3, 6])]),
+        };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![], vec![addr_b], TraceFilterMode::Intersection);
+
+        let result = api.candidate_blocks_for_trace_filter(&filter, 0, 10).unwrap();
+        assert_eq!(result, Some(vec![2, 3, 6]));
+    }
+
+    #[test]
+    fn test_range_filtering() {
+        let addr_a = address!("0x000000000000000000000000000000000000000a");
+
+        let index = MockCallTraceIndex {
+            from_blocks: HashMap::from_iter([(addr_a, vec![1, 5, 10, 15, 20])]),
+            to_blocks: HashMap::default(),
+        };
+        let api = make_trace_api(Some(index));
+        let filter = make_filter(vec![addr_a], vec![], TraceFilterMode::Union);
+
+        let result = api.candidate_blocks_for_trace_filter(&filter, 5, 15).unwrap();
+        assert_eq!(result, Some(vec![5, 10, 15]));
     }
 }
