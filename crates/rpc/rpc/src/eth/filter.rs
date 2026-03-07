@@ -946,7 +946,9 @@ pub enum EthFilterError {
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     /// Query result is too large.
-    #[error("query exceeds max results {max_logs}, retry with the range {from_block}-{to_block}")]
+    #[error(
+        "query exceeds max results {max_logs}, retry with the range {from_block:#x}-{to_block:#x}"
+    )]
     QueryExceedsMaxResults {
         /// Maximum number of logs allowed per response
         max_logs: usize,
