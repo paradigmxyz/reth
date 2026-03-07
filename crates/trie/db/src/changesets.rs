@@ -853,9 +853,6 @@ impl ChangesetCacheInner {
             self.block_numbers.range(..up_to_block).map(|(num, _)| *num).collect();
 
         // Remove entries for each block number below threshold
-        #[cfg(feature = "metrics")]
-        let mut evicted_count = 0;
-        #[cfg(not(feature = "metrics"))]
         let mut evicted_count = 0;
 
         for block_number in &blocks_to_evict {
