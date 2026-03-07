@@ -97,7 +97,7 @@ pub enum EthApiError {
     #[error("invalid block range")]
     InvalidBlockRange,
     /// Requested block number is beyond the head block
-    #[error("request beyond head block: requested {requested}, head {head}")]
+    #[error("request beyond head block: requested {requested:#x}, head {head:#x}")]
     RequestBeyondHead {
         /// The requested block number
         requested: u64,

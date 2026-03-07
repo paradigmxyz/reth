@@ -51,7 +51,7 @@ pub enum EthSimulateError {
     #[error("Client adjustable limit reached")]
     GasLimitReached,
     /// Block number in sequence did not increase.
-    #[error("block numbers must be in order: {got} <= {parent}")]
+    #[error("block numbers must be in order: {got:#x} <= {parent:#x}")]
     BlockNumberInvalid {
         /// The block number that was provided.
         got: u64,
