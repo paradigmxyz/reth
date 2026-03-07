@@ -190,7 +190,6 @@ pub trait EthFees:
                 }
 
                 let chain_spec = self.provider().chain_spec();
-
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
@@ -207,14 +206,15 @@ pub trait EthFees:
                 }
 
                 if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
-                    // Fetch blocks and receipts with bounded concurrency (4 in flight). Drive with `while let` so we process each result as it arrives.
+                    let hashes: Vec<_> = headers.iter().map(|h| h.hash()).collect();
                     let mut stream =
-                        futures::stream::iter(headers.iter().map(|h| h.hash()).collect::<Vec<_>>())
+                        futures::stream::iter(hashes)
                             .map(|hash| self.cache().get_block_and_receipts(hash))
                             .buffered(4);
-                    let mut header_iter = headers.iter();
+                    let mut header_idx = 0;
                     while let Some(result) = stream.next().await {
-                        let header = header_iter.next().expect("stream length equals headers");
+                        let header = &headers[header_idx];
+                        header_idx += 1;
                         let (block, receipts) = result
                             .map_err(Self::Error::from_eth_err)?
                             .ok_or(EthApiError::InvalidBlockRange)?;
