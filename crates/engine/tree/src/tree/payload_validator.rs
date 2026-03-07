@@ -25,6 +25,7 @@ use reth_chain_state::{
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    StateRootDecisionInput, StateRootValidator, StrictStateRootValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -35,8 +36,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
@@ -129,9 +130,10 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
 /// used as a standalone component, but rather as a building block for concrete implementations.
 #[derive(derive_more::Debug)]
-pub struct BasicEngineValidator<P, Evm, V>
+pub struct BasicEngineValidator<P, Evm, V, SR = StrictStateRootValidator>
 where
     Evm: ConfigureEvm,
+    SR: StateRootValidator<Evm::Primitives>,
 {
     /// Provider for database access.
     provider: P,
@@ -154,13 +156,16 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// Strategy for validating computed state roots.
+    #[debug(skip)]
+    state_root_validator: SR,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
 }
 
-impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
+impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V, StrictStateRootValidator>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
@@ -211,11 +216,82 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            state_root_validator: StrictStateRootValidator,
             changeset_cache,
             runtime,
         }
     }
+}
 
+impl<P, Evm, V, SR> BasicEngineValidator<P, Evm, V, SR>
+where
+    Evm: ConfigureEvm,
+    SR: StateRootValidator<Evm::Primitives>,
+{
+    /// Sets the state root validator used during block validation.
+    pub fn with_state_root_validator<NSR>(
+        self,
+        state_root_validator: NSR,
+    ) -> BasicEngineValidator<P, Evm, V, NSR>
+    where
+        NSR: StateRootValidator<Evm::Primitives>,
+    {
+        let Self {
+            provider,
+            consensus,
+            evm_config,
+            config,
+            payload_processor,
+            precompile_cache_map,
+            precompile_cache_metrics,
+            invalid_block_hook,
+            metrics,
+            validator,
+            state_root_validator: _,
+            changeset_cache,
+            runtime,
+        } = self;
+
+        BasicEngineValidator {
+            provider,
+            consensus,
+            evm_config,
+            config,
+            payload_processor,
+            precompile_cache_map,
+            precompile_cache_metrics,
+            invalid_block_hook,
+            metrics,
+            validator,
+            state_root_validator,
+            changeset_cache,
+            runtime,
+        }
+    }
+}
+
+impl<N, P, Evm, V, SR> BasicEngineValidator<P, Evm, V, SR>
+where
+    N: NodePrimitives,
+    P: DatabaseProviderFactory<
+            Provider: BlockReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + StorageChangeSetReader
+                          + BlockNumReader
+                          + StorageSettingsCache,
+        > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
+        + StateProviderFactory
+        + StateReader
+        + HashedPostStateProvider
+        + Clone
+        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+    SR: StateRootValidator<N>,
+{
     /// Converts a [`BlockOrPayload`] to a recovered block.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
@@ -459,12 +535,32 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
         };
 
-        // Plan the strategy used for state root computation.
+        let num_hash = input.num_hash();
+        let state_root_decision_input = StateRootDecisionInput {
+            timestamp: input.timestamp(),
+            block_number: num_hash.number,
+            block_hash: num_hash.hash,
+            parent_hash: input.parent_hash(),
+        };
+        let should_compute_state_root =
+            self.state_root_validator.should_compute_state_root(&state_root_decision_input);
+
+        // Plan the preferred strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
+
+        // If state-root computation is disabled by policy, force a non-StateRootTask path
+        // to avoid spawning expensive state-root worker tasks while still executing the block.
+        let execution_strategy = if should_compute_state_root {
+            strategy
+        } else {
+            StateRootStrategy::Synchronous
+        };
 
         debug!(
             target: "engine::tree::payload_validator",
             ?strategy,
+            ?execution_strategy,
+            should_compute_state_root,
             "Decided which state root algorithm to run"
         );
 
@@ -496,7 +592,7 @@ where
             txs,
             provider_builder,
             overlay_factory.clone(),
-            strategy,
+            execution_strategy,
             block_access_list,
         ));
 
@@ -613,6 +709,30 @@ where
             block
         );
 
+        if !should_compute_state_root {
+            debug!(
+                target: "engine::tree::payload_validator",
+                block = ?block.num_hash(),
+                "Skipping state root computation by validator policy"
+            );
+
+            if let Some(valid_block_tx) = valid_block_tx {
+                let _ = valid_block_tx.send(());
+            }
+
+            return Ok(self.spawn_deferred_trie_task(
+                block,
+                output,
+                &ctx,
+                hashed_state,
+                // State-root computation/validation was intentionally skipped by policy.
+                // In this mode we intentionally don't materialize trie updates from root
+                // computation and pass an empty update set.
+                TrieUpdates::default(),
+                overlay_factory,
+            ));
+        }
+
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
@@ -664,21 +784,23 @@ where
                         }
 
                         // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
-                        } else {
-                            warn!(
-                                target: "engine::tree::payload_validator",
-                                ?state_root,
-                                block_state_root = ?block.header().state_root(),
-                                "State root task returned incorrect state root"
-                            );
-                            #[cfg(feature = "trie-debug")]
-                            Self::write_trie_debug_recorders(
-                                block.header().number(),
-                                &trie_debug_recorders,
-                            );
-                            state_root_task_failed = true;
+                        match self.state_root_validator.validate_state_root(&block, state_root) {
+                            Ok(()) => maybe_state_root = Some((state_root, trie_updates, elapsed)),
+                            Err(error) => {
+                                warn!(
+                                    target: "engine::tree::payload_validator",
+                                    ?state_root,
+                                    block_state_root = ?block.header().state_root(),
+                                    %error,
+                                    "State root task result rejected by payload validator"
+                                );
+                                #[cfg(feature = "trie-debug")]
+                                Self::write_trie_debug_recorders(
+                                    block.header().number(),
+                                    &trie_debug_recorders,
+                                );
+                                state_root_task_failed = true;
+                            }
                         }
                     }
                     Err(error) => {
@@ -741,8 +863,10 @@ where
             .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
-        // ensure state root matches
-        if state_root != block.header().state_root() {
+        // ensure state root matches (or is otherwise accepted by the payload validator)
+        if let Err(consensus_error) =
+            self.state_root_validator.validate_state_root(&block, state_root)
+        {
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 
@@ -754,13 +878,9 @@ where
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
-            let block_state_root = block.header().state_root();
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
-                )
-                .into(),
+                consensus_error.into(),
             )
             .into())
         }
@@ -1404,8 +1524,8 @@ where
         block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
         PayloadHandle<
-            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
-            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, SR, T>,
+            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, SR, T>,
             N::Receipt,
         >,
         InsertBlockErrorKind,
@@ -1904,7 +2024,7 @@ pub trait EngineValidator<
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
 }
 
-impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
+impl<N, Types, P, Evm, V, SR> EngineValidator<Types> for BasicEngineValidator<P, Evm, V, SR>
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
@@ -1925,6 +2045,7 @@ where
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
+    SR: StateRootValidator<N>,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
@@ -1967,9 +2088,10 @@ where
     }
 }
 
-impl<P, Evm, V> WaitForCaches for BasicEngineValidator<P, Evm, V>
+impl<P, Evm, V, SR> WaitForCaches for BasicEngineValidator<P, Evm, V, SR>
 where
     Evm: ConfigureEvm,
+    SR: StateRootValidator<Evm::Primitives>,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
         self.payload_processor.wait_for_caches()
@@ -2062,6 +2184,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_used(),
             Self::Block(block) => block.gas_used(),
+        }
+    }
+
+    /// Returns the timestamp from the payload or block header.
+    pub fn timestamp(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.timestamp(),
+            Self::Block(block) => block.timestamp(),
         }
     }
 }

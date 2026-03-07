@@ -21,12 +21,13 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_consensus::ConsensusError;
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::spawn_os_thread;
 use std::{
@@ -41,7 +42,7 @@ use std::{
 use tokio::sync::oneshot;
 
 /// Mock engine validator for tests
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct MockEngineValidator;
 
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
@@ -83,6 +84,123 @@ impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
         // Mock implementation - always valid
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SkipStateRootValidator;
+
+impl StateRootValidator<EthPrimitives> for SkipStateRootValidator {
+    fn should_compute_state_root(
+        &self,
+        _input: &reth_engine_primitives::StateRootDecisionInput,
+    ) -> bool {
+        false
+    }
+
+    fn validate_state_root(
+        &self,
+        _block: &RecoveredBlock<Block>,
+        _computed_state_root: B256,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct NoComputePanicStateRootValidator;
+
+impl StateRootValidator<EthPrimitives> for NoComputePanicStateRootValidator {
+    fn should_compute_state_root(
+        &self,
+        _input: &reth_engine_primitives::StateRootDecisionInput,
+    ) -> bool {
+        false
+    }
+
+    fn validate_state_root(
+        &self,
+        _block: &RecoveredBlock<Block>,
+        _computed_state_root: B256,
+    ) -> Result<(), ConsensusError> {
+        panic!("validate_state_root should not be called when state-root computation is disabled")
+    }
+}
+
+#[test]
+fn test_validate_block_allows_state_root_skip_policy() {
+    let sealed = TestBlockBuilder::eth()
+        .with_chain_spec(MAINNET.as_ref().clone())
+        .generate_random_block(1, MAINNET.genesis_hash())
+        .into_block()
+        .seal_slow();
+    let recovered = sealed.try_recover().expect("recover senders");
+
+    let computed_state_root = if recovered.header().state_root() == B256::ZERO {
+        B256::with_last_byte(1)
+    } else {
+        B256::ZERO
+    };
+
+    let strict = StrictStateRootValidator;
+    let err = <StrictStateRootValidator as StateRootValidator<EthPrimitives>>::validate_state_root(
+        &strict,
+        &recovered,
+        computed_state_root,
+    )
+    .expect_err("strict validator should reject mismatched state root");
+    assert_matches!(err, ConsensusError::BodyStateRootDiff(_));
+
+    let skip = SkipStateRootValidator;
+    <SkipStateRootValidator as StateRootValidator<EthPrimitives>>::validate_state_root(
+        &skip,
+        &recovered,
+        computed_state_root,
+    )
+    .expect("skip policy should accept mismatched state root");
+}
+
+#[test]
+fn test_skip_policy_bypasses_state_root_computation() {
+    let chain_spec = MAINNET.clone();
+    let mut harness = TestHarness::new(chain_spec.clone());
+    let seed_blocks: Vec<_> = harness.block_builder.get_executed_blocks(1..2).collect();
+    let mut harness = harness.with_blocks(seed_blocks);
+    let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
+    let evm_config = MockEvmConfig::default();
+    evm_config.extend([reth_execution_types::ExecutionOutcome::default()]);
+
+    let mut validator = BasicEngineValidator::new(
+        harness.provider.clone(),
+        consensus,
+        evm_config,
+        MockEngineValidator::default(),
+        TreeConfig::default(),
+        Box::new(NoopInvalidBlockHook::default()),
+        ChangesetCache::new(),
+        reth_tasks::Runtime::test(),
+    )
+    .with_state_root_validator(NoComputePanicStateRootValidator);
+
+    let parent = harness.tree.state.tree_state.current_canonical_head;
+    let mut block = loop {
+        let candidate = harness
+            .block_builder
+            .generate_random_block(parent.number + 1, parent.hash)
+            .into_block();
+        if candidate.body.transactions.is_empty() {
+            break candidate
+        }
+    };
+    // force a mismatch with computed state root to ensure strict mode would reject this block
+    block.header.state_root = B256::random();
+    let block = block.seal_slow();
+
+    let ctx = TreeCtx::new(&mut harness.tree.state, &harness.tree.canonical_in_memory_state);
+    let result = validator.validate_block(block, ctx);
+    assert!(
+        result.is_ok(),
+        "skip policy should bypass state-root computation and validation, got: {result:?}"
+    );
 }
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -181,7 +299,7 @@ impl TestHarness {
 
         let provider = MockEthProvider::default();
 
-        let payload_validator = MockEngineValidator;
+        let payload_validator = MockEngineValidator::default();
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
@@ -396,7 +514,6 @@ impl ValidatorTestHarness {
         // Create validator identical to the one in TestHarness
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
         let provider = harness.provider.clone();
-        let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
         let changeset_cache = ChangesetCache::new();
 
@@ -404,7 +521,7 @@ impl ValidatorTestHarness {
             provider,
             consensus,
             evm_config,
-            payload_validator,
+            MockEngineValidator::default(),
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
