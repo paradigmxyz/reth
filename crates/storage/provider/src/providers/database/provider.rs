@@ -2653,19 +2653,51 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
+            let slots = storage.storage_slots_ref();
+            if slots.is_empty() {
+                continue;
+            }
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+            let mut slots_iter = slots.iter().peekable();
+
+            // Both incoming slots and DB duplicates are sorted, so we merge-walk
+            // them to avoid per-slot seeks. Upserts are deferred to a second pass
+            // because they reposition the cursor.
+            let mut db_entry = hashed_storage_cursor
+                .seek_by_key_subkey(*hashed_address, slots_iter.peek().unwrap().0)?;
+
+            let mut to_upsert = Vec::with_capacity(slots.len());
+
+            'outer: for &(hashed_slot, value) in slots_iter {
+                while let Some(entry) = &db_entry {
+                    match entry.key.cmp(&hashed_slot) {
+                        Ordering::Less => {
+                            db_entry = hashed_storage_cursor.next_dup_val()?;
+                        }
+                        Ordering::Equal => {
+                            // Value unchanged, no write needed.
+                            if entry.value == value {
+                                db_entry = hashed_storage_cursor.next_dup_val()?;
+                                continue 'outer;
+                            }
+                            hashed_storage_cursor.delete_current()?;
+                            db_entry = hashed_storage_cursor
+                                .current()?
+                                .filter(|(k, _)| k == hashed_address)
+                                .map(|(_, v)| v);
+                            break;
+                        }
+                        Ordering::Greater => break,
+                    }
                 }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                if !value.is_zero() {
+                    to_upsert.push(StorageEntry { key: hashed_slot, value });
                 }
+            }
+
+            for entry in to_upsert {
+                hashed_storage_cursor.upsert(*hashed_address, &entry)?;
             }
         }
 
