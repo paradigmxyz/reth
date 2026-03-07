@@ -1,5 +1,9 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{keccak256, map::B256Map, Address, BlockNumber, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressSet, B256Map},
+    Address, BlockNumber, B256,
+};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
@@ -305,7 +309,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 
         // Iterate over account changesets and record value before first occurring account change
         let mut accounts = Vec::new();
-        let mut seen_accounts = HashSet::new();
+        let mut seen_accounts = AddressSet::default();
         for entry in provider.account_changesets_range(start..end)? {
             let (_, AccountBeforeTx { address, info }) = entry;
             if seen_accounts.insert(address) {
