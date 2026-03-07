@@ -32,7 +32,7 @@ pub trait LoadReceipt:
                 .get_receipts(hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                .ok_or(EthApiError::ReceiptsNotFound(hash.into()))?;
 
             let (gas_used, next_log_index) =
                 calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
