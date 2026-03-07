@@ -1,6 +1,6 @@
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{AddressSet, HashMap, HashSet},
     Address, BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
@@ -39,7 +39,7 @@ where
     // We still need direct access to HashedAccounts table
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
-    let mut seen_accounts = HashSet::new();
+    let mut seen_accounts = AddressSet::default();
     for (_, AccountBeforeTx { address, .. }) in account_changesets {
         if seen_accounts.insert(address) {
             let hashed_address = keccak256(address);
