@@ -1,7 +1,7 @@
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    BlockNumber, B256,
+    Address, BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
 use reth_db_api::{
@@ -39,20 +39,28 @@ where
     // We still need direct access to HashedAccounts table
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
+    let mut seen_accounts = HashSet::new();
     for (_, AccountBeforeTx { address, .. }) in account_changesets {
-        let hashed_address = keccak256(address);
-        account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        if seen_accounts.insert(address) {
+            let hashed_address = keccak256(address);
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
-        if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
-            destroyed_accounts.insert(hashed_address);
+            if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
+                destroyed_accounts.insert(hashed_address);
+            }
         }
     }
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
+    let mut last_address: Option<Address> = None;
+    let mut hashed_address = B256::ZERO;
     for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
-        let hashed_address = keccak256(address);
-        account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        if last_address != Some(address) {
+            last_address = Some(address);
+            hashed_address = keccak256(address);
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        }
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
