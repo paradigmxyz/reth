@@ -39,9 +39,9 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
-        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, NoFactory,
+        ParallelConfig, PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -343,7 +343,7 @@ where
         .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
             PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
         }))
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
+        .add_set(HashingStages { stages_config: self.stages_config.clone(), parallel: None })
         .add_set(HistoryIndexingStages {
             stages_config: self.stages_config.clone(),
             prune_modes: self.prune_modes.clone(),
@@ -411,22 +411,30 @@ where
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
 /// - [`MerkleStage`] (execute)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct HashingStages {
+pub struct HashingStages<Factory = NoFactory> {
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Optional parallel state root configuration for the merkle execute stage.
+    parallel: Option<ParallelConfig<Factory>>,
 }
 
-impl<Provider> StageSet<Provider> for HashingStages
+impl Default for HashingStages {
+    fn default() -> Self {
+        Self { stages_config: StageConfig::default(), parallel: None }
+    }
+}
+
+impl<Provider, Factory: 'static> StageSet<Provider> for HashingStages<Factory>
 where
-    MerkleStage: Stage<Provider>,
+    MerkleStage<Factory>: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
-            .add_stage(MerkleStage::default_unwind())
+            .add_stage(MerkleStage::<Factory>::Unwind)
             .add_stage(AccountHashingStage::new(
                 self.stages_config.account_hashing,
                 self.stages_config.etl.clone(),
@@ -435,10 +443,11 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(
-                self.stages_config.merkle.rebuild_threshold,
-                self.stages_config.merkle.incremental_threshold,
-            ))
+            .add_stage(MerkleStage::Execution {
+                rebuild_threshold: self.stages_config.merkle.rebuild_threshold,
+                incremental_threshold: self.stages_config.merkle.incremental_threshold,
+                parallel: self.parallel,
+            })
     }
 }
 
