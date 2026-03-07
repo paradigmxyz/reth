@@ -25,10 +25,16 @@ use crate::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
     },
 };
-use alloy_provider::{ext::DebugApi, Provider};
+use alloy_primitives::{Bytes, B256};
+use alloy_provider::{
+    ext::DebugApi,
+    network::{AnyNetwork, AnyRpcBlock},
+    Provider, RootProvider,
+};
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
+use futures::stream::{FuturesOrdered, StreamExt};
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
@@ -94,6 +100,19 @@ pub struct Command {
         verbatim_doc_comment
     )]
     rpc_block_buffer_size: usize,
+
+    /// Number of blocks to fetch concurrently from the RPC endpoint.
+    ///
+    /// When greater than 1, multiple blocks are fetched in parallel within the background
+    /// prefetch task, keeping the block buffer full even when RPC latency is high. Results
+    /// are always sent to the engine in order.
+    #[arg(
+        long = "rpc-parallel-fetches",
+        value_name = "RPC_PARALLEL_FETCHES",
+        default_value = "1",
+        verbatim_doc_comment
+    )]
+    rpc_parallel_fetches: usize,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -166,67 +185,52 @@ impl Command {
         }
 
         let buffer_size = self.rpc_block_buffer_size;
+        let parallel_fetches = self.rpc_parallel_fetches.max(1);
+
+        if parallel_fetches > 1 {
+            info!(
+                target: "reth-bench",
+                parallel_fetches,
+                buffer_size,
+                "Parallel block prefetching enabled"
+            );
+        }
 
         // Use a oneshot channel to propagate errors from the spawned task
         let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
 
         tokio::task::spawn(async move {
-            while benchmark_mode.contains(next_block) {
-                let block_res = block_provider
-                    .get_block_by_number(next_block.into())
-                    .full()
-                    .await
-                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
-                    Ok(block) => block,
+            let mut futures = FuturesOrdered::new();
+
+            // Seed the pipeline with up to `parallel_fetches` concurrent requests
+            for _ in 0..parallel_fetches {
+                if benchmark_mode.contains(next_block) {
+                    let block_num = next_block;
+                    next_block += 1;
+                    futures.push_back(fetch_block(&block_provider, block_num, rlp_blocks));
+                }
+            }
+
+            while let Some(result) = futures.next().await {
+                let data = match result {
+                    Ok(data) => data,
                     Err(e) => {
-                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", %e, "Block fetch failed");
                         let _ = error_sender.send(e);
                         break;
                     }
                 };
 
-                let rlp = if rlp_blocks {
-                    let rlp = match block_provider.debug_get_raw_block(next_block.into()).await {
-                        Ok(rlp) => rlp,
-                        Err(e) => {
-                            tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}: {e}");
-                            let _ = error_sender
-                                .send(eyre::eyre!("Failed to fetch raw block {next_block}: {e}"));
-                            break;
-                        }
-                    };
-                    Some(rlp)
-                } else {
-                    None
-                };
+                // Queue the next fetch before sending to keep the pipeline full
+                if benchmark_mode.contains(next_block) {
+                    let block_num = next_block;
+                    next_block += 1;
+                    futures.push_back(fetch_block(&block_provider, block_num, rlp_blocks));
+                }
 
-                let head_block_hash = block.header.hash;
-                let safe_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(32).into());
-
-                let finalized_block_hash = block_provider
-                    .get_block_by_number(block.header.number.saturating_sub(64).into());
-
-                let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
-
-                let safe_block_hash = match safe {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                let finalized_block_hash = match finalized {
-                    Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash,
-                };
-
-                next_block += 1;
-                if let Err(e) = sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash, rlp))
-                    .await
-                {
-                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
+                if sender.send(data).await.is_err() {
+                    tracing::error!(target: "reth-bench", "Channel closed, stopping prefetch");
                     break;
                 }
             }
@@ -360,4 +364,50 @@ impl Command {
 
         Ok(())
     }
+}
+
+type FetchedBlock = (AnyRpcBlock, B256, B256, B256, Option<Bytes>);
+
+/// Fetches a single block and its forkchoice ancestors from the RPC provider.
+async fn fetch_block(
+    provider: &RootProvider<AnyNetwork>,
+    block_number: u64,
+    rlp_blocks: bool,
+) -> eyre::Result<FetchedBlock> {
+    let block = provider
+        .get_block_by_number(block_number.into())
+        .full()
+        .await
+        .wrap_err_with(|| format!("Failed to fetch block by number {block_number}"))?
+        .ok_or_eyre(format!("Block {block_number} not found"))?;
+
+    let rlp = if rlp_blocks {
+        Some(
+            provider
+                .debug_get_raw_block(block_number.into())
+                .await
+                .map_err(|e| eyre::eyre!("Failed to fetch raw block {block_number}: {e}"))?,
+        )
+    } else {
+        None
+    };
+
+    let head_block_hash = block.header.hash;
+
+    let (safe, finalized) = tokio::join!(
+        provider.get_block_by_number(block.header.number.saturating_sub(32).into()),
+        provider.get_block_by_number(block.header.number.saturating_sub(64).into()),
+    );
+
+    let safe_block_hash = match safe {
+        Ok(Some(block)) => block.header.hash,
+        Ok(None) | Err(_) => head_block_hash,
+    };
+
+    let finalized_block_hash = match finalized {
+        Ok(Some(block)) => block.header.hash,
+        Ok(None) | Err(_) => head_block_hash,
+    };
+
+    Ok((block, head_block_hash, safe_block_hash, finalized_block_hash, rlp))
 }
