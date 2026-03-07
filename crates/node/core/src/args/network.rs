@@ -4,6 +4,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    num::NonZeroUsize,
     ops::Not,
     path::PathBuf,
     sync::OnceLock,
@@ -384,6 +385,10 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub network_id: Option<u64>,
 
+    /// Maximum allowed ETH message size in bytes. Default is 10 MiB.
+    #[arg(long = "eth-max-message-size", value_name = "BYTES")]
+    pub eth_max_message_size: Option<NonZeroUsize>,
+
     /// Restrict network communication to the given IP networks (CIDR masks).
     ///
     /// Comma separated list of CIDR network specifications.
@@ -544,6 +549,13 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .apply(|builder| {
+                if let Some(max_size) = self.eth_max_message_size {
+                    builder.eth_max_message_size(max_size.get())
+                } else {
+                    builder
+                }
+            })
             .network_id(self.network_id)
     }
 
@@ -680,6 +692,7 @@ impl Default for NetworkArgs {
             propagation_mode,
             required_block_hashes: vec![],
             network_id: None,
+            eth_max_message_size: None,
             netrestrict: None,
             enforce_enr_fork_id: false,
         }
@@ -1087,6 +1100,43 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn parse_eth_max_message_size() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "15728640",
+        ])
+        .args;
+
+        assert_eq!(
+            args.eth_max_message_size,
+            Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_zero_rejected() {
+        let result =
+            CommandParser::<NetworkArgs>::try_parse_from(["reth", "--eth-max-message-size", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_eth_max_message_size_above_rlpx_cap() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--eth-max-message-size",
+            "16777216",
+        ]);
+        assert!(result.is_ok());
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.eth_max_message_size,
+            Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap())
+        );
     }
 
     #[test]
