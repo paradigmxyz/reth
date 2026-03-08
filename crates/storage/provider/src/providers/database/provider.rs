@@ -255,7 +255,17 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         let mut block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == self.best_block_number().unwrap_or_default() &&
+        let best_block = self.best_block_number()?;
+
+        // Reject requests for blocks beyond the best block
+        if block_number > best_block {
+            return Err(ProviderError::BlockNotExecuted {
+                requested: block_number,
+                executed: best_block,
+            });
+        }
+
+        if block_number == best_block &&
             block_number == self.last_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProviderRef::new(self)))
@@ -4565,6 +4575,41 @@ mod tests {
         // Should fail with BlockNotExecuted error
         match result {
             Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
+            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
+            Ok(_) => panic!("Expected error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_history_by_block_hash_rejects_unexecuted_blocks() {
+        let factory = create_test_provider_factory();
+
+        // Insert genesis block and execute it
+        let data = BlockchainTestData::default();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Insert block 1 header into HeaderNumbers table (simulating a block that exists but isn't
+        // executed)
+        let provider_rw = factory.provider_rw().unwrap();
+        let block1_hash = data.blocks[0].0.hash();
+        provider_rw.tx.put::<tables::HeaderNumbers>(block1_hash, 1).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+
+        // Requesting state by hash for an unexecuted block should fail
+        let result = provider.history_by_block_hash(block1_hash);
+        match result {
+            Err(ProviderError::BlockNotExecuted { requested: 1, executed: 0 }) => {}
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
