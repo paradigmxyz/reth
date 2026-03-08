@@ -6,7 +6,10 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc,
+    },
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
@@ -28,7 +31,7 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
+use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -75,6 +78,13 @@ const TIMEOUT_SCALING: u32 = 3;
 /// Once we've queued up more responses than this, the session should prioritize message flushing
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
+
+/// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
+///
+/// Many small broadcast messages carrying a single tx hash each are equivalent in cost to one
+/// message carrying many hashes. This limit counts individual items (hashes, transactions, blocks)
+/// rather than messages, so that many small messages don't trigger aggressive drops unnecessarily.
+pub(super) const MAX_QUEUED_BROADCAST_ITEMS: usize = 4096;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
@@ -364,7 +374,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             }
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
-                    self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                    self.queued_outgoing.push_pooled_hashes(msg);
                 } else {
                     debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
@@ -894,6 +904,52 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             _ => false,
         }
     }
+
+    /// Returns the number of broadcast items in this message.
+    ///
+    /// For transaction hash announcements this is the number of hashes, for full transaction
+    /// broadcasts it is the number of transactions, and for blocks it is 1.
+    /// Request/response messages return 0.
+    fn broadcast_item_count(&self) -> usize {
+        match self {
+            Self::Eth(msg) => match msg {
+                EthMessage::NewBlockHashes(h) => h.len(),
+                EthMessage::NewPooledTransactionHashes66(h) => h.len(),
+                EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
+                _ => 0,
+            },
+            Self::Broadcast(msg) => match msg {
+                EthBroadcastMessage::NewBlock(_) => 1,
+                EthBroadcastMessage::Transactions(txs) => txs.len(),
+            },
+            Self::Raw(_) => 0,
+        }
+    }
+
+    /// Tries to merge pooled transaction hash announcements into this message if it is the same
+    /// variant (eth66 or eth68).
+    fn try_merge_hashes(&mut self, incoming: &NewPooledTransactionHashes) -> bool {
+        let Self::Eth(eth) = self else { return false };
+        match (eth, incoming) {
+            (
+                EthMessage::NewPooledTransactionHashes66(existing),
+                NewPooledTransactionHashes::Eth66(inc),
+            ) => {
+                existing.extend_from_slice(inc);
+                true
+            }
+            (
+                EthMessage::NewPooledTransactionHashes68(existing),
+                NewPooledTransactionHashes::Eth68(inc),
+            ) => {
+                existing.hashes.extend_from_slice(&inc.hashes);
+                existing.sizes.extend_from_slice(&inc.sizes);
+                existing.types.extend_from_slice(&inc.types);
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
@@ -919,24 +975,56 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
     smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
 
-/// A helper struct that wraps the queue of outgoing messages and a metric to track their count
+/// A helper struct that wraps the queue of outgoing messages with broadcast-aware tracking.
+///
+/// Tracks both the total number of queued messages (via a metric gauge) and the total number of
+/// broadcast items (tx hashes, transactions, blocks) via a shared atomic counter. The atomic
+/// counter is shared with [`ActiveSessionHandle`](super::handle::ActiveSessionHandle) so the
+/// [`SessionManager`](super::SessionManager) can apply size-based backpressure.
 pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     messages: VecDeque<OutgoingMessage<N>>,
     count: Gauge,
+    /// Shared counter of buffered broadcast items for size-based backpressure.
+    broadcast_items: Arc<AtomicUsize>,
 }
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
-    pub(crate) const fn new(metric: Gauge) -> Self {
-        Self { messages: VecDeque::new(), count: metric }
+    pub(crate) const fn new(metric: Gauge, broadcast_items: Arc<AtomicUsize>) -> Self {
+        Self { messages: VecDeque::new(), count: metric, broadcast_items }
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        let items = message.broadcast_item_count();
         self.messages.push_back(message);
         self.count.increment(1);
+        if items > 0 {
+            self.broadcast_items.fetch_add(items, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
-        self.messages.pop_front().inspect(|_| self.count.decrement(1))
+        self.messages.pop_front().inspect(|msg| {
+            self.count.decrement(1);
+            let items = msg.broadcast_item_count();
+            if items > 0 {
+                self.broadcast_items.fetch_sub(items, Ordering::Relaxed);
+            }
+        })
+    }
+
+    /// Pushes a pooled transaction hash announcement, merging into the last queued message if
+    /// it is the same variant (eth66 or eth68).
+    pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
+        let items = msg.len();
+        if let Some(last) = self.messages.back_mut() &&
+            last.try_merge_hashes(&msg)
+        {
+            self.broadcast_items.fetch_add(items, Ordering::Relaxed);
+            return;
+        }
+        self.messages.push_back(EthMessage::from(msg).into());
+        self.count.increment(1);
+        self.broadcast_items.fetch_add(items, Ordering::Relaxed);
     }
 
     pub(crate) fn shrink_to_fit(&mut self) {
@@ -1085,7 +1173,10 @@ mod tests {
                         internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
-                        queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),
+                        queued_outgoing: QueuedOutgoingMessages::new(
+                            Gauge::noop(),
+                            Arc::new(AtomicUsize::new(0)),
+                        ),
                         received_requests_from_remote: Default::default(),
                         internal_request_timeout_interval: tokio::time::interval(
                             INITIAL_REQUEST_TIMEOUT,
