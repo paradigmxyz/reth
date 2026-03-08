@@ -4,7 +4,6 @@ use crate::{
     pool::pending::PendingTransaction,
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
-use alloy_consensus::Transaction;
 use alloy_primitives::map::AddressSet;
 use core::fmt;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -57,9 +56,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             let best = Iterator::next(&mut self.best)?;
             // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
             // the transaction
-            if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
-                best.transaction
-                    .max_fee_per_blob_gas()
+            if best.max_fee_per_gas() >= self.base_fee as u128 &&
+                best.max_fee_per_blob_gas()
                     .is_none_or(|fee| fee >= self.base_fee_per_blob_gas as u128)
             {
                 return Some(best);
@@ -398,11 +396,10 @@ where
         // If we have space, try prioritizing transactions
         if self.prioritized_gas < self.max_prioritized_gas {
             for item in &mut self.inner {
-                if self.prioritized_senders.contains(&item.transaction.sender()) &&
-                    self.prioritized_gas + item.transaction.gas_limit() <=
-                        self.max_prioritized_gas
+                if self.prioritized_senders.contains(item.sender_ref()) &&
+                    self.prioritized_gas + item.gas_limit() <= self.max_prioritized_gas
                 {
-                    self.prioritized_gas += item.transaction.gas_limit();
+                    self.prioritized_gas += item.gas_limit();
                     return Some(item)
                 }
                 self.buffer.push_back(item);
@@ -432,7 +429,7 @@ where
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         if skip_blobs {
-            self.buffer.retain(|tx| !tx.transaction.is_eip4844())
+            self.buffer.retain(|tx| !tx.is_eip4844())
         }
         self.inner.set_skip_blobs(skip_blobs)
     }
@@ -446,6 +443,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         BestTransactions, Priority,
     };
+    use alloy_consensus::Transaction;
 
     #[test]
     fn test_best_iter() {
@@ -552,7 +550,7 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = best.next().expect("Transaction should be returned");
             assert_eq!(tx.nonce(), nonce);
-            assert!(tx.transaction.max_fee_per_gas() >= base_fee as u128);
+            assert!(tx.max_fee_per_gas() >= base_fee as u128);
         }
     }
 
@@ -609,10 +607,8 @@ mod tests {
         for nonce in 0..num_tx {
             let tx = best.next().expect("Transaction should be returned");
             assert_eq!(tx.nonce(), nonce);
-            assert!(tx.transaction.max_fee_per_gas() >= base_fee as u128);
-            assert!(
-                tx.transaction.max_fee_per_blob_gas().unwrap() >= base_fee_per_blob_gas as u128
-            );
+            assert!(tx.max_fee_per_gas() >= base_fee as u128);
+            assert!(tx.max_fee_per_blob_gas().unwrap() >= base_fee_per_blob_gas as u128);
         }
 
         // No more transactions should be returned
