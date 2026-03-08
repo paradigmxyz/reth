@@ -410,7 +410,12 @@ fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
     response
 }
 
-#[cfg(tokio_unstable)]
+#[cfg(all(
+    tokio_unstable,
+    feature = "tokio-taskdump",
+    target_os = "linux",
+    any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")
+))]
 async fn handle_tokio_dump() -> Response<Full<Bytes>> {
     let handle = tokio::runtime::Handle::current();
     let dump = handle.dump().await;
@@ -426,10 +431,15 @@ async fn handle_tokio_dump() -> Response<Full<Bytes>> {
     response
 }
 
-#[cfg(not(tokio_unstable))]
+#[cfg(not(all(
+    tokio_unstable,
+    feature = "tokio-taskdump",
+    target_os = "linux",
+    any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")
+)))]
 async fn handle_tokio_dump() -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from_static(
-        b"tokio task dump not available. Rebuild with RUSTFLAGS=\"--cfg tokio_unstable\" and tokio's `taskdump` feature.",
+        b"tokio task dump not available. Rebuild on supported Linux targets with RUSTFLAGS=\"--cfg tokio_unstable\" and the `tokio-taskdump` feature.",
     )));
     *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
     response

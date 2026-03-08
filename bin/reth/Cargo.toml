@@ -108,6 +108,10 @@ js-tracer = [
 ]
 
 dev = ["reth-ethereum-cli/dev"]
+tokio-taskdump = [
+    "reth-ethereum-cli/tokio-taskdump",
+    "reth-node-metrics/tokio-taskdump",
+]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",

@@ -62,6 +62,7 @@ jemalloc-symbols = [
 ]
 tracy-allocator = ["tracy"]
 tracy = ["reth-tracing/tracy", "reth-node-core/tracy"]
+tokio-taskdump = ["reth-node-metrics/tokio-taskdump"]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
