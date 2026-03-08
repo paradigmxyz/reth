@@ -3,7 +3,7 @@ use alloy_primitives::{map::B256Map, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
     prefix_set::{PrefixSet, TriePrefixSets},
-    BranchNodeCompact, Nibbles,
+    BranchNodeCompact, Nibbles, TrieMask,
 };
 use std::sync::Arc;
 
@@ -92,7 +92,8 @@ impl<C> MaskedTrieCursor<C> {
 }
 
 impl<C: TrieCursor> MaskedTrieCursor<C> {
-    /// Mask hash bits on a node for children whose paths match the prefix set.
+    /// Mask hash bits on a node for children whose paths match the prefix set, and set
+    /// `state_mask` bits for new children discovered via the prefix set.
     ///
     /// Returns `true` if the node should be kept, `false` if it should be skipped (both
     /// `hash_mask` and `tree_mask` are empty after masking).
@@ -105,22 +106,52 @@ impl<C: TrieCursor> MaskedTrieCursor<C> {
         node.root_hash = None;
 
         let original_hash_mask = node.hash_mask;
-        if original_hash_mask.is_empty() {
-            return true;
-        }
 
-        let mut new_hash_mask = original_hash_mask;
+        // Check all 16 nibbles against the prefix set. For nibbles already in the state_mask
+        // that match, we build an unset_hash_mask to clear their cached hashes. For nibbles NOT in
+        // the state_mask that match, we set them on the state_mask so that consumers (e.g.
+        // proof_v2) discover new children that weren't present when the branch was persisted.
+        let mut unset_hash_mask = TrieMask::default();
+        let mut new_state_bits = TrieMask::default();
         let mut child_path = *key;
         let key_len = key.len();
 
-        for nibble in original_hash_mask.iter() {
+        for nibble in 0u8..16 {
             child_path.truncate(key_len);
             child_path.push(nibble);
 
             if self.prefix_set.contains(&child_path) {
-                new_hash_mask.unset_bit(nibble);
+                if node.state_mask.is_bit_set(nibble) {
+                    unset_hash_mask.set_bit(nibble);
+                } else {
+                    new_state_bits.set_bit(nibble);
+                }
             }
         }
+
+        // Add newly discovered children to the state_mask.
+        node.state_mask |= new_state_bits;
+
+        if original_hash_mask.is_empty() {
+            return true;
+        }
+
+        // We pessimistically assume all leaves matched by the prefix set will be removed.
+        //
+        // If removing dirty children leaves only a single child in the original state_mask,
+        // that child must also be unset. A single-child branch is invalid in MPT — the branch
+        // must collapse — so the remaining child must be revealed in order to perform the collapse.
+        // Its cached hash cannot be used.
+        //
+        // New state bits are excluded: they represent children being added, so they cannot
+        // cause the branch to collapse.
+        let remaining_bits = (node.state_mask & !new_state_bits) & !unset_hash_mask;
+        if remaining_bits.count_ones() == 1 {
+            unset_hash_mask = node.state_mask;
+        }
+
+        // Apply unset_hash_mask to hash_mask.
+        let new_hash_mask = original_hash_mask & !unset_hash_mask;
 
         if new_hash_mask != original_hash_mask {
             // Remove hashes for unset bits in-place.
@@ -242,11 +273,18 @@ mod tests {
 
     #[test]
     fn test_seek_masks_matching_child_hashes() {
-        // Node at [0x1] with children 2 and 5 hashed.
+        // Node at [0x1] with children 2 and 5 hashed, tree_mask keeps it alive.
         // Prefix set marks child 2 as changed.
+        // Since only one hashed bit (5) would remain and the original had more than one,
+        // that last bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
-            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                0b0000_0000_0010_0100,
+                vec![hash(2), hash(5)],
+            ),
         )];
 
         let mut ps = PrefixSetMut::default();
@@ -258,10 +296,9 @@ mod tests {
         let result = cursor.seek(Nibbles::default()).unwrap();
         let (key, node) = result.unwrap();
         assert_eq!(key, Nibbles::from_nibbles([0x1]));
-        // Hash bit 2 should be unset, only bit 5 remains.
         assert!(!node.hash_mask.is_bit_set(2));
-        assert!(node.hash_mask.is_bit_set(5));
-        assert_eq!(&*node.hashes, &[hash(5)]);
+        assert!(!node.hash_mask.is_bit_set(5));
+        assert!(node.hashes.is_empty());
     }
 
     #[test]
@@ -317,6 +354,10 @@ mod tests {
 
     #[test]
     fn test_seek_exact_masks_hash_bits() {
+        // Node at [0x1] with children 2 and 5 hashed.
+        // Prefix set marks child 5 as changed.
+        // Since only one hashed bit (2) would remain and the original had two,
+        // the last remaining bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
             node_with_tree_mask(
@@ -335,9 +376,9 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x1])).unwrap();
         let (_, node) = result.unwrap();
-        assert!(node.hash_mask.is_bit_set(2));
+        assert!(!node.hash_mask.is_bit_set(2));
         assert!(!node.hash_mask.is_bit_set(5));
-        assert_eq!(&*node.hashes, &[hash(2)]);
+        assert!(node.hashes.is_empty());
     }
 
     #[test]
@@ -395,6 +436,63 @@ mod tests {
     }
 
     #[test]
+    fn test_hash_preserved_when_multiple_state_children_remain() {
+        // Branch at [0x1] with children 0 (hashed), 1 (unhashed, state_mask only), 5 (hashed).
+        // state_mask has bits 0,1,5; hash_mask has only bits 0,5.
+        // Prefix set marks child 0 as changed → unset_mask has bit 0.
+        // Surviving state_mask is {1, 5} — two children, so no collapse needed.
+        // Hash for child 5 should be preserved.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0011, // state_mask: bits 0, 1, 5
+                0b0000_0000_0010_0011, // tree_mask: keeps node alive
+                0b0000_0000_0010_0001, // hash_mask: bits 0, 5 (NOT 1)
+                vec![hash(0), hash(5)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (_, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        // Child 0's hash cleared (dirty), child 5's hash preserved (two children remain).
+        assert!(!node.hash_mask.is_bit_set(0));
+        assert!(node.hash_mask.is_bit_set(5));
+        assert_eq!(&*node.hashes, &[hash(5)]);
+    }
+
+    #[test]
+    fn test_hash_cleared_when_single_state_child_remains() {
+        // Branch at [0x1] with children 0 (hashed), 5 (hashed).
+        // state_mask and hash_mask both have bits 0 and 5.
+        // Prefix set marks child 0 as changed → only child 5 remains in state_mask.
+        // Single-child branch must collapse → child 5's hash also cleared.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_0010_0001, // state_mask: bits 0, 5
+                0b0000_0000_0010_0001, // tree_mask: keeps node alive
+                0b0000_0000_0010_0001, // hash_mask: bits 0, 5
+                vec![hash(0), hash(5)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (_, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert!(node.hash_mask.is_empty(), "expected empty hash_mask, got {:?}", node.hash_mask);
+        assert!(node.hashes.is_empty());
+    }
+
+    #[test]
     fn test_no_match_returns_unchanged() {
         let nodes = vec![(
             Nibbles::from_nibbles([0x2]),
@@ -447,8 +545,12 @@ mod tests {
 
     #[test]
     fn test_root_hash_cleared_on_mask() {
-        let mut n =
-            node_with_hashes(0b0000_0000_0010_0100, 0b0000_0000_0010_0100, vec![hash(2), hash(5)]);
+        let mut n = node_with_tree_mask(
+            0b0000_0000_0010_0100,
+            0b0000_0000_0010_0100,
+            0b0000_0000_0010_0100,
+            vec![hash(2), hash(5)],
+        );
         n.root_hash = Some(hash(0xFF));
 
         let nodes = vec![(Nibbles::from_nibbles([0x1]), n)];
@@ -505,10 +607,11 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_mask_preserves_remaining_hashes() {
+    fn test_partial_mask_clears_last_remaining_hash() {
         // Node at [0x1] with children 0, 3, 7 hashed.
         // Prefix set marks children 0 and 7 as changed.
-        // Only hash for child 3 should remain.
+        // Only child 3 would remain, but since the original had more than one hashed bit,
+        // the single remaining bit is also cleared.
         let nodes = vec![(
             Nibbles::from_nibbles([0x1]),
             node_with_tree_mask(
@@ -529,10 +632,71 @@ mod tests {
         let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
         assert_eq!(key, Nibbles::from_nibbles([0x1]));
         assert!(!node.hash_mask.is_bit_set(0));
+        assert!(!node.hash_mask.is_bit_set(3));
+        assert!(!node.hash_mask.is_bit_set(7));
+        assert!(node.hashes.is_empty());
+        assert_eq!(node.root_hash, None);
+    }
+
+    #[test]
+    fn test_hash_preserved_when_state_mask_wider_and_multiple_remain() {
+        // Node at [0x1] with state_mask bits 0, 3, 7, 9 but only 0, 3, 7 hashed.
+        // Prefix set marks children 0 and 7 as changed.
+        // Surviving state children: {3, 9} — two children, so no collapse needed.
+        // Child 3's hash should be preserved since it's not dirty and the branch is valid.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0010_1000_1001, // state_mask: bits 0, 3, 7, 9
+                0b0000_0010_1000_1001,
+                0b0000_0000_1000_1001, // hash_mask: bits 0, 3, 7
+                vec![hash(0), hash(3), hash(7)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x0]));
+        ps.insert(Nibbles::from_nibbles([0x1, 0x7]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        // Children 0 and 7 are dirty → hashes cleared. Child 3's hash preserved.
+        assert!(!node.hash_mask.is_bit_set(0));
         assert!(node.hash_mask.is_bit_set(3));
         assert!(!node.hash_mask.is_bit_set(7));
         assert_eq!(&*node.hashes, &[hash(3)]);
-        assert_eq!(node.root_hash, None);
+    }
+
+    #[test]
+    fn test_unhashed_child_deleted_collapses_branch() {
+        // Reproduces the panic from proof_v2: branch at [0x1] with state_mask bits {3, 7},
+        // hash_mask bit {3} only. Nibble 7 has no hash (computed from leaves).
+        // Prefix set marks child 7 as changed (its leaves were deleted).
+        // After masking, only child 3 remains in state_mask — single-child branch must
+        // collapse, so child 3's cached hash must also be cleared.
+        let nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            node_with_tree_mask(
+                0b0000_0000_1000_1000, // state_mask: bits 3, 7
+                0b0000_0000_1000_1000,
+                0b0000_0000_0000_1000, // hash_mask: bit 3 only
+                vec![hash(3)],
+            ),
+        )];
+
+        let mut ps = PrefixSetMut::default();
+        ps.insert(Nibbles::from_nibbles([0x1, 0x7]));
+
+        let inner = make_cursor(nodes);
+        let mut cursor = MaskedTrieCursor::new(inner, ps.freeze());
+
+        let (key, node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(key, Nibbles::from_nibbles([0x1]));
+        assert!(node.hash_mask.is_empty(), "expected empty hash_mask, got {:?}", node.hash_mask);
+        assert!(node.hashes.is_empty());
     }
 
     mod proptest_tests {
