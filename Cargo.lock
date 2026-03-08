@@ -9056,6 +9056,7 @@ dependencies = [
  "metrics-derive",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
