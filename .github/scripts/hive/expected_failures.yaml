@@ -1,9 +1,6 @@
 # tracked by https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
-  - debug_getRawHeader/get-invalid-number (reth)
-  - debug_getRawReceipts/get-invalid-number (reth)
-  - debug_getRawReceipts/get-block-n (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
 
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
