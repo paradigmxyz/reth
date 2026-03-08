@@ -3074,7 +3074,7 @@ where
     /// This is called during `engine_forkchoiceUpdated` when the CL provides payload attributes,
     /// indicating it wants the EL to start building a new block.
     ///
-    /// Runs [`PayloadValidator::validate_payload_attributes_against_header`] to ensure
+    /// Runs [`PayloadValidator::validate_payload_attributes_against_header`](reth_engine_primitives::PayloadValidator::validate_payload_attributes_against_header) to ensure
     /// `payloadAttributes.timestamp > headBlock.timestamp` per the Engine API spec.
     ///
     /// If validation passes, sends the attributes to the payload builder to start a new
