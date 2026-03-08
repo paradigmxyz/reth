@@ -1,6 +1,7 @@
 use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
+use indexmap::IndexSet;
 use reth_primitives_traits::{Block, SealedBlock};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -22,7 +23,7 @@ pub struct BlockBuffer<B: Block> {
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
-    pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    pub(crate) parent_to_child: HashMap<BlockHash, IndexSet<BlockHash>>,
     /// `BTreeMap` tracking the earliest blocks by block number.
     /// Used for removal of old blocks that precede finalization.
     pub(crate) earliest_blocks: BTreeMap<BlockNumber, HashSet<BlockHash>>,
@@ -139,7 +140,7 @@ impl<B: Block> BlockBuffer<B> {
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
         // remove from parent to child connection, but only for this block parent.
         if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
-            entry.remove(hash);
+            entry.shift_remove(hash);
             // if set is empty remove block entry.
             if entry.is_empty() {
                 self.parent_to_child.remove(&parent_hash);
