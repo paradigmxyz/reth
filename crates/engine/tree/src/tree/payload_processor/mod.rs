@@ -425,9 +425,11 @@ where
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
             //
-            // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
-            // few transactions are recovered sequentially and sent immediately before
-            // entering the parallel iterator for the remainder.
+            // Both sequential and parallel conversion run concurrently: the parallel
+            // computation (signature recovery) starts on rayon immediately while the
+            // first few transactions are converted sequentially. The parallel consumer
+            // waits for the sequential path to finish yielding before it starts sending
+            // results, so execution receives transactions in the original order.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
@@ -435,28 +437,50 @@ where
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
 
+                let convert = Arc::new(convert);
+                let (seq_done_tx, seq_done_rx) = tokio::sync::oneshot::channel::<()>();
+
+                // Clone for parallel path.
+                let convert_par = convert.clone();
+                let prewarm_tx_par = prewarm_tx.clone();
+                let execute_tx_par = execute_tx.clone();
+                let executor_par = executor.clone();
+
+                // Start parallel computation on rayon immediately. The map() runs in
+                // parallel right away (sending to prewarm as soon as each tx is
+                // converted), but the ordered consumer waits for the sequential path
+                // to finish before yielding to execution.
+                executor.spawn_blocking_named("tx-iterator-par", move || {
+                    let mut seq_done_rx = Some(seq_done_rx);
+                    rest.into_par_iter()
+                        .enumerate()
+                        .map(|(i, tx)| {
+                            let idx = i + prefetch;
+                            let tx = convert_par.convert(tx);
+                            let tx = tx.map(|tx| {
+                                let (tx_env, tx) = tx.into_parts();
+                                let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                                let _ = prewarm_tx_par.send((idx, tx.clone()));
+                                tx
+                            });
+                            (idx, tx)
+                        })
+                        .for_each_ordered_in(executor_par.cpu_pool(), |(idx, tx)| {
+                            if let Some(rx) = seq_done_rx.take() {
+                                // Block until sequential path finishes yielding.
+                                let _ = rx.blocking_recv();
+                            }
+                            let _ = execute_tx_par.send(tx);
+                            debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        });
+                });
+
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(all.into_iter(), &*convert, &prewarm_tx, &execute_tx);
 
-                // Convert the remaining transactions in parallel.
-                rest.into_par_iter()
-                    .enumerate()
-                    .map(|(i, tx)| {
-                        let idx = i + prefetch;
-                        let tx = convert.convert(tx);
-                        (idx, tx)
-                    })
-                    .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                        let tx = tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            let _ = prewarm_tx.send((idx, tx.clone()));
-                            tx
-                        });
-                        let _ = execute_tx.send(tx);
-                        debug!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                    });
+                // Signal parallel path that sequential is done.
+                let _ = seq_done_tx.send(());
             });
         }
 
