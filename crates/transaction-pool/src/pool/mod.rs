@@ -544,7 +544,7 @@ where
     /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         let changed_senders = self.changed_senders(accounts.into_iter());
-        let UpdateOutcome { promoted, discarded } =
+        let UpdateOutcome { promoted, discarded, .. } =
             self.pool.write().update_accounts(changed_senders);
 
         self.notify_on_transaction_updates(promoted, discarded);
@@ -740,11 +740,37 @@ where
             self.on_new_pending_transaction(pending);
         }
 
+        // Notify listeners for blob transactions that are close enough to execution to announce
+        if let Some(tx) = meta.added.blob_announceable_transaction() {
+            self.on_blob_announceable_transaction(tx);
+        }
+
         // Notify event listeners
         self.notify_event_listeners(&meta.added);
 
         // Notify new transaction listeners
         self.on_new_transaction(meta.added.into_new_transaction_event());
+    }
+
+    /// Sends hashes to all pending transaction listeners, cleaning up closed channels.
+    fn notify_pending_listeners(
+        &self,
+        mut send_fn: impl FnMut(&PendingTransactionHashListener) -> bool,
+    ) {
+        let mut needs_cleanup = false;
+        {
+            let listeners = self.pending_transaction_listener.read();
+            for listener in listeners.iter() {
+                if !send_fn(listener) {
+                    needs_cleanup = true;
+                }
+            }
+        }
+        if needs_cleanup {
+            self.pending_transaction_listener
+                .write()
+                .retain(|listener| !listener.sender.is_closed());
+        }
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -756,23 +782,21 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::pending_transactions_listener_for`](crate::TransactionPool).
     pub fn on_new_pending_transaction(&self, pending: &AddedPendingTransaction<T::Transaction>) {
-        let mut needs_cleanup = false;
+        self.notify_pending_listeners(|listener| {
+            listener.send_all(pending.pending_transactions(listener.kind))
+        });
+    }
 
-        {
-            let listeners = self.pending_transaction_listener.read();
-            for listener in listeners.iter() {
-                if !listener.send_all(pending.pending_transactions(listener.kind)) {
-                    needs_cleanup = true;
-                }
-            }
+    /// Notify pending transaction listeners about a blob transaction that is close enough to
+    /// execution to announce (within 1 fee-jump).
+    ///
+    /// Respects the `propagate` flag — private transactions are not announced.
+    fn on_blob_announceable_transaction(&self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
+        if !tx.propagate {
+            return;
         }
-
-        // Clean up dead listeners if we detected any closed channels
-        if needs_cleanup {
-            self.pending_transaction_listener
-                .write()
-                .retain(|listener| !listener.sender.is_closed());
-        }
+        let hash = *tx.hash();
+        self.notify_pending_listeners(|listener| listener.send_all(std::iter::once(hash)));
     }
 
     /// Notify all listeners about a newly inserted pending transaction.
@@ -840,19 +864,11 @@ where
     fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome<T::Transaction>) {
         trace!(target: "txpool", promoted=outcome.promoted.len(), discarded= outcome.discarded.len() ,"notifying listeners on state change");
 
-        // notify about promoted pending transactions - emit hashes
-        let mut needs_pending_cleanup = false;
-        {
-            let listeners = self.pending_transaction_listener.read();
-            for listener in listeners.iter() {
-                if !listener.send_all(outcome.pending_transactions(listener.kind)) {
-                    needs_pending_cleanup = true;
-                }
-            }
-        }
-        if needs_pending_cleanup {
-            self.pending_transaction_listener.write().retain(|l| !l.sender.is_closed());
-        }
+        // notify about promoted pending transactions (and blob txs close to execution) - emit
+        // hashes
+        self.notify_pending_listeners(|listener| {
+            listener.send_all(outcome.pending_transactions(listener.kind))
+        });
 
         // emit full transactions
         let mut needs_tx_cleanup = false;
@@ -868,7 +884,7 @@ where
             self.transaction_listener.write().retain(|l| !l.sender.is_closed());
         }
 
-        let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
+        let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash, .. } = outcome;
 
         // broadcast specific transaction events
         self.with_event_listener(|listener| {
@@ -1422,6 +1438,8 @@ pub enum AddedTransaction<T: PoolTransaction> {
         subpool: SubPool,
         /// The specific reason why the transaction is queued (if applicable).
         queued_reason: Option<QueuedReason>,
+        /// Whether this blob transaction is close enough to execution to announce.
+        blob_announceable: bool,
     },
 }
 
@@ -1430,6 +1448,15 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     pub const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             Self::Pending(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the transaction if it was added to the blob pool and is close enough to
+    /// execution to announce.
+    pub const fn blob_announceable_transaction(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+        match self {
+            Self::Parked { transaction, blob_announceable: true, .. } => Some(transaction),
             _ => None,
         }
     }
@@ -1596,10 +1623,14 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that were discarded during the update
     pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// Blob transactions that became close enough to execution to announce (within 1 fee-jump)
+    /// but are still in the blob sub-pool.
+    pub(crate) blob_announced: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
-    /// Returns all transactions that were promoted to the pending pool and adhere to the given
+    /// Returns all transactions that were promoted to the pending pool (plus blob transactions
+    /// that became close enough to execution to announce) and adhere to the given
     /// [`TransactionListenerKind`].
     ///
     /// If the kind is [`TransactionListenerKind::PropagateOnly`], then only transactions that
@@ -1608,11 +1639,12 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
         &self,
         kind: TransactionListenerKind,
     ) -> impl Iterator<Item = B256> + '_ {
-        let iter = self.promoted.iter();
+        let iter = self.promoted.iter().chain(self.blob_announced.iter());
         PendingTransactionIter { kind, iter }
     }
 
-    /// Returns all FULL transactions that were promoted to the pending pool and adhere to the given
+    /// Returns all FULL transactions that were promoted to the pending pool (plus blob
+    /// transactions that became close enough to execution to announce) and adhere to the given
     /// [`TransactionListenerKind`].
     ///
     /// If the kind is [`TransactionListenerKind::PropagateOnly`], then only transactions that
@@ -1621,7 +1653,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
         &self,
         kind: TransactionListenerKind,
     ) -> impl Iterator<Item = NewTransactionEvent<T>> + '_ {
-        let iter = self.promoted.iter();
+        let iter = self.promoted.iter().chain(self.blob_announced.iter());
         FullPendingTransactionIter { kind, iter }
     }
 }

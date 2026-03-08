@@ -217,13 +217,15 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee<F>(
+    fn update_blob_fee<F, G>(
         &mut self,
         mut pending_blob_fee: u128,
         base_fee_update: Ordering,
         mut on_promoted: F,
+        mut on_blob_announced: G,
     ) where
         F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
+        G: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
     {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
@@ -245,7 +247,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         tx.subpool = tx.state.into();
                         tx.subpool
                     };
-                    self.add_transaction_to_subpool(to, tx);
+                    if self.add_transaction_to_subpool(to, tx.clone()) {
+                        on_blob_announced(&tx);
+                    }
                 }
             }
             (Ordering::Less, _) | (_, Ordering::Less) => {
@@ -269,6 +273,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(subpool, tx);
                 }
             }
+        }
+
+        // After any fee change, drain blob txs that are now close enough to announce
+        for tx in self.blob_pool.drain_newly_announceable() {
+            on_blob_announced(&tx);
         }
     }
 
@@ -362,9 +371,16 @@ impl<T: TransactionOrdering> TxPool<T> {
             outcome.promoted.push(tx.clone());
         });
         if let Some(blob_fee) = info.pending_blob_fee {
-            self.update_blob_fee(blob_fee, basefee_ordering, |tx| {
-                outcome.promoted.push(tx.clone());
-            })
+            self.update_blob_fee(
+                blob_fee,
+                basefee_ordering,
+                |tx| {
+                    outcome.promoted.push(tx.clone());
+                },
+                |tx| {
+                    outcome.blob_announced.push(tx.clone());
+                },
+            )
         }
         // then update tracked values
         self.all_transactions.set_block_info(info);
@@ -627,9 +643,16 @@ impl<T: TransactionOrdering> TxPool<T> {
             outcome.promoted.push(tx.clone());
         });
 
-        self.update_blob_fee(new_blob_fee, base_fee_ordering, |tx| {
-            outcome.promoted.push(tx.clone());
-        });
+        self.update_blob_fee(
+            new_blob_fee,
+            base_fee_ordering,
+            |tx| {
+                outcome.promoted.push(tx.clone());
+            },
+            |tx| {
+                outcome.blob_announced.push(tx.clone());
+            },
+        );
     }
 
     /// Updates the transactions for the changed senders.
@@ -700,6 +723,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             mined: mined_transactions,
             promoted: outcome.promoted,
             discarded: outcome.discarded,
+            blob_announced: outcome.blob_announced,
         }
     }
 
@@ -776,28 +800,42 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //  3. Promote higher-nonce txs last   (e.g. gap-fill scenario)
                 let new_nonce = transaction.id().nonce;
                 let split = updates.iter().position(|u| u.id.nonce >= new_nonce);
-                let (promoted, discarded) = match split {
+                let (promoted, discarded, blob_announceable) = match split {
                     // All updates are lower-nonce — promote them first, then add new tx
                     None => {
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        (promoted, discarded)
+                        let UpdateOutcome { promoted, discarded, .. } =
+                            self.process_updates(updates);
+                        let blob_announceable = self.add_new_transaction(
+                            transaction.clone(),
+                            replaced_tx.clone(),
+                            move_to,
+                        );
+                        (promoted, discarded, blob_announceable)
                     }
                     // All updates are higher-nonce — add new tx first, then promote
                     Some(0) => {
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
-                        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-                        (promoted, discarded)
+                        let blob_announceable = self.add_new_transaction(
+                            transaction.clone(),
+                            replaced_tx.clone(),
+                            move_to,
+                        );
+                        let UpdateOutcome { promoted, discarded, .. } =
+                            self.process_updates(updates);
+                        (promoted, discarded, blob_announceable)
                     }
                     // Mixed — split and interleave
                     Some(i) => {
                         let after = updates.split_off(i);
                         let mut outcome = self.process_updates(updates);
-                        self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
+                        let blob_announceable = self.add_new_transaction(
+                            transaction.clone(),
+                            replaced_tx.clone(),
+                            move_to,
+                        );
                         let after_outcome = self.process_updates(after);
                         outcome.promoted.extend(after_outcome.promoted);
                         outcome.discarded.extend(after_outcome.discarded);
-                        (outcome.promoted, outcome.discarded)
+                        (outcome.promoted, outcome.discarded, blob_announceable)
                     }
                 };
                 self.metrics.inserted_transactions.increment(1);
@@ -820,6 +858,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         subpool: move_to,
                         replaced,
                         queued_reason,
+                        blob_announceable,
                     }
                 };
 
@@ -1194,37 +1233,46 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Inserts the transaction into the given sub-pool.
+    ///
+    /// Returns `true` if the transaction was added to the blob pool and is immediately
+    /// announceable (within 1 fee-jump of execution).
     fn add_transaction_to_subpool(
         &mut self,
         pool: SubPool,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
-    ) {
+    ) -> bool {
         // We trace here instead of in structs directly, because the `ParkedPool` type is
         // generic and it would not be possible to distinguish whether a transaction is being
         // added to the `BaseFee` pool, or the `Queued` pool.
         trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Adding transaction to a subpool");
         match pool {
-            SubPool::Queued => self.queued_pool.add_transaction(tx),
+            SubPool::Queued => {
+                self.queued_pool.add_transaction(tx);
+                false
+            }
             SubPool::Pending => {
                 self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
+                false
             }
             SubPool::BaseFee => {
                 self.basefee_pool.add_transaction(tx);
+                false
             }
-            SubPool::Blob => {
-                self.blob_pool.add_transaction(tx);
-            }
+            SubPool::Blob => self.blob_pool.add_transaction(tx),
         }
     }
 
     /// Inserts the transaction into the given sub-pool.
     /// Optionally, removes the replacement transaction.
+    ///
+    /// Returns `true` if the transaction was added to the blob pool and is immediately
+    /// announceable.
     fn add_new_transaction(
         &mut self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
         replaced: Option<(Arc<ValidPoolTransaction<T::Transaction>>, SubPool)>,
         pool: SubPool,
-    ) {
+    ) -> bool {
         if let Some((replaced, replaced_pool)) = replaced {
             // Remove the replaced transaction
             self.remove_from_subpool(replaced_pool, replaced.id());
@@ -3510,7 +3558,7 @@ mod tests {
 
         // Raise blob fee beyond the transaction's cap so it gets parked in Blob pool.
         let increased_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 200;
-        pool.update_blob_fee(increased_blob_fee, Ordering::Equal, |_| {});
+        pool.update_blob_fee(increased_blob_fee, Ordering::Equal, |_| {}, |_| {});
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.blob_pool.len(), 1);
 

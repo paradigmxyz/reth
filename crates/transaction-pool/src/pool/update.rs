@@ -40,10 +40,13 @@ pub struct UpdateOutcome<T: PoolTransaction> {
     pub promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that failed and were discarded
     pub discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// Blob transactions that became close enough to execution to announce (within 1 fee-jump)
+    /// but are still in the blob sub-pool.
+    pub blob_announced: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![] }
+        Self { promoted: vec![], discarded: vec![], blob_announced: vec![] }
     }
 }

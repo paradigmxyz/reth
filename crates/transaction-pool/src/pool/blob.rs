@@ -9,6 +9,14 @@ use std::{
     sync::Arc,
 };
 
+/// Blob transactions with priority at or above this threshold are announced to peers.
+///
+/// A priority of -1 means the transaction is within 1 fee-jump of being executable. Transactions
+/// further away from execution are suppressed to save bandwidth.
+///
+/// See also [`blob_tx_priority`].
+const BLOB_ANNOUNCE_PRIORITY_THRESHOLD: i64 = -1;
+
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///
 /// The purpose of this pool is to keep track of blob transactions that are queued and to evict the
@@ -39,11 +47,14 @@ pub struct BlobTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> BlobTransactions<T> {
     /// Adds a new transactions to the pending queue.
     ///
+    /// Returns `true` if the transaction is immediately announceable (priority >=
+    /// `BLOB_ANNOUNCE_PRIORITY_THRESHOLD`).
+    ///
     /// # Panics
     ///
     ///   - If the transaction is not a blob tx.
     ///   - If the transaction is already included.
-    pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
+    pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) -> bool {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
         assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
@@ -53,10 +64,25 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.size_of += tx.size();
 
         // set transaction, which will also calculate priority based on current pending fees
-        let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
+        let mut transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
+
+        // Only announce if priority is high enough AND the predecessor nonce (if any) in this
+        // pool was already announced. This prevents announcing a tx whose predecessor is still
+        // suppressed — peers can't use it without the full nonce chain.
+        let predecessor_announced = id
+            .unchecked_ancestor()
+            .and_then(|prev_id| self.by_id.get(&prev_id))
+            .is_none_or(|prev| prev.announced);
+        let announceable =
+            predecessor_announced && transaction.ord.priority >= BLOB_ANNOUNCE_PRIORITY_THRESHOLD;
+        if announceable {
+            transaction.announced = true;
+        }
 
         self.by_id.insert(id, transaction.clone());
         self.all.insert(transaction);
+
+        announceable
     }
 
     const fn next_id(&mut self) -> u64 {
@@ -169,6 +195,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Resorts the transactions in the pool based on the pool's current [`PendingFees`].
+    ///
+    /// The `announced` flag is intentionally NOT reset when priority drops — once a transaction
+    /// has been announced, peers already have the hash and re-announcing serves no purpose.
+    /// This avoids repeated announcements during fee oscillations.
     pub(crate) fn reprioritize(&mut self) {
         // mem::take to modify without allocating, then collect to rebuild the BTreeSet
         self.all = std::mem::take(&mut self.all)
@@ -184,6 +214,43 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         for tx in self.by_id.values_mut() {
             tx.update_priority(&self.pending_fees);
         }
+    }
+
+    /// Returns blob transactions that are close enough to execution to announce but haven't
+    /// been announced yet.
+    ///
+    /// A transaction is announceable if its priority is >= [`BLOB_ANNOUNCE_PRIORITY_THRESHOLD`]
+    /// (within 1 fee-jump of being executable) and all lower-nonce transactions from the same
+    /// sender have already been announced. Once drained, the transactions are marked as announced
+    /// so they won't be returned again.
+    pub(crate) fn drain_newly_announceable(&mut self) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut result = Vec::new();
+        // Track the sender whose nonce chain is broken so we skip its remaining txs.
+        // `by_id` is a BTreeMap<TransactionId, _> ordered by (sender, nonce), so we naturally
+        // iterate each sender's transactions in nonce order.
+        let mut blocked_sender = None;
+        for (id, tx) in &mut self.by_id {
+            // Reset blocked state when we move to a new sender
+            if blocked_sender == Some(id.sender) {
+                continue
+            }
+            blocked_sender = None;
+
+            if tx.announced {
+                continue
+            }
+            if tx.ord.priority >= BLOB_ANNOUNCE_PRIORITY_THRESHOLD {
+                tx.announced = true;
+                result.push(tx.transaction.clone());
+            } else {
+                // This tx doesn't meet the threshold — block all remaining txs from this sender
+                // to maintain nonce-chain ordering.
+                blocked_sender = Some(id.sender);
+            }
+        }
+        // No need to sync `announced` back to `all` — it's not part of `Ord` so the BTreeSet
+        // ordering is unaffected. The `by_id` map is the source of truth for `announced` state.
+        result
     }
 
     /// Removes all transactions (and their descendants) which:
@@ -265,6 +332,11 @@ struct BlobTransaction<T: PoolTransaction> {
     transaction: Arc<ValidPoolTransaction<T>>,
     /// The value that determines the order of this transaction.
     ord: BlobOrd,
+    /// Whether this transaction has been announced to peers.
+    ///
+    /// Only transactions with priority >= [`BLOB_ANNOUNCE_PRIORITY_THRESHOLD`] are announced.
+    /// Once set, this flag is never reset — peers already have the hash.
+    announced: bool,
 }
 
 impl<T: PoolTransaction> BlobTransaction<T> {
@@ -282,7 +354,7 @@ impl<T: PoolTransaction> BlobTransaction<T> {
             pending_fees.base_fee as u128,
         );
         let ord = BlobOrd { priority, submission_id };
-        Self { transaction, ord }
+        Self { transaction, ord, announced: false }
     }
 
     /// Updates the priority for the transaction based on the current pending fees.
@@ -298,7 +370,11 @@ impl<T: PoolTransaction> BlobTransaction<T> {
 
 impl<T: PoolTransaction> Clone for BlobTransaction<T> {
     fn clone(&self) -> Self {
-        Self { transaction: self.transaction.clone(), ord: self.ord.clone() }
+        Self {
+            transaction: self.transaction.clone(),
+            ord: self.ord.clone(),
+            announced: self.announced,
+        }
     }
 }
 
