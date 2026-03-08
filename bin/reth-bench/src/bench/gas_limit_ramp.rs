@@ -8,6 +8,7 @@ use crate::{
     },
     valid_payload::{
         call_forkchoice_updated_with_reth, call_new_payload_with_reth, payload_to_new_payload,
+        reth_new_payload_wait,
     },
 };
 use alloy_eips::BlockNumberOrTag;
@@ -58,6 +59,14 @@ pub struct Command {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
+
+    /// Skip waiting for persistence and cache locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
+    /// `reth_newPayload` endpoint, causing it to execute the payload immediately
+    /// without waiting for in-flight persistence or cache updates.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    no_wait: bool,
 }
 
 /// Mode for determining when to stop ramping.
@@ -186,7 +195,14 @@ impl Command {
             )?;
 
             let (version, params) = if self.reth_new_payload {
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?)
+                let wait = reth_new_payload_wait(self.no_wait);
+                (
+                    None,
+                    serde_json::to_value((
+                        RethNewPayloadInput::ExecutionData(execution_data),
+                        wait,
+                    ))?,
+                )
             } else {
                 (Some(version), params)
             };
