@@ -491,11 +491,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
 
-            if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
-                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
-                // no gas limit was provided in the request, so we need to cap the request's gas
-                // limit
-                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
+            if request.as_ref().gas_limit().is_none() {
+                if tx_env.gas_price() > 0 {
+                    // caller_gas_allowance caps based on (balance - value) / gas_price
+                    let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
+                    tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
+                } else {
+                    // when gas_price is 0, we can't compute caller allowance (would divide
+                    // by zero), so use block gas limit as default
+                    tx_env.set_gas_limit(evm_env.block_env.gas_limit());
+                }
             }
 
             // can consume the list since we're not using the request anymore
