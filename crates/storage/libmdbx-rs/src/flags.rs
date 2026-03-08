@@ -206,6 +206,24 @@ impl EnvironmentFlags {
 }
 
 bitflags! {
+    #[doc="Warmup options for [`Environment::warmup()`](crate::Environment::warmup)."]
+    #[derive(Default)]
+    pub struct WarmupFlags: ffi::MDBX_warmup_flags_t {
+        /// Force load all pages by peeking them sequentially.
+        const FORCE = ffi::MDBX_warmup_force;
+        /// Use system calls to peek pages instead of direct access,
+        /// avoiding OOM-killer in low-memory conditions (POSIX only, requires `FORCE`).
+        const OOM_SAFE = ffi::MDBX_warmup_oomsafe;
+        /// Lock database pages in memory via `mlock()`/`VirtualLock()`.
+        const LOCK = ffi::MDBX_warmup_lock;
+        /// Adjust resource limits to be sufficient for `LOCK`.
+        const TOUCH_LIMIT = ffi::MDBX_warmup_touchlimit;
+        /// Release a previous `LOCK`.
+        const RELEASE = ffi::MDBX_warmup_release;
+    }
+}
+
+bitflags! {
     #[doc="Database options."]
     #[derive(Default)]
     pub struct DatabaseFlags: MDBX_env_flags_t {
