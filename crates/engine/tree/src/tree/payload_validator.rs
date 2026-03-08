@@ -200,6 +200,38 @@ where
             &config,
             precompile_cache_map.clone(),
         );
+        Self::new_with_payload_processor(
+            provider,
+            consensus,
+            evm_config,
+            validator,
+            config,
+            invalid_block_hook,
+            changeset_cache,
+            runtime,
+            payload_processor,
+            precompile_cache_map,
+        )
+    }
+
+    /// Creates a new `TreePayloadValidator` with an externally created
+    /// [`PayloadProcessor`].
+    ///
+    /// This allows sharing a [`PayloadProcessor`] (and its internal caches like
+    /// the sparse trie) between the validation and payload building paths.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_payload_processor(
+        provider: P,
+        consensus: Arc<dyn FullConsensus<N>>,
+        evm_config: Evm,
+        validator: V,
+        config: TreeConfig,
+        invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
+        changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
+        payload_processor: PayloadProcessor<Evm>,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
         Self {
             provider,
             consensus,
