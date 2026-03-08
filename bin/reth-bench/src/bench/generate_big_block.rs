@@ -450,7 +450,13 @@ impl Command {
             self.save_payload(&built)?;
 
             if self.execute || self.count > 1 {
-                info!(target: "reth-bench", payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+                info!(
+                    target: "reth-bench",
+                    payload = i + 1,
+                    block_hash = %built.block_hash,
+                    gas_used = built.gas_used,
+                    "Executing payload (newPayload + FCU)"
+                );
                 self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
                 info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
             }
@@ -614,7 +620,13 @@ impl Command {
             let current_timestamp = built.timestamp;
 
             // Execute payload
-            info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+            info!(
+                target: "reth-bench",
+                payload = i + 1,
+                block_hash = %current_block_hash,
+                gas_used = built.gas_used,
+                "Executing payload (newPayload + FCU)"
+            );
             self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
             info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
 
@@ -808,7 +820,13 @@ impl Command {
         let json = serde_json::to_string_pretty(&payload.envelope)?;
         std::fs::write(&filepath, &json)
             .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-        info!(target: "reth-bench", block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
+        info!(
+            target: "reth-bench",
+            block_number = payload.block_number,
+            block_hash = %payload.block_hash,
+            path = %filepath.display(),
+            "Payload saved"
+        );
         Ok(())
     }
 

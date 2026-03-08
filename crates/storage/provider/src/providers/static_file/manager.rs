@@ -337,7 +337,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                                 last_event_timestamp = Some(current_modified_timestamp);
                             }
 
-                            info!(target: "providers::static_file", updated_file = ?segment.file_stem(), "re-initializing static file provider index");
+                            info!(
+                                target: "providers::static_file",
+                                updated_file = ?segment.file_stem(),
+                                "re-initializing static file provider index"
+                            );
                             if let Err(err) = provider.initialize_index() {
                                 warn!(target: "providers::static_file", "failed to re-initialize index: {err}");
                             }
@@ -1823,7 +1827,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::TransactionSenders => {
                 if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                     let number = highest_static_file_entry - block.last_tx_num();
-                    debug!(target: "reth::providers::static_file", prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
+                    debug!(
+                        target: "reth::providers::static_file",
+                        prune_count = number,
+                        checkpoint_block_number,
+                        "Pruning transaction based segment"
+                    );
 
                     match segment {
                         StaticFileSegment::Transactions => {

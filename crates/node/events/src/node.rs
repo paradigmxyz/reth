@@ -596,7 +596,13 @@ impl Eta {
                 current.processed.checked_sub(self.last_checkpoint.processed)
             else {
                 self.eta = None;
-                debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                debug!(
+                    target: "reth::cli",
+                    %stage,
+                    ?current,
+                    ?self.last_checkpoint,
+                    "Failed to calculate the ETA: processed entities is less than the last checkpoint"
+                );
                 return
             };
             let elapsed = last_checkpoint_time.elapsed();

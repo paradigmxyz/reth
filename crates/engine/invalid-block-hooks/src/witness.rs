@@ -309,13 +309,25 @@ where
             if re_executed_root != original_root {
                 let filename = format!("{}.state_root.diff", block_prefix);
                 let diff_path = self.save_diff(filename, &original_root, &re_executed_root)?;
-                warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
+                warn!(
+                    target: "engine::invalid_block_hooks::witness",
+                    ?original_root,
+                    ?re_executed_root,
+                    diff_path = %diff_path.display(),
+                    "State root mismatch after re-execution"
+                );
             }
 
             if re_executed_root != block.state_root() {
                 let filename = format!("{}.header_state_root.diff", block_prefix);
                 let diff_path = self.save_diff(filename, &block.state_root(), &re_executed_root)?;
-                warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
+                warn!(
+                    target: "engine::invalid_block_hooks::witness",
+                    header_state_root=?block.state_root(),
+                    ?re_executed_root,
+                    diff_path = %diff_path.display(),
+                    "Re-executed state root does not match block state root"
+                );
             }
 
             if &trie_output != original_updates {

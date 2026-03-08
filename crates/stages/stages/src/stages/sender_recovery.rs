@@ -182,7 +182,13 @@ where
                 block_numbers
             });
             let fold_elapsed = start.elapsed();
-            debug!(target: "sync::stages::sender_recovery", ?block_body_indices_elapsed, ?fold_elapsed, len = block_numbers.len(), "Calculated block numbers");
+            debug!(
+                target: "sync::stages::sender_recovery",
+                ?block_body_indices_elapsed,
+                ?fold_elapsed,
+                len = block_numbers.len(),
+                "Calculated block numbers"
+            );
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
