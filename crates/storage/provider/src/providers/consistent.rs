@@ -596,45 +596,42 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 
     /// Consumes the provider and returns a state provider for the specific block hash.
+    ///
+    /// For blocks that are in memory (part of the tracked chain), returns a provider overlay.
+    /// For historical (database) blocks, verifies the block is canonical before returning state
+    /// to prevent serving stale state for blocks whose headers exist but haven't been executed.
     pub(crate) fn into_state_provider_at_block_hash(
         self,
         block_hash: BlockHash,
     ) -> ProviderResult<StateProviderBox> {
         let Self { storage_provider, head_block, .. } = self;
-        let into_history_at_block_hash = |block_hash| -> ProviderResult<StateProviderBox> {
-            let block_number = storage_provider
-                .block_number(block_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-            storage_provider.try_into_history_at_block(block_number)
-        };
+
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let anchor_hash = block_state.anchor().hash;
-            let latest_historical = into_history_at_block_hash(anchor_hash)?;
+            let block_number = storage_provider
+                .block_number(anchor_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+            let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-        into_history_at_block_hash(block_hash)
-    }
-}
 
-impl<N: ProviderNodeTypes> ConsistentProvider<N> {
-    /// Ensures that the given block number is canonical (synced)
-    ///
-    /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
-    /// out of range and would lead to invalid results, mainly during initial sync.
-    ///
-    /// Verifying the `block_number` would be expensive since we need to lookup sync table
-    /// Instead, we ensure that the `block_number` is within the range of the
-    /// [`Self::best_block_number`] which is updated when a block is synced.
-    #[inline]
-    pub(crate) fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        let latest = self.best_block_number()?;
-        if block_number > latest {
-            Err(ProviderError::HeaderNotFound(block_number.into()))
-        } else {
-            Ok(())
+        let block_number = storage_provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+
+        // Guard against serving state for blocks that have been downloaded but not yet
+        // executed (e.g. during backfill sync)
+        let best = head_block
+            .as_ref()
+            .map(|b| Ok(b.number()))
+            .unwrap_or_else(|| storage_provider.best_block_number())?;
+        if block_number > best {
+            return Err(ProviderError::HeaderNotFound(block_number.into()));
         }
+
+        storage_provider.try_into_history_at_block(block_number)
     }
 }
 
