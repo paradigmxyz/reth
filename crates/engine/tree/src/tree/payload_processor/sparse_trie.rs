@@ -384,13 +384,11 @@ where
         }
 
         for (address, slots) in targets.storage_targets {
+            // Look up outer map once per address instead of once per slot.
+            let new_updates = self.new_storage_updates.entry(address).or_default();
             for slot in slots {
                 // Only touch storages that are not yet present in the updates set.
-                self.new_storage_updates
-                    .entry(address)
-                    .or_default()
-                    .entry(slot.key())
-                    .or_insert(LeafUpdate::Touched);
+                new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
             }
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
@@ -406,45 +404,59 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+        // Destructure to allow simultaneous mutable borrows of disjoint fields, so we can
+        // hoist per-address outer-map lookups out of the per-slot inner loop.
+        let Self {
+            trie,
+            new_storage_updates,
+            storage_updates,
+            new_account_updates,
+            pending_account_updates,
+            ..
+        } = self;
+
         for (address, storage) in hashed_state_update.storages {
+            // Look up outer maps once per address instead of once per slot.
+            let new_updates = new_storage_updates.entry(address).or_default();
+            let mut existing_updates = storage_updates.get_mut(&address);
+
             for (slot, value) in storage.storage {
-                self.trie.record_slot_touch(address, slot);
+                trie.record_slot_touch(address, slot);
 
                 let encoded = if value.is_zero() {
                     Vec::new()
                 } else {
                     alloy_rlp::encode_fixed_size(&value).to_vec()
                 };
-                self.new_storage_updates
-                    .entry(address)
-                    .or_default()
-                    .insert(slot, LeafUpdate::Changed(encoded));
+                new_updates.insert(slot, LeafUpdate::Changed(encoded));
 
                 // Remove an existing storage update if it exists.
-                self.storage_updates.get_mut(&address).and_then(|updates| updates.remove(&slot));
+                if let Some(ref mut existing) = existing_updates {
+                    existing.remove(&slot);
+                }
             }
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
             // trie for storage root update.
-            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
 
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
-            self.pending_account_updates.entry(address).or_insert(None);
+            pending_account_updates.entry(address).or_insert(None);
         }
 
         for (address, account) in hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
+            trie.record_account_touch(address);
 
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
             // is already tracked in the trie and can be easily fetched again.
-            self.new_account_updates.insert(address, LeafUpdate::Touched);
+            new_account_updates.insert(address, LeafUpdate::Touched);
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            pending_account_updates.insert(address, Some(account));
         }
     }
 
