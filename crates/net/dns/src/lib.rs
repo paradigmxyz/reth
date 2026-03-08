@@ -409,7 +409,9 @@ mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
     use alloy_chains::Chain;
+    use alloy_primitives::keccak256;
     use alloy_rlp::{Decodable, Encodable};
+    use data_encoding::BASE32_NOPAD;
     use enr::EnrKey;
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
@@ -602,6 +604,46 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_hash_mismatch_is_not_cached_and_does_not_poison_same_hash() {
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = MapResolver::default();
+
+        let invalid_entry = "enrtree-branch:AAAAAAAAAAAAAAAAAAAA".to_string();
+        let valid_entry = "enrtree-branch:YNEGZIWHOM7TOOSUATAPTM".to_string();
+
+        let hash = BASE32_NOPAD.encode(keccak256(valid_entry.as_bytes()).as_slice());
+
+        let bad_link =
+            LinkEntry { domain: "bad.example.org".to_string(), pubkey: secret_key.public() };
+        let good_link =
+            LinkEntry { domain: "good.example.org".to_string(), pubkey: secret_key.public() };
+
+        resolver.insert(format!("{}.{}", hash, bad_link.domain), invalid_entry);
+        resolver.insert(format!("{}.{}", hash, good_link.domain), valid_entry.clone());
+
+        let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
+
+        service.resolve_entry(bad_link, hash.clone(), ResolveKind::Enr);
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(service.dns_record_cache.get(&hash).is_none());
+
+        service.resolve_entry(good_link, hash.clone(), ResolveKind::Enr);
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        let cached = service.dns_record_cache.get(&hash).cloned();
+        assert_eq!(cached.map(|entry| entry.to_string()), Some(valid_entry));
     }
 
     #[tokio::test]
