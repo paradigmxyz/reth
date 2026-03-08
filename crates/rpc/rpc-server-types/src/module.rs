@@ -349,7 +349,6 @@ impl RethRpcModule {
         Self::Flashbots,
         Self::Miner,
         Self::Mev,
-        Self::Testing,
     ];
 
     /// Returns the number of standard variants (excludes Other)
@@ -557,6 +556,8 @@ mod test {
     fn test_default_ipc_modules() {
         let default_ipc_modules = RpcModuleSelection::default_ipc_modules();
         assert_eq!(default_ipc_modules, RpcModuleSelection::all_modules());
+        // Testing module should not be included by default
+        assert!(!default_ipc_modules.contains(&RethRpcModule::Testing));
     }
 
     #[test]
@@ -883,13 +884,14 @@ mod test {
         // Verify "other" is not in the list
         assert!(!standard_names.contains(&"other"));
 
-        // Should have exactly as many names as STANDARD_VARIANTS
-        assert_eq!(standard_names.len(), RethRpcModule::STANDARD_VARIANTS.len());
-
-        // Verify all standard variants have their names in the list
+        // All STANDARD_VARIANTS should have their names in the list
         for variant in RethRpcModule::STANDARD_VARIANTS {
             assert!(standard_names.contains(&variant.as_ref()));
         }
+
+        // Testing is a valid variant name (for explicit CLI usage) but not a standard variant
+        assert!(standard_names.contains(&"testing"));
+        assert!(!RethRpcModule::STANDARD_VARIANTS.contains(&RethRpcModule::Testing));
     }
 
     #[test]
