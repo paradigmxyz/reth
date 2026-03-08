@@ -146,6 +146,8 @@ pub struct TreeConfig {
     slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
+    /// Whether to use the arena-based sparse trie implementation.
+    enable_arena_sparse_trie: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
     /// If `Some`, after waiting this duration for the state root task, a sequential state root
     /// computation is spawned in parallel and whichever finishes first is used.
@@ -180,6 +182,7 @@ impl Default for TreeConfig {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
     }
@@ -239,6 +242,7 @@ impl TreeConfig {
             sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout,
         }
     }
@@ -536,6 +540,17 @@ impl TreeConfig {
     /// Setter for whether to disable sparse trie cache pruning.
     pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
         self.disable_sparse_trie_cache_pruning = value;
+        self
+    }
+
+    /// Returns whether the arena-based sparse trie is enabled.
+    pub const fn enable_arena_sparse_trie(&self) -> bool {
+        self.enable_arena_sparse_trie
+    }
+
+    /// Setter for whether to enable the arena-based sparse trie.
+    pub const fn with_enable_arena_sparse_trie(mut self, value: bool) -> Self {
+        self.enable_arena_sparse_trie = value;
         self
     }
 
