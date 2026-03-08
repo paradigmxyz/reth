@@ -32,9 +32,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider,
-    ProviderBlock, ReceiptProviderIdExt, StateProofProvider, StateProviderFactory,
-    StateRootProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -93,21 +93,6 @@ where
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
-    }
-
-    /// Returns [`EthApiError::PrunedHistoryUnavailable`] if the block is in the pruned range,
-    /// otherwise [`EthApiError::HeaderNotFound`].
-    fn header_or_pruned_error(&self, block_id: BlockId) -> EthApiError
-    where
-        Eth::Provider: BlockNumReader,
-    {
-        if let BlockId::Number(BlockNumberOrTag::Number(num)) = block_id &&
-            let Ok(earliest) = self.provider().earliest_block_number() &&
-            num < earliest
-        {
-            return EthApiError::PrunedHistoryUnavailable;
-        }
-        EthApiError::HeaderNotFound(block_id)
     }
 }
 
@@ -218,13 +203,13 @@ where
             .provider()
             .block_hash_for_id(block_id)
             .map_err(Eth::Error::from_eth_err)?
-            .ok_or_else(|| self.header_or_pruned_error(block_id))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let block = self
             .eth_api()
             .recovered_block(block_hash.into())
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(block_id))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
@@ -356,7 +341,7 @@ where
             .eth_api()
             .recovered_block(block_id)
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(block_id))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         if tx_index >= block.transaction_count() {
             // tx_index out of bounds
@@ -424,7 +409,7 @@ where
             .eth_api()
             .recovered_block(target_block)
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(target_block))?;
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
         let mut evm_env =
             self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
@@ -526,7 +511,7 @@ where
             .eth_api()
             .recovered_block(hash.into())
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(hash.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
         self.debug_execution_witness_for_block(block).await
     }
@@ -544,7 +529,7 @@ where
             .eth_api()
             .recovered_block(block_id.into())
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         self.debug_execution_witness_for_block(block).await
     }
@@ -650,7 +635,7 @@ where
             .eth_api()
             .recovered_block(block_hash.into())
             .await?
-            .ok_or_else(|| self.header_or_pruned_error(block_hash.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
@@ -717,7 +702,7 @@ where
             .provider()
             .block_by_id(block_id)
             .to_rpc_result()?
-            .ok_or_else(|| self.header_or_pruned_error(block_id))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let mut res = Vec::new();
         block.encode(&mut res);
         Ok(res.into())

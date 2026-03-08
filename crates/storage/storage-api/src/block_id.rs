@@ -90,7 +90,19 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                 BlockNumberOrTag::Finalized => self.finalized_block_hash(),
                 BlockNumberOrTag::Safe => self.safe_block_hash(),
                 BlockNumberOrTag::Earliest => self.block_hash(self.earliest_block_number()?),
-                BlockNumberOrTag::Number(num) => self.block_hash(num),
+                BlockNumberOrTag::Number(num) => {
+                    let hash = self.block_hash(num)?;
+                    if hash.is_none() {
+                        let earliest = self.earliest_block_number()?;
+                        if num < earliest {
+                            return Err(ProviderError::BlockExpired {
+                                requested: num,
+                                earliest_available: earliest,
+                            });
+                        }
+                    }
+                    Ok(hash)
+                }
             },
         }
     }
