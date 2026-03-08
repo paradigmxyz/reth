@@ -596,16 +596,17 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 
     /// Consumes the provider and returns a state provider for the specific block hash.
-    ///
-    /// For blocks that are in memory (part of the tracked chain), returns a provider overlay.
-    /// For historical (database) blocks, verifies the block is canonical before returning state
-    /// to prevent serving stale state for blocks whose headers exist but haven't been executed.
     pub(crate) fn into_state_provider_at_block_hash(
         self,
         block_hash: BlockHash,
     ) -> ProviderResult<StateProviderBox> {
-        let Self { storage_provider, head_block, .. } = self;
+        // Resolve block number and verify it's canonical before destructuring self
+        let block_number = self
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        self.ensure_canonical_block(block_number)?;
 
+        let Self { storage_provider, head_block, .. } = self;
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
@@ -616,13 +617,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-
-        let block_number = storage_provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-
-        Self::ensure_canonical_block(&head_block, &storage_provider, block_number)?;
-
         storage_provider.try_into_history_at_block(block_number)
     }
 }
@@ -637,16 +631,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Instead, we ensure that the `block_number` is within the range of the
     /// [`Self::best_block_number`] which is updated when a block is synced.
     #[inline]
-    fn ensure_canonical_block(
-        head_block: &Option<Arc<BlockState<N::Primitives>>>,
-        storage_provider: &<ProviderFactory<N> as DatabaseProviderFactory>::Provider,
-        block_number: BlockNumber,
-    ) -> ProviderResult<()> {
-        let best = head_block
-            .as_ref()
-            .map(|b| Ok(b.number()))
-            .unwrap_or_else(|| storage_provider.best_block_number())?;
-        if block_number > best {
+    pub(crate) fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        let latest = self.best_block_number()?;
+        if block_number > latest {
             Err(ProviderError::HeaderNotFound(block_number.into()))
         } else {
             Ok(())
