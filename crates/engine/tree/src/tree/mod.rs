@@ -3071,6 +3071,17 @@ where
 
     /// Validates the payload attributes with respect to the header and fork choice state.
     ///
+    /// This is called during `engine_forkchoiceUpdated` when the CL provides payload attributes,
+    /// indicating it wants the EL to start building a new block.
+    ///
+    /// Validation:
+    /// - [`PayloadValidator::validate_payload_attributes_against_header`]: ensures
+    ///   `payloadAttributes.timestamp > headBlock.timestamp` per the Engine API spec.
+    ///
+    /// If validation passes, sends the attributes to the payload builder to start a new
+    /// payload job. If it fails, returns `INVALID_PAYLOAD_ATTRIBUTES` without rolling back
+    /// the forkchoice update.
+    ///
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(

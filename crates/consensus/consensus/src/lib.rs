@@ -1,4 +1,23 @@
 //! Consensus protocol functions
+//!
+//! # Trait hierarchy
+//!
+//! Consensus validation is split across three traits, each adding a layer:
+//!
+//! - [`HeaderValidator`] — validates a header in isolation and against its parent. Used early in
+//!   the validation pipeline before block execution.
+//!
+//! - [`Consensus`] — extends `HeaderValidator` with block body validation. Checks that the body
+//!   matches the header (tx root, ommer hash, withdrawals) and runs pre-execution checks. Used
+//!   before a block is executed.
+//!
+//! - [`FullConsensus`] — extends `Consensus` with post-execution validation. Checks execution
+//!   results against the header (gas used, receipt root, logs bloom). Used after block execution to
+//!   verify the outcome.
+//!
+//! In the engine, these are applied in order during payload validation (`engine_newPayload`).
+//! Payload attribute validation for block building (`engine_forkchoiceUpdated`) is handled
+//! separately at the engine API layer and does not use these traits.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
