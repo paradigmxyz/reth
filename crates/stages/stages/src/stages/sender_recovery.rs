@@ -150,7 +150,8 @@ where
 
         let mut writer = EitherWriter::new_senders(provider, *range_output.block_range.start())?;
 
-        info!(target: "sync::stages::sender_recovery", tx_range = ?range_output.tx_range, "Recovering senders");
+        let total_txs = range_output.tx_range.end - range_output.tx_range.start;
+        info!(target: "sync::stages::sender_recovery", total_txs, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
         let batch = range_output
@@ -168,6 +169,7 @@ where
         let block_body_indices_elapsed = start.elapsed();
         let mut blocks_with_indices = range_output.block_range.zip(block_body_indices).peekable();
 
+        let total_batches = batch.len();
         for range in batch {
             // Pair each transaction number with its block number
             let start = Instant::now();
@@ -183,7 +185,22 @@ where
             });
             let fold_elapsed = start.elapsed();
             debug!(target: "sync::stages::sender_recovery", ?block_body_indices_elapsed, ?fold_elapsed, len = block_numbers.len(), "Calculated block numbers");
-            recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
+            recover_range(
+                range.clone(),
+                block_numbers,
+                provider,
+                tx_batch_sender.clone(),
+                &mut writer,
+            )?;
+
+            let processed = range.end - range_output.tx_range.start;
+            if total_batches > 1 {
+                info!(
+                    target: "sync::stages::sender_recovery",
+                    progress = %format!("{}/{} ({:.2}%)", processed, total_txs, (processed as f64 / total_txs as f64) * 100.0),
+                    "Recovered senders"
+                );
+            }
         }
 
         // Advance the static file header to the end of this range to account for empty blocks.
