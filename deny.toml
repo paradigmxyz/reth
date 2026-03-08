@@ -78,4 +78,14 @@ unknown-registry = "warn"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
-allow-git = []
+unused-allowed-source = "allow"
+# Frequently patched dependencies
+allow-git = [
+    "https://github.com/alloy-rs/alloy",
+    "https://github.com/foundry-rs/block-explorers",
+    "https://github.com/bluealloy/revm",
+    "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/alloy-rs/evm",
+    "https://github.com/alloy-rs/hardforks",
+    "https://github.com/paradigmxyz/jsonrpsee",
+]
