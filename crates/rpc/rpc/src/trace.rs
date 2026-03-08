@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -77,6 +77,21 @@ impl<Eth: RpcNodeCore> TraceApi<Eth> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
+    }
+
+    /// Returns [`EthApiError::PrunedHistoryUnavailable`] if the block is in the pruned range,
+    /// otherwise [`EthApiError::HeaderNotFound`].
+    fn header_or_pruned_error(&self, block_id: BlockId) -> EthApiError
+    where
+        Eth::Provider: BlockNumReader,
+    {
+        if let BlockId::Number(BlockNumberOrTag::Number(num)) = block_id &&
+            let Ok(earliest) = self.provider().earliest_block_number() &&
+            num < earliest
+        {
+            return EthApiError::PrunedHistoryUnavailable;
+        }
+        EthApiError::HeaderNotFound(block_id)
     }
 }
 
@@ -477,7 +492,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Err(EthApiError::HeaderNotFound(block_id).into());
+            return Err(self.header_or_pruned_error(block_id).into());
         };
 
         let mut traces = self
@@ -553,7 +568,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Err(EthApiError::HeaderNotFound(block_id).into());
+            return Err(self.header_or_pruned_error(block_id).into());
         };
 
         let Some(transactions) = self
@@ -589,7 +604,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
-            return Err(EthApiError::HeaderNotFound(block_id).into());
+            return Err(self.header_or_pruned_error(block_id).into());
         };
 
         let Some(transactions) = self
