@@ -70,18 +70,36 @@ impl<T> TransactionOrdering for CoinbaseTipOrdering<T>
 where
     T: PoolTransaction + 'static,
 {
-    type PriorityValue = u128;
+    /// Priority is a 3-tuple `(effective_tip, fee_cap, tip_cap)` to enable tie-breaking
+    /// when multiple transactions have the same effective tip.
+    ///
+    /// This matches Geth's transaction ordering behavior.
+    type PriorityValue = (u128, u128, u128);
     type Transaction = T;
 
-    /// Source: <https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482>.
+    /// Returns the priority score for the given transaction.
     ///
-    /// NOTE: The implementation is incomplete for missing base fee.
+    /// Follows the same 3-level comparison as Geth's [`priceHeap.cmp`]:
+    /// 1. Primary: effective tip per gas (miner's actual reward)
+    /// 2. Secondary: max fee per gas (tie-breaker)
+    /// 3. Tertiary: max priority fee per gas (final tie-breaker)
+    ///
+    /// The tuple automatically provides lexicographic ordering, implementing
+    /// the exact same logic as Geth.
+    ///
+    /// [`priceHeap.cmp`]: https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482
     fn priority(
         &self,
         transaction: &Self::Transaction,
         base_fee: u64,
     ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).into()
+        let effective_tip = transaction.effective_tip_per_gas(base_fee).unwrap_or(0);
+
+        let fee_cap = transaction.max_fee_per_gas();
+
+        let tip_cap = transaction.max_priority_fee_per_gas().unwrap_or(0);
+
+        Priority::Value((effective_tip, fee_cap, tip_cap))
     }
 }
 
