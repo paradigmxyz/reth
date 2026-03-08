@@ -621,17 +621,36 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        // Guard against serving state for blocks that have been downloaded but not yet
-        // executed (e.g. during backfill sync)
+        Self::ensure_canonical_block(&head_block, &storage_provider, block_number)?;
+
+        storage_provider.try_into_history_at_block(block_number)
+    }
+}
+
+impl<N: ProviderNodeTypes> ConsistentProvider<N> {
+    /// Ensures that the given block number is canonical (synced)
+    ///
+    /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
+    /// out of range and would lead to invalid results, mainly during initial sync.
+    ///
+    /// Verifying the `block_number` would be expensive since we need to lookup sync table
+    /// Instead, we ensure that the `block_number` is within the range of the
+    /// [`Self::best_block_number`] which is updated when a block is synced.
+    #[inline]
+    fn ensure_canonical_block(
+        head_block: &Option<Arc<BlockState<N::Primitives>>>,
+        storage_provider: &<ProviderFactory<N> as DatabaseProviderFactory>::Provider,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
         let best = head_block
             .as_ref()
             .map(|b| Ok(b.number()))
             .unwrap_or_else(|| storage_provider.best_block_number())?;
         if block_number > best {
-            return Err(ProviderError::HeaderNotFound(block_number.into()));
+            Err(ProviderError::HeaderNotFound(block_number.into()))
+        } else {
+            Ok(())
         }
-
-        storage_provider.try_into_history_at_block(block_number)
     }
 }
 
