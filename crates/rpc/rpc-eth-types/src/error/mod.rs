@@ -1208,6 +1208,25 @@ mod tests {
     }
 
     #[test]
+    fn block_expired_converts_to_pruned_history_unavailable() {
+        // ProviderError::BlockExpired → EthApiError::PrunedHistoryUnavailable
+        let provider_err = reth_errors::ProviderError::BlockExpired {
+            requested: 100,
+            earliest_available: 1_000_000,
+        };
+        let eth_err: EthApiError = provider_err.into();
+        assert!(
+            matches!(eth_err, EthApiError::PrunedHistoryUnavailable),
+            "expected PrunedHistoryUnavailable, got: {eth_err:?}"
+        );
+
+        // Verify JSON-RPC error code is 4444
+        let rpc_err: jsonrpsee_types::error::ErrorObject<'static> = eth_err.into();
+        assert_eq!(rpc_err.code(), 4444);
+        assert_eq!(rpc_err.message(), "pruned history unavailable");
+    }
+
+    #[test]
     fn revert_err_display() {
         let revert = Revert::from("test_revert_reason");
         let err = RevertError::new(revert.abi_encode().into());
