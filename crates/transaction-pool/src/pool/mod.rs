@@ -1301,11 +1301,8 @@ where
         &'a self,
         transactions: impl IntoIterator<Item = &'a Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        let blob_txs = transactions
-            .into_iter()
-            .filter(|tx| tx.transaction.is_eip4844())
-            .map(|tx| *tx.hash())
-            .collect();
+        let blob_txs =
+            transactions.into_iter().filter(|tx| tx.is_eip4844()).map(|tx| *tx.hash()).collect();
         self.delete_blobs(blob_txs);
     }
 }
@@ -1452,7 +1449,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the hash of the replaced transaction if it is a blob transaction.
     pub(crate) fn replaced_blob_transaction(&self) -> Option<B256> {
-        self.replaced().filter(|tx| tx.transaction.is_eip4844()).map(|tx| *tx.transaction.hash())
+        self.replaced().filter(|tx| tx.is_eip4844()).map(|tx| *tx.hash())
     }
 
     /// Returns the hash of the transaction
