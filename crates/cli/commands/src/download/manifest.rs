@@ -432,6 +432,10 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
 }
 
 /// Package chunk archives from a source datadir and generate a manifest.
+///
+/// When `previous` is provided, finalized chunks (all but the last) from the previous manifest
+/// are copied verbatim instead of being re-archived. Only the tip chunk and any new chunks are
+/// archived from source. The previous manifest's `blocks_per_file` must match the current value.
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -439,7 +443,25 @@ pub fn generate_manifest(
     block: u64,
     chain_id: u64,
     blocks_per_file: u64,
+    previous: Option<&SnapshotManifest>,
 ) -> Result<SnapshotManifest> {
+    if let Some(prev) = previous {
+        // Validate blocks_per_file consistency with the previous manifest.
+        for (key, component) in &prev.components {
+            if let ComponentManifest::Chunked(chunked) = component {
+                if chunked.blocks_per_file != blocks_per_file {
+                    eyre::bail!(
+                        "Previous manifest has blocks_per_file={} for component '{}', \
+                         but current is {}; they must match",
+                        chunked.blocks_per_file,
+                        key,
+                        blocks_per_file
+                    );
+                }
+            }
+        }
+    }
+
     std::fs::create_dir_all(output_dir)?;
 
     let mut components = BTreeMap::new();
@@ -455,12 +477,40 @@ pub fn generate_manifest(
     ] {
         let key = ty.key();
         let num_chunks = block.div_ceil(blocks_per_file);
+
+        // Look up this component in the previous manifest (if any).
+        let prev_chunked = previous.and_then(|prev| match prev.components.get(key) {
+            Some(ComponentManifest::Chunked(c)) => Some(c),
+            _ => None,
+        });
+        let prev_num_chunks = prev_chunked.map(|c| c.chunk_sizes.len() as u64).unwrap_or(0);
+
         let mut planned_chunks = Vec::with_capacity(num_chunks as usize);
+        let mut reused_chunks: Vec<PackagedChunk> = Vec::new();
         let mut found_any = false;
 
         for i in 0..num_chunks {
             let start = i * blocks_per_file;
             let end = (i + 1) * blocks_per_file - 1;
+
+            // If this chunk is finalized in the previous manifest (not the tip), reuse it.
+            if let Some(prev) = prev_chunked {
+                if i < prev_num_chunks.saturating_sub(1) {
+                    let idx = i as usize;
+                    let size = prev.chunk_sizes.get(idx).copied().unwrap_or_default();
+                    let output_files =
+                        prev.chunk_output_files.get(idx).cloned().unwrap_or_default();
+                    info!(target: "reth::cli",
+                        component = key,
+                        chunk = %format!("{start}-{end}"),
+                        "Reusing finalized chunk from previous manifest"
+                    );
+                    found_any = true;
+                    reused_chunks.push(PackagedChunk { chunk_idx: i, size, output_files });
+                    continue;
+                }
+            }
+
             let source_files = source_files_for_chunk(source_datadir, *ty, start, end)?;
 
             if source_files.is_empty() {
@@ -491,6 +541,8 @@ pub fn generate_manifest(
                 .into_iter()
                 .collect::<Result<Vec<_>>>()?;
 
+            // Merge reused and newly archived chunks.
+            packaged_chunks.extend(reused_chunks);
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
@@ -1053,7 +1105,7 @@ mod tests {
         std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
 
         let state = manifest.component(SnapshotComponentType::State).unwrap();
         let ComponentManifest::Single(state) = state else {
@@ -1077,7 +1129,7 @@ mod tests {
         std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
 
         let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
         let ComponentManifest::Single(rocksdb) = rocksdb else {
@@ -1087,5 +1139,136 @@ mod tests {
         assert!(!rocksdb.output_files.is_empty());
         assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
         assert!(output.path().join("rocksdb_indices.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_incremental_skips_finalized_chunks() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+
+        // Create state DB (always required).
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+
+        // Create 3 header chunks in source static_files.
+        let sf = source.path().join("static_files");
+        std::fs::create_dir_all(&sf).unwrap();
+        std::fs::write(sf.join("static_file_headers_0_499999"), b"chunk0").unwrap();
+        std::fs::write(sf.join("static_file_headers_500000_999999"), b"chunk1").unwrap();
+        std::fs::write(sf.join("static_file_headers_1000000_1499999"), b"chunk2").unwrap();
+
+        // Build a "previous" manifest that covered 2 header chunks.
+        let prev_manifest = SnapshotManifest {
+            block: 1_000_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: None,
+            components: {
+                let mut c = BTreeMap::new();
+                c.insert(
+                    "headers".to_string(),
+                    ComponentManifest::Chunked(ChunkedArchive {
+                        blocks_per_file: 500_000,
+                        total_blocks: 1_000_000,
+                        chunk_sizes: vec![111, 222],
+                        chunk_output_files: vec![
+                            vec![OutputFileChecksum {
+                                path: "static_files/static_file_headers_0_499999".to_string(),
+                                size: 6,
+                                blake3: "prev_hash_0".to_string(),
+                            }],
+                            vec![OutputFileChecksum {
+                                path: "static_files/static_file_headers_500000_999999".to_string(),
+                                size: 6,
+                                blake3: "prev_hash_1".to_string(),
+                            }],
+                        ],
+                    }),
+                );
+                c
+            },
+        };
+
+        // Generate with previous manifest — only tip (chunk 1) and new (chunk 2) should be
+        // archived; chunk 0 should be reused from the previous manifest.
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            1_500_000,
+            1,
+            500_000,
+            Some(&prev_manifest),
+        )
+        .unwrap();
+
+        let headers = manifest.component(SnapshotComponentType::Headers).unwrap();
+        let ComponentManifest::Chunked(chunked) = headers else {
+            panic!("headers should be chunked")
+        };
+
+        assert_eq!(chunked.chunk_sizes.len(), 3);
+        // First chunk was reused from previous — size should be the previous value (111).
+        assert_eq!(chunked.chunk_sizes[0], 111);
+        // Tip chunk (index 1) was re-archived — size should be a real archive size, not 222.
+        assert_ne!(chunked.chunk_sizes[1], 222);
+        // New chunk (index 2) was archived — should be a real archive size.
+        assert!(chunked.chunk_sizes[2] > 0);
+
+        // Only 2 archives should have been written to disk (tip re-archived + new).
+        assert!(!output.path().join("headers-0-499999.tar.zst").exists());
+        assert!(output.path().join("headers-500000-999999.tar.zst").exists());
+        assert!(output.path().join("headers-1000000-1499999.tar.zst").exists());
+
+        // Reused chunk should preserve the output_files from the previous manifest.
+        assert_eq!(chunked.chunk_output_files[0].len(), 1);
+        assert_eq!(chunked.chunk_output_files[0][0].blake3, "prev_hash_0");
+    }
+
+    #[test]
+    fn generate_manifest_incremental_rejects_mismatched_blocks_per_file() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+
+        let prev_manifest = SnapshotManifest {
+            block: 500_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: None,
+            components: {
+                let mut c = BTreeMap::new();
+                c.insert(
+                    "headers".to_string(),
+                    ComponentManifest::Chunked(ChunkedArchive {
+                        blocks_per_file: 250_000, // Different from what we'll pass
+                        total_blocks: 500_000,
+                        chunk_sizes: vec![100, 200],
+                        chunk_output_files: vec![vec![], vec![]],
+                    }),
+                );
+                c
+            },
+        };
+
+        let result = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            1_000_000,
+            1,
+            500_000,
+            Some(&prev_manifest),
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("blocks_per_file"));
     }
 }
