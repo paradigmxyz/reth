@@ -16,10 +16,10 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, ProofTrieNodeV2,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, ProofTrieNodeV2, ProofV2Target,
     TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
@@ -351,12 +351,6 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates {
-                    if let Some(trie) = self.trie.trie_mut().as_revealed_mut() {
-                        trie.update_subtrie_hashes();
-                    }
-                }
-
                 if self.finished_state_updates &&
                     self.pending_storage_roots.is_empty() &&
                     self.account_updates.is_empty() &&
@@ -508,12 +502,12 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
+                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(Target::new(path).with_min_len(min_len));
+                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
 
@@ -770,14 +764,13 @@ where
             .filter_map(|(address, updates)| updates.is_empty().then_some(address))
             .collect();
 
-        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
+        let mut tries_to_compute_roots = Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
             if let Some(trie) = self.trie.storage_tries_mut().get(address) &&
                 !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((
-                    address,
+                    *address,
                     self.trie.take_storage_trie(address).expect("trie was created above"),
                 ));
             }
