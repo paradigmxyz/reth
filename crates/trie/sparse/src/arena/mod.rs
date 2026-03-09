@@ -2618,9 +2618,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let num_updates = updates.len();
 
         // Drain and sort updates lexicographically by nibbles path.
+        #[cfg(feature = "metrics")]
+        let sort_start = Instant::now();
+
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
+
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_sort_latency.record(sort_start.elapsed());
 
         let threshold = self.parallelism_thresholds.min_updates;
 
@@ -2630,11 +2636,34 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Subtries taken for parallel processing: (arena_index, subtrie, update_range).
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
 
+        #[cfg(feature = "metrics")]
+        let walk_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let mut seek_revealed_leaf: u64 = 0;
+        #[cfg(feature = "metrics")]
+        let mut seek_no_child: u64 = 0;
+        #[cfg(feature = "metrics")]
+        let mut seek_diverged: u64 = 0;
+        #[cfg(feature = "metrics")]
+        let mut seek_subtrie: u64 = 0;
+        #[cfg(feature = "metrics")]
+        let mut seek_blinded: u64 = 0;
+
         let mut update_idx = 0;
         while update_idx < sorted.len() {
             let (key, ref full_path, ref update) = sorted[update_idx];
 
             let find_result = cursor.seek(&mut self.upper_arena, full_path);
+
+            #[cfg(feature = "metrics")]
+            match &find_result {
+                SeekResult::RevealedLeaf => seek_revealed_leaf += 1,
+                SeekResult::NoChild { .. } => seek_no_child += 1,
+                SeekResult::Diverged => seek_diverged += 1,
+                SeekResult::RevealedSubtrie => seek_subtrie += 1,
+                SeekResult::Blinded => seek_blinded += 1,
+                SeekResult::EmptyRoot => {}
+            }
 
             match find_result {
                 // Blinded — request a proof regardless of update type.
@@ -2793,6 +2822,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
         cursor.drain(&mut self.upper_arena);
         self.buffers.cursor = cursor;
 
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.update_leaves_walk_latency.record(walk_start.elapsed());
+            self.metrics.update_leaves_seek_revealed_leaf.record(seek_revealed_leaf as f64);
+            self.metrics.update_leaves_seek_no_child.record(seek_no_child as f64);
+            self.metrics.update_leaves_seek_diverged.record(seek_diverged as f64);
+            self.metrics.update_leaves_seek_subtrie.record(seek_subtrie as f64);
+            self.metrics.update_leaves_seek_blinded.record(seek_blinded as f64);
+        }
+
         if taken.is_empty() {
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
@@ -2806,6 +2845,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Apply updates to taken subtries, in parallel if more than one.
+        #[cfg(feature = "metrics")]
+        let parallel_start = Instant::now();
+
         if taken.len() == 1 {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
@@ -2816,6 +2858,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_parallel_latency.record(parallel_start.elapsed());
+
+        #[cfg(feature = "metrics")]
+        let restore_start = Instant::now();
 
         // Collect subtrie paths before consuming `taken`, then restore subtries and
         // process required proofs.
@@ -2872,6 +2920,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         #[cfg(feature = "metrics")]
         {
+            self.metrics.update_leaves_restore_latency.record(restore_start.elapsed());
             self.metrics.update_leaves_latency.record(start.elapsed());
             self.metrics.num_leaf_updates.record(num_updates as f64);
         }

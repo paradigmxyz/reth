@@ -70,6 +70,32 @@ pub(crate) struct ParallelSparseTrieMetrics {
     pub(crate) num_pruned_nodes: Histogram,
     /// A histogram for the total time to compute the root hash.
     pub(crate) root_latency: Histogram,
+
+    // --- update_leaves phase breakdown (arena) ---
+    /// Time spent sorting updates by nibbles path.
+    pub(crate) update_leaves_sort_latency: Histogram,
+    /// Time spent on cursor seeks + upsert/remove (excluding sort and parallel subtrie work).
+    pub(crate) update_leaves_walk_latency: Histogram,
+    /// Time spent on parallel subtrie leaf updates.
+    pub(crate) update_leaves_parallel_latency: Histogram,
+    /// Time spent on post-parallel restore/dirty-propagation pass.
+    pub(crate) update_leaves_restore_latency: Histogram,
+    /// Number of cursor seek calls returning RevealedLeaf.
+    pub(crate) update_leaves_seek_revealed_leaf: Histogram,
+    /// Number of cursor seek calls returning NoChild.
+    pub(crate) update_leaves_seek_no_child: Histogram,
+    /// Number of cursor seek calls returning Diverged.
+    pub(crate) update_leaves_seek_diverged: Histogram,
+    /// Number of cursor seek calls returning RevealedSubtrie.
+    pub(crate) update_leaves_seek_subtrie: Histogram,
+    /// Number of cursor seek calls returning Blinded.
+    pub(crate) update_leaves_seek_blinded: Histogram,
+
+    // --- update_leaves fast-path counters (hashmap) ---
+    /// Number of updates that hit the existing-leaf fast path (no trie walk).
+    pub(crate) update_leaves_existing_leaf_hits: Histogram,
+    /// Number of updates that required a full trie walk.
+    pub(crate) update_leaves_full_walk: Histogram,
 }
 
 impl PartialEq for ParallelSparseTrieMetrics {

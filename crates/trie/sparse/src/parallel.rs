@@ -1313,6 +1313,11 @@ impl SparseTrie for ParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
+        #[cfg(feature = "metrics")]
+        let mut existing_leaf_hits: u64 = 0;
+        #[cfg(feature = "metrics")]
+        let mut full_walk: u64 = 0;
+
         // Drain updates to avoid cloning keys while preserving the map's allocation.
         // On success, entries remain removed; on blinded node failure, they're re-inserted.
         let drained: Vec<_> = updates.drain().collect();
@@ -1342,6 +1347,18 @@ impl SparseTrie for ParallelSparseTrie {
                         }
                     } else {
                         // Update/insert: update_leaf is atomic - cleans up on error.
+                        #[cfg(feature = "metrics")]
+                        {
+                            let is_existing =
+                                self.upper_subtrie.inner.values.contains_key(&full_path) ||
+                                    self.lower_subtrie_for_path(&full_path)
+                                        .is_some_and(|s| s.inner.values.contains_key(&full_path));
+                            if is_existing {
+                                existing_leaf_hits += 1;
+                            } else {
+                                full_walk += 1;
+                            }
+                        }
                         if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
                         {
                             if let Some(path) = Self::get_retriable_path(&e) {
@@ -1386,6 +1403,8 @@ impl SparseTrie for ParallelSparseTrie {
         {
             self.metrics.update_leaves_latency.record(start.elapsed());
             self.metrics.num_leaf_updates.record(num_updates as f64);
+            self.metrics.update_leaves_existing_leaf_hits.record(existing_leaf_hits as f64);
+            self.metrics.update_leaves_full_walk.record(full_walk as f64);
         }
 
         Ok(())
