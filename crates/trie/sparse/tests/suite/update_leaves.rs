@@ -819,8 +819,7 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie + Default>
     let root_before = trie.root();
 
     // Call update_leaves with Touched for an existing key.
-    let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((key2, LeafUpdate::Touched)).collect();
+    let mut leaf_updates: B256Map<LeafUpdate> = once((key2, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -870,8 +869,7 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie + 
         key.0[0] = 0x20;
         key
     };
-    let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((target_key, LeafUpdate::Touched)).collect();
+    let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -896,8 +894,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_key<T: SparseTrie + Default
     let mut trie = T::default();
 
     let target_key = B256::with_last_byte(42);
-    let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((target_key, LeafUpdate::Touched)).collect();
+    let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
     trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
@@ -932,7 +929,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
     // Key 0x50 does not exist in the trie but its path is fully revealed (no blinded nodes).
     let nonexistent_key = B256::with_last_byte(0x50);
     let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((nonexistent_key, LeafUpdate::Touched)).collect();
+        once((nonexistent_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
     trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
@@ -978,8 +975,8 @@ pub(super) fn test_update_leaves_multiple_mixed_updates<T: SparseTrie + Default>
     let new_value_a = U256::from(100);
     let updated_value_b = U256::from(999);
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key_a, LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_value_a).to_vec())),
-        (key_b, LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&updated_value_b).to_vec())),
+        (key_a, LeafUpdate::Changed(encode_fixed_size(&new_value_a).to_vec())),
+        (key_b, LeafUpdate::Changed(encode_fixed_size(&updated_value_b).to_vec())),
         (key_c, LeafUpdate::Changed(Vec::new())), // removal
         (key_d, LeafUpdate::Touched),
     ]
@@ -1127,7 +1124,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     assert_eq!(root1, harness.original_root, "initial root should match");
 
     // Step 1: Remove key_c to collapse the branch at 0x10..
-    let removal: BTreeMap<B256, U256> = std::iter::once((key_c, U256::ZERO)).collect();
+    let removal: BTreeMap<B256, U256> = once((key_c, U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1135,7 +1132,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     assert_eq!(root2, harness.original_root, "root after removal should match");
 
     // Step 2: Re-insert key_c with a new value — this re-creates the branch.
-    let reinsert: BTreeMap<B256, U256> = std::iter::once((key_c, U256::from(33))).collect();
+    let reinsert: BTreeMap<B256, U256> = once((key_c, U256::from(33))).collect();
     harness.apply_changeset(reinsert.clone());
     let mut reinsert_updates = SuiteTestHarness::leaf_updates(&reinsert);
     harness.reveal_and_update(&mut trie, &mut reinsert_updates);
@@ -1144,7 +1141,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
 
     // Step 3: Update key_a — previously could be orphaned if branch collapse
     // didn't maintain structural tracking properly.
-    let update: BTreeMap<B256, U256> = std::iter::once((key_a, U256::from(999))).collect();
+    let update: BTreeMap<B256, U256> = once((key_a, U256::from(999))).collect();
     harness.apply_changeset(update.clone());
     let mut update_updates = SuiteTestHarness::leaf_updates(&update);
     harness.reveal_and_update(&mut trie, &mut update_updates);
@@ -1189,7 +1186,7 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
     let mut trie: T = harness.init_trie_fully_revealed(false);
 
     // Step 1: Remove key_a → branch collapses, key_b becomes the sole child.
-    let removal: BTreeMap<B256, U256> = std::iter::once((key_a, U256::ZERO)).collect();
+    let removal: BTreeMap<B256, U256> = once((key_a, U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1210,7 +1207,7 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
 
     // Step 2: Modify the remaining leaf's value — this must succeed after the collapse
     // updated key_len properly.
-    let modification: BTreeMap<B256, U256> = std::iter::once((key_b, U256::from(999))).collect();
+    let modification: BTreeMap<B256, U256> = once((key_b, U256::from(999))).collect();
     harness.apply_changeset(modification.clone());
     let mut mod_updates = SuiteTestHarness::leaf_updates(&modification);
     harness.reveal_and_update(&mut trie, &mut mod_updates);
@@ -1260,7 +1257,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
     // Now remove keys[0] — this leaves keys[1] and all the blinded subtries.
     // The branch at the root still has multiple children (keys[1] + blinded children),
     // so this should not trigger a problematic branch collapse into blinded territory.
-    let removal: BTreeMap<B256, U256> = std::iter::once((keys[0], U256::ZERO)).collect();
+    let removal: BTreeMap<B256, U256> = once((keys[0], U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1282,7 +1279,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
     assert_eq!(find_result, LeafLookup::Exists, "retained leaf should still be findable");
 
     // Now update the retained leaf to verify the trie is in a consistent state.
-    let modification: BTreeMap<B256, U256> = std::iter::once((keys[1], U256::from(999))).collect();
+    let modification: BTreeMap<B256, U256> = once((keys[1], U256::from(999))).collect();
     harness.apply_changeset(modification.clone());
     let mut mod_updates = SuiteTestHarness::leaf_updates(&modification);
     harness.reveal_and_update(&mut trie, &mut mod_updates);

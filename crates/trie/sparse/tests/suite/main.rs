@@ -20,6 +20,7 @@
 //! - [`lifecycle`]: Integration tests exercising multiple methods together
 
 use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::{
     hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
@@ -177,7 +178,7 @@ impl SuiteTestHarness {
                 let rlp_value = if value == U256::ZERO {
                     Vec::new()
                 } else {
-                    alloy_rlp::encode_fixed_size(&value).to_vec()
+                    encode_fixed_size(&value).to_vec()
                 };
                 (slot, LeafUpdate::Changed(rlp_value))
             })

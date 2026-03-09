@@ -21,7 +21,7 @@ pub(super) fn test_find_leaf_exists<T: SparseTrie + Default>() {
     );
 
     // find_leaf with correct expected value → Exists
-    let correct_value = alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec();
+    let correct_value = encode_fixed_size(&U256::from(2)).to_vec();
     assert_eq!(
         trie.find_leaf(&key2_nibbles, Some(&correct_value)).expect("find_leaf should succeed"),
         LeafLookup::Exists,
@@ -105,7 +105,7 @@ pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie + Default>() {
     let trie: T = harness.init_trie_fully_revealed(false);
 
     let key2_nibbles = Nibbles::unpack(key2);
-    let wrong_value = alloy_rlp::encode_fixed_size(&U256::from(999)).to_vec();
+    let wrong_value = encode_fixed_size(&U256::from(999)).to_vec();
 
     let result = trie.find_leaf(&key2_nibbles, Some(&wrong_value));
     assert!(
@@ -162,7 +162,7 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + De
     key1.0[1] = 0x34;
     key1.0[2] = 0x56;
 
-    let base_storage: BTreeMap<B256, U256> = std::iter::once((key1, U256::from(1))).collect();
+    let base_storage: BTreeMap<B256, U256> = once((key1, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false);
@@ -191,8 +191,7 @@ pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie + Default
     existing_key.0[0] = 0x12;
     existing_key.0[1] = 0x34;
 
-    let base_storage: BTreeMap<B256, U256> =
-        std::iter::once((existing_key, U256::from(1))).collect();
+    let base_storage: BTreeMap<B256, U256> = once((existing_key, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false);
