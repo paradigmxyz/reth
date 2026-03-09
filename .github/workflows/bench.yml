@@ -492,17 +492,10 @@ jobs:
             core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
             core.setOutput('ref', pr.head.sha);
 
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-          fetch-depth: 0
-          ref: ${{ steps.checkout-ref.outputs.ref }}
-
-      - name: Resolve job URL and update status
+      - name: Resolve job URL
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
@@ -513,6 +506,19 @@ jobs:
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
+      - uses: actions/checkout@v6
+        id: checkout
+        with:
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ steps.checkout-ref.outputs.ref }}
+
+      - name: Update status
+        if: env.BENCH_COMMENT_ID
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
@@ -1095,6 +1101,7 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const steps_status = [
+              ['checking out', '${{ steps.checkout.outcome }}'],
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
@@ -1129,6 +1136,7 @@ jobs:
         with:
           script: |
             const steps_status = [
+              ['checking out', '${{ steps.checkout.outcome }}'],
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
