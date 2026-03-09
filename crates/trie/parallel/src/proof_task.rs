@@ -391,7 +391,7 @@ pub struct ProofTaskCtx<Factory> {
 
 impl<Factory> ProofTaskCtx<Factory> {
     /// Creates a new [`ProofTaskCtx`] with the given factory.
-    pub fn new(factory: Factory) -> Self {
+    pub const fn new(factory: Factory) -> Self {
         Self {
             factory,
             #[cfg(feature = "trie-debug")]
