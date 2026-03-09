@@ -216,8 +216,8 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone())
-            && input.gas >= entry.gas_used()
+        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
+            input.gas >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
             return entry.to_precompile_result()
@@ -438,7 +438,7 @@ mod tests {
     /// at different capacities.
     ///
     /// The model uses three tiers (hot/warm/cold) that reflect real mainnet behavior:
-    /// popular DeFi pools reuse the same curve inputs repeatedly (hot), less popular
+    /// popular `DeFi` pools reuse the same curve inputs repeatedly (hot), less popular
     /// ones are accessed occasionally (warm), and one-off operations form a long tail
     /// (cold). At 10K capacity the warm set is partially evicted by cold accesses,
     /// matching the ~55% hit rate observed for ecMul in production.
