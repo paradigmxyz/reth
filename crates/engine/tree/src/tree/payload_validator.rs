@@ -973,7 +973,7 @@ where
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
 
-            let built_bal = &result.block_access_list;
+            let built_bal = db.take_built_alloy_bal();
 
             // Compute hashes and compare
             let expected_hash = expected_bal
@@ -1389,9 +1389,13 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
-        {
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            block,
+            output,
+            receipt_root_bloom,
+            None,
+            false,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())

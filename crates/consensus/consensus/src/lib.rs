@@ -60,8 +60,9 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
-        block_access_list: Option<BlockAccessList>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list: Option<BlockAccessList>,
+        allow_bal_check: bool,
     ) -> Result<(), ConsensusError>;
 }
 

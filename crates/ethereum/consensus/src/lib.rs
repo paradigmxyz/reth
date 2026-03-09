@@ -77,8 +77,9 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
-        block_access_list: Option<BlockAccessList>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list: Option<BlockAccessList>,
+        allow_bal_check: bool,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(
             block,
@@ -87,6 +88,7 @@ where
             &result.requests,
             receipt_root_bloom,
             &block_access_list,
+            allow_bal_check,
             Some(result.gas_used),
         )
     }

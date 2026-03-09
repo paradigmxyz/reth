@@ -31,6 +31,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list: &Option<BlockAccessList>,
+    allow_bal_check: bool,
     gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
@@ -54,7 +55,7 @@ where
         })
     }
     // Validate that the block access list hash matches the calculated block access list hash
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) && allow_bal_check {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
         let default_bal = BlockAccessList::default();
         let block_access_list_hash =
