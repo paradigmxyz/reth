@@ -1,6 +1,7 @@
 use crate::{
     chain::ChainSpecInfo,
     hooks::{Hook, Hooks},
+    process::register_process_metrics,
     recorder::install_prometheus_recorder,
     version::VersionInfo,
 };
@@ -113,6 +114,7 @@ impl MetricServer {
 
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
+        register_process_metrics();
 
         Ok(())
     }
