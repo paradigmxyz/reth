@@ -484,6 +484,17 @@ where
         // save caches and finish using the shared ExecutionOutcome
         if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
             self.save_cache(execution_outcome, valid_block_rx);
+        } else {
+            // Execution failed or task terminated without outcome. Clear the stored cache
+            // to prevent stale data from being used by the next block.
+            //
+            // When get_cache_for() encounters a hash mismatch (fork block), it calls clear()
+            // on the shared Arc<ExecutionCacheInner>, then prewarm populates it with ancestor
+            // state. If execution then fails, the SavedCache stored in the RwLock retains the
+            // canonical hash but its inner data now contains stale fork ancestor state. Without
+            // this cleanup, the next canonical block would match the hash, skip clearing, and
+            // execute against the polluted cache.
+            self.execution_cache.clear();
         }
     }
 }

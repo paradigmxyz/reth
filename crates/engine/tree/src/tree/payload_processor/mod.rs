@@ -1060,7 +1060,6 @@ impl PayloadExecutionCache {
     }
 
     /// Clears the tracked cache
-    #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
     }
