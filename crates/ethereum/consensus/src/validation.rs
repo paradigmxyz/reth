@@ -20,6 +20,8 @@ use reth_primitives_traits::{
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
 ///
+///  If `allow_bal_check` is true, we compute the bal hash and match with the header bal hash
+///
 /// `gas_spent` is the `gas_used` value from the block execution result. When EIP-7778
 /// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
 /// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
