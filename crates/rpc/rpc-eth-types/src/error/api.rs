@@ -60,7 +60,7 @@ pub trait AsEthApiError {
     /// [`RpcInvalidTransactionError::GasTooHigh`].
     fn is_gas_too_high(&self) -> bool {
         if let Some(err) = self.as_err() {
-            return err.is_gas_too_high()
+            return err.is_gas_too_high();
         }
 
         false
@@ -70,7 +70,7 @@ pub trait AsEthApiError {
     /// [`RpcInvalidTransactionError::GasTooLow`].
     fn is_gas_too_low(&self) -> bool {
         if let Some(err) = self.as_err() {
-            return err.is_gas_too_low()
+            return err.is_gas_too_low();
         }
 
         false
@@ -118,6 +118,19 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
     /// Converts from EVM error to this type.
     fn from_evm_err(err: EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>) -> Self {
         err.into()
+    }
+
+    /// Converts from EVM error with a transaction index.
+    fn from_evm_err_with_index(
+        err: EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>,
+        index: usize,
+    ) -> Self
+    where
+        EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>: core::fmt::Display,
+        Self: From<EthApiError>,
+    {
+        EthApiError::EvmCustom(format!("transaction execution failed (index {index}): {err}"))
+            .into()
     }
 
     /// Ensures the execution result is successful or returns an error,
