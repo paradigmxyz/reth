@@ -1,5 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
+    prefix_set::TriePrefixSetsMut,
     proof::Proof,
     proof_v2,
     trie_cursor::TrieCursorFactory,
@@ -26,6 +27,8 @@ pub struct TrieWitness<T, H> {
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
+    /// A set of prefix sets that have changes.
+    prefix_sets: TriePrefixSetsMut,
     /// Flag indicating whether the root node should always be included (even if the target state
     /// is empty). This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
@@ -41,6 +44,7 @@ impl<T, H> TrieWitness<T, H> {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
+            prefix_sets: TriePrefixSetsMut::default(),
             always_include_root_node: false,
             witness: HashMap::default(),
         }
@@ -51,6 +55,7 @@ impl<T, H> TrieWitness<T, H> {
         TrieWitness {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
             witness: self.witness,
         }
@@ -61,9 +66,16 @@ impl<T, H> TrieWitness<T, H> {
         TrieWitness {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
             witness: self.witness,
         }
+    }
+
+    /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
+    pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
+        self.prefix_sets = prefix_sets;
+        self
     }
 
     /// Set `always_include_root_node` to true. Root node will be included even in empty state.
@@ -107,8 +119,10 @@ where
         } else {
             Self::get_proof_targets(&state)
         };
+        let prefix_sets_mut = core::mem::take(&mut self.prefix_sets);
         let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                .with_prefix_sets_mut(prefix_sets_mut)
                 .multiproof_v2(proof_targets)?;
 
         // No need to reconstruct the rest of the trie, we just need to include
@@ -209,7 +223,7 @@ where
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
                     storage_trie.root()
                 } else {
-                    self.storage_root_from_cursor(hashed_address)?
+                    self.storage_root_from_cursor(hashed_address, &prefix_sets)?
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -293,7 +307,11 @@ where
 
     /// Compute the storage root for an account by walking the storage trie from the cursor
     /// factories. Records the root node in the witness.
-    fn storage_root_from_cursor(&mut self, hashed_address: B256) -> Result<B256, TrieWitnessError> {
+    fn storage_root_from_cursor(
+        &mut self,
+        hashed_address: B256,
+        prefix_sets: &TriePrefixSets,
+    ) -> Result<B256, TrieWitnessError> {
         let storage_trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(hashed_address)
@@ -306,6 +324,9 @@ where
             storage_trie_cursor,
             hashed_storage_cursor,
         );
+        if let Some(prefix_set) = prefix_sets.storage_prefix_sets.get(&hashed_address) {
+            calculator = calculator.with_prefix_set(prefix_set.clone());
+        }
         let root_node = calculator.storage_root_node(hashed_address)?;
         let root_hash = calculator
             .compute_root_hash(core::slice::from_ref(&root_node))?
