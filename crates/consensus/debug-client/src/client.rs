@@ -1,14 +1,20 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadStatusEnum;
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, EngineApiMessageVersion, ExecutionPayload, NodePrimitives,
     PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
-use reth_tracing::tracing::warn;
+use reth_tracing::tracing::{debug, warn};
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
 use tokio::sync::mpsc;
+
+/// Maximum number of ancestor blocks to backfill when a gap is detected.
+///
+/// Prevents unbounded fetching if the node is very far behind the provider.
+const MAX_GAP_BACKFILL: u64 = 64;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
 /// by number to fetch past finalized and safe blocks.
@@ -89,53 +95,146 @@ where
             rx
         };
 
+        // Track the last block number we successfully processed (got Valid from engine).
+        let mut last_valid_block_number: Option<u64> = None;
+
         while let Some(block) = block_stream.recv().await {
+            let block_number = block.header().number();
+
+            // Detect gaps: if we've processed blocks before and this block isn't the
+            // immediate successor, backfill the missing ancestors first. On fast-block-time
+            // chains the subscription can skip blocks, which leaves the engine without the
+            // parent state needed to return Valid.
+            if let Some(last_valid) = last_valid_block_number {
+                let expected = last_valid + 1;
+                if block_number > expected {
+                    let gap = block_number - expected;
+                    let backfill_count = gap.min(MAX_GAP_BACKFILL);
+                    let start = block_number - backfill_count;
+
+                    debug!(
+                        target: "consensus::debug-client",
+                        %last_valid,
+                        %block_number,
+                        %backfill_count,
+                        "detected gap, backfilling missing blocks"
+                    );
+
+                    for num in start..block_number {
+                        if let Err(err) = self
+                            .submit_block_by_number(
+                                num,
+                                &mut previous_block_hashes,
+                                &mut last_valid_block_number,
+                            )
+                            .await
+                        {
+                            warn!(
+                                target: "consensus::debug-client",
+                                %num, %err, "failed to backfill block"
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Now submit the current block from the stream.
             let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
-
-            let block_hash = payload.block_hash();
-            let block_number = payload.block_number();
-
-            previous_block_hashes.enqueue(block_hash);
-
-            // Send new events to execution client
-            let _ = self.engine_handle.new_payload(payload).await;
-
-            // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
-            // finalized block hashes.
-            let safe_block_hash = self.block_provider.get_or_fetch_previous_block(
-                &previous_block_hashes,
-                block_number,
-                32,
-            );
-            let finalized_block_hash = self.block_provider.get_or_fetch_previous_block(
-                &previous_block_hashes,
-                block_number,
-                64,
-            );
-            let (safe_block_hash, finalized_block_hash) =
-                tokio::join!(safe_block_hash, finalized_block_hash);
-            let (safe_block_hash, finalized_block_hash) = match (
-                safe_block_hash,
-                finalized_block_hash,
-            ) {
-                (Ok(safe_block_hash), Ok(finalized_block_hash)) => {
-                    (safe_block_hash, finalized_block_hash)
-                }
-                (safe_block_hash, finalized_block_hash) => {
-                    warn!(target: "consensus::debug-client", ?safe_block_hash, ?finalized_block_hash, "failed to fetch safe or finalized hash from etherscan");
-                    continue;
-                }
-            };
-            let state = alloy_rpc_types_engine::ForkchoiceState {
-                head_block_hash: block_hash,
-                safe_block_hash,
-                finalized_block_hash,
-            };
-            let _ = self
-                .engine_handle
-                .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
-                .await;
+            if let Err(err) = self
+                .submit_payload(payload, &mut previous_block_hashes, &mut last_valid_block_number)
+                .await
+            {
+                warn!(target: "consensus::debug-client", %err, "failed to submit payload");
+            }
         }
+    }
+
+    /// Fetches a block by number from the provider and submits it to the engine.
+    async fn submit_block_by_number(
+        &self,
+        block_number: u64,
+        previous_block_hashes: &mut AllocRingBuffer<B256>,
+        last_valid_block_number: &mut Option<u64>,
+    ) -> eyre::Result<()> {
+        let block = self.block_provider.get_block(block_number).await?;
+        let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
+        self.submit_payload(payload, previous_block_hashes, last_valid_block_number).await
+    }
+
+    /// Submits a payload to the engine via newPayload + FCU, checking the response
+    /// to track which blocks were accepted as Valid.
+    async fn submit_payload(
+        &self,
+        payload: T::ExecutionData,
+        previous_block_hashes: &mut AllocRingBuffer<B256>,
+        last_valid_block_number: &mut Option<u64>,
+    ) -> eyre::Result<()> {
+        let block_hash = payload.block_hash();
+        let block_number = payload.block_number();
+
+        previous_block_hashes.enqueue(block_hash);
+
+        // Send newPayload and inspect the response.
+        match self.engine_handle.new_payload(payload).await {
+            Ok(status) => match status.status {
+                PayloadStatusEnum::Valid => {
+                    *last_valid_block_number = Some(block_number);
+                }
+                PayloadStatusEnum::Syncing => {
+                    debug!(
+                        target: "consensus::debug-client",
+                        %block_number, %block_hash, "newPayload returned Syncing"
+                    );
+                }
+                PayloadStatusEnum::Invalid { .. } | PayloadStatusEnum::Accepted => {
+                    warn!(
+                        target: "consensus::debug-client",
+                        %block_number, ?status, "newPayload returned unexpected status"
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    target: "consensus::debug-client",
+                    %block_number, %err, "newPayload failed"
+                );
+            }
+        }
+
+        // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
+        // finalized block hashes.
+        let safe_block_hash = self.block_provider.get_or_fetch_previous_block(
+            previous_block_hashes,
+            block_number,
+            32,
+        );
+        let finalized_block_hash = self.block_provider.get_or_fetch_previous_block(
+            previous_block_hashes,
+            block_number,
+            64,
+        );
+        let (safe_block_hash, finalized_block_hash) =
+            tokio::join!(safe_block_hash, finalized_block_hash);
+        let (safe_block_hash, finalized_block_hash) = match (safe_block_hash, finalized_block_hash)
+        {
+            (Ok(safe_block_hash), Ok(finalized_block_hash)) => {
+                (safe_block_hash, finalized_block_hash)
+            }
+            (safe_block_hash, finalized_block_hash) => {
+                warn!(target: "consensus::debug-client", ?safe_block_hash, ?finalized_block_hash, "failed to fetch safe or finalized hash");
+                return Ok(());
+            }
+        };
+        let state = alloy_rpc_types_engine::ForkchoiceState {
+            head_block_hash: block_hash,
+            safe_block_hash,
+            finalized_block_hash,
+        };
+        let _ =
+            self.engine_handle.fork_choice_updated(state, None, EngineApiMessageVersion::V3).await;
+
+        Ok(())
     }
 }
 
