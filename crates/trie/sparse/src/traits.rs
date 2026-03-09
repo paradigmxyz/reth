@@ -288,25 +288,27 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    /// Returns a heuristic for the in-memory size of this trie in bytes.
     ///
-    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
-    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    /// This is an approximation that accounts for the trie's nodes, values,
+    /// and auxiliary data structures.
+    fn memory_size(&self) -> usize;
+
+    /// Prunes all subtrees that do not contain retained leaves.
+    ///
+    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
+    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
+    /// hash stubs when hashes are available.
     ///
     /// # Preconditions
     ///
     /// Must be called after `root()` to ensure all nodes have computed hashes.
-    /// Calling on a trie without computed hashes will result in no pruning.
-    ///
-    /// # Behavior
-    ///
-    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
-    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    /// Calling on a trie without computed hashes will result in limited or no pruning.
     ///
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, max_depth: usize) -> usize;
+    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize;
 
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///

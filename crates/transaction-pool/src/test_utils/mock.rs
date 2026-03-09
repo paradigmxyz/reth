@@ -428,6 +428,14 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the number of blob versioned hashes for EIP-4844 transactions.
+    pub fn with_blob_hashes(mut self, count: usize) -> Self {
+        if let Self::Eip4844 { blob_versioned_hashes, .. } = &mut self {
+            *blob_versioned_hashes = (0..count).map(|_| B256::random()).collect();
+        }
+        self
+    }
+
     /// Sets the max fee per blob gas for EIP-4844 transactions,
     pub const fn set_blob_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip4844 { max_fee_per_blob_gas, .. } = self {

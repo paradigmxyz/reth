@@ -1,7 +1,7 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::env::BlockEnvironment;
+use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
@@ -27,17 +27,18 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
+use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -204,12 +205,12 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.trace_block(block, evm_env, opts).await
     }
@@ -226,7 +227,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -352,7 +353,7 @@ where
             .into())
         }
 
-        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
@@ -404,13 +405,15 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((mut evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(target_block),
-            self.eth_api().recovered_block(target_block),
-        )?;
+        let block = self
+            .eth_api()
+            .recovered_block(target_block)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(target_block))?;
+        let mut evm_env =
+            self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -622,6 +625,43 @@ where
                     .state_by_block_id(block_id.unwrap_or_default())
                     .map_err(Eth::Error::from_eth_err)?;
                 state.state_root_with_updates(hashed_state).map_err(Eth::Error::from_eth_err)
+            })
+            .await
+    }
+
+    /// Executes a block and returns the state root after each transaction.
+    pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(block_hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                // Enable transition tracking so that merge_transitions works
+                db.transition_state = Some(Default::default());
+
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                let mut roots = Vec::with_capacity(block.body().transactions().len());
+                for tx in block.transactions_recovered() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    {
+                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                    // Merge transitions into cumulative bundle_state
+                    db.merge_transitions(BundleRetention::PlainState);
+                    // Compute state root from the accumulated state changes
+                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let root =
+                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                    roots.push(root);
+                }
+
+                Ok(roots)
             })
             .await
     }
@@ -967,10 +1007,11 @@ where
 
     async fn debug_intermediate_roots(
         &self,
-        _block_hash: B256,
+        block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+    ) -> RpcResult<Vec<B256>> {
+        let _permit = self.acquire_trace_permit().await;
+        self.intermediate_roots(block_hash).await.map_err(Into::into)
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
@@ -1070,18 +1111,33 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: B256,
-        _opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        let block = self
+            .inner
+            .bad_block_store
+            .get(block_hash)
+            .ok_or_else(|| internal_rpc_err("bad block not found in cache"))?;
+
+        let evm_env = self
+            .eth_api()
+            .evm_config()
+            .evm_env(block.header())
+            .map_err(RethError::other)
+            .to_rpc_result()?;
+
+        let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
+        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
     }
 
-    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
-        Ok(())
+    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
-    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
@@ -1152,6 +1208,12 @@ impl<B: BlockTrait> BadBlockStore<B> {
     fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
         let guard = self.inner.read();
         guard.iter().rev().cloned().collect()
+    }
+
+    /// Returns the bad block with the given hash, if cached.
+    fn get(&self, hash: B256) -> Option<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().find(|b| b.hash() == hash).cloned()
     }
 }
 

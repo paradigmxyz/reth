@@ -70,8 +70,8 @@ impl ExecutionWitnessRecord {
                 }
             }
         }
-        // Get the lowest block number from the cache
-        self.lowest_block_number = statedb.block_hashes.lowest().map(|(n, _)| n)
+        self.lowest_block_number =
+            statedb.block_hashes.lowest().map(|(block_number, _)| block_number)
     }
 
     /// Creates the record from the state after execution.
