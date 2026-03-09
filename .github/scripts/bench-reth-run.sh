@@ -111,6 +111,7 @@ case "$LABEL" in
   feature*)  EXTRA_NODE_ARGS="${BENCH_FEATURE_ARGS:-}" ;;
 esac
 if [ -n "$EXTRA_NODE_ARGS" ]; then
+  echo "Extra node args for ${LABEL}: ${EXTRA_NODE_ARGS}"
   # Word-split the string into individual args
   # shellcheck disable=SC2206
   RETH_ARGS+=($EXTRA_NODE_ARGS)
