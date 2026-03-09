@@ -218,7 +218,7 @@ impl ArenaSparseSubtrie {
     /// caller after this method returns.
     #[instrument(
         level = "trace",
-        target = "trie::arena",
+        target = TRACE_TARGET,
         skip_all,
         fields(
             subtrie = ?self.path,
@@ -614,7 +614,7 @@ impl ArenaParallelSparseTrie {
     /// Pops the subtrie entry (propagating leaf count deltas) before returning.
     #[instrument(
         level = "trace",
-        target = "trie::arena",
+        target = TRACE_TARGET,
         skip_all,
         fields(subtrie_path = ?cursor.head().expect("cursor is non-empty").path),
     )]
@@ -848,7 +848,7 @@ impl ArenaParallelSparseTrie {
     /// the child's nibble. Once all children of a branch are processed, the branch is encoded
     /// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
     /// single result `RlpNode`.
-    #[instrument(level = "trace", target = "trie::arena", skip_all, fields(base_path = ?base_path), ret)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
         arena: &mut NodeArena,
         root: Index,
@@ -1264,7 +1264,7 @@ impl ArenaParallelSparseTrie {
     ///
     /// Returns an [`UpsertLeafResult`] and [`SubtrieCounterDeltas`] so the caller can maintain
     /// aggregate counters and decide whether to wrap the result as a subtrie.
-    #[instrument(level = "trace", target = "trie::arena", skip_all, fields(full_path = ?full_path))]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(full_path = ?full_path))]
     fn upsert_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
@@ -1706,6 +1706,7 @@ impl ArenaParallelSparseTrie {
     /// - Nodes at other depths must NOT be `Subtrie`.
     ///
     /// Uses the cursor to DFS the upper arena, checking each visited node's path length.
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     #[cfg(debug_assertions)]
     fn debug_assert_subtrie_structure(&mut self) {
         let mut cursor = mem::take(&mut self.buffers.cursor);
@@ -1803,7 +1804,7 @@ impl ArenaParallelSparseTrie {
     /// leaf head) are no-ops — the proof node is skipped.
     ///
     /// Returns the `Index` of the revealed node in the arena, if any was revealed.
-    #[instrument(level = "trace", target = "trie::arena", skip_all)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn reveal_node(
         arena: &mut NodeArena,
         cursor: &ArenaCursor,
@@ -1934,7 +1935,7 @@ impl ArenaParallelSparseTrie {
 }
 
 impl SparseTrie for ArenaParallelSparseTrie {
-    #[instrument(level = "trace", target = "trie::arena", skip_all)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn set_root(
         &mut self,
         root: TrieNodeV2,
@@ -1997,7 +1998,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.upper_arena.reserve(additional);
     }
 
-    #[instrument(level = "trace", target = "trie::arena", skip_all, fields(num_nodes = nodes.len()))]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
             return Ok(());
@@ -2149,7 +2150,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         unimplemented!("ArenaParallelSparseTrie uses update_leaves for batch leaf removals")
     }
 
-    #[instrument(level = "trace", target = "trie::arena", skip_all, ret)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
     fn root(&mut self) -> B256 {
         self.update_subtrie_hashes();
 
@@ -2174,7 +2175,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.upper_arena[self.root].is_cached()
     }
 
-    #[instrument(level = "trace", target = "trie::arena", skip_all)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
@@ -2294,14 +2295,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
-    #[instrument(level = "trace", target = "trie::arena", skip_all)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
-    #[instrument(level = "trace", target = "trie::arena", skip_all)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn clear(&mut self) {
         for idx in self.all_subtries() {
             if let ArenaSparseNode::Subtrie(mut subtrie) =
@@ -2492,7 +2493,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(
         level = "trace",
-        target = "trie::arena",
+        target = TRACE_TARGET,
         skip_all,
         fields(num_updates = updates.len()),
     )]

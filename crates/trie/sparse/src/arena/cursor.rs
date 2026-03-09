@@ -1,11 +1,13 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, TRACE_TARGET,
+    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
 use slotmap::{DefaultKey, SlotMap};
 use tracing::{instrument, trace};
+
+const TRACE_TARGET: &str = "trie::arena::cursor";
 
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
@@ -97,6 +99,7 @@ impl ArenaCursor {
     }
 
     /// Clears the traversal stack and pushes the given root entry.
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self))]
     pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(
             self.stack.is_empty() && !self.needs_pop,
@@ -121,7 +124,7 @@ impl ArenaCursor {
     ///
     /// Uses `arena.get()` for the popped node because callers (e.g. pruning) may remove
     /// the node from the arena between the time it was pushed and the time it is popped.
-    #[instrument(level = "trace", target = "trie::arena", skip(self, arena))]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn pop(&mut self, arena: &mut NodeArena) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
@@ -159,6 +162,7 @@ impl ArenaCursor {
 
     /// Drains the stack, propagating dirty state from each entry to its parent,
     /// then removes the final (root) entry.
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     pub(super) fn drain(&mut self, arena: &mut NodeArena) {
         trace!(target: TRACE_TARGET, "Draining stack");
         self.needs_pop = false;
@@ -245,6 +249,7 @@ impl ArenaCursor {
     /// can read it via [`Self::head`].
     ///
     /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
     pub(super) fn next(
         &mut self,
         arena: &mut NodeArena,
@@ -304,7 +309,7 @@ impl ArenaCursor {
     /// deepest ancestor is reached.
     ///
     /// Returns a [`SeekResult`] describing the state at the stack head.
-    #[instrument(level = "trace", target = "trie::arena", skip(self, arena), ret)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena), ret)]
     pub(super) fn seek(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         // Pop stack until head is ancestor of full_path.
         while self.stack.len() > 1 &&
