@@ -24,6 +24,7 @@ use reth_primitives_traits::{
 /// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
 /// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
 /// against the execution result's `gas_used` rather than the receipt value.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
