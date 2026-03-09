@@ -498,6 +498,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
+      # The checkout above uses the PR head ref, so .github/scripts/
+      # may be outdated. Overlay the bench scripts from main so the
+      # benchmark infrastructure always uses the latest version.
+      - name: Update bench scripts from main
+        run: git checkout origin/main -- .github/scripts/bench-*
+
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
