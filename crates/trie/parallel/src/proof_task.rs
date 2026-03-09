@@ -723,9 +723,8 @@ where
 
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
-                let jitter = Duration::from_nanos(
-                    rand::random::<u64>() % (max_jitter.as_nanos() as u64 + 1),
-                );
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
                 trace!(
                     target: "trie::proof_task",
                     worker_id = self.worker_id,
@@ -1010,9 +1009,8 @@ where
 
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
-                let jitter = Duration::from_nanos(
-                    rand::random::<u64>() % (max_jitter.as_nanos() as u64 + 1),
-                );
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
                 trace!(
                     target: "trie::proof_task",
                     worker_id = self.worker_id,
