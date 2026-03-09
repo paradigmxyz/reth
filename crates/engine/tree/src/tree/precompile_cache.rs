@@ -1,28 +1,35 @@
-//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
+//! Precompile cache backed by [`schnellru::LruMap`] (LRU by length).
 
-use alloy_primitives::{
-    map::{DefaultHashBuilder, FbBuildHasher},
-    Bytes,
-};
-use moka::policy::EvictionPolicy;
+use alloy_primitives::map::FbBuildHasher;
+use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
-use std::{hash::Hash, sync::Arc};
+use schnellru::{ByLength, LruMap};
+use std::{fmt, hash::Hash, sync::Arc};
 
-/// Default max cache size for [`PrecompileCache`]
+/// Default max cache size for [`PrecompileCache`].
 const MAX_CACHE_SIZE: u32 = 10_000;
 
 /// Stores caches for each precompile.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static;
+
+impl<S> fmt::Debug for PrecompileCacheMap<S>
+where
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrecompileCacheMap").field("num_precompiles", &self.0.len()).finish()
+    }
+}
 
 impl<S> PrecompileCacheMap<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Get the precompile cache for the given address.
     pub fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
@@ -38,38 +45,50 @@ where
     }
 }
 
+/// Inner LRU map type used by [`PrecompileCache`].
+type PrecompileLruMap<S> = LruMap<Vec<u8>, CacheEntry<S>, ByLength>;
+
 /// Cache for precompiles, for each input stores the result.
-#[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>)
+///
+/// Internally backed by [`schnellru::LruMap`] behind an `Arc<Mutex<..>>` so that multiple
+/// [`CachedPrecompile`] instances for the same address share state.
+#[derive(Clone)]
+pub struct PrecompileCache<S>(Arc<Mutex<PrecompileLruMap<S>>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static;
+
+impl<S> fmt::Debug for PrecompileCache<S>
+where
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let map = self.0.lock();
+        f.debug_struct("PrecompileCache").field("len", &map.len()).finish()
+    }
+}
 
 impl<S> Default for PrecompileCache<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
-                .eviction_policy(EvictionPolicy::lru())
-                .build_with_hasher(Default::default()),
-        )
+        Self(Arc::new(Mutex::new(LruMap::new(ByLength::new(MAX_CACHE_SIZE)))))
     }
 }
 
 impl<S> PrecompileCache<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+        self.0.lock().get(input).filter(|e| e.spec == spec).cloned()
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
-    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
-        self.0.entry_count() as usize
+    fn insert(&self, input: &[u8], value: CacheEntry<S>) -> usize {
+        let mut map = self.0.lock();
+        map.insert(input.to_vec(), value);
+        map.len()
     }
 }
 
@@ -94,7 +113,7 @@ impl<S> CacheEntry<S> {
 #[derive(Debug)]
 pub struct CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Cache for precompile results and gas bounds.
     cache: PrecompileCache<S>,
@@ -108,7 +127,7 @@ where
 
 impl<S> CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
     pub const fn new(
@@ -162,7 +181,7 @@ where
 
 impl<S> Precompile for CachedPrecompile<S>
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn precompile_id(&self) -> &PrecompileId {
         self.precompile.precompile_id()
@@ -182,7 +201,7 @@ where
         match &result {
             Ok(output) => {
                 let size = self.cache.insert(
-                    Bytes::copy_from_slice(calldata),
+                    calldata,
                     CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
                 );
                 self.set_precompile_cache_size_metric(size as f64);
@@ -226,6 +245,7 @@ impl CachedPrecompileMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Bytes;
     use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
     use revm::{context::TxEnv, precompile::PrecompileOutput};
@@ -255,7 +275,7 @@ mod tests {
 
         let input = b"test_input";
         let expected = CacheEntry { output, spec: SpecId::PRAGUE };
-        cache.cache.insert(input.into(), expected.clone());
+        cache.cache.insert(input.as_slice(), expected.clone());
 
         let actual = cache.cache.get(input, SpecId::PRAGUE).unwrap();
 
