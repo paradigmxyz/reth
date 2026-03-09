@@ -1,6 +1,6 @@
 use super::{
-    child_dense_index, ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
-    TRACE_TARGET,
+    branch_child_idx::{BranchChildIdx, BranchChildIter},
+    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, TRACE_TARGET,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -212,19 +212,19 @@ impl ArenaCursor {
             child_nibble.expect("if cursor has a parent then the head path can't be empty");
 
         let parent_branch = arena[parent.index].branch_mut();
-        let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
 
         debug_assert!(
             matches!(
-                parent_branch.children[dense_idx],
+                parent_branch.children[child_idx],
                 ArenaSparseNodeBranchChild::Revealed(idx)
                 if idx == old_idx
             ),
             "parent child at nibble {child_nibble} does not match old_idx",
         );
 
-        parent_branch.children[dense_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
+        parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
     }
 
     /// Advances the DFS traversal to the next actionable node.
@@ -266,19 +266,20 @@ impl ArenaCursor {
             let child_depth = self.stack.len();
 
             let mut descended = false;
-            for (dense_idx, nibble) in state_mask.iter().enumerate() {
-                if dense_idx < start {
+            for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
+                if branch_child_idx.get() < start {
                     continue;
                 }
 
-                let child_idx = match &arena[head_idx].branch_ref().children[dense_idx] {
+                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
                 };
 
                 if should_descend(child_depth, &arena[child_idx]) {
                     // Record where to resume iteration when we return to this entry.
-                    self.stack.last_mut().expect("head exists").next_dense_idx = dense_idx + 1;
+                    self.stack.last_mut().expect("head exists").next_dense_idx =
+                        branch_child_idx.get() + 1;
                     let path = self.child_path(arena, nibble);
                     self.push(arena, child_idx, path);
                     descended = true;
@@ -346,11 +347,12 @@ impl ArenaCursor {
             }
 
             let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
-            let Some(dense_idx) = child_dense_index(head_branch.state_mask, child_nibble) else {
+            let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
+            else {
                 return SeekResult::NoChild { child_nibble };
             };
 
-            match &head_branch.children[dense_idx] {
+            match &head_branch.children[branch_child_idx] {
                 ArenaSparseNodeBranchChild::Blinded(_) => {
                     return SeekResult::Blinded;
                 }

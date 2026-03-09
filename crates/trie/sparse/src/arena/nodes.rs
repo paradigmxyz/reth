@@ -1,4 +1,4 @@
-use super::ArenaSparseSubtrie;
+use super::{branch_child_idx::BranchChildIter, ArenaSparseSubtrie};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
@@ -82,9 +82,9 @@ impl ArenaSparseNodeBranch {
         compact: &mut BranchNodeCompact,
     ) {
         let mut hashes = Vec::new();
-        for (dense_idx, nibble) in self.state_mask.iter().enumerate() {
+        for (child_idx, nibble) in BranchChildIter::new(self.state_mask) {
             if self.branch_masks.hash_mask.is_bit_set(nibble) {
-                let hash = match &self.children[dense_idx] {
+                let hash = match &self.children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node.as_hash().expect("blinded child must be a hash")
                     }

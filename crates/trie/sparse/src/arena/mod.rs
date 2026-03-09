@@ -1,6 +1,8 @@
+mod branch_child_idx;
 mod cursor;
 mod nodes;
 
+use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
@@ -29,20 +31,6 @@ const TRACE_TARGET: &str = "trie::arena";
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
-
-/// Counts the number of occupied child slots below `nibble` in the dense children array.
-const fn dense_index_of(state_mask: TrieMask, nibble: u8) -> usize {
-    (state_mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize
-}
-
-/// Returns the index into a densely-packed children array for a given nibble, based on the
-/// state mask. Returns `None` if the nibble's bit is not set.
-const fn child_dense_index(state_mask: TrieMask, nibble: u8) -> Option<usize> {
-    if !state_mask.is_bit_set(nibble) {
-        return None;
-    }
-    Some(dense_index_of(state_mask, nibble))
-}
 
 /// Finds the sub-range of `sorted_keys[start..]` whose entries start with `prefix`.
 ///
@@ -229,9 +217,9 @@ impl ArenaSparseSubtrie {
             let parent_idx = self.buffers.cursor.parent().expect("pruned child has parent").index;
             let child_nibble = nibble.expect("non-root child");
             let parent_branch = self.arena[parent_idx].branch_mut();
-            let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
                 .expect("child nibble not found in parent state_mask");
-            parent_branch.children[dense_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
         }
     }
 
@@ -674,10 +662,10 @@ impl ArenaParallelSparseTrie {
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
         let parent_branch = self.upper_arena[parent_idx].branch_mut();
-        let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
 
-        parent_branch.children.remove(dense_idx);
+        parent_branch.children.remove(child_idx.get());
         parent_branch.unset_child_bit(child_nibble);
         // The branch structure changed (child removed), so any cached RLP is stale.
         parent_branch.state = parent_branch.state.to_dirty();
@@ -741,9 +729,9 @@ impl ArenaParallelSparseTrie {
                 self.upper_arena.remove(branch_idx);
                 let parent_idx = cursor.head().expect("cursor is non-empty").index;
                 let parent_branch = self.upper_arena[parent_idx].branch_mut();
-                let dense_idx = child_dense_index(parent_branch.state_mask, branch_nibble)
+                let child_idx = BranchChildIdx::new(parent_branch.state_mask, branch_nibble)
                     .expect("child nibble not found in parent state_mask");
-                parent_branch.children.remove(dense_idx);
+                parent_branch.children.remove(child_idx.get());
                 parent_branch.unset_child_bit(branch_nibble);
                 parent_branch.state = parent_branch.state.to_dirty();
                 continue; // re-check the parent
@@ -850,8 +838,8 @@ impl ArenaParallelSparseTrie {
     ) -> BranchNodeMasks {
         let mut masks = BranchNodeMasks::default();
 
-        for (dense_idx, nibble) in branch.state_mask.iter().enumerate() {
-            let (hash_bit, tree_bit) = match branch.children[dense_idx] {
+        for (child_idx, nibble) in BranchChildIter::new(branch.state_mask) {
+            let (hash_bit, tree_bit) = match branch.children[child_idx] {
                 ArenaSparseNodeBranchChild::Blinded(_) => (
                     branch.branch_masks.hash_mask.is_bit_set(nibble),
                     branch.branch_masks.tree_mask.is_bit_set(nibble),
@@ -949,8 +937,8 @@ impl ArenaParallelSparseTrie {
 
             rlp_node_buf.clear();
             let state_mask = arena[head_idx].branch_ref().state_mask;
-            for (dense_idx, _nibble) in state_mask.iter().enumerate() {
-                match &arena[head_idx].branch_ref().children[dense_idx] {
+            for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
+                match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node_buf.push(rlp_node.clone());
                     }
@@ -1072,8 +1060,8 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let dense_idx = child_dense_index(b.state_mask, child_nibble)?;
-                    match &b.children[dense_idx] {
+                    let child_idx = BranchChildIdx::new(b.state_mask, child_nibble)?;
+                    match &b.children[child_idx] {
                         ArenaSparseNodeBranchChild::Blinded(_) => return None,
                         ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                             current = *child_idx;
@@ -1137,11 +1125,11 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let Some(dense_idx) = child_dense_index(b.state_mask, child_nibble) else {
+                    let Some(child_idx) = BranchChildIdx::new(b.state_mask, child_nibble) else {
                         return Ok(LeafLookup::NonExistent);
                     };
 
-                    match &b.children[dense_idx] {
+                    match &b.children[child_idx] {
                         ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                             let hash = rlp_node
                                 .as_hash()
@@ -1371,7 +1359,7 @@ impl ArenaParallelSparseTrie {
                 let head_idx = head.index;
                 let head_branch = arena[head_idx].branch_ref();
                 let state_mask = head_branch.state_mask;
-                let insert_pos = dense_index_of(state_mask, child_nibble);
+                let insert_pos = BranchChildIdx::insertion_point(state_mask, child_nibble);
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
@@ -1383,7 +1371,9 @@ impl ArenaParallelSparseTrie {
 
                 let branch = arena[head_idx].branch_mut();
                 branch.state_mask.set_bit(child_nibble);
-                branch.children.insert(insert_pos, ArenaSparseNodeBranchChild::Revealed(new_leaf));
+                branch
+                    .children
+                    .insert(insert_pos.get(), ArenaSparseNodeBranchChild::Revealed(new_leaf));
                 branch.state = ArenaSparseNodeState::Dirty;
 
                 // Re-seek to position the cursor on the newly inserted leaf.
@@ -1452,10 +1442,10 @@ impl ArenaParallelSparseTrie {
                     let parent_branch = arena[parent_idx].branch_ref();
 
                     if parent_branch.state_mask.count_bits() == 2 {
-                        let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+                        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
                             .expect("leaf nibble not found in parent state_mask");
                         // With exactly 2 bits set the dense array has indices 0 and 1.
-                        let sibling_dense_idx = 1 - dense_idx;
+                        let sibling_dense_idx = 1 - child_idx.get();
                         if parent_branch.children[sibling_dense_idx].is_blinded() {
                             let sibling_nibble = parent_branch
                                 .state_mask
@@ -1505,13 +1495,13 @@ impl ArenaParallelSparseTrie {
                 let child_nibble = head_path.last().expect("non-root leaf");
 
                 let parent_branch = arena[parent_idx].branch_ref();
-                let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+                let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
                     .expect("leaf nibble not found in parent state_mask");
 
                 // Remove the leaf from the arena and from the parent's children.
                 arena.remove(head_idx);
                 let parent_branch = arena[parent_idx].branch_mut();
-                parent_branch.children.remove(dense_idx);
+                parent_branch.children.remove(child_idx.get());
                 parent_branch.unset_child_bit(child_nibble);
                 parent_branch.state = ArenaSparseNodeState::Dirty;
 
@@ -1572,9 +1562,9 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not in parent state_mask");
-        let sibling_dense_idx = 1 - dense_idx;
+        let sibling_dense_idx = 1 - child_idx.get();
         if !parent_branch.children[sibling_dense_idx].is_blinded() {
             return None;
         }
@@ -1798,10 +1788,10 @@ impl ArenaParallelSparseTrie {
 
         let child_nibble = node.path.get_unchecked(head_branch_logical_path.len());
         let head_branch = arena[head_idx].branch_ref();
-        let dense_idx = child_dense_index(head_branch.state_mask, child_nibble)
+        let dense_child_idx = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             .expect("Blinded result but child nibble not in state_mask");
 
-        let cached_rlp = match &head_branch.children[dense_idx] {
+        let cached_rlp = match &head_branch.children[dense_child_idx] {
             ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
             ArenaSparseNodeBranchChild::Revealed(_) => return false,
         };
@@ -1822,7 +1812,7 @@ impl ArenaParallelSparseTrie {
         let is_leaf = matches!(arena_node, ArenaSparseNode::Leaf { .. });
         let child_idx = arena.insert(arena_node);
 
-        arena[head_idx].branch_mut().children[dense_idx] =
+        arena[head_idx].branch_mut().children[dense_child_idx] =
             ArenaSparseNodeBranchChild::Revealed(child_idx);
 
         is_leaf
