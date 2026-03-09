@@ -12,7 +12,7 @@ use alloy_primitives::{
     Bytes, B256, U256,
 };
 use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
-use alloy_trie::EMPTY_ROOT_HASH;
+use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
     prefix_set::TriePrefixSets, DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2,
@@ -279,6 +279,15 @@ where
         node.encode(encoded);
         let bytes = Bytes::from(encoded.clone());
         self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+
+        if let TrieNodeV2::Branch(branch) = node &&
+            !branch.key.is_empty()
+        {
+            encoded.clear();
+            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
+            let bytes = Bytes::from(encoded.clone());
+            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
+        }
     }
 
     /// Compute the storage root for an account by walking the storage trie from the cursor
