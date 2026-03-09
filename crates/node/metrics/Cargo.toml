@@ -40,7 +40,6 @@ tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 procfs = "0.18.0"
 
 [dev-dependencies]
-reqwest.workspace = true
 socket2.workspace = true
 
 [lints]
