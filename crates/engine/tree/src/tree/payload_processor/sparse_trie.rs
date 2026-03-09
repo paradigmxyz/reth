@@ -451,9 +451,8 @@ where
     fn on_storage_root_result(
         &mut self,
         address: B256,
-        mut trie: RevealableSparseTrie<S>,
+        trie: RevealableSparseTrie<S>,
     ) -> Result<(), ParallelStateRootError> {
-        let storage_root = trie.root().expect("storage root should be revealed by now");
         self.trie.insert_storage_trie(address, trie);
         self.pending_storage_roots.remove(&address);
         // Replay any storage proofs that arrived while the trie was out.
@@ -463,62 +462,6 @@ where
                     "could not reveal buffered storage proofs: {e:?}"
                 ))
             })?;
-        }
-
-        let updates =
-            self.storage_updates.get_mut(&address).expect("trie did have storage updates");
-
-        if updates.is_empty() {
-            let Entry::Occupied(entry) = self.pending_account_updates.entry(address) else {
-                return Ok(());
-            };
-            let account = if entry.get().is_some() {
-                entry.remove().unwrap()
-            } else {
-                // Get the current account state either from the trie or from latest account update.
-                let trie_account = match self.account_updates.get(&address) {
-                    Some(LeafUpdate::Changed(encoded)) => {
-                        Some(encoded).filter(|encoded| !encoded.is_empty())
-                    }
-                    // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return Ok(()),
-                    None => self.trie.get_account_value(&address),
-                };
-
-                let trie_account = trie_account.map(|value| {
-                    TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
-                });
-                trie_account.map(|account| account.into())
-            };
-
-            let encoded =
-                encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
-            self.account_updates.insert(address, LeafUpdate::Changed(encoded));
-        } else {
-            let trie = self.trie.storage_trie_mut(&address).expect("trie was just inserted");
-            let fetched = self.fetched_storage_targets.entry(address).or_default();
-            let mut targets = Vec::new();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                }
-            })?;
-
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(&address, targets);
-                self.dispatch_pending_targets();
-            } else if updates.is_empty() {
-                let trie = self.trie.take_storage_trie(&address).expect("trie was just inserted");
-                let _ = self.storage_roots_tx.send(vec![(address, trie)]);
-                self.pending_storage_roots.insert(address);
-            }
         }
 
         Ok(())
