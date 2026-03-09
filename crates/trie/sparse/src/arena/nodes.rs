@@ -242,14 +242,14 @@ impl ArenaSparseNode {
     }
 }
 
-impl From<ProofTrieNodeV2> for ArenaSparseNode {
+impl ArenaSparseNode {
     /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`].
     ///
     /// # Panics
     ///
     /// Panics if the node is an `Extension`, which should have been merged into a branch
     /// by [`TrieNodeV2`].
-    fn from(proof_node: ProofTrieNodeV2) -> Self {
+    pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2) -> Self {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
             TrieNodeV2::EmptyRoot => Self::EmptyRoot,
@@ -259,11 +259,10 @@ impl From<ProofTrieNodeV2> for ArenaSparseNode {
                 value: leaf.value,
             },
             TrieNodeV2::Branch(branch) => {
-                let mut children = SmallVec::with_capacity(branch.state_mask.count_bits() as usize);
-                for (stack_ptr, _nibble) in branch.state_mask.iter().enumerate() {
-                    children
-                        .push(ArenaSparseNodeBranchChild::Blinded(branch.stack[stack_ptr].clone()));
-                }
+                let children = branch.stack[..branch.state_mask.count_bits() as usize]
+                    .iter()
+                    .map(|rlp| ArenaSparseNodeBranchChild::Blinded(rlp.clone()))
+                    .collect();
                 Self::Branch(ArenaSparseNodeBranch {
                     state: ArenaSparseNodeState::Revealed,
                     children,

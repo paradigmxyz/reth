@@ -429,13 +429,13 @@ mod configurable_sparse_trie {
     }
 
     macro_rules! delegate {
-    ($self:ident, $method:ident $(, $arg:expr)*) => {
-        match $self {
-            Self::Arena(inner) => inner.$method($($arg),*),
-            Self::HashMap(inner) => inner.$method($($arg),*),
-        }
-    };
-}
+        ($self:ident, $method:ident $(, $arg:expr)*) => {
+            match $self {
+                Self::Arena(inner) => inner.$method($($arg),*),
+                Self::HashMap(inner) => inner.$method($($arg),*),
+            }
+        };
+    }
 
     impl SparseTrie for ConfigurableSparseTrie {
         fn set_root(

@@ -30,13 +30,18 @@ const TRACE_TARGET: &str = "trie::arena";
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
+/// Counts the number of occupied child slots below `nibble` in the dense children array.
+const fn dense_index_of(state_mask: TrieMask, nibble: u8) -> usize {
+    (state_mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize
+}
+
 /// Returns the index into a densely-packed children array for a given nibble, based on the
 /// state mask. Returns `None` if the nibble's bit is not set.
 const fn child_dense_index(state_mask: TrieMask, nibble: u8) -> Option<usize> {
     if !state_mask.is_bit_set(nibble) {
         return None;
     }
-    Some((state_mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize)
+    Some(dense_index_of(state_mask, nibble))
 }
 
 /// Finds the sub-range of `sorted_keys[start..]` whose entries start with `prefix`.
@@ -1366,8 +1371,7 @@ impl ArenaParallelSparseTrie {
                 let head_idx = head.index;
                 let head_branch = arena[head_idx].branch_ref();
                 let state_mask = head_branch.state_mask;
-                let insert_pos =
-                    (state_mask.get() & ((1u16 << child_nibble) - 1)).count_ones() as usize;
+                let insert_pos = dense_index_of(state_mask, child_nibble);
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
@@ -1810,7 +1814,7 @@ impl ArenaParallelSparseTrie {
         );
 
         let proof_node = mem::replace(node, ProofTrieNodeV2::empty());
-        let mut arena_node = ArenaSparseNode::from(proof_node);
+        let mut arena_node = ArenaSparseNode::from_proof_node(proof_node);
 
         let state = arena_node.state_mut();
         *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
@@ -2301,16 +2305,30 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn memory_size(&self) -> usize {
-        // Approximate: count arena entries across all subtries.
+        let node_size = core::mem::size_of::<ArenaSparseNode>();
+
+        // Upper arena: capacity × node size.
+        let upper = self.upper_arena.capacity() * node_size;
+
+        // Active subtries: capacity × node size per subtrie arena.
         let subtrie_size: usize = self
             .upper_arena
             .iter()
             .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.arena.len()),
+                ArenaSparseNode::Subtrie(s) => Some(s.arena.capacity() * node_size),
                 _ => None,
             })
             .sum();
-        self.upper_arena.len() + subtrie_size
+
+        // Cleared subtries still hold allocated arena capacity.
+        let cleared_size: usize =
+            self.cleared_subtries.iter().map(|s| s.arena.capacity() * node_size).sum();
+
+        // RLP buffers.
+        let buffer_size = self.buffers.rlp_buf.capacity() +
+            self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
+
+        upper + subtrie_size + cleared_size + buffer_size
     }
 
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
@@ -2468,7 +2486,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.min_len);
-                        updates.insert(proof.key, LeafUpdate::Touched);
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
