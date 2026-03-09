@@ -1,7 +1,9 @@
 //! Prometheus recorder
 
+use crate::hooks::Hooks;
 use eyre::WrapErr;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_process::Collector;
 use metrics_util::layers::{PrefixLayer, Stack};
 use std::sync::{atomic::AtomicBool, OnceLock};
 
@@ -53,20 +55,43 @@ pub fn try_install_prometheus_recorder_with_builder(
 ///
 /// This is intended to be used as the global recorder.
 /// Callers must ensure that [`PrometheusRecorder::spawn_upkeep`] is called once.
-#[derive(Debug)]
 pub struct PrometheusRecorder {
     handle: PrometheusHandle,
+    hooks: Hooks,
     upkeep: AtomicBool,
 }
 
+impl std::fmt::Debug for PrometheusRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrometheusRecorder")
+            .field("handle", &self.handle)
+            .field("hooks", &self.hooks)
+            .finish()
+    }
+}
+
 impl PrometheusRecorder {
-    const fn new(handle: PrometheusHandle) -> Self {
-        Self { handle, upkeep: AtomicBool::new(false) }
+    fn new(handle: PrometheusHandle) -> Self {
+        let hooks = Hooks::builder().build();
+        // Describe process metrics so they appear even before the first collect.
+        Collector::default().describe();
+        Self { handle, hooks, upkeep: AtomicBool::new(false) }
     }
 
     /// Returns a reference to the [`PrometheusHandle`].
     pub const fn handle(&self) -> &PrometheusHandle {
         &self.handle
+    }
+
+    /// Collects process / system metrics via the registered hooks, then renders
+    /// all metrics in Prometheus exposition format.
+    ///
+    /// Prefer this over [`PrometheusHandle::render`] to ensure process-level
+    /// metrics (`process_start_time_seconds`, IO counters, jemalloc stats, …)
+    /// are always up-to-date.
+    pub fn collect_and_render(&self) -> String {
+        self.hooks.iter().for_each(|hook| hook());
+        self.handle.render()
     }
 
     /// Spawns the upkeep task if there hasn't been one spawned already.
@@ -137,11 +162,7 @@ mod tests {
     fn process_metrics() {
         let recorder = install_prometheus_recorder();
 
-        let process = metrics_process::Collector::default();
-        process.describe();
-        process.collect();
-
-        let metrics = recorder.handle().render();
+        let metrics = recorder.collect_and_render();
         assert!(metrics.contains("process_cpu_seconds_total"), "{metrics:?}");
     }
 }
