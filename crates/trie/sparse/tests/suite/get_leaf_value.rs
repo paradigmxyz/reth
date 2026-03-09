@@ -18,7 +18,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie + Default>() {
     let new_value = U256::from(42);
     let new_value_rlp = alloy_rlp::encode_fixed_size(&new_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(key4, LeafUpdate::Changed(new_value_rlp.clone()))].into_iter().collect();
+        std::iter::once((key4, LeafUpdate::Changed(new_value_rlp.clone()))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     assert_eq!(
@@ -31,7 +31,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie + Default>() {
     let updated_value = U256::from(222);
     let updated_value_rlp = alloy_rlp::encode_fixed_size(&updated_value).to_vec();
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(key2, LeafUpdate::Changed(updated_value_rlp.clone()))].into_iter().collect();
+        std::iter::once((key2, LeafUpdate::Changed(updated_value_rlp.clone()))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     assert_eq!(

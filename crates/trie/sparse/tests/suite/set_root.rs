@@ -3,7 +3,7 @@ use super::*;
 /// Branch root initializes correctly and produces correct hash.
 ///
 /// Two leaves whose first nibbles differ produce a branch root node.
-/// After set_root + reveal_nodes, root() must match the reference hash.
+/// After `set_root` + `reveal_nodes`, `root()` must match the reference hash.
 pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
     // Keys whose first nibbles differ → branch at root.
     let mut key_a = B256::ZERO;
@@ -21,7 +21,7 @@ pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
 
 /// Single-leaf root initializes correctly.
 ///
-/// A single key-value pair produces a leaf root node. After set_root + root(),
+/// A single key-value pair produces a leaf root node. After `set_root` + `root()`,
 /// the hash must match the reference trie.
 pub(super) fn test_set_root_with_leaf_node<T: SparseTrie + Default>() {
     let storage: BTreeMap<B256, U256> = BTreeMap::from([(B256::ZERO, U256::from(42))]);
@@ -37,7 +37,7 @@ pub(super) fn test_set_root_with_leaf_node<T: SparseTrie + Default>() {
 /// Extension root (shared prefix) initializes correctly.
 ///
 /// Two keys sharing a long common prefix produce an extension root node.
-/// After set_root + reveal_nodes, root() must match the reference hash.
+/// After `set_root` + `reveal_nodes`, `root()` must match the reference hash.
 pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
     // Keys that share first byte 0xAB → extension root.
     let mut key_a = B256::ZERO;
@@ -54,7 +54,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
     assert_eq!(root, harness.original_root);
 }
 
-/// retain_updates=true enables update tracking.
+/// `retain_updates=true` enables update tracking.
 ///
 /// When `set_root` is called with `retain_updates = true`, subsequent mutations
 /// should be tracked and `take_updates()` should return non-empty results.
@@ -97,7 +97,7 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie + Defau
     );
 }
 
-/// retain_updates=false disables update tracking.
+/// `retain_updates=false` disables update tracking.
 ///
 /// When `set_root` is called with `retain_updates = false`, `take_updates()` should
 /// return an empty `SparseTrieUpdates` even after mutations.
@@ -131,7 +131,7 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
     );
 }
 
-/// Branch masks influence removed_nodes detection.
+/// Branch masks influence `removed_nodes` detection.
 ///
 /// When `BranchNodeMasks` are provided to `set_root`, they inform the trie about
 /// which branch nodes existed in the DB. After mutations that remove leaves (causing
@@ -186,7 +186,7 @@ pub(super) fn test_set_root_with_branch_masks<T: SparseTrie + Default>() {
     );
 }
 
-/// EmptyRoot produces EMPTY_ROOT_HASH.
+/// `EmptyRoot` produces `EMPTY_ROOT_HASH`.
 ///
 /// Setting the root to `TrieNodeV2::EmptyRoot` should leave the trie in its initial
 /// empty state, returning `EMPTY_ROOT_HASH` from `root()`.

@@ -320,7 +320,7 @@ pub(super) fn test_prune_only_descends_into_branch_root<T: SparseTrie + Default>
 }
 
 /// Small subtrie root nodes (RLP < 32 bytes) are
-/// handled correctly during prune. After root() + prune(), a subsequent root()
+/// handled correctly during prune. After `root()` + `prune()`, a subsequent `root()`
 /// still returns the same hash.
 pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie + Default>() {
     // Build a trie with two groups of leaves to create a branch root with mixed

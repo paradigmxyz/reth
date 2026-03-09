@@ -47,11 +47,6 @@ pub(super) fn test_update_leaves_insert_new_leaf<T: SparseTrie + Default>() {
 ///
 /// Starting from a 3-leaf trie, changing one leaf's value via `update_leaves` should
 /// produce a root hash matching a reference trie with the updated value.
-
-/// Modify an existing leaf's value and verify root.
-///
-/// Starting from a 3-leaf trie, changing one leaf's value via `update_leaves` should
-/// produce a root hash matching a reference trie with the updated value.
 pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie + Default>() {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
@@ -82,11 +77,6 @@ pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie + Default>()
     );
 }
 
-/// Insert 256 leaves with varied prefix patterns into an empty trie.
-///
-/// All 256 keys are inserted in a single `update_leaves` call. The root must match
-/// a reference trie and `take_updates()` must return non-empty results.
-
 /// Insert a single leaf into an empty trie.
 ///
 /// Calling `update_leaves` with one key on a default (empty) trie should produce a root
@@ -114,12 +104,6 @@ pub(super) fn test_insert_single_leaf_into_empty_trie<T: SparseTrie + Default>()
         "root should match reference single-leaf trie"
     );
 }
-
-/// Two leaves at adjacent keys produce correct root.
-///
-/// Insert key `0x50..` then key `0x51..` (adjacent first-byte keys that share first nibble `5`),
-/// computing root after each. The final root must match the reference trie with both keys.
-/// `take_updates()` should return empty since no branch masks were set.
 
 /// Insert 256 leaves with varied prefix patterns into an empty trie.
 ///
@@ -164,12 +148,6 @@ pub(super) fn test_insert_multiple_leaves_into_empty_trie<T: SparseTrie + Defaul
 /// Insert 256 keys with old values, compute root (hash1). Then update all 256 keys with
 /// new values, compute root (hash2). Both must match their respective reference tries,
 /// and hash1 ≠ hash2.
-
-/// Overwrite all values and verify both root states.
-///
-/// Insert 256 keys with old values, compute root (hash1). Then update all 256 keys with
-/// new values, compute root (hash2). Both must match their respective reference tries,
-/// and hash1 ≠ hash2.
 pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie + Default>() {
     // Build 256 keys with alternating prefix patterns.
     let keys: Vec<B256> = (0..=255u8)
@@ -207,11 +185,6 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie + Default>() 
     assert_eq!(hash2, expected_new.original_root, "hash2 should match reference with new values");
     assert_ne!(hash1, hash2, "roots should differ after updating all values");
 }
-
-/// Insert a single leaf into an empty trie.
-///
-/// Calling `update_leaves` with one key on a default (empty) trie should produce a root
-/// hash matching a reference trie with that single leaf.
 
 /// Two leaves at adjacent keys produce correct root.
 ///
@@ -258,11 +231,6 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie + 
 ///
 /// Starting from a 3-leaf trie, removing one key should produce a root hash
 /// matching a reference trie containing only the remaining 2 leaves.
-
-/// Remove a leaf via `LeafUpdate::Changed(vec![])` and verify root.
-///
-/// Starting from a 3-leaf trie, removing one key should produce a root hash
-/// matching a reference trie containing only the remaining 2 leaves.
 pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie + Default>() {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
@@ -290,11 +258,6 @@ pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie + Default>() {
         "root should match reference trie with removed leaf"
     );
 }
-
-/// Removing a leaf that causes a branch to collapse into an
-/// extension. Three leaves sharing prefix `0x5` create a branch at nibble 5; removing one
-/// child should collapse the structure. The root hash must match a reference trie with the
-/// remaining two leaves.
 
 /// Removing a leaf that causes a branch to collapse into an
 /// extension. Three leaves sharing prefix `0x5` create a branch at nibble 5; removing one
@@ -344,10 +307,6 @@ pub(super) fn test_remove_leaf_branch_collapses_to_extension<T: SparseTrie + Def
 /// Removing one of two leaves from a branch should collapse the
 /// branch into a leaf. Update tracking should report the root branch as removed and NOT as
 /// updated.
-
-/// Removing one of two leaves from a branch should collapse the
-/// branch into a leaf. Update tracking should report the root branch as removed and NOT as
-/// updated.
 pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie + Default>() {
     // Two leaves with different first nibbles → branch root.
     let key_a = B256::with_last_byte(0x10); // first nibble = 1
@@ -392,9 +351,6 @@ pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie + Default>
 
 /// Removing the only leaf in a trie should produce
 /// `EMPTY_ROOT_HASH`.
-
-/// Removing the only leaf in a trie should produce
-/// `EMPTY_ROOT_HASH`.
 pub(super) fn test_remove_last_leaf_produces_empty_root<T: SparseTrie + Default>() {
     let key = B256::with_last_byte(0x12);
     let base_storage: BTreeMap<B256, U256> = BTreeMap::from([(key, U256::from(1))]);
@@ -411,10 +367,7 @@ pub(super) fn test_remove_last_leaf_produces_empty_root<T: SparseTrie + Default>
 }
 
 /// Build 6 leaves then remove one-by-one, verifying root at each
-/// step against a reference trie. Final removal produces EMPTY_ROOT_HASH.
-
-/// Build 6 leaves then remove one-by-one, verifying root at each
-/// step against a reference trie. Final removal produces EMPTY_ROOT_HASH.
+/// step against a reference trie. Final removal produces `EMPTY_ROOT_HASH`.
 pub(super) fn test_insert_then_remove_sequence<T: SparseTrie + Default>() {
     // Helper: build a B256 key from a nibble prefix, zero-padded.
     let key_from_nibbles = |nibbles: &[u8]| -> B256 {
@@ -474,14 +427,8 @@ pub(super) fn test_insert_then_remove_sequence<T: SparseTrie + Default>() {
 
 /// Removing a nonexistent key should not invalidate cached hashes.
 ///
-/// After computing root() (which caches hashes on all nodes), attempting to remove a key
-/// that doesn't exist should leave the cache intact so the next root() call returns the
-/// same hash without recomputation.
-
-/// Removing a nonexistent key should not invalidate cached hashes.
-///
-/// After computing root() (which caches hashes on all nodes), attempting to remove a key
-/// that doesn't exist should leave the cache intact so the next root() call returns the
+/// After computing `root()` (which caches hashes on all nodes), attempting to remove a key
+/// that doesn't exist should leave the cache intact so the next `root()` call returns the
 /// same hash without recomputation.
 pub(super) fn test_remove_nonexistent_leaf_preserves_hashes<T: SparseTrie + Default>() {
     let key_a = B256::with_last_byte(0x10);
@@ -511,10 +458,6 @@ pub(super) fn test_remove_nonexistent_leaf_preserves_hashes<T: SparseTrie + Defa
         "removing a nonexistent leaf should preserve cached hashes and return the same root"
     );
 }
-
-/// When `update_leaves` encounters a blinded node (insufficient
-/// proof data), it should invoke the `proof_required_fn` callback with the correct target key
-/// and minimum depth, and leave the key in the updates map for retry.
 
 /// When `update_leaves` encounters a blinded node (insufficient
 /// proof data), it should invoke the `proof_required_fn` callback with the correct target key
@@ -646,11 +589,9 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + D
     base_storage.insert(revealed_key, U256::from(1));
 
     // 16 keys under first nibble 0x2 (slots 0x20..0x2F) — enough to produce a hash node.
-    let mut group_b_keys = Vec::new();
     for i in 0u8..16 {
         let mut key = B256::ZERO;
         key.0[0] = 0x20 | i;
-        group_b_keys.push(key);
         base_storage.insert(key, U256::from(i as u64 + 100));
     }
 
@@ -676,11 +617,8 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + D
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Retry removal — now the sibling is revealed, branch can collapse.
-    let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets2.push(ProofV2Target::new(key).with_min_len(min_len));
-    })
-    .expect("update_leaves should succeed on retry");
+    trie.update_leaves(&mut leaf_updates, |_, _| {})
+        .expect("update_leaves should succeed on retry");
     assert!(leaf_updates.is_empty(), "key should be drained after successful removal");
 
     // Root should match reference trie with only group_b keys.
@@ -695,13 +633,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + D
     );
 }
 
-/// Atomic rollback — node structure and prefix_set unchanged after
-/// removal of a revealed leaf when the sibling is blinded.
-///
-/// Same scenario as the value-preservation test, but additionally checks that
-/// `size_hint` (node count) is unchanged and the update remains in the map.
-
-/// Atomic rollback — node structure and prefix_set unchanged after
+/// Atomic rollback — node structure and `prefix_set` unchanged after
 /// removal of a revealed leaf when the sibling is blinded.
 ///
 /// Same scenario as the value-preservation test, but additionally checks that
@@ -769,12 +701,6 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<
 /// When removals in a subtrie would empty it and collapse the parent branch onto
 /// a blinded sibling, `update_leaves` should detect this and request a proof for
 /// the blinded sibling via the callback, deferring the updates.
-
-/// Subtrie collapse with blinded sibling triggers callback.
-///
-/// When removals in a subtrie would empty it and collapse the parent branch onto
-/// a blinded sibling, `update_leaves` should detect this and request a proof for
-/// the blinded sibling via the callback, deferring the updates.
 pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie + Default>() {
     // Build a branch with two children:
     //   nibble 0x1 → a subtrie with 2 revealed leaves
@@ -833,11 +759,6 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie +
 ///
 /// When multiple keys in the update map all route through the same blinded node,
 /// the callback should be invoked once per key (not deduplicated).
-
-/// Multiple keys hitting the same blinded node each trigger a callback.
-///
-/// When multiple keys in the update map all route through the same blinded node,
-/// the callback should be invoked once per key (not deduplicated).
 pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie + Default>() {
     // Branch: nibble 0x1 = 16 revealed keys (hash node), nibble 0x2 = 16 blinded keys.
     let mut base_storage = BTreeMap::new();
@@ -884,8 +805,6 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie +
 }
 
 /// `LeafUpdate::Touched` on a fully revealed path should be a no-op.
-
-/// `LeafUpdate::Touched` on a fully revealed path should be a no-op.
 pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie + Default>() {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
@@ -900,7 +819,8 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie + Default>
     let root_before = trie.root();
 
     // Call update_leaves with Touched for an existing key.
-    let mut leaf_updates: B256Map<LeafUpdate> = [(key2, LeafUpdate::Touched)].into_iter().collect();
+    let mut leaf_updates: B256Map<LeafUpdate> =
+        std::iter::once((key2, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -915,9 +835,6 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie + Default>
     // Root should be unchanged.
     assert_eq!(trie.root(), root_before, "root should be unchanged after Touched no-op");
 }
-
-/// `LeafUpdate::Touched` on a path with a blinded node should
-/// invoke the callback and keep the key in the updates map. No trie mutation should occur.
 
 /// `LeafUpdate::Touched` on a path with a blinded node should
 /// invoke the callback and keep the key in the updates map. No trie mutation should occur.
@@ -954,7 +871,7 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie + 
         key
     };
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(target_key, LeafUpdate::Touched)].into_iter().collect();
+        std::iter::once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -975,18 +892,12 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie + 
 /// An empty (default) trie has an Empty root — all paths are accessible (no blinded nodes).
 /// `Touched` on a key that doesn't exist should be drained from the map without any
 /// callback invocation or mutation.
-
-/// Touched on a nonexistent key in an empty trie is drained silently.
-///
-/// An empty (default) trie has an Empty root — all paths are accessible (no blinded nodes).
-/// `Touched` on a key that doesn't exist should be drained from the map without any
-/// callback invocation or mutation.
 pub(super) fn test_update_leaves_touched_nonexistent_key<T: SparseTrie + Default>() {
     let mut trie = T::default();
 
     let target_key = B256::with_last_byte(42);
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(target_key, LeafUpdate::Touched)].into_iter().collect();
+        std::iter::once((target_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
     trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
@@ -1002,9 +913,6 @@ pub(super) fn test_update_leaves_touched_nonexistent_key<T: SparseTrie + Default
         "nonexistent key should return None"
     );
 }
-
-/// `LeafUpdate::Touched` on a nonexistent key in a fully
-/// revealed, populated trie should be a no-op — no callback, key drained, trie unchanged.
 
 /// `LeafUpdate::Touched` on a nonexistent key in a fully
 /// revealed, populated trie should be a no-op — no callback, key drained, trie unchanged.
@@ -1024,7 +932,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
     // Key 0x50 does not exist in the trie but its path is fully revealed (no blinded nodes).
     let nonexistent_key = B256::with_last_byte(0x50);
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(nonexistent_key, LeafUpdate::Touched)].into_iter().collect();
+        std::iter::once((nonexistent_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
     trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
@@ -1041,9 +949,6 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
         "nonexistent key should return None"
     );
 }
-
-/// A single `update_leaves` call with a mix of inserts,
-/// modifications, removals, and touched entries should process all correctly.
 
 /// A single `update_leaves` call with a mix of inserts,
 /// modifications, removals, and touched entries should process all correctly.
@@ -1107,8 +1012,6 @@ pub(super) fn test_update_leaves_multiple_mixed_updates<T: SparseTrie + Default>
     );
 }
 
-/// Calling `root()` on a fresh, empty trie returns `EMPTY_ROOT_HASH`.
-
 /// Ancestors marked dirty even without cached hashes.
 ///
 /// When removing a leaf, all ancestor nodes must be marked dirty unconditionally —
@@ -1162,13 +1065,6 @@ pub(super) fn test_remove_leaf_marks_ancestors_dirty_unconditionally<T: SparseTr
         "root should match reference after removal without prior root() call"
     );
 }
-
-/// Orphaned value update falls through to full insertion.
-///
-/// After a sequence of insertions and removals that involve branch collapses,
-/// every key with a value must remain findable via `find_leaf` and updatable
-/// via `update_leaves`. This verifies the invariant that structural consistency
-/// is maintained even when branch collapses could orphan value entries.
 
 /// Orphaned value update falls through to full insertion.
 ///
@@ -1231,7 +1127,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     assert_eq!(root1, harness.original_root, "initial root should match");
 
     // Step 1: Remove key_c to collapse the branch at 0x10..
-    let removal: BTreeMap<B256, U256> = [(key_c, U256::ZERO)].into_iter().collect();
+    let removal: BTreeMap<B256, U256> = std::iter::once((key_c, U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1239,7 +1135,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     assert_eq!(root2, harness.original_root, "root after removal should match");
 
     // Step 2: Re-insert key_c with a new value — this re-creates the branch.
-    let reinsert: BTreeMap<B256, U256> = [(key_c, U256::from(33))].into_iter().collect();
+    let reinsert: BTreeMap<B256, U256> = std::iter::once((key_c, U256::from(33))).collect();
     harness.apply_changeset(reinsert.clone());
     let mut reinsert_updates = SuiteTestHarness::leaf_updates(&reinsert);
     harness.reveal_and_update(&mut trie, &mut reinsert_updates);
@@ -1248,7 +1144,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
 
     // Step 3: Update key_a — previously could be orphaned if branch collapse
     // didn't maintain structural tracking properly.
-    let update: BTreeMap<B256, U256> = [(key_a, U256::from(999))].into_iter().collect();
+    let update: BTreeMap<B256, U256> = std::iter::once((key_a, U256::from(999))).collect();
     harness.apply_changeset(update.clone());
     let mut update_updates = SuiteTestHarness::leaf_updates(&update);
     harness.reveal_and_update(&mut trie, &mut update_updates);
@@ -1279,10 +1175,6 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
 /// When removing a leaf causes a branch to collapse at a subtrie
 /// boundary, the remaining sibling leaf's `key_len` metadata must be updated. After the
 /// collapse the remaining leaf must be findable, updatable, and contribute to the correct root.
-
-/// When removing a leaf causes a branch to collapse at a subtrie
-/// boundary, the remaining sibling leaf's `key_len` metadata must be updated. After the
-/// collapse the remaining leaf must be findable, updatable, and contribute to the correct root.
 pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: SparseTrie + Default>() {
     // Create two leaves that share a branch at a subtrie boundary.
     // Keys share the same first nibble (0x1) so they form a branch one level down,
@@ -1297,7 +1189,7 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
     let mut trie: T = harness.init_trie_fully_revealed(false);
 
     // Step 1: Remove key_a → branch collapses, key_b becomes the sole child.
-    let removal: BTreeMap<B256, U256> = [(key_a, U256::ZERO)].into_iter().collect();
+    let removal: BTreeMap<B256, U256> = std::iter::once((key_a, U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1318,7 +1210,7 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
 
     // Step 2: Modify the remaining leaf's value — this must succeed after the collapse
     // updated key_len properly.
-    let modification: BTreeMap<B256, U256> = [(key_b, U256::from(999))].into_iter().collect();
+    let modification: BTreeMap<B256, U256> = std::iter::once((key_b, U256::from(999))).collect();
     harness.apply_changeset(modification.clone());
     let mut mod_updates = SuiteTestHarness::leaf_updates(&modification);
     harness.reveal_and_update(&mut trie, &mut mod_updates);
@@ -1329,12 +1221,6 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
         "root after updating remaining leaf should match reference"
     );
 }
-
-/// Removal of a leaf should never corrupt blinded/pruned subtries.
-///
-/// When a branch collapses during leaf removal and the remaining child's value needs to be
-/// moved between subtries, the operation must not reveal (initialize) blind/unloaded subtries.
-/// Either the removal succeeds cleanly or it requests proofs for the blinded area.
 
 /// Removal of a leaf should never corrupt blinded/pruned subtries.
 ///
@@ -1374,7 +1260,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
     // Now remove keys[0] — this leaves keys[1] and all the blinded subtries.
     // The branch at the root still has multiple children (keys[1] + blinded children),
     // so this should not trigger a problematic branch collapse into blinded territory.
-    let removal: BTreeMap<B256, U256> = [(keys[0], U256::ZERO)].into_iter().collect();
+    let removal: BTreeMap<B256, U256> = std::iter::once((keys[0], U256::ZERO)).collect();
     harness.apply_changeset(removal.clone());
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
@@ -1396,7 +1282,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
     assert_eq!(find_result, LeafLookup::Exists, "retained leaf should still be findable");
 
     // Now update the retained leaf to verify the trie is in a consistent state.
-    let modification: BTreeMap<B256, U256> = [(keys[1], U256::from(999))].into_iter().collect();
+    let modification: BTreeMap<B256, U256> = std::iter::once((keys[1], U256::from(999))).collect();
     harness.apply_changeset(modification.clone());
     let mut mod_updates = SuiteTestHarness::leaf_updates(&modification);
     harness.reveal_and_update(&mut trie, &mut mod_updates);

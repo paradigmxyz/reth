@@ -1,4 +1,4 @@
-//! Generic SparseTrie test suite.
+//! Generic `SparseTrie` test suite.
 //!
 //! Tests are written as generic functions `test_foo<T: SparseTrie + Default>()` and stamped out
 //! for every concrete implementation via the [`sparse_trie_tests`] macro.
@@ -57,7 +57,7 @@ const HASHED_ADDRESS: B256 = B256::ZERO;
 // Test harness
 // ---------------------------------------------------------------------------
 
-/// Generic test harness for SparseTrie tests.
+/// Generic test harness for `SparseTrie` tests.
 ///
 /// Manages a base storage dataset, computes expected roots via `StorageRoot`, and generates
 /// V2 proofs via `StorageProofCalculator` using mock cursors.

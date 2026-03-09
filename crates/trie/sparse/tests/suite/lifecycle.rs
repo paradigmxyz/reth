@@ -1,6 +1,6 @@
 use super::*;
 
-/// Standard production lifecycle — update, root, take_updates, commit_updates.
+/// Standard production lifecycle — update, root, `take_updates`, `commit_updates`.
 ///
 /// Build a trie with enough leaves to produce hashed branch children (≥16 per subtrie),
 /// insert 1 new leaf + modify 1 existing, compute root, take updates, commit, then verify
@@ -64,7 +64,7 @@ pub(super) fn test_full_lifecycle_update_root_take_commit<T: SparseTrie + Defaul
     assert_eq!(hash1, hash2, "root should be unchanged after commit_updates");
 }
 
-/// Multiple rounds of (update → root → take_updates → commit_updates), followed by
+/// Multiple rounds of (update → root → `take_updates` → `commit_updates`), followed by
 /// a prune, simulating block processing.
 pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie + Default>() {
     // Build a trie with 10 leaves.
@@ -179,7 +179,7 @@ pub(super) fn test_reveal_update_root_basic_lifecycle<T: SparseTrie + Default>()
 }
 
 /// Incremental reveal and update with retry loop.
-/// Partial proof → update_leaves hits blinded nodes → reveal more → retry succeeds.
+/// Partial proof → `update_leaves` hits blinded nodes → reveal more → retry succeeds.
 pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie + Default>() {
     // Build 10 leaves across multiple subtries so partial reveal leaves some blinded.
     // Use 16 keys per group so branch children become hash nodes (>32 bytes RLP).
@@ -488,7 +488,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
     // Step 1: Touched on a key in group B's blinded subtrie → callback fires.
     let target_key = group_b_keys[0];
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(target_key, LeafUpdate::Touched)].into_iter().collect();
+        std::iter::once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -509,11 +509,8 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
         .insert(target_key, LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_value).to_vec()));
 
     // Step 4: update_leaves again — key should now be drained.
-    let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets2.push(ProofV2Target::new(key).with_min_len(min_len));
-    })
-    .expect("update_leaves with Changed should succeed");
+    trie.update_leaves(&mut leaf_updates, |_, _| {})
+        .expect("update_leaves with Changed should succeed");
 
     assert!(leaf_updates.is_empty(), "Changed key should be drained after reveal");
 
@@ -529,7 +526,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
     );
 }
 
-/// get_leaf_value for storage root lookup.
+/// `get_leaf_value` for storage root lookup.
 ///
 /// Simulates the `SparseStateTrie::update_account` pattern: read existing leaf via
 /// `get_leaf_value`, decode, modify (change one field while preserving another), re-encode,
@@ -565,7 +562,7 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie + Defaul
 
     // Step 4: Update the leaf with the re-encoded value.
     let mut leaf_updates: B256Map<LeafUpdate> =
-        [(key1, LeafUpdate::Changed(new_value_rlp))].into_iter().collect();
+        std::iter::once((key1, LeafUpdate::Changed(new_value_rlp))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Step 5: Compute root and verify against reference.

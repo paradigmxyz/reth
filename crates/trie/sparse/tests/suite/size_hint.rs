@@ -1,6 +1,6 @@
 use super::*;
 
-/// size_hint reflects leaf count changes.
+/// `size_hint` reflects leaf count changes.
 ///
 /// Builds a 5-leaf trie, records `size_hint`, adds 2 leaves, records again,
 /// removes 1 leaf, records again. Asserts s2 > s1 and s3 < s2 (monotonic

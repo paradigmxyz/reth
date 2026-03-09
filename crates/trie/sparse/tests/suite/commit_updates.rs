@@ -1,6 +1,6 @@
 use super::*;
 
-/// After commit, take_updates reports only delta.
+/// After commit, `take_updates` reports only delta.
 ///
 /// After calling `commit_updates` with taken updates, a subsequent mutation + `root()` +
 /// `take_updates()` should only report the delta from the new baseline — it must NOT
@@ -67,13 +67,12 @@ pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie + Default>() 
 
     // updates2 should NOT contain the same paths as updates1 — commit_updates
     // resets the baseline so only the delta from round 2 is reported.
-    for (path, _) in &updates1.updated_nodes {
-        if updates2.updated_nodes.contains_key(path) {
-            panic!(
-                "path {path:?} was re-reported in updates2 after commit — \
-                 commit_updates should have synced the baseline"
-            );
-        }
+    for path in updates1.updated_nodes.keys() {
+        assert!(
+            !updates2.updated_nodes.contains_key(path),
+            "path {path:?} was re-reported in updates2 after commit — \
+             commit_updates should have synced the baseline"
+        );
     }
 }
 

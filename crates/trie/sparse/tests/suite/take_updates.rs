@@ -74,7 +74,7 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie + Default>() {
     );
 }
 
-/// take_updates contains both updated and removed nodes, mutually exclusive.
+/// `take_updates` contains both updated and removed nodes, mutually exclusive.
 ///
 /// After mutations that cause branch node changes and deletions, `take_updates` should
 /// contain both updated and removed nodes. The two sets must be mutually exclusive.

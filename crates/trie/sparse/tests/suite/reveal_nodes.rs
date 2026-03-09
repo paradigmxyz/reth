@@ -127,7 +127,7 @@ pub(super) fn test_reveal_nodes_with_branch_masks<T: SparseTrie + Default>() {
 
 /// Reveal on empty root is a silent no-op.
 ///
-/// Calling `reveal_nodes` when the root is EmptyRoot should return `Ok(())` without
+/// Calling `reveal_nodes` when the root is `EmptyRoot` should return `Ok(())` without
 /// modifying trie state, even when non-empty proof nodes are provided.
 pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie + Default>() {
     // Build a harness with real data so we can obtain non-trivial proof nodes.

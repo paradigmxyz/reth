@@ -137,7 +137,7 @@ pub(super) fn test_root_handles_small_root_node_without_hash<T: SparseTrie + Def
     let value = U256::from(1);
 
     let storage: BTreeMap<B256, U256> = BTreeMap::from([(key, value)]);
-    let harness = SuiteTestHarness::new(storage.clone());
+    let harness = SuiteTestHarness::new(storage);
 
     let mut trie: T = harness.init_trie_fully_revealed(false);
 

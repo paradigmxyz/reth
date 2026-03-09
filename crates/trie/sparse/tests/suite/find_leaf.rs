@@ -115,10 +115,10 @@ pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie + Default>() {
 }
 
 /// `find_leaf` on a key whose nibble at a branch node
-/// is not set in the branch's state_mask returns `NonExistent`.
+/// is not set in the branch's `state_mask` returns `NonExistent`.
 ///
 /// Two leaves sharing prefix 0x12 create a branch with children at nibbles 3 and 5.
-/// Searching for a key with nibble 7 at that branch position should return NonExistent.
+/// Searching for a key with nibble 7 at that branch position should return `NonExistent`.
 pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie + Default>() {
     // key1 nibbles: 1,2,3,4,0,0,...  →  B256 = 0x12340000...
     let mut key1 = B256::ZERO;
@@ -162,7 +162,7 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + De
     key1.0[1] = 0x34;
     key1.0[2] = 0x56;
 
-    let base_storage: BTreeMap<B256, U256> = [(key1, U256::from(1))].into_iter().collect();
+    let base_storage: BTreeMap<B256, U256> = std::iter::once((key1, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false);
@@ -184,14 +184,15 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + De
 /// leaf but has a longer path returns `NonExistent`.
 ///
 /// A single leaf at nibbles [1,2,3,4,0,0,...] exists. Searching for a key at nibbles
-/// [1,2,3,4,5,6,0,0,...] extends past the existing leaf — it should return NonExistent.
+/// [1,2,3,4,5,6,0,0,...] extends past the existing leaf — it should return `NonExistent`.
 pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie + Default>() {
     // Existing leaf at short path: nibbles [1,2,3,4,0,0,...] → B256 = 0x12340000...
     let mut existing_key = B256::ZERO;
     existing_key.0[0] = 0x12;
     existing_key.0[1] = 0x34;
 
-    let base_storage: BTreeMap<B256, U256> = [(existing_key, U256::from(1))].into_iter().collect();
+    let base_storage: BTreeMap<B256, U256> =
+        std::iter::once((existing_key, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false);
