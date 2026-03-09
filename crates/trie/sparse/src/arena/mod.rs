@@ -20,6 +20,9 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
+
+#[cfg(feature = "metrics")]
+use reth_primitives_traits::FastInstant as Instant;
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
 use tracing::{instrument, trace};
@@ -530,6 +533,9 @@ pub struct ArenaParallelSparseTrie {
     cleared_subtries: Vec<ArenaSparseSubtrie>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Metrics for the arena parallel sparse trie.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ParallelSparseTrieMetrics,
 }
 
 impl ArenaParallelSparseTrie {
@@ -1884,6 +1890,8 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
         }
     }
 }
@@ -1972,6 +1980,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if nodes.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_nodes = nodes.len();
 
         if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
             trace!(target: TRACE_TARGET, "Skipping reveal_nodes on empty root");
@@ -2092,6 +2105,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
         }
 
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.reveal_nodes_latency.record(start.elapsed());
+            self.metrics.num_revealed_nodes.record(num_nodes as f64);
+        }
+
         Ok(())
     }
 
@@ -2114,6 +2133,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = "trie::arena", skip_all, ret)]
     fn root(&mut self) -> B256 {
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+
         self.update_subtrie_hashes();
 
         // Merge buffered subtrie updates into self.updates before hashing the upper trie,
@@ -2130,6 +2152,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             &mut self.updates,
         );
 
+        #[cfg(feature = "metrics")]
+        self.metrics.root_latency.record(start.elapsed());
+
         rlp_node.as_hash().expect("root RlpNode must be a hash")
     }
 
@@ -2145,6 +2170,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
             return;
         }
+
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
 
         // Count total dirty leaves across all subtries to make a global parallelism
         // decision, matching the approach in ParallelSparseTrie.
@@ -2225,6 +2253,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             self.update_upper_subtrie(head_idx);
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.subtries_updated.record(taken.len() as f64);
+            self.metrics.subtrie_hash_update_latency.record(start.elapsed());
         }
     }
 
@@ -2319,6 +2353,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return 0;
         }
 
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+
         let mut retained_leaves = retained_leaves.to_vec();
         retained_leaves.sort_unstable();
 
@@ -2397,6 +2434,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
         }
 
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.prune_latency.record(start.elapsed());
+            self.metrics.num_pruned_nodes.record(pruned as f64);
+        }
+
         pruned
     }
 
@@ -2414,6 +2457,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if updates.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_updates = updates.len();
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
@@ -2558,6 +2606,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.update_leaves_latency.record(start.elapsed());
+                self.metrics.num_leaf_updates.record(num_updates as f64);
+            }
             return Ok(());
         }
 
@@ -2621,6 +2674,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             cursor.drain(&mut self.upper_arena);
             self.buffers.cursor = cursor;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.update_leaves_latency.record(start.elapsed());
+            self.metrics.num_leaf_updates.record(num_updates as f64);
         }
 
         Ok(())
