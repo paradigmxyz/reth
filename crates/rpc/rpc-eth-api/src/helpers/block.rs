@@ -39,7 +39,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     where
         Self: FullEthApiTypes,
     {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
+        async move {
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let header =
+                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            Ok(Some(header))
+        }
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -74,8 +79,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
         async move {
-            // If no pending block from provider, build the pending block locally.
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
+                // If no pending block from provider, build the pending block locally.
                 if let Some(pending) = self.local_pending_block().await? {
                     return Ok(Some(pending.block.body().transaction_count()));
                 }
@@ -180,6 +189,10 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
                 if let Some((block, receipts)) = self
@@ -239,18 +252,11 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let uncles = if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                self.provider()
-                    .pending_block()
-                    .map_err(Self::Error::from_eth_err)?
-                    .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
-            } else {
-                self.recovered_block(block_id)
-                    .await?
-                    .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
-            }
-            .unwrap_or_default();
+            let uncles = self
+                .recovered_block(block_id)
+                .await?
+                .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
+                .unwrap_or_default();
 
             uncles
                 .into_iter()
@@ -291,6 +297,10 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     > + Send {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // Pending block can be fetched directly without need for caching
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?

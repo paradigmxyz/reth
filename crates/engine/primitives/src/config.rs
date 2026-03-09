@@ -9,32 +9,8 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
-/// Returns the default number of storage worker threads based on available parallelism.
-fn default_storage_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
-}
-
-/// Returns the default number of account worker threads.
-///
-/// Account workers coordinate storage proof collection and account trie traversal.
-/// They are set to the same count as storage workers for simplicity.
-fn default_account_worker_count() -> usize {
-    default_storage_worker_count()
-}
-
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
-
-/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
-/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
-pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
@@ -50,10 +26,15 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-/// Default maximum number of storage tries to keep after pruning.
+/// Default LFU hot-slot capacity for sparse trie pruning.
 ///
-/// Storage tries beyond this limit are cleared (but allocations preserved).
-pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+/// Limits the number of `(address, slot)` pairs retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
+
+/// Default LFU hot-account capacity for sparse trie pruning.
+///
+/// Limits the number of account addresses retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -127,8 +108,6 @@ pub struct TreeConfig {
     cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
-    /// Whether multiproof task should chunk proof targets.
-    multiproof_chunking_enabled: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -153,16 +132,18 @@ pub struct TreeConfig {
     always_process_payload_attributes_on_canonical_head: bool,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of storage proof worker threads.
-    storage_worker_count: usize,
-    /// Number of account proof worker threads.
-    account_worker_count: usize,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// Maximum number of storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
+    /// When set, blocks whose total processing time (execution + state reads + state root +
+    /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
+    /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
+    slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
@@ -187,18 +168,17 @@ impl Default for TreeConfig {
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
-            storage_worker_count: default_storage_worker_count(),
-            account_worker_count: default_account_worker_count(),
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
@@ -221,18 +201,17 @@ impl TreeConfig {
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
-        multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
         allow_unwind_canonical_header: bool,
-        storage_worker_count: usize,
-        account_worker_count: usize,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_storage_tries: usize,
+        sparse_trie_max_hot_slots: usize,
+        sparse_trie_max_hot_accounts: usize,
+        slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
@@ -248,18 +227,17 @@ impl TreeConfig {
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
-            storage_worker_count,
-            account_worker_count,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
         }
@@ -288,11 +266,6 @@ impl TreeConfig {
     /// Return the maximum execute block batch size.
     pub const fn max_execute_block_batch_size(&self) -> usize {
         self.max_execute_block_batch_size
-    }
-
-    /// Return whether the multiproof task chunking is enabled.
-    pub const fn multiproof_chunking_enabled(&self) -> bool {
-        self.multiproof_chunking_enabled
     }
 
     /// Return the multiproof task chunk size.
@@ -458,15 +431,6 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether multiproof task should chunk proof targets.
-    pub const fn with_multiproof_chunking_enabled(
-        mut self,
-        multiproof_chunking_enabled: bool,
-    ) -> Self {
-        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
-        self
-    }
-
     /// Setter for multiproof task chunk size for proof targets.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
         self.multiproof_chunk_size = multiproof_chunk_size;
@@ -502,42 +466,6 @@ impl TreeConfig {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 
-    /// Return the number of storage proof worker threads.
-    pub const fn storage_worker_count(&self) -> usize {
-        self.storage_worker_count
-    }
-
-    /// Setter for the number of storage proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_storage_worker_count_opt(
-        mut self,
-        storage_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = storage_worker_count {
-            self.storage_worker_count = count;
-        }
-        self
-    }
-
-    /// Return the number of account proof worker threads.
-    pub const fn account_worker_count(&self) -> usize {
-        self.account_worker_count
-    }
-
-    /// Setter for the number of account proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_account_worker_count_opt(
-        mut self,
-        account_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = account_worker_count {
-            self.account_worker_count = count;
-        }
-        self
-    }
-
     /// Returns whether cache metrics recording is disabled.
     pub const fn disable_cache_metrics(&self) -> bool {
         self.disable_cache_metrics
@@ -560,14 +488,43 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the maximum number of storage tries to retain after pruning.
-    pub const fn sparse_trie_max_storage_tries(&self) -> usize {
-        self.sparse_trie_max_storage_tries
+    /// Returns the LFU hot-slot capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
+        self.sparse_trie_max_hot_slots
     }
 
-    /// Setter for maximum storage tries to retain.
-    pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
-        self.sparse_trie_max_storage_tries = max_tries;
+    /// Setter for LFU hot-slot capacity.
+    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
+        self.sparse_trie_max_hot_slots = max_hot_slots;
+        self
+    }
+
+    /// Returns the LFU hot-account capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
+        self.sparse_trie_max_hot_accounts
+    }
+
+    /// Setter for LFU hot-account capacity.
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = max_hot_accounts;
+        self
+    }
+
+    /// Returns the slow block threshold, if configured.
+    ///
+    /// When `Some`, blocks whose total processing time exceeds this duration emit a structured
+    /// warning with timing, state-operation, and cache-hit-rate details. `Duration::ZERO` logs
+    /// every block.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
         self
     }
 

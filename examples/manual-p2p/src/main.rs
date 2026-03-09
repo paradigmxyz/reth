@@ -129,7 +129,7 @@ async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
     while let Some(Ok(update)) = eth_stream.next().await {
         match update {
             EthMessage::NewPooledTransactionHashes66(txs) => {
-                println!("Got {} new tx hashes from peer {}", txs.0.len(), peer.address);
+                println!("Got {} new tx hashes from peer {}", txs.len(), peer.address);
             }
             EthMessage::NewBlock(block) => {
                 println!("Got new block data {:?} from peer {}", block, peer.address);
@@ -138,11 +138,7 @@ async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
                 println!("Got {} new tx hashes from peer {}", txs.hashes.len(), peer.address);
             }
             EthMessage::NewBlockHashes(block_hashes) => {
-                println!(
-                    "Got {} new block hashes from peer {}",
-                    block_hashes.0.len(),
-                    peer.address
-                );
+                println!("Got {} new block hashes from peer {}", block_hashes.len(), peer.address);
             }
             EthMessage::GetNodeData(_) => {
                 println!("Unable to serve GetNodeData request to peer {}", peer.address);

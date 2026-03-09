@@ -17,7 +17,7 @@ use reth_ethereum::{cli::interface::Cli, node::EthereumNode};
 
 fn main() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 .node(EthereumNode::default())
                 .on_node_started(|_ctx| {

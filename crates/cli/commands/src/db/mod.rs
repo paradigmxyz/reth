@@ -19,6 +19,7 @@ mod list;
 mod prune_checkpoints;
 mod repair_trie;
 mod settings;
+mod stage_checkpoints;
 mod state;
 mod static_file_header;
 mod stats;
@@ -70,6 +71,8 @@ pub enum Subcommands {
     Settings(settings::Command),
     /// View or set prune checkpoints
     PruneCheckpoints(prune_checkpoints::Command),
+    // View or set stage checkpoints
+    StageCheckpoints(stage_checkpoints::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
@@ -99,14 +102,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let static_files_path = data_dir.static_files();
         let exex_wal_path = data_dir.exex_wal();
 
-        // ensure the provided datadir exist
+        // ensure the provided datadir exists
         eyre::ensure!(
             data_dir.data_dir().is_dir(),
             "Datadir does not exist: {:?}",
             data_dir.data_dir()
         );
 
-        // ensure the provided database exist
+        // ensure the provided database exists
         eyre::ensure!(db_path.is_dir(), "Database does not exist: {:?}", db_path);
 
         match self.command {
@@ -209,6 +212,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::PruneCheckpoints(command) => {
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::StageCheckpoints(command) => {
                 db_exec!(self.env, tool, N, command.access_rights(), {
                     command.execute(&tool)?;
                 });

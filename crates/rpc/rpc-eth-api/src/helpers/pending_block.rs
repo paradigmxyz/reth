@@ -13,7 +13,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
-    ConfigureEvm, Evm, NextBlockEnvAttributes,
+    ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, ReceiptProvider,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
     StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
@@ -62,11 +62,8 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
-            let Some(receipts) = self
-                .provider()
-                .receipts_by_block(block.hash().into())
-                .map_err(Self::Error::from_eth_err)?
+        if let Some((block, receipts)) =
+            self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
         {
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total
@@ -148,6 +145,23 @@ pub trait LoadPendingBlock:
                 PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
             };
 
+            self.build_pool_pending_block(parent, pending.evm_env).await
+        }
+    }
+
+    /// Builds or returns a cached pending block from the transaction pool.
+    ///
+    /// This is the shared implementation used by both [`Self::pool_pending_block`] and
+    /// [`Self::local_pending_block`] to avoid resolving the pending block environment twice.
+    fn build_pool_pending_block(
+        &self,
+        parent: SealedHeader<ProviderHeader<Self::Provider>>,
+        evm_env: EvmEnvFor<Self::Evm>,
+    ) -> impl Future<Output = Result<Option<PendingBlock<Self::Primitives>>, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move {
             // we couldn't find the real pending block, so we need to build it ourselves
             let mut lock = self.pending_block().lock().await;
 
@@ -156,7 +170,7 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if pending.evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
+                if evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
                     parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -209,9 +223,10 @@ pub trait LoadPendingBlock:
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
                     Some(BlockAndReceipts { block, receipts })
                 }
-                PendingBlockEnvOrigin::DerivedFromLatest(..) => {
-                    self.pool_pending_block().await?.map(PendingBlock::into_block_and_receipts)
-                }
+                PendingBlockEnvOrigin::DerivedFromLatest(parent) => self
+                    .build_pool_pending_block(parent, pending.evm_env)
+                    .await?
+                    .map(PendingBlock::into_block_and_receipts),
             })
         }
     }

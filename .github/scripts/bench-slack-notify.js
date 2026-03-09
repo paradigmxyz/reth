@@ -68,6 +68,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   function fmtMs(v) { return v.toFixed(2) + 'ms'; }
   function fmtMgas(v) { return v.toFixed(2); }
+  function fmtS(v) { return v.toFixed(2) + 's'; }
   function fmtChange(ch) {
     if (!ch.pct && !ch.ci_pct) return ' ';
     const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
@@ -117,10 +118,19 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
   if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
 
-  const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
-  const countsLine = warmup
-    ? `*Warmup:* ${warmup} | *Blocks:* ${summary.blocks}`
-    : `*Blocks:* ${summary.blocks}`;
+  const cores = process.env.BENCH_CORES || '0';
+  const countsParts = [];
+  if (summary.big_blocks) {
+    const gasRamp = summary.gas_ramp_blocks || 0;
+    if (gasRamp > 0) countsParts.push(`*Gas Ramp:* ${gasRamp}`);
+    countsParts.push(`*Big Blocks:* ${summary.blocks}`);
+  } else {
+    const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
+    if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
+    countsParts.push(`*Blocks:* ${summary.blocks}`);
+  }
+  if (cores !== '0') countsParts.push(`*Cores:* ${cores}`);
+  const countsLine = countsParts.join(' | ');
 
   const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, countsLine].join('\n');
 
@@ -166,6 +176,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
         [cell('P90'),      cell(fmtMs(b.p90_ms)),       cell(fmtMs(f.p90_ms)),       cell(fmtChange(c.p90))],
         [cell('P99'),      cell(fmtMs(b.p99_ms)),       cell(fmtMs(f.p99_ms)),       cell(fmtChange(c.p99))],
         [cell('Mgas/s'),   cell(fmtMgas(b.mean_mgas_s)), cell(fmtMgas(f.mean_mgas_s)), cell(fmtChange(c.mgas_s))],
+        [cell('Wall Clock'), cell(fmtS(b.wall_clock_s)), cell(fmtS(f.wall_clock_s)), cell(fmtChange(c.wall_clock))],
       ],
     },
     {
@@ -281,23 +292,29 @@ async function success({ core, context }) {
     }
   }
 
-  // Always DM the actor
-  if (actorSlackId) {
-    await sendWithThread(actorSlackId);
-  } else {
-    core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
-  }
-
-  // Post to public channel if any metric shows significant improvement
+  // Post to public channel if any metric shows significant improvement or regression
   const channel = process.env.SLACK_BENCH_CHANNEL;
+  let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
       await sendWithThread(channel);
+      postedToChannel = true;
     } else {
       core.info('No significant improvement, skipping public channel notification');
     }
+  }
+
+  // DM the actor only when results were not posted to the public channel
+  if (!postedToChannel) {
+    if (actorSlackId) {
+      await sendWithThread(actorSlackId);
+    } else {
+      core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
+    }
+  } else {
+    core.info(`Results posted to channel, skipping DM to ${actor}`);
   }
 }
 

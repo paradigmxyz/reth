@@ -36,6 +36,7 @@ use std::{
         mpsc::{Receiver, Sender},
         Arc,
     },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 
@@ -222,6 +223,7 @@ impl TestHarness {
             evm_config,
             changeset_cache,
             provider.cached_storage_settings().use_hashed_state(),
+            reth_tasks::Runtime::test(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -414,14 +416,13 @@ impl ValidatorTestHarness {
 
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = crossbeam_channel::bounded(1);
-
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -758,7 +759,12 @@ async fn test_tree_state_on_new_head_reorg() {
     assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
 
     // send the response so we can advance again
-    sender.send(Some(blocks[1].recovered_block().num_hash())).unwrap();
+    sender
+        .send(PersistenceResult {
+            last_block: Some(blocks[1].recovered_block().num_hash()),
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
 
     // we should be persisting blocks[1] because we threw out the prev action
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
@@ -1581,6 +1587,39 @@ mod check_invalid_ancestors_tests {
         }
     }
 
+    /// Test that `find_invalid_ancestor` detects the block itself in the invalid cache
+    #[test]
+    fn test_find_invalid_ancestor_detects_block_itself() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Read block 1
+        let s1 = include_str!("../../test-data/holesky/1.rlp");
+        let data1 = Bytes::from_str(s1).unwrap();
+        let block1 = Block::decode(&mut data1.as_ref()).unwrap();
+        let sealed1 = block1.seal_slow();
+        let hash1 = sealed1.hash();
+        let parent1 = sealed1.parent_hash();
+
+        // Mark block 1 itself as invalid (simulates a block that failed execution)
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
+
+        // Create payload for block 1 (same block, sent again by CL)
+        let payload1 = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(hash1, &sealed1.into_block()).into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // find_invalid_ancestor should detect the block itself without re-execution
+        let result = test_harness.tree.find_invalid_ancestor(&payload1);
+        assert!(result.is_some(), "Should detect block itself in invalid headers cache");
+    }
+
     /// Helper function to create a malformed payload that descends from a given parent
     fn create_malformed_payload_descending_from(parent_hash: B256) -> ExecutionData {
         // Create a block with invalid hash (mismatch between computed and provided hash)
@@ -2033,11 +2072,139 @@ mod forkchoice_updated_tests {
                 if let Some(last) = saved_blocks.last() {
                     last_persisted_number = last.recovered_block().number;
                 }
-                sender.send(saved_blocks.last().map(|b| b.recovered_block().num_hash())).unwrap();
+                sender
+                    .send(PersistenceResult {
+                        last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        commit_duration: Some(Duration::ZERO),
+                    })
+                    .unwrap();
             }
         }
 
         // Ensure we persisted right to the tip
         assert_eq!(last_persisted_number, canonical_tip);
+    }
+}
+
+/// Tests that `on_valid_downloaded_block` triggers a download for the actual head block when
+/// the block matches a non-head sync target (safe or finalized).
+///
+/// This exercises the exact code path fixed in `on_downloaded_block`: after `insert_block`
+/// returns `Inserted(Valid)`, `on_valid_downloaded_block` checks `sync_target.contains()`.
+/// If the block is NOT the head, it should make canonical inline and emit a `Download`
+/// event for the head — rather than returning `MakeCanonical` which would stop the download
+/// pipeline.
+///
+/// Reproduces the hive test failure:
+///   "Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts -
+///    No Transactions: Timeout while waiting for secondary client to sync"
+#[test]
+fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    // Build blocks: genesis (0) and safe block (1).
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
+    let genesis = &blocks[0];
+    let safe_block = &blocks[1];
+
+    // Insert genesis and safe block into the tree. The safe block must be in the tree
+    // for `make_canonical` to succeed inside `on_valid_downloaded_block`.
+    test_harness = test_harness.with_blocks(vec![genesis.clone(), safe_block.clone()]);
+
+    let genesis_hash = genesis.recovered_block().hash();
+    let safe_hash = safe_block.recovered_block().hash();
+    let head_hash = B256::random(); // head block is unknown — hasn't been downloaded yet
+
+    // Reset canonical head to genesis so the safe block is in tree but not yet canonical.
+    test_harness.tree.state.tree_state.set_canonical_head(genesis.recovered_block().num_hash());
+
+    // Set the forkchoice tracker to SYNCING with head != safe.
+    let fcu_state = ForkchoiceState {
+        head_block_hash: head_hash,
+        safe_block_hash: safe_hash,
+        finalized_block_hash: genesis_hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    // Call on_valid_downloaded_block — this is called by on_downloaded_block after
+    // insert_block returns Inserted(Valid).
+    let safe_num_hash = safe_block.recovered_block().num_hash();
+    let result = test_harness.tree.on_valid_downloaded_block(safe_num_hash).unwrap();
+
+    // With the fix: the engine makes safe canonical inline, then emits Download for head.
+    // Without the fix: it would return MakeCanonical{safe_hash} and never download head.
+    match result {
+        Some(TreeEvent::Download(DownloadRequest::BlockSet(hashes))) => {
+            assert!(
+                hashes.contains(&head_hash),
+                "Expected download for head block {head_hash}, got {hashes:?}"
+            );
+        }
+        Some(TreeEvent::TreeAction(TreeAction::MakeCanonical { sync_target_head })) => {
+            panic!(
+                "BUG: returned MakeCanonical for non-head block {sync_target_head} \
+                 instead of downloading the actual head {head_hash}"
+            );
+        }
+        other => panic!("Expected Download event for head block, got: {other:?}"),
+    }
+
+    // Verify the safe block was made canonical.
+    assert_eq!(
+        test_harness.tree.state.tree_state.canonical_block_hash(),
+        safe_hash,
+        "Safe block should be canonical after on_valid_downloaded_block"
+    );
+}
+
+/// Tests that `on_valid_downloaded_block` returns `MakeCanonical` when the downloaded block
+/// IS the sync target head (the normal non-buggy path).
+#[test]
+fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
+    let genesis = &blocks[0];
+    let head_block = &blocks[1];
+
+    test_harness = test_harness.with_blocks(vec![genesis.clone(), head_block.clone()]);
+
+    let genesis_hash = genesis.recovered_block().hash();
+    let head_hash = head_block.recovered_block().hash();
+
+    // Reset canonical head to genesis.
+    test_harness.tree.state.tree_state.set_canonical_head(genesis.recovered_block().num_hash());
+
+    // Set the forkchoice tracker: head == the downloaded block.
+    let fcu_state = ForkchoiceState {
+        head_block_hash: head_hash,
+        safe_block_hash: head_hash,
+        finalized_block_hash: genesis_hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    let head_num_hash = head_block.recovered_block().num_hash();
+    let result = test_harness.tree.on_valid_downloaded_block(head_num_hash).unwrap();
+
+    // When the downloaded block IS the head, should return MakeCanonical.
+    match result {
+        Some(TreeEvent::TreeAction(TreeAction::MakeCanonical { sync_target_head })) => {
+            assert_eq!(sync_target_head, head_hash);
+        }
+        other => panic!("Expected MakeCanonical for head block, got: {other:?}"),
     }
 }
