@@ -528,11 +528,30 @@ where
         // Take the branch's children off the stack, using the state mask to determine how many
         // there are.
         let num_children = branch.state_mask.count_ones() as usize;
-        debug_assert!(num_children > 1, "A branch must have at least two children");
         debug_assert!(
             self.child_stack.len() >= num_children,
             "Stack is missing necessary children ({num_children:?})"
         );
+
+        // If there is only one child remaining then the branch must be collapsed: the branch is
+        // removed and the single child takes its place, with the branch's extension key + the
+        // child's nibble prepended to the child's short key.
+        if num_children == 1 {
+            let child = self.child_stack.pop().expect("checked num_children == 1");
+            let child =
+                Self::collapse_branch(&branch, &self.branch_path, child, &mut self.rlp_encode_buf);
+            self.child_stack.push(child);
+
+            // Update branch_path the same way as the normal case.
+            let new_path_len =
+                self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
+            debug_assert!(self.branch_path.len() >= new_path_len);
+            self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
+
+            self.rlp_nodes_bufs.push(rlp_nodes_buf);
+
+            return Ok(())
+        }
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
@@ -591,6 +610,51 @@ where
         self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
 
         Ok(())
+    }
+
+    /// Collapses a single-child branch by prepending the branch's extension key and the child's
+    /// nibble to the child's short key. The child is returned in place of the branch.
+    fn collapse_branch(
+        branch: &ProofTrieBranch,
+        branch_path: &Nibbles,
+        mut child: ProofTrieBranchChild<VE::DeferredEncoder>,
+        rlp_encode_buf: &mut Vec<u8>,
+    ) -> ProofTrieBranchChild<VE::DeferredEncoder> {
+        debug_assert_eq!(
+            branch.state_mask.count_ones(),
+            1,
+            "collapse_branch called on branch with {} children",
+            branch.state_mask.count_ones(),
+        );
+
+        let child_nibble = branch.state_mask.trailing_zeros() as u8;
+
+        // Build the prefix to prepend: branch extension + child nibble.
+        let ext_start = branch_path.len() - branch.ext_len as usize;
+        let mut prefix = branch_path.slice_unchecked(ext_start, branch_path.len());
+        prefix.push_unchecked(child_nibble);
+
+        match &mut child {
+            ProofTrieBranchChild::Leaf { short_key, .. } => {
+                let mut new_key = prefix;
+                new_key.extend(short_key);
+                *short_key = new_key;
+            }
+            ProofTrieBranchChild::Branch { node, .. } => {
+                let mut new_key = prefix;
+                new_key.extend(&node.key);
+                node.key = new_key;
+                // Recompute the branch_rlp_node since the extension key changed.
+                rlp_encode_buf.clear();
+                BranchNodeRef::new(&node.stack, node.state_mask).encode(rlp_encode_buf);
+                node.branch_rlp_node = Some(RlpNode::from_rlp(rlp_encode_buf));
+            }
+            ProofTrieBranchChild::RlpNode(_) => {
+                panic!("Cannot collapse branch with RlpNode child")
+            }
+        }
+
+        child
     }
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
@@ -2845,5 +2909,213 @@ mod tests {
 
         // Test proof generation
         harness.assert_proof(targets).expect("Proof generation failed");
+    }
+
+    /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
+    /// leaf's key after trimming all branch/extension nibbles consumed by ancestor nodes.
+    fn storage_leaf_hash(short_key: &Nibbles, value: &U256) -> B256 {
+        let mut buf = Vec::new();
+        alloy_trie::nodes::LeafNodeRef::new(short_key, &alloy_rlp::encode_fixed_size(value))
+            .encode(&mut buf);
+        keccak256(&buf)
+    }
+
+    /// Tests branch collapse when the removed child comes BEFORE the remaining child.
+    ///
+    /// Trie structure (3 hashed storage keys):
+    ///   key_a = 0x20...  (root nibble 2, sub-nibble 0)
+    ///   key_b = 0x21...  (root nibble 2, sub-nibble 1)
+    ///   key_c = 0xb0...  (root nibble b)
+    ///
+    /// This creates:
+    ///   root branch at nibbles {2, b}
+    ///   sub-branch at path [2] at nibbles {0, 1}
+    ///
+    /// key_a is removed (prefix set marks it dirty, cursor has no value for it).
+    /// The sub-branch at [2] collapses into its remaining child (key_b). The removed child
+    /// (nibble 0) comes before the remaining child (nibble 1).
+    #[test]
+    fn test_branch_collapse_removed_child_before_remaining() {
+        reth_tracing::init_test_tracing();
+        use reth_trie_common::prefix_set::PrefixSetMut;
+
+        let account_addr = B256::ZERO;
+        let val = U256::from(1u64);
+
+        // Construct hashed keys directly (no keccak — MockHashedCursorFactory uses these as-is).
+        let key_a = B256::right_padding_from(&[0x20]); // root nibble 2, sub-nibble 0
+        let key_b = B256::right_padding_from(&[0x21]); // root nibble 2, sub-nibble 1
+        let key_c = B256::right_padding_from(&[0xb0]); // root nibble b
+
+        // Compute leaf hashes for the sub-branch's children.
+        // The sub-branch at path [2] consumes 2 nibbles from each key (root nibble + sub-nibble).
+        let leaf_hash_a = storage_leaf_hash(&Nibbles::unpack(key_a).slice(2..), &val);
+        let leaf_hash_b = storage_leaf_hash(&Nibbles::unpack(key_b).slice(2..), &val);
+
+        // Only cache the sub-branch at path [2] — the root will be built from leaves.
+        // The sub-branch has children at nibbles 0 and 1, both with cached hashes.
+        let sub_branch_state_mask = TrieMask::new((1 << 0) | (1 << 1));
+        let cached_sub_branch = BranchNodeCompact::new(
+            sub_branch_state_mask,
+            TrieMask::new(0),
+            sub_branch_state_mask,
+            vec![leaf_hash_a, leaf_hash_b],
+            None,
+        );
+
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            [(Nibbles::from_nibbles([0x2]), cached_sub_branch)].into_iter().collect();
+
+        // The hashed cursor contains key_b and key_c (the root's other child). key_a was removed
+        // (not in cursor)
+        let updated_storage: BTreeMap<B256, U256> =
+            [(key_b, val), (key_c, val)].into_iter().collect();
+        let updated_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, updated_storage.clone())]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        // Prefix set marks key_a as dirty (removed).
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::unpack(key_a));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Compute root with cached branches + prefix set — triggers sub-branch collapse.
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
+                .with_prefix_set(prefix_set);
+        let root_node = calculator
+            .storage_root_node(account_addr)
+            .expect("storage_root_node should succeed after branch collapse");
+        let root_with_collapse =
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
+
+        // Compute reference root from scratch (no cached branches) using the full final state.
+        let final_storage: BTreeMap<B256, U256> =
+            [(key_b, val), (key_c, val)].into_iter().collect();
+        let empty_trie = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+        let fresh_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, final_storage)]),
+        );
+        let storage_trie_cursor = empty_trie.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = fresh_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
+        let fresh_root_node = fresh_calculator
+            .storage_root_node(account_addr)
+            .expect("fresh storage_root_node should succeed");
+        let expected_root = fresh_calculator
+            .compute_root_hash(core::slice::from_ref(&fresh_root_node))
+            .unwrap()
+            .unwrap();
+
+        pretty_assertions::assert_eq!(
+            expected_root,
+            root_with_collapse,
+            "Root hash after collapsing branch (removed child before remaining) should match fresh computation"
+        );
+    }
+
+    /// Tests branch collapse when the removed child comes AFTER the remaining child.
+    ///
+    /// Same trie structure as "before" test, but with nibbles 4 and 9 instead of 0 and 1 for
+    /// the sub-branch, and nibble 9 is removed. The removed child (nibble 9) comes after the
+    /// remaining child (nibble 4).
+    #[test]
+    fn test_branch_collapse_removed_child_after_remaining() {
+        reth_tracing::init_test_tracing();
+        use reth_trie_common::prefix_set::PrefixSetMut;
+
+        let account_addr = B256::ZERO;
+        let val = U256::from(1u64);
+
+        // key_a at sub-nibble 4, key_b at sub-nibble 9 (under root nibble 2).
+        let key_a = B256::right_padding_from(&[0x24]); // root nibble 2, sub-nibble 4
+        let key_b = B256::right_padding_from(&[0x29]); // root nibble 2, sub-nibble 9
+        let key_c = B256::right_padding_from(&[0xb0]); // root nibble b
+
+        let leaf_hash_a = storage_leaf_hash(&Nibbles::unpack(key_a).slice(2..), &val);
+        let leaf_hash_b = storage_leaf_hash(&Nibbles::unpack(key_b).slice(2..), &val);
+
+        // Only cache the sub-branch at path [2] — the root will be built from leaves.
+        let sub_branch_state_mask = TrieMask::new((1 << 4) | (1 << 9));
+        let cached_sub_branch = BranchNodeCompact::new(
+            sub_branch_state_mask,
+            TrieMask::new(0),
+            sub_branch_state_mask,
+            vec![leaf_hash_a, leaf_hash_b],
+            None,
+        );
+
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            [(Nibbles::from_nibbles([0x2]), cached_sub_branch)].into_iter().collect();
+
+        // The hashed cursor contains key_a and key_c. key_b was removed (not in cursor)
+        let updated_storage: BTreeMap<B256, U256> =
+            [(key_a, val), (key_c, val)].into_iter().collect();
+        let updated_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, updated_storage.clone())]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        // Prefix set marks key_b as dirty (removed).
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::unpack(key_b));
+        let prefix_set = prefix_set_mut.freeze();
+
+        // Compute root with cached branches + prefix set — triggers sub-branch collapse.
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
+                .with_prefix_set(prefix_set);
+        let root_node = calculator
+            .storage_root_node(account_addr)
+            .expect("storage_root_node should succeed after branch collapse");
+        let root_with_collapse =
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
+
+        // Compute reference root from scratch (no cached branches) using the full final state.
+        let final_storage: BTreeMap<B256, U256> =
+            [(key_a, val), (key_c, val)].into_iter().collect();
+        let empty_trie = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+        let fresh_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, final_storage)]),
+        );
+        let storage_trie_cursor = empty_trie.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = fresh_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
+        let fresh_root_node = fresh_calculator
+            .storage_root_node(account_addr)
+            .expect("fresh storage_root_node should succeed");
+        let expected_root = fresh_calculator
+            .compute_root_hash(core::slice::from_ref(&fresh_root_node))
+            .unwrap()
+            .unwrap();
+
+        pretty_assertions::assert_eq!(
+            expected_root,
+            root_with_collapse,
+            "Root hash after collapsing branch (removed child after remaining) should match fresh computation"
+        );
     }
 }
