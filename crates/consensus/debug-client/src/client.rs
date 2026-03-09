@@ -1,4 +1,4 @@
-use alloy_consensus::Sealable;
+use alloy_consensus::{BlockHeader as _, Sealable};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use reth_node_api::{
