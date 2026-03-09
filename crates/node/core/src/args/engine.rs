@@ -561,6 +561,7 @@ mod tests {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
 
