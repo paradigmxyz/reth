@@ -133,18 +133,25 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 
 /// Branch masks influence `removed_nodes` detection.
 ///
-/// When `BranchNodeMasks` are provided to `set_root`, they inform the trie about
-/// which branch nodes existed in the DB. After mutations that remove leaves (causing
+/// When proof nodes carry `BranchNodeMasks`, `reveal_nodes` registers them in the
+/// trie's internal `branch_node_masks`. After mutations that remove leaves (causing
 /// branch nodes to disappear), `take_updates().removed_nodes` should correctly
-/// report nodes that existed per the masks but are now gone.
+/// report nodes whose masks were previously registered but are now gone.
 pub(super) fn test_set_root_with_branch_masks<T: SparseTrie + Default>() {
-    // Build a trie with enough leaves to produce non-root branch nodes.
-    // 16 leaves sharing first nibble 0x1 (key[0] = 0x10), varying second nibble.
+    // 256 leaves under key[0]=0x10, varying key[1] across all 256 values.
+    // This creates two levels of branching:
+    //   - A branch at nibble path [1,0] with children at all 16 nibbles (0-F)
+    //   - Each child is itself a branch with 16 leaf children (e.g., [1,0,0], [1,0,1], …)
+    //
+    // When proofs are generated for all 256 keys, the proof includes branch nodes at
+    // [1,0,0] through [1,0,F], each carrying their own masks (hash_mask with bits set
+    // for their 16 hashed leaf children). These masks are registered in the trie's
+    // internal `branch_node_masks` during `reveal_nodes`.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
-    for i in 0u8..16 {
+    for i in 0u16..256 {
         let mut key = B256::ZERO;
         key.0[0] = 0x10;
-        key.0[1] = i * 16;
+        key.0[1] = i as u8;
         storage.insert(key, U256::from(i as u64 + 1));
     }
 
@@ -156,19 +163,19 @@ pub(super) fn test_set_root_with_branch_masks<T: SparseTrie + Default>() {
     // Compute root once to cache branch hashes.
     let _ = trie.root();
 
-    // Take updates from the initial root computation and commit them,
-    // so the masks baseline reflects the current DB state.
+    // Take and commit initial updates so the masks baseline is established.
     let initial_updates = trie.take_updates();
     trie.commit_updates(&initial_updates.updated_nodes, &initial_updates.removed_nodes);
 
-    // Remove all but one leaf, causing intermediate branch nodes to collapse.
-    // This ensures that previously-tracked branch paths (per masks) are now gone.
+    // Remove all 16 leaves from sub-branch [1,0,F] (key[1]=0xF0..0xFF).
+    // This collapses the branch at [1,0,F] entirely — its masks were registered
+    // during reveal, so it should appear in removed_nodes.
     let mut changeset: BTreeMap<B256, U256> = BTreeMap::new();
-    for i in 1u8..16 {
+    for i in 0xF0u16..=0xFF {
         let mut key = B256::ZERO;
         key.0[0] = 0x10;
-        key.0[1] = i * 16;
-        changeset.insert(key, U256::ZERO); // zero = removal
+        key.0[1] = i as u8;
+        changeset.insert(key, U256::ZERO);
     }
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
@@ -176,13 +183,31 @@ pub(super) fn test_set_root_with_branch_masks<T: SparseTrie + Default>() {
     // Compute root to finalize changes.
     let _ = trie.root();
 
-    // Take updates — removed_nodes should be non-empty because branch nodes that
-    // existed (per committed masks) are now gone after the removals collapsed
-    // the branch structure.
     let updates = trie.take_updates();
+
+    // The parent branch at [1,0] should be updated: it lost child nibble F,
+    // so state_mask and hash_mask should have bit F (0x8000) cleared.
+    assert_eq!(updates.updated_nodes.len(), 1, "exactly one branch should be updated");
+    let parent = updates.updated_nodes.get(&Nibbles::from_nibbles([0x1, 0x0])).unwrap();
     assert!(
-        !updates.removed_nodes.is_empty(),
-        "removed_nodes should be non-empty when masks-tracked branches are removed"
+        !parent.state_mask.is_bit_set(0xF),
+        "parent branch should no longer have nibble F in state_mask"
+    );
+    assert!(
+        !parent.hash_mask.is_bit_set(0xF),
+        "parent branch should no longer have nibble F in hash_mask"
+    );
+    // Nibbles 0-E should still be present.
+    for nibble in 0u8..0xF {
+        assert!(parent.state_mask.is_bit_set(nibble), "nibble {nibble} should still be set");
+    }
+
+    // The sub-branch at [1,0,F] was fully removed — its masks were registered
+    // during reveal, so it appears in removed_nodes.
+    assert_eq!(updates.removed_nodes.len(), 1, "exactly one path should be removed");
+    assert!(
+        updates.removed_nodes.contains(&Nibbles::from_nibbles([0x1, 0x0, 0xF])),
+        "removed_nodes should contain the collapsed sub-branch [1,0,F]"
     );
 }
 
