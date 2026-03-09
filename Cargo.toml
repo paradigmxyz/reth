@@ -767,23 +767,23 @@ ipnet = "2.11"
 # =============================================================================
 
 # revm staging patches
-revm = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-database = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-state = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-context = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-handler = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-op-revm = { git = "https://github.com/bluealloy/revm", branch = "devnet3" }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "fa5a6914398c9b178422efc1edd1d2ab33dad923" }
+# revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", branch = "devnet3" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
 
 # alloy bal-devnet2 patches
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
