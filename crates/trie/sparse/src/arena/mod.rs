@@ -22,9 +22,14 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
+use slotmap::{DefaultKey, Key as _, SlotMap};
 use smallvec::SmallVec;
-use thunderdome::{Arena, Index};
 use tracing::{instrument, trace};
+
+/// Alias for the slotmap key type used as node references throughout the arena trie.
+type Index = DefaultKey;
+/// Alias for the slotmap used as the node arena throughout the arena trie.
+type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 const TRACE_TARGET: &str = "trie::arena";
 
@@ -82,7 +87,7 @@ impl ArenaTrieBuffers {
 #[derive(Debug, Clone)]
 struct ArenaSparseSubtrie {
     /// The arena allocating nodes within this subtrie.
-    arena: Arena<ArenaSparseNode>,
+    arena: NodeArena,
     /// The root node of this subtrie.
     root: Index,
     /// The absolute path of this subtrie's root in the full trie.
@@ -450,7 +455,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// ## Structure
 ///
-/// Uses arena allocation ([`thunderdome::Arena`]) for node storage with direct index-based child
+/// Uses arena allocation ([`slotmap::SlotMap`]) for node storage with direct index-based child
 /// pointers, avoiding the per-node hashing overhead of a `HashMap`-based trie. The trie is split
 /// into two tiers:
 ///
@@ -512,7 +517,7 @@ impl Default for ArenaParallelismThresholds {
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
-    upper_arena: Arena<ArenaSparseNode>,
+    upper_arena: NodeArena,
     /// The root node of the upper trie.
     root: Index,
     /// Optional tracking of trie updates for database persistence.
@@ -552,8 +557,8 @@ impl ArenaParallelSparseTrie {
             s
         } else {
             ArenaSparseSubtrie {
-                arena: Arena::new(),
-                root: Index::DANGLING,
+                arena: SlotMap::new(),
+                root: Index::null(),
                 path: Nibbles::default(),
                 buffers: ArenaTrieBuffers::default(),
                 required_proofs: Vec::new(),
@@ -832,10 +837,7 @@ impl ArenaParallelSparseTrie {
     }
 
     /// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
-    fn get_branch_masks(
-        arena: &Arena<ArenaSparseNode>,
-        branch: &ArenaSparseNodeBranch,
-    ) -> BranchNodeMasks {
+    fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
         let mut masks = BranchNodeMasks::default();
 
         for (child_idx, nibble) in BranchChildIter::new(branch.state_mask) {
@@ -870,7 +872,7 @@ impl ArenaParallelSparseTrie {
     /// single result `RlpNode`.
     #[instrument(level = "trace", target = "trie::arena", skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         root: Index,
         cursor: &mut ArenaCursor,
         rlp_buf: &mut Vec<u8>,
@@ -1038,7 +1040,7 @@ impl ArenaParallelSparseTrie {
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
     /// `path_offset` is the number of nibbles already consumed from `full_path`.
     fn get_leaf_value_in_arena<'a>(
-        arena: &'a Arena<ArenaSparseNode>,
+        arena: &'a NodeArena,
         mut current: Index,
         full_path: &Nibbles,
         mut path_offset: usize,
@@ -1085,7 +1087,7 @@ impl ArenaParallelSparseTrie {
     /// Returns whether the leaf exists or not, or an error if a blinded node is encountered or
     /// the value doesn't match.
     fn find_leaf_in_arena(
-        arena: &Arena<ArenaSparseNode>,
+        arena: &NodeArena,
         mut current: Index,
         full_path: &Nibbles,
         mut path_offset: usize,
@@ -1160,7 +1162,7 @@ impl ArenaParallelSparseTrie {
     /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`. If the leaf is already
     /// cached, its existing `RlpNode` is reused.
     fn encode_leaf(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         idx: Index,
         rlp_buf: &mut Vec<u8>,
         rlp_node_buf: &mut Vec<RlpNode>,
@@ -1196,7 +1198,7 @@ impl ArenaParallelSparseTrie {
     /// Returns `true` if the existing node was not already dirty (i.e., the split newly dirtied
     /// it).
     fn split_and_insert_leaf(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         new_leaf_path: Nibbles,
@@ -1287,7 +1289,7 @@ impl ArenaParallelSparseTrie {
     /// aggregate counters and decide whether to wrap the result as a subtrie.
     #[instrument(level = "trace", target = "trie::arena", skip_all, fields(full_path = ?full_path))]
     fn upsert_leaf(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         full_path: &Nibbles,
@@ -1406,7 +1408,7 @@ impl ArenaParallelSparseTrie {
     /// The caller must handle [`SeekResult::Blinded`] and
     /// [`SeekResult::RevealedSubtrie`] before calling this function.
     fn remove_leaf(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         key: B256,
@@ -1530,7 +1532,7 @@ impl ArenaParallelSparseTrie {
     ///
     /// Returns `Some(proof)` for the blinded sibling when the edge-case applies, `None` otherwise.
     fn check_subtrie_collapse_needs_proof(
-        arena: &Arena<ArenaSparseNode>,
+        arena: &NodeArena,
         cursor: &ArenaCursor,
         subtrie_updates: &[(B256, Nibbles, LeafUpdate)],
     ) -> Option<ArenaRequiredProof> {
@@ -1594,7 +1596,7 @@ impl ArenaParallelSparseTrie {
     /// replaced with the remaining child which has taken its place.
     /// Returns `true` if the collapse dirtied a surviving leaf that was not already dirty.
     fn collapse_branch(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         updates: &mut Option<SparseTrieUpdates>,
@@ -1700,7 +1702,7 @@ impl ArenaParallelSparseTrie {
     }
 
     /// Counts the total leaves and dirty leaves in a subtree rooted at `idx`.
-    fn count_leaves_and_dirty(arena: &Arena<ArenaSparseNode>, idx: Index) -> (u64, u64) {
+    fn count_leaves_and_dirty(arena: &NodeArena, idx: Index) -> (u64, u64) {
         match &arena[idx] {
             ArenaSparseNode::Leaf { state, .. } => {
                 let dirty = matches!(state, ArenaSparseNodeState::Dirty) as u64;
@@ -1730,8 +1732,8 @@ impl ArenaParallelSparseTrie {
     /// (overwriting); otherwise a new slot is allocated. Returns the `dst` index of the
     /// migrated node.
     fn migrate_nodes(
-        dst: &mut Arena<ArenaSparseNode>,
-        src: &mut Arena<ArenaSparseNode>,
+        dst: &mut NodeArena,
+        src: &mut NodeArena,
         src_idx: Index,
         dst_slot: Option<Index>,
     ) -> Index {
@@ -1763,7 +1765,7 @@ impl ArenaParallelSparseTrie {
     /// node is skipped.
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn reveal_node(
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         cursor: &ArenaCursor,
         node: &mut ProofTrieNodeV2,
         find_result: SeekResult,
@@ -1819,11 +1821,7 @@ impl ArenaParallelSparseTrie {
     }
 
     #[cfg(debug_assertions)]
-    fn collect_reachable_nodes(
-        arena: &Arena<ArenaSparseNode>,
-        idx: Index,
-        reachable: &mut HashSet<Index>,
-    ) {
+    fn collect_reachable_nodes(arena: &NodeArena, idx: Index, reachable: &mut HashSet<Index>) {
         if !reachable.insert(idx) {
             return;
         }
@@ -1837,7 +1835,7 @@ impl ArenaParallelSparseTrie {
     }
 
     #[cfg(debug_assertions)]
-    fn assert_no_orphaned_nodes(arena: &Arena<ArenaSparseNode>, root: Index, label: &str) {
+    fn assert_no_orphaned_nodes(arena: &NodeArena, root: Index, label: &str) {
         let mut reachable = HashSet::default();
         Self::collect_reachable_nodes(arena, root, &mut reachable);
         let all_indices: HashSet<Index> = arena.iter().map(|(idx, _)| idx).collect();
@@ -1869,7 +1867,7 @@ impl Drop for ArenaParallelSparseTrie {
 
 impl Default for ArenaParallelSparseTrie {
     fn default() -> Self {
-        let mut upper_arena = Arena::new();
+        let mut upper_arena = SlotMap::new();
         let root = upper_arena.insert(ArenaSparseNode::EmptyRoot);
         Self {
             upper_arena,
@@ -1957,8 +1955,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
-    fn reserve_nodes(&mut self, _additional: usize) {
-        // thunderdome::Arena does not support reserve; no-op.
+    fn reserve_nodes(&mut self, additional: usize) {
+        self.upper_arena.reserve(additional);
     }
 
     #[instrument(level = "trace", target = "trie::arena", skip_all, fields(num_nodes = nodes.len()))]
@@ -2277,7 +2275,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn shrink_nodes_to(&mut self, _size: usize) {
-        // Arena does not support shrinking; no-op.
+        // SlotMap does not support shrinking; no-op.
     }
 
     fn shrink_values_to(&mut self, _size: usize) {

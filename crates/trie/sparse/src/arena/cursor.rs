@@ -4,8 +4,13 @@ use super::{
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
-use thunderdome::{Arena, Index};
+use slotmap::{DefaultKey, SlotMap};
 use tracing::{instrument, trace};
+
+/// Alias for the slotmap key type used as node references throughout the arena trie.
+type Index = DefaultKey;
+/// Alias for the slotmap used as the node arena throughout the arena trie.
+type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 /// An entry on the cursor's traversal stack, tracking an ancestor node during trie walks.
 #[derive(Debug, Clone)]
@@ -92,7 +97,7 @@ impl ArenaCursor {
     }
 
     /// Clears the traversal stack and pushes the given root entry.
-    pub(super) fn reset(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
+    pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(
             self.stack.is_empty() && !self.needs_pop,
             "cursor must be fully drained before reset; stack has {} entries, needs_pop={}",
@@ -105,8 +110,8 @@ impl ArenaCursor {
     }
 
     /// Pushes an entry onto the stack for the node at the given index and path.
-    fn push(&mut self, arena: &Arena<ArenaSparseNode>, idx: Index, path: Nibbles) {
-        debug_assert!(arena.contains(idx), "push called with invalid arena index");
+    fn push(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
+        debug_assert!(arena.contains_key(idx), "push called with invalid arena index");
         self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
@@ -117,7 +122,7 @@ impl ArenaCursor {
     /// Uses `arena.get()` for the popped node because callers (e.g. pruning) may remove
     /// the node from the arena between the time it was pushed and the time it is popped.
     #[instrument(level = "trace", target = "trie::arena", skip(self, arena))]
-    pub(super) fn pop(&mut self, arena: &mut Arena<ArenaSparseNode>) -> ArenaCursorStackEntry {
+    pub(super) fn pop(&mut self, arena: &mut NodeArena) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
 
@@ -154,7 +159,7 @@ impl ArenaCursor {
 
     /// Drains the stack, propagating dirty state from each entry to its parent,
     /// then removes the final (root) entry.
-    pub(super) fn drain(&mut self, arena: &mut Arena<ArenaSparseNode>) {
+    pub(super) fn drain(&mut self, arena: &mut NodeArena) {
         trace!(target: TRACE_TARGET, "Draining stack");
         self.needs_pop = false;
         while self.stack.len() > 1 {
@@ -165,19 +170,19 @@ impl ArenaCursor {
 
     /// Returns the logical path of the branch at the top of the stack.
     /// The logical path is `entry.path + branch.short_key`.
-    pub(super) fn head_logical_branch_path(&self, arena: &Arena<ArenaSparseNode>) -> Nibbles {
+    pub(super) fn head_logical_branch_path(&self, arena: &NodeArena) -> Nibbles {
         logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"))
     }
 
     /// Returns the length of the logical path of the branch at the top of the stack.
     /// Equivalent to `head_logical_branch_path(arena).len()` but avoids constructing the path.
-    pub(super) fn head_logical_branch_path_len(&self, arena: &Arena<ArenaSparseNode>) -> usize {
+    pub(super) fn head_logical_branch_path_len(&self, arena: &NodeArena) -> usize {
         logical_branch_path_len(arena, self.stack.last().expect("cursor is non-empty"))
     }
 
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
     /// the stack. The result is `stack_head.path + branch.short_key + child_nibble`.
-    pub(super) fn child_path(&self, arena: &Arena<ArenaSparseNode>, child_nibble: u8) -> Nibbles {
+    pub(super) fn child_path(&self, arena: &NodeArena, child_nibble: u8) -> Nibbles {
         let mut path = logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"));
         path.push_unchecked(child_nibble);
         path
@@ -185,7 +190,7 @@ impl ArenaCursor {
 
     /// Returns the logical path of the parent branch entry (second from top of the stack).
     /// Panics if the stack has fewer than 2 entries.
-    pub(super) fn parent_logical_branch_path(&self, arena: &Arena<ArenaSparseNode>) -> Nibbles {
+    pub(super) fn parent_logical_branch_path(&self, arena: &NodeArena) -> Nibbles {
         logical_branch_path(arena, self.parent().expect("cursor must have a parent"))
     }
 
@@ -194,7 +199,7 @@ impl ArenaCursor {
     /// (stack has one entry), `root` is updated instead.
     pub(super) fn replace_head_index(
         &mut self,
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         root: &mut Index,
         new_idx: Index,
     ) {
@@ -242,7 +247,7 @@ impl ArenaCursor {
     /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
     pub(super) fn next(
         &mut self,
-        arena: &mut Arena<ArenaSparseNode>,
+        arena: &mut NodeArena,
         should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
     ) -> NextResult {
         if self.needs_pop {
@@ -300,11 +305,7 @@ impl ArenaCursor {
     ///
     /// Returns a [`SeekResult`] describing the state at the stack head.
     #[instrument(level = "trace", target = "trie::arena", skip(self, arena), ret)]
-    pub(super) fn seek(
-        &mut self,
-        arena: &mut Arena<ArenaSparseNode>,
-        full_path: &Nibbles,
-    ) -> SeekResult {
+    pub(super) fn seek(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         // Pop stack until head is ancestor of full_path.
         while self.stack.len() > 1 &&
             !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
@@ -368,7 +369,7 @@ impl ArenaCursor {
 
 /// Returns the logical path of a branch stack entry. The logical path is
 /// `entry.path + branch.short_key`.
-fn logical_branch_path(arena: &Arena<ArenaSparseNode>, entry: &ArenaCursorStackEntry) -> Nibbles {
+fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibbles {
     let mut path = entry.path;
     path.extend(&arena[entry.index].branch_ref().short_key);
     path
@@ -376,6 +377,6 @@ fn logical_branch_path(arena: &Arena<ArenaSparseNode>, entry: &ArenaCursorStackE
 
 /// Returns the length of the logical path of a branch stack entry.
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
-fn logical_branch_path_len(arena: &Arena<ArenaSparseNode>, entry: &ArenaCursorStackEntry) -> usize {
+fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
 }

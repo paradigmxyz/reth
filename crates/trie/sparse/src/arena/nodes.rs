@@ -3,8 +3,13 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
-use thunderdome::{Arena, Index};
+
+/// Alias for the slotmap key type used as node references throughout the arena trie.
+type Index = DefaultKey;
+/// Alias for the slotmap used as the node arena throughout the arena trie.
+type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +83,7 @@ impl ArenaSparseNodeBranch {
     /// Populates the given [`BranchNodeCompact`] from this branch's masks and children hashes.
     pub(super) fn set_branch_node_compact(
         &self,
-        arena: &Arena<ArenaSparseNode>,
+        arena: &NodeArena,
         compact: &mut BranchNodeCompact,
     ) {
         let mut hashes = Vec::new();
