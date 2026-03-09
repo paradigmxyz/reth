@@ -2273,12 +2273,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.clear();
     }
 
-    fn shrink_nodes_to(&mut self, _size: usize) {
-        // SlotMap does not support shrinking; no-op.
+    fn shrink_nodes_to(&mut self, size: usize) {
+        self.upper_arena.shrink_to(size);
+        for (_, node) in &mut self.upper_arena {
+            if let ArenaSparseNode::Subtrie(s) = node {
+                s.arena.shrink_to(size);
+            }
+        }
+        for s in &mut self.cleared_subtries {
+            s.arena.shrink_to(size);
+        }
     }
 
     fn shrink_values_to(&mut self, _size: usize) {
-        // No separate value storage; no-op per spec.
+        // Values are stored inline in nodes; no separate value storage.
     }
 
     fn size_hint(&self) -> usize {
