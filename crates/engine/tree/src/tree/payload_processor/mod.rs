@@ -1042,13 +1042,14 @@ impl PayloadExecutionCache {
             );
 
             if available {
-                // If the has is available (no other threads are using it), but has a mismatching
-                // parent hash, we can just clear it and keep using without re-creating from
-                // scratch.
+                // If the hash is available (no other threads are using it) but has a mismatching
+                // parent hash, we can just clear it, set the new parent hash, and keep using
+                // without re-creating from scratch.
+                let mut cache = c.clone();
                 if !hash_matches {
-                    c.clear();
-                }
-                return Some(c.clone())
+                    cache.clear_with_hash(parent_hash);
+                };
+                return Some(cache);
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }
@@ -1057,12 +1058,6 @@ impl PayloadExecutionCache {
         }
 
         None
-    }
-
-    /// Clears the tracked cache
-    #[expect(unused)]
-    pub(crate) fn clear(&self) {
-        self.inner.write().take();
     }
 
     /// Waits until the execution cache becomes available for use.
