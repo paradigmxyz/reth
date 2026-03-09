@@ -1469,4 +1469,61 @@ mod tests {
             "State root mismatch: task={root_from_task}, base={root_from_regular}"
         );
     }
+
+    /// Regression test: full fork-then-canonical sequence matching the bug report scenario.
+    ///
+    /// 1. Build canonical chain blocks 1–4 (cache tracks block 4).
+    /// 2. Inject fork block with parent = block 2 — Reth rejects it.
+    /// 3. Build canonical block 5 with parent = block 4 — must succeed.
+    ///
+    /// The bug caused step 3 to fail with "nonce too high" because the cache was
+    /// corrupted to block 2's state during step 2.
+    #[test]
+    fn canonical_chain_continues_after_rejected_fork_block() {
+        let execution_cache = PayloadExecutionCache::default();
+
+        // Simulate canonical chain progressing through blocks 1–4.
+        // Each block updates the cache hash to the newly executed block.
+        for i in 1u8..=4 {
+            let block_hash = B256::from([i; 32]);
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block_hash)));
+        }
+
+        // Verify cache is at block 4.
+        let block4_hash = B256::from([4u8; 32]);
+        {
+            let cache = execution_cache.get_cache_for(block4_hash);
+            assert!(cache.is_some());
+            assert_eq!(cache.as_ref().unwrap().executed_block_hash(), block4_hash);
+        }
+
+        // Fork block arrives with parent = block 2 (not the canonical head).
+        let fork_parent = B256::from([2u8; 32]);
+        let fork_cache = execution_cache.get_cache_for(fork_parent);
+        // Fork gets a cache since no one else is using it, but it must be a clone
+        // with the fork parent hash — not the canonical hash.
+        assert!(fork_cache.is_some());
+        assert_eq!(
+            fork_cache.as_ref().unwrap().executed_block_hash(),
+            fork_parent,
+            "fork cache must carry the fork parent hash, not the canonical hash"
+        );
+
+        // Fork block execution fails — drop without updating the stored cache.
+        drop(fork_cache);
+
+        // Canonical block 5 arrives with parent = block 4.
+        // The stored cache must still be findable via block 4's hash.
+        let block5_parent = block4_hash;
+        let block5_cache = execution_cache.get_cache_for(block5_parent);
+        assert!(
+            block5_cache.is_some(),
+            "block 5 must find the cache for its parent (block 4) after a rejected fork"
+        );
+        assert_eq!(
+            block5_cache.as_ref().unwrap().executed_block_hash(),
+            block5_parent,
+            "cache hash must still be block 4, not corrupted to block 2"
+        );
+    }
 }
