@@ -295,7 +295,7 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
             slot_number: payload.payload.as_v4().map(|v4| v4.slot_number),
         })
