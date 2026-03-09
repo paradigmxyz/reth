@@ -80,12 +80,8 @@ impl ArenaSparseNodeBranch {
         self.state_mask.unset_bit(nibble);
     }
 
-    /// Populates the given [`BranchNodeCompact`] from this branch's masks and children hashes.
-    pub(super) fn set_branch_node_compact(
-        &self,
-        arena: &NodeArena,
-        compact: &mut BranchNodeCompact,
-    ) {
+    /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
+    pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
         let mut hashes = Vec::new();
         for (child_idx, nibble) in BranchChildIter::new(self.state_mask) {
             if self.branch_masks.hash_mask.is_bit_set(nibble) {
@@ -100,13 +96,13 @@ impl ArenaSparseNodeBranch {
                 hashes.push(hash);
             }
         }
-        *compact = BranchNodeCompact::new(
+        BranchNodeCompact::new(
             self.state_mask,
             self.branch_masks.tree_mask,
             self.branch_masks.hash_mask,
             hashes,
             None,
-        );
+        )
     }
 }
 

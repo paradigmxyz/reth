@@ -1022,8 +1022,7 @@ impl ArenaParallelSparseTrie {
                         trie_updates.updated_nodes.remove(&logical_path);
                         trie_updates.removed_nodes.insert(logical_path);
                     } else if !new_branch_masks.is_empty() {
-                        let mut compact = BranchNodeCompact::default();
-                        arena[head_idx].branch_ref().set_branch_node_compact(arena, &mut compact);
+                        let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
                         trie_updates.updated_nodes.insert(logical_path, compact);
                         trie_updates.removed_nodes.remove(&logical_path);
                     }
