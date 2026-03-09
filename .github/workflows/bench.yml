@@ -51,6 +51,16 @@ on:
         required: false
         default: ""
         type: string
+      baseline_args:
+        description: "Extra CLI args for the baseline reth node"
+        required: false
+        default: ""
+        type: string
+      feature_args:
+        description: "Extra CLI args for the feature reth node"
+        required: false
+        default: ""
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -86,6 +96,8 @@ jobs:
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       reth-new-payload: ${{ steps.args.outputs.reth-new-payload }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      baseline-args: ${{ steps.args.outputs.baseline-args }}
+      feature-args: ${{ steps.args.outputs.feature-args }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -126,6 +138,8 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
+              var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -151,11 +165,17 @@ jobs:
               const boolArgs = new Set(['samply']);
               const boolDefaultTrue = new Set(['reth_newPayload']);
               const durationArgs = new Set(['wait-time']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0', reth_newPayload: 'true', 'wait-time': '' };
+              const stringArgs = new Set(['baseline-args', 'feature-args']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0', reth_newPayload: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
-              for (const part of args.split(/\s+/).filter(Boolean)) {
+              // Parse args, handling quoted values like key="value with spaces"
+              const parts = [];
+              const argRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
+              let m;
+              while ((m = argRegex.exec(args)) !== null) parts.push(m[1]);
+              for (const part of parts) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
                   if (boolArgs.has(part)) {
@@ -168,7 +188,11 @@ jobs:
                   continue;
                 }
                 const key = part.slice(0, eq);
-                const value = part.slice(eq + 1);
+                let value = part.slice(eq + 1);
+                // Strip surrounding quotes
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.slice(1, -1);
+                }
                 if (boolDefaultTrue.has(key)) {
                   if (value === 'true' || value === 'false') {
                     defaults[key] = value;
@@ -202,6 +226,8 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
+                } else if (stringArgs.has(key)) {
+                  defaults[key] = value;
                 } else {
                   unknown.push(key);
                 }
@@ -210,7 +236,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N] [reth_newPayload=true|false] [wait-time=DURATION]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N] [reth_newPayload=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -229,6 +255,8 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = defaults.reth_newPayload;
               var waitTime = defaults['wait-time'];
+              var baselineNodeArgs = defaults['baseline-args'];
+              var featureNodeArgs = defaults['feature-args'];
             }
 
             // Resolve display names for baseline/feature
@@ -260,6 +288,8 @@ jobs:
             core.setOutput('big-blocks', bigBlocks);
             core.setOutput('reth-new-payload', rethNewPayload);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('baseline-args', baselineNodeArgs);
+            core.setOutput('feature-args', featureNodeArgs);
 
       - name: Acknowledge request
         id: ack
@@ -325,8 +355,12 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -359,8 +393,12 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -427,6 +465,8 @@ jobs:
       BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
       BENCH_RETH_NEW_PAYLOAD: ${{ needs.reth-bench-ack.outputs.reth-new-payload }}
       BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
+      BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
+      BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
       - name: Clean up previous bench-work
@@ -486,8 +526,12 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -901,6 +945,11 @@ jobs:
           fi
           if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
+            # Read gas ramp blocks count from first baseline run (same for all runs)
+            GAS_RAMP_FILE="$BENCH_WORK_DIR/baseline-1/gas_ramp_blocks.txt"
+            if [ -f "$GAS_RAMP_FILE" ]; then
+              SUMMARY_ARGS="$SUMMARY_ARGS --gas-ramp-blocks $(cat "$GAS_RAMP_FILE" | tr -d '[:space:]')"
+            fi
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS

@@ -452,6 +452,17 @@ where
                                     new_job = true;
                                     this.payload_jobs.push((job, id, job_span));
                                     this.payload_events.send(Events::Attributes(attr)).ok();
+
+                                    // Clear stale cached payload for this id so
+                                    // resolve() never returns an outdated result
+                                    // from a previous job with the same id.
+                                    if let Some((cached_id, _, _)) =
+                                        &*this.cached_payload_rx.borrow() &&
+                                        *cached_id == id
+                                    {
+                                        trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
+                                        let _ = this.cached_payload_tx.send(None);
+                                    }
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
