@@ -648,11 +648,8 @@ where
             let shutdown_tx = shutdown_tx.clone();
 
             tokio::spawn(async move {
-                loop {
-                    let head = canonical_stream.next().await;
-                    if let Some(head) = head &&
-                        head_tx.send(head).await.is_err()
-                    {
+                while let Some(head) = canonical_stream.next().await {
+                    if head_tx.send(head).await.is_err() {
                         break;
                     }
                 }

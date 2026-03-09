@@ -44,7 +44,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
         Arc,
     },
@@ -131,14 +131,18 @@ where
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
-    /// Sparse trie prune depth.
-    sparse_trie_prune_depth: usize,
-    /// Maximum storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// LFU hot-slot capacity: max storage slots retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
+    disable_bal_parallel_execution: bool,
+    /// Whether to disable BAL-driven parallel state root computation.
+    disable_bal_parallel_state_root: bool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -169,10 +173,12 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
-            sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
-            sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
+            sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
+            sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            disable_bal_parallel_execution: config.disable_bal_parallel_execution(),
+            disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
         }
     }
 }
@@ -192,10 +198,10 @@ where
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
             let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
         });
 
@@ -429,6 +435,7 @@ where
             // few transactions are recovered sequentially and sent immediately before
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+            let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
@@ -446,7 +453,7 @@ where
                         let tx = convert.convert(tx);
                         (idx, tx)
                     })
-                    .for_each_ordered(|(idx, tx)| {
+                    .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
@@ -485,6 +492,8 @@ where
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
+        let executed_tx_index = Arc::new(AtomicUsize::new(0));
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -493,6 +502,7 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
         };
@@ -502,14 +512,16 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
+            self.disable_bal_parallel_state_root,
         );
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(bal) = bal {
+                } else if let Some(bal) = bal.filter(|_| !disable_bal_parallel_execution) {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
@@ -518,7 +530,7 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task), executed_tx_index }
     }
 
     /// Returns the cache for the given parent hash.
@@ -554,14 +566,14 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let prune_depth = self.sparse_trie_prune_depth;
-        let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let max_hot_slots = self.sparse_trie_max_hot_slots;
+        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
-            increase_thread_priority();
+            reth_tasks::once!(increase_thread_priority);
 
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
@@ -576,7 +588,7 @@ where
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
 
-            let sparse_state_trie = preserved
+            let mut sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -593,13 +605,14 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
+            sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
                 proof_worker_handle,
                 trie_metrics.clone(),
-                sparse_state_trie.with_skip_proof_node_filtering(true),
+                sparse_state_trie,
                 chunk_size,
             );
 
@@ -639,8 +652,8 @@ where
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
-                    prune_depth,
-                    max_storage_tries,
+                    max_hot_slots,
+                    max_hot_accounts,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
@@ -649,6 +662,12 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
+                trie_metrics
+                    .sparse_trie_retained_memory_bytes
+                    .set(trie.memory_size() as f64);
+                trie_metrics
+                    .sparse_trie_retained_storage_tries
+                    .set(trie.retained_storage_tries_count() as f64);
                 guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
                 deferred
             } else {
@@ -867,6 +886,14 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
+    /// Returns a reference to the shared executed transaction index counter.
+    ///
+    /// The main execution loop should store `index + 1` after executing each transaction so that
+    /// prewarm workers can skip transactions that have already been processed.
+    pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+        &self.prewarm_handle.executed_tx_index
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -904,6 +931,9 @@ pub struct CacheTaskHandle<R> {
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    /// Shared counter tracking the next transaction index to be executed by the main execution
+    /// loop. Prewarm workers skip transactions below this index.
+    executed_tx_index: Arc<AtomicUsize>,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {

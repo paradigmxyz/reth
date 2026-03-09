@@ -1145,7 +1145,7 @@ mod tests {
 
         let expected_disconnect = DisconnectReason::UselessPeer;
 
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             let msg = client_stream.next().await.unwrap().unwrap_err();
             assert_eq!(msg.as_disconnected().unwrap(), expected_disconnect);
         });
@@ -1168,7 +1168,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
             drop(client_stream);
             tokio::time::sleep(Duration::from_secs(1)).await
         });
@@ -1198,7 +1198,7 @@ mod tests {
 
         let num_messages = 100;
 
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             for _ in 0..num_messages {
                 client_stream
                     .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
@@ -1234,7 +1234,7 @@ mod tests {
         let request_timeout = Duration::from_millis(100);
         let drop_timeout = Duration::from_millis(1500);
 
-        let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
             let _client_stream = client_stream;
             tokio::time::sleep(drop_timeout * 60).await;
         });
@@ -1287,7 +1287,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
@@ -1315,7 +1315,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             client_stream
                 .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
                 .await

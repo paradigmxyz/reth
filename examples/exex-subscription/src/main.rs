@@ -161,7 +161,7 @@ async fn my_exex<Node: FullNodeComponents>(
 }
 
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(|builder, _| async move {
+    reth_ethereum::cli::Cli::parse_args().run(async move |builder, _| {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
         let rpc = StorageWatcherRpc::new(subscriptions_tx);
 
