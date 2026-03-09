@@ -837,8 +837,10 @@ impl SavedCache {
         self.caches.update_metrics(&self.metrics);
     }
 
-    /// Clears all caches, resetting them to empty state.
-    pub(crate) fn clear(&self) {
+    /// Clears all caches, resetting them to empty state,
+    /// and updates the hash of the block this cache belongs to.
+    pub(crate) fn clear_with_hash(&mut self, hash: B256) {
+        self.hash = hash;
         self.caches.clear();
     }
 }

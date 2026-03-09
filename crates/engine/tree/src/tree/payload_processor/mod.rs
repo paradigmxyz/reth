@@ -1013,7 +1013,7 @@ impl PayloadExecutionCache {
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let start = Instant::now();
-        let cache = self.inner.read();
+        let mut cache = self.inner.write();
 
         let elapsed = start.elapsed();
         self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
@@ -1021,7 +1021,7 @@ impl PayloadExecutionCache {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
 
-        if let Some(c) = cache.as_ref() {
+        if let Some(c) = cache.as_mut() {
             let cached_hash = c.executed_block_hash();
             // Check that the cache hash matches the parent hash of the current block. It won't
             // match in case it's a fork block.
@@ -1042,11 +1042,11 @@ impl PayloadExecutionCache {
             );
 
             if available {
-                // If the has is available (no other threads are using it), but has a mismatching
-                // parent hash, we can just clear it and keep using without re-creating from
-                // scratch.
                 if !hash_matches {
-                    c.clear();
+                    // Fork block: clear and update the hash on the ORIGINAL before cloning.
+                    // This prevents the canonical chain from matching on the stale hash
+                    // and picking up polluted data if the fork block fails.
+                    c.clear_with_hash(parent_hash);
                 }
                 return Some(c.clone())
             } else if hash_matches {
@@ -1057,12 +1057,6 @@ impl PayloadExecutionCache {
         }
 
         None
-    }
-
-    /// Clears the tracked cache
-    #[expect(unused)]
-    pub(crate) fn clear(&self) {
-        self.inner.write().take();
     }
 
     /// Waits until the execution cache becomes available for use.
@@ -1242,10 +1236,18 @@ mod tests {
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        // When the parent hash doesn't match, the cache is cleared and returned for reuse
+        // When the parent hash doesn't match (fork block), the cache is cleared,
+        // hash updated on the original, and clone returned for reuse
         let different_hash = B256::from([4u8; 32]);
         let cache = execution_cache.get_cache_for(different_hash);
-        assert!(cache.is_some(), "cache should be returned for reuse after clearing")
+        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
+
+        drop(cache);
+
+        // The stored cache now has the fork block's parent hash.
+        // Canonical chain looking for original hash sees a mismatch → clears and reuses.
+        let original = execution_cache.get_cache_for(hash);
+        assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
     }
 
     #[test]
