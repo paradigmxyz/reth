@@ -102,6 +102,14 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Maps full leaf paths to their arena indices for O(1) lookup during updates.
+    /// Maintained incrementally: entries are added on reveal/upsert and removed on
+    /// prune/remove. Stale entries (generational mismatch) are harmless misses.
+    leaf_index: HashMap<Nibbles, Index>,
+    /// Leaf paths dirtied via the fast path (value-only update without cursor.seek).
+    /// Drained before hashing to call `mark_ancestors_dirty` so `update_cached_rlp`'s
+    /// DFS reaches these leaves.
+    fast_path_dirty_leaves: Vec<Nibbles>,
 }
 
 impl ArenaSparseSubtrie {
@@ -120,6 +128,24 @@ impl ArenaSparseSubtrie {
             "subtrie {:?} num_dirty_leaves mismatch: stored {} vs actual {}",
             self.path, self.num_dirty_leaves, actual_dirty,
         );
+
+        for (path, &idx) in &self.leaf_index {
+            if let Some(node) = self.arena.get(idx) {
+                debug_assert!(
+                    matches!(node, ArenaSparseNode::Leaf { .. }),
+                    "subtrie {:?} leaf_index[{:?}] points to non-leaf node",
+                    self.path, path,
+                );
+            }
+        }
+        debug_assert_eq!(
+            self.leaf_index.len() as u64,
+            self.num_leaves,
+            "subtrie {:?} leaf_index.len() ({}) != num_leaves ({})",
+            self.path,
+            self.leaf_index.len(),
+            self.num_leaves,
+        );
     }
 
     fn clear(&mut self) {
@@ -128,6 +154,8 @@ impl ArenaSparseSubtrie {
         self.required_proofs.clear();
         self.num_leaves = 0;
         self.num_dirty_leaves = 0;
+        self.leaf_index.clear();
+        self.fast_path_dirty_leaves.clear();
     }
 
     /// Prunes revealed subtrees that are not ancestors of any retained leaf.
@@ -190,6 +218,7 @@ impl ArenaSparseSubtrie {
 
                     if matches!(self.arena[head_idx], ArenaSparseNode::Leaf { .. }) {
                         pruned_leaves += 1;
+                        self.leaf_index.remove(&node_prefix);
                     }
 
                     ArenaParallelSparseTrie::remove_pruned_node(
@@ -236,9 +265,41 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        // Defer cursor initialization until the first slow-path update.
+        let mut needs_cursor = false;
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
+            // Fast path: for non-empty value updates, try the leaf_index first.
+            if let LeafUpdate::Changed(value) = update {
+                if !value.is_empty() {
+                    if let Some(&leaf_idx) = self.leaf_index.get(full_path) {
+                        if let Some(ArenaSparseNode::Leaf {
+                            value: leaf_value,
+                            state,
+                            ..
+                        }) = self.arena.get_mut(leaf_idx)
+                        {
+                            leaf_value.clear();
+                            leaf_value.extend_from_slice(value);
+                            if !matches!(state, ArenaSparseNodeState::Dirty) {
+                                *state = ArenaSparseNodeState::Dirty;
+                                self.num_dirty_leaves += 1;
+                                self.fast_path_dirty_leaves.push(*full_path);
+                            }
+                            continue;
+                        }
+                        // Stale entry — remove and fall through to slow path.
+                        self.leaf_index.remove(full_path);
+                    }
+                }
+            }
+
+            // Slow path: initialize cursor on first use.
+            if !needs_cursor {
+                self.buffers.cursor.reset(&self.arena, self.root, self.path);
+                needs_cursor = true;
+            }
+
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
@@ -254,7 +315,7 @@ impl ArenaSparseSubtrie {
             match update {
                 LeafUpdate::Changed(value) if !value.is_empty() => {
                     // Upsert: insert or update a leaf with the given value.
-                    let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
+                    let (result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
                         &mut self.root,
@@ -265,8 +326,36 @@ impl ArenaSparseSubtrie {
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
+
+                    // Maintain leaf_index for new leaves.
+                    match result {
+                        UpsertLeafResult::NewLeaf | UpsertLeafResult::NewChild => {
+                            let head_idx =
+                                self.buffers.cursor.head().expect("cursor is non-empty").index;
+                            if matches!(self.arena[head_idx], ArenaSparseNode::Leaf { .. }) {
+                                self.leaf_index.insert(*full_path, head_idx);
+                            } else {
+                                // After split_and_insert_leaf, cursor head is the NEW
+                                // BRANCH. Re-seek to find the new leaf.
+                                let seek_result =
+                                    self.buffers.cursor.seek(&mut self.arena, full_path);
+                                debug_assert!(matches!(seek_result, SeekResult::RevealedLeaf));
+                                let leaf_idx = self
+                                    .buffers
+                                    .cursor
+                                    .head()
+                                    .expect("cursor is non-empty")
+                                    .index;
+                                self.leaf_index.insert(*full_path, leaf_idx);
+                            }
+                        }
+                        UpsertLeafResult::Updated => {}
+                    }
                 }
                 LeafUpdate::Changed(_) => {
+                    // Remove from leaf_index before removing the leaf.
+                    self.leaf_index.remove(full_path);
+
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
@@ -291,7 +380,9 @@ impl ArenaSparseSubtrie {
         }
 
         // Drain remaining cursor entries, propagating dirty state.
-        self.buffers.cursor.drain(&mut self.arena);
+        if needs_cursor {
+            self.buffers.cursor.drain(&mut self.arena);
+        }
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -313,16 +404,20 @@ impl ArenaSparseSubtrie {
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         for node in nodes.iter_mut() {
-            let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
-            if ArenaParallelSparseTrie::reveal_node(
+            let node_path = node.path;
+            let find_result = self.buffers.cursor.seek(&mut self.arena, &node_path);
+            if let Some(child_idx) = ArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
                 &self.buffers.cursor,
                 node,
                 find_result,
-            )
-            .is_some_and(|child_idx| matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }))
-            {
-                self.num_leaves += 1;
+            ) {
+                if let ArenaSparseNode::Leaf { key, .. } = &self.arena[child_idx] {
+                    self.num_leaves += 1;
+                    let mut full_leaf_path = node_path;
+                    full_leaf_path.extend(&key);
+                    self.leaf_index.insert(full_leaf_path, child_idx);
+                }
             }
         }
 
@@ -340,6 +435,16 @@ impl ArenaSparseSubtrie {
     ///
     /// Trie updates are written directly to `self.buffers.updates` (if `Some`).
     fn update_cached_rlp(&mut self) {
+        // Mark ancestor branches dirty for leaves updated via the fast path.
+        for leaf_path in self.fast_path_dirty_leaves.drain(..) {
+            ArenaParallelSparseTrie::mark_ancestors_dirty(
+                &mut self.arena,
+                self.root,
+                self.path.len(),
+                &leaf_path,
+            );
+        }
+
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
@@ -540,6 +645,8 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
+                leaf_index: HashMap::default(),
+                fast_path_dirty_leaves: Vec::new(),
             })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
@@ -592,6 +699,7 @@ impl ArenaParallelSparseTrie {
         let (leaves, dirty) = Self::count_leaves_and_dirty(&subtrie.arena, subtrie.root);
         subtrie.num_leaves = leaves;
         subtrie.num_dirty_leaves = dirty;
+        Self::build_leaf_index(&subtrie.arena, subtrie.root, *child_path, &mut subtrie.leaf_index);
         #[cfg(debug_assertions)]
         subtrie.debug_assert_counters();
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
@@ -1775,6 +1883,78 @@ impl ArenaParallelSparseTrie {
         }
 
         self.buffers.cursor = cursor;
+    }
+
+    /// Walks from `current` toward `leaf_path`, marking each branch along the way as
+    /// [`ArenaSparseNodeState::Dirty`]. Stops early if it encounters an already-dirty branch,
+    /// since all ancestors above it are already dirty.
+    ///
+    /// `path_offset` is the number of nibbles already consumed (the subtrie's root path length).
+    fn mark_ancestors_dirty(
+        arena: &mut NodeArena,
+        mut current: Index,
+        mut path_offset: usize,
+        leaf_path: &Nibbles,
+    ) {
+        loop {
+            match &mut arena[current] {
+                ArenaSparseNode::Branch(b) => {
+                    if matches!(b.state, ArenaSparseNodeState::Dirty) {
+                        return;
+                    }
+                    b.state = ArenaSparseNodeState::Dirty;
+
+                    let logical_end = path_offset + b.short_key.len();
+                    if leaf_path.len() <= logical_end {
+                        return;
+                    }
+                    let child_nibble = leaf_path.get_unchecked(logical_end);
+                    let Some(child_idx) =
+                        BranchChildIdx::new(b.state_mask, child_nibble)
+                    else {
+                        return;
+                    };
+                    match &b.children[child_idx] {
+                        ArenaSparseNodeBranchChild::Revealed(idx) => {
+                            current = *idx;
+                            path_offset = logical_end + 1;
+                        }
+                        ArenaSparseNodeBranchChild::Blinded(_) => return,
+                    }
+                }
+                _ => return,
+            }
+        }
+    }
+
+    /// Recursively builds a leaf index by walking all nodes from `idx`.
+    ///
+    /// `path_prefix` is the accumulated path to the current node's position in the trie.
+    fn build_leaf_index(
+        arena: &NodeArena,
+        idx: Index,
+        path_prefix: Nibbles,
+        leaf_index: &mut HashMap<Nibbles, Index>,
+    ) {
+        match &arena[idx] {
+            ArenaSparseNode::Leaf { key, .. } => {
+                let mut full_path = path_prefix;
+                full_path.extend(key);
+                leaf_index.insert(full_path, idx);
+            }
+            ArenaSparseNode::Branch(b) => {
+                for (dense_idx, nibble) in BranchChildIter::new(b.state_mask) {
+                    if let ArenaSparseNodeBranchChild::Revealed(child_idx) = &b.children[dense_idx]
+                    {
+                        let mut child_path = path_prefix;
+                        child_path.extend(&b.short_key);
+                        child_path.push_unchecked(nibble);
+                        Self::build_leaf_index(arena, *child_idx, child_path, leaf_index);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Recursively migrates all nodes from `src` into `dst`, starting at `src_idx`.
