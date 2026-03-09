@@ -133,7 +133,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
 ]
-trie-debug = ["reth-trie-sparse/trie-debug", "dep:serde_json"]
+trie-debug = ["reth-trie-sparse/trie-debug", "reth-trie-parallel/trie-debug", "reth-engine-primitives/trie-debug", "dep:serde_json"]
 rocksdb = [
     "reth-provider/rocksdb",
     "reth-prune/rocksdb",
