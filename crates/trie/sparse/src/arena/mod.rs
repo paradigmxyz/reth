@@ -319,7 +319,9 @@ impl ArenaSparseSubtrie {
                 &self.buffers.cursor,
                 node,
                 find_result,
-            ) {
+            )
+            .is_some_and(|child_idx| matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }))
+            {
                 self.num_leaves += 1;
             }
         }
@@ -560,17 +562,12 @@ impl ArenaParallelSparseTrie {
         path_len == UPPER_TRIE_MAX_DEPTH
     }
 
-    /// If the child at the cursor head should be a subtrie based on its depth, pops it,
-    /// wraps it in [`ArenaSparseNode::Subtrie`], and updates the parent's child pointer.
+    /// If the child at the cursor head should be a subtrie based on its depth, wraps it
+    /// in [`ArenaSparseNode::Subtrie`].
     ///
     /// The child must be the cursor head and its parent the cursor's parent.
-    fn maybe_wrap_in_subtrie(&mut self, cursor: &ArenaCursor) {
-        let child_entry = cursor.head().expect("cursor is non-empty");
-        let child_idx = child_entry.index;
-        let child_path = child_entry.path;
-        let child_path_len = child_path.len();
-
-        if !Self::should_be_subtrie(child_path_len) {
+    fn maybe_wrap_in_subtrie(&mut self, child_idx: Index, child_path: &Nibbles) {
+        if !Self::should_be_subtrie(child_path.len()) {
             return;
         }
 
@@ -584,7 +581,7 @@ impl ArenaParallelSparseTrie {
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
         let mut subtrie = self.take_or_create_cleared_subtrie();
-        subtrie.path = child_path;
+        subtrie.path = *child_path;
         let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
 
@@ -1762,19 +1759,20 @@ impl ArenaParallelSparseTrie {
     /// [`ArenaCursor::seek`].
     ///
     /// If the result is `Blinded`, the blinded child is replaced with the proof node (converted to
-    /// an arena node with `Cached` state). If the child is a branch, it is pushed onto the stack.
-    /// All other cases (already revealed, no child, diverged, leaf head) are no-ops — the proof
-    /// node is skipped.
+    /// an arena node with `Cached` state). All other cases (already revealed, no child, diverged,
+    /// leaf head) are no-ops — the proof node is skipped.
+    ///
+    /// Returns the `Index` of the revealed node in the arena, if any was revealed.
     #[instrument(level = "trace", target = "trie::arena", skip_all)]
     fn reveal_node(
         arena: &mut NodeArena,
         cursor: &ArenaCursor,
         node: &mut ProofTrieNodeV2,
         find_result: SeekResult,
-    ) -> bool {
+    ) -> Option<Index> {
         let SeekResult::Blinded = find_result else {
             // Already revealed, no child slot, or diverged — skip this proof node.
-            return false;
+            return None;
         };
 
         let head = cursor.head().expect("cursor is non-empty");
@@ -1797,7 +1795,7 @@ impl ArenaParallelSparseTrie {
 
         let cached_rlp = match &head_branch.children[dense_child_idx] {
             ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
-            ArenaSparseNodeBranchChild::Revealed(_) => return false,
+            ArenaSparseNodeBranchChild::Revealed(_) => return None,
         };
 
         trace!(
@@ -1813,13 +1811,11 @@ impl ArenaParallelSparseTrie {
         let state = arena_node.state_mut();
         *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
 
-        let is_leaf = matches!(arena_node, ArenaSparseNode::Leaf { .. });
         let child_idx = arena.insert(arena_node);
-
         arena[head_idx].branch_mut().children[dense_child_idx] =
             ArenaSparseNodeBranchChild::Revealed(child_idx);
 
-        is_leaf
+        Some(child_idx)
     }
 
     #[cfg(debug_assertions)]
@@ -1998,7 +1994,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     node_idx += 1;
                 }
                 SeekResult::Blinded => {
-                    Self::reveal_node(
+                    // Save the proof node's path before reveal_node consumes it.
+                    let child_path = nodes[node_idx].path;
+                    let child_idx = Self::reveal_node(
                         &mut self.upper_arena,
                         &cursor,
                         &mut nodes[node_idx],
@@ -2006,7 +2004,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     );
                     node_idx += 1;
 
-                    self.maybe_wrap_in_subtrie(&cursor);
+                    if let Some(child_idx) = child_idx {
+                        self.maybe_wrap_in_subtrie(child_idx, &child_path);
+                    }
                 }
                 SeekResult::RevealedSubtrie => {
                     let subtrie_entry = cursor.head().expect("cursor is non-empty");
@@ -2572,7 +2572,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             find_result,
                         );
                         if matches!(result, UpsertLeafResult::NewChild) {
-                            self.maybe_wrap_in_subtrie(&cursor);
+                            let child_entry = cursor.head().expect("cursor is at the new child");
+                            self.maybe_wrap_in_subtrie(child_entry.index, &child_entry.path);
                         }
                     }
                     LeafUpdate::Changed(_) => {
