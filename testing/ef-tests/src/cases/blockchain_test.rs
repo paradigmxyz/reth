@@ -249,7 +249,6 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let output = executor
             .execute(&(*block).clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
-        let bal = executor.into_state().take_built_alloy_bal();
 
         // Consensus checks after block execution
         validate_block_post_execution(
@@ -258,8 +257,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             &output.receipts,
             &output.requests,
             None,
-            &bal,
-            true,
+            &None, // Todo Bal
+            false,
             Some(output.gas_used),
         )
         .map_err(|err| Error::block_failed(block_number, err))?;

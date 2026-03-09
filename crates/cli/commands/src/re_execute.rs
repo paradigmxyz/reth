@@ -178,7 +178,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 return Err(err.into())
                             }
                         };
-                        let bal=executor.into_state().take_built_alloy_bal();
+                        let bal=executor.take_bal();
                         if let Err(err) = consensus
                             .validate_block_post_execution(&block, &result, None,bal,true)
                             .wrap_err_with(|| {

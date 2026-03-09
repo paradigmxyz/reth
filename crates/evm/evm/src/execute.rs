@@ -147,6 +147,9 @@ pub trait Executor<DB: Database>: Sized {
     /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
 
+    /// Take built [`BlockAccessList`] from executor
+    fn take_bal(&mut self) -> Option<BlockAccessList>;
+
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -617,6 +620,10 @@ where
         self.db
     }
 
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
+        self.db.take_built_alloy_bal()
+    }
+
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
     }
@@ -720,6 +727,10 @@ mod tests {
 
         fn into_state(self) -> State<DB> {
             unreachable!()
+        }
+
+        fn take_bal(&mut self) -> Option<BlockAccessList> {
+            None
         }
 
         fn size_hint(&self) -> usize {
