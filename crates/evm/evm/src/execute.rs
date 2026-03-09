@@ -467,6 +467,8 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()?;
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -483,6 +485,8 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
+            // Bump BAL index after each committed transaction (EIP-7928)
+            self.executor.evm_mut().db_mut().bump_bal_index();
 
             Ok(Some(gas_used))
         } else {
