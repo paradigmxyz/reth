@@ -1701,6 +1701,46 @@ impl ArenaParallelSparseTrie {
         }
     }
 
+    /// Asserts that every node in the upper arena satisfies the subtrie structure invariant:
+    /// - Nodes at `UPPER_TRIE_MAX_DEPTH` path length must be `Subtrie` (or `TakenSubtrie`).
+    /// - Nodes at other depths must NOT be `Subtrie`.
+    ///
+    /// Uses the cursor to DFS the upper arena, checking each visited node's path length.
+    #[cfg(debug_assertions)]
+    fn debug_assert_subtrie_structure(&mut self) {
+        let mut cursor = mem::take(&mut self.buffers.cursor);
+        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
+
+        loop {
+            let result = cursor.next(&mut self.upper_arena, |_, _| true);
+            match result {
+                NextResult::Done => break,
+                NextResult::NonBranch | NextResult::Branch => {
+                    let head = cursor.head().expect("cursor is non-empty");
+                    let path_len = head.path.len();
+                    let node = &self.upper_arena[head.index];
+
+                    if Self::should_be_subtrie(path_len) {
+                        debug_assert!(
+                            matches!(
+                                node,
+                                ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie
+                            ),
+                            "node at path_len={path_len} should be a Subtrie but is {node:?}",
+                        );
+                    } else {
+                        debug_assert!(
+                            !matches!(node, ArenaSparseNode::Subtrie(_)),
+                            "node at path_len={path_len} should NOT be a Subtrie but is",
+                        );
+                    }
+                }
+            }
+        }
+
+        self.buffers.cursor = cursor;
+    }
+
     /// Recursively migrates all nodes from `src` into `dst`, starting at `src_idx`.
     /// Branch children's `Revealed` indices are remapped to the new `dst` indices during
     /// the migration.
@@ -2085,6 +2125,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         for (idx, subtrie, _) in taken {
             self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
         }
+
+        #[cfg(debug_assertions)]
+        self.debug_assert_subtrie_structure();
 
         Ok(())
     }
@@ -2669,6 +2712,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             cursor.drain(&mut self.upper_arena);
             self.buffers.cursor = cursor;
         }
+
+        #[cfg(debug_assertions)]
+        self.debug_assert_subtrie_structure();
 
         Ok(())
     }
