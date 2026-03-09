@@ -56,6 +56,20 @@ pub(crate) struct ParallelSparseTrieMetrics {
     pub(crate) subtrie_hash_update_latency: Histogram,
     /// A histogram for the time it took to update the upper subtrie hashes.
     pub(crate) subtrie_upper_hash_latency: Histogram,
+    /// A histogram for the time it took to reveal nodes.
+    pub(crate) reveal_nodes_latency: Histogram,
+    /// A histogram for the number of nodes revealed per call.
+    pub(crate) num_revealed_nodes: Histogram,
+    /// A histogram for the time it took to apply leaf updates.
+    pub(crate) update_leaves_latency: Histogram,
+    /// A histogram for the number of leaf updates per call.
+    pub(crate) num_leaf_updates: Histogram,
+    /// A histogram for the time it took to prune the trie.
+    pub(crate) prune_latency: Histogram,
+    /// A histogram for the number of nodes pruned per call.
+    pub(crate) num_pruned_nodes: Histogram,
+    /// A histogram for the total time to compute the root hash.
+    pub(crate) root_latency: Histogram,
 }
 
 impl PartialEq for ParallelSparseTrieMetrics {

@@ -202,6 +202,11 @@ impl SparseTrie for ParallelSparseTrie {
             return Ok(())
         }
 
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_nodes = nodes.len();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::RevealNodes {
             nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
@@ -311,6 +316,13 @@ impl SparseTrie for ParallelSparseTrie {
                     hashes_from_upper.get(&node.path).copied(),
                 )?;
             }
+
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.reveal_nodes_latency.record(start.elapsed());
+                self.metrics.num_revealed_nodes.record(num_nodes as f64);
+            }
+
             return Ok(())
         }
 
@@ -422,6 +434,12 @@ impl SparseTrie for ParallelSparseTrie {
                 if res.is_err() {
                     any_err = res;
                 }
+            }
+
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.reveal_nodes_latency.record(start.elapsed());
+                self.metrics.num_revealed_nodes.record(num_nodes as f64);
             }
 
             any_err
@@ -867,6 +885,9 @@ impl SparseTrie for ParallelSparseTrie {
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::Root);
 
@@ -889,6 +910,9 @@ impl SparseTrie for ParallelSparseTrie {
         // that can access both upper and lower subtrie nodes
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let root_rlp = self.update_upper_subtrie_hashes(&mut prefix_set);
+
+        #[cfg(feature = "metrics")]
+        self.metrics.root_latency.record(start.elapsed());
 
         // Return the root hash
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
@@ -1151,6 +1175,9 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
 
@@ -1257,7 +1284,15 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
-        Self::finalize_pruned_roots(self, effective_pruned_roots)
+        let pruned = Self::finalize_pruned_roots(self, effective_pruned_roots);
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.prune_latency.record(start.elapsed());
+            self.metrics.num_pruned_nodes.record(pruned as f64);
+        }
+
+        pruned
     }
 
     fn update_leaves(
@@ -1266,6 +1301,11 @@ impl SparseTrie for ParallelSparseTrie {
         mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
+
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_updates = updates.len();
 
         #[cfg(feature = "trie-debug")]
         let recorded_updates: Vec<_> =
@@ -1341,6 +1381,12 @@ impl SparseTrie for ParallelSparseTrie {
             remaining_keys: updates.keys().copied().collect(),
             proof_targets: recorded_proof_targets,
         });
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.update_leaves_latency.record(start.elapsed());
+            self.metrics.num_leaf_updates.record(num_updates as f64);
+        }
 
         Ok(())
     }
