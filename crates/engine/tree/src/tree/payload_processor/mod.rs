@@ -444,8 +444,8 @@ where
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
 
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
+                    while let Some(entry) = queue.first_entry()
+                        && *entry.key() == next_for_execution
                     {
                         let _ = execute_tx.send(entry.remove());
                         next_for_execution += 1;
@@ -926,7 +926,7 @@ impl PayloadExecutionCache {
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let start = Instant::now();
-        let cache = self.inner.read();
+        let mut cache = self.inner.write();
 
         let elapsed = start.elapsed();
         self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
@@ -934,7 +934,7 @@ impl PayloadExecutionCache {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
 
-        if let Some(c) = cache.as_ref() {
+        if let Some(c) = cache.as_mut() {
             let cached_hash = c.executed_block_hash();
             // Check that the cache hash matches the parent hash of the current block. It won't
             // match in case it's a fork block.
@@ -955,13 +955,13 @@ impl PayloadExecutionCache {
             );
 
             if available {
-                // If the has is available (no other threads are using it), but has a mismatching
-                // parent hash, we can just clear it and keep using without re-creating from
-                // scratch.
                 if !hash_matches {
-                    c.clear();
+                    // Fork block: clear and update the hash on the ORIGINAL before cloning.
+                    // This prevents the canonical chain from matching on the stale hash
+                    // and picking up polluted data if the fork block fails.
+                    c.clear_with_hash(parent_hash);
                 }
-                return Some(c.clone())
+                return Some(c.clone());
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }
@@ -972,10 +972,25 @@ impl PayloadExecutionCache {
         None
     }
 
-    /// Clears the tracked cache
-    #[expect(unused)]
-    pub(crate) fn clear(&self) {
-        self.inner.write().take();
+    /// Waits until the execution cache becomes available for use.
+    ///
+    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
+    /// This is useful for synchronization before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub fn wait_for_availability(&self) -> Duration {
+        let start = Instant::now();
+        // Acquire write lock to wait for any current holders to finish
+        let _guard = self.inner.write();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for execution cache to become available"
+            );
+        }
+        elapsed
     }
 
     /// Updates the cache with a closure that has exclusive access to the guard.
@@ -1128,10 +1143,18 @@ mod tests {
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        // When the parent hash doesn't match, the cache is cleared and returned for reuse
+        // When the parent hash doesn't match (fork block), the cache is cleared,
+        // hash updated on the original, and clone returned for reuse
         let different_hash = B256::from([4u8; 32]);
         let cache = execution_cache.get_cache_for(different_hash);
-        assert!(cache.is_some(), "cache should be returned for reuse after clearing")
+        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
+
+        drop(cache);
+
+        // The stored cache now has the fork block's parent hash.
+        // Canonical chain looking for original hash sees a mismatch → clears and reuses.
+        let original = execution_cache.get_cache_for(hash);
+        assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
     }
 
     #[test]
@@ -1353,6 +1376,63 @@ mod tests {
         assert_eq!(
             root_from_task, root_from_regular,
             "State root mismatch: task={root_from_task}, base={root_from_regular}"
+        );
+    }
+
+    /// Tests the full prewarm lifecycle for a fork block:
+    ///
+    /// 1. Cache is at canonical block 4.
+    /// 2. Fork block (parent = block 2) checks out the cache via `get_cache_for`, simulating what
+    ///    `PrewarmCacheTask` does when it receives a `SavedCache`.
+    /// 3. Prewarm populates the shared cache with fork-specific state.
+    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_guard` > 1).
+    /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
+    /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
+    ///    data.
+    #[test]
+    fn fork_prewarm_dropped_without_save_does_not_corrupt_cache() {
+        let execution_cache = PayloadExecutionCache::default();
+
+        // Canonical chain at block 4.
+        let block4_hash = B256::from([4u8; 32]);
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
+
+        // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
+        // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
+        let fork_parent = B256::from([2u8; 32]);
+        let prewarm_cache = execution_cache.get_cache_for(fork_parent);
+        assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
+        let prewarm_cache = prewarm_cache.unwrap();
+        assert_eq!(prewarm_cache.executed_block_hash(), fork_parent);
+
+        // Prewarm populates cache with fork-specific state (ancestor data for block 2).
+        // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
+        let fork_addr = Address::from([0xBB; 20]);
+        let fork_key = B256::from([0xCC; 32]);
+        prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
+
+        // While prewarm holds the clone, the usage_guard count > 1 → cache is in use.
+        let during_prewarm = execution_cache.get_cache_for(block4_hash);
+        assert!(
+            during_prewarm.is_none(),
+            "cache must be unavailable while prewarm holds a reference"
+        );
+
+        // Fork block fails — prewarm task drops without calling save_cache/update_with_guard.
+        drop(prewarm_cache);
+
+        // Canonical block 5 arrives (parent = block 4).
+        // Stored hash = fork_parent (our fix), so get_cache_for sees a mismatch,
+        // clears the stale fork data, and returns a cache with hash = block4_hash.
+        let block5_cache = execution_cache.get_cache_for(block4_hash);
+        assert!(
+            block5_cache.is_some(),
+            "canonical chain must get cache after fork prewarm is dropped"
+        );
+        assert_eq!(
+            block5_cache.as_ref().unwrap().executed_block_hash(),
+            block4_hash,
+            "cache must carry the canonical parent hash, not the fork parent"
         );
     }
 }
