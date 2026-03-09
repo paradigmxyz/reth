@@ -532,26 +532,10 @@ where
             self.child_stack.len() >= num_children,
             "Stack is missing necessary children ({num_children:?})"
         );
-
-        // If there is only one child remaining then the branch must be collapsed: the branch is
-        // removed and the single child takes its place, with the branch's extension key + the
-        // child's nibble prepended to the child's short key.
-        if num_children == 1 {
-            let child = self.child_stack.pop().expect("checked num_children == 1");
-            let child =
-                Self::collapse_branch(&branch, &self.branch_path, child, &mut self.rlp_encode_buf);
-            self.child_stack.push(child);
-
-            // Update branch_path the same way as the normal case.
-            let new_path_len =
-                self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
-            debug_assert!(self.branch_path.len() >= new_path_len);
-            self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
-
-            self.rlp_nodes_bufs.push(rlp_nodes_buf);
-
-            return Ok(())
-        }
+        debug_assert!(
+            num_children >= 2,
+            "A branch must have at least two children, got {num_children}"
+        );
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
@@ -610,51 +594,6 @@ where
         self.branch_path = self.branch_path.slice_unchecked(0, new_path_len);
 
         Ok(())
-    }
-
-    /// Collapses a single-child branch by prepending the branch's extension key and the child's
-    /// nibble to the child's short key. The child is returned in place of the branch.
-    fn collapse_branch(
-        branch: &ProofTrieBranch,
-        branch_path: &Nibbles,
-        mut child: ProofTrieBranchChild<VE::DeferredEncoder>,
-        rlp_encode_buf: &mut Vec<u8>,
-    ) -> ProofTrieBranchChild<VE::DeferredEncoder> {
-        debug_assert_eq!(
-            branch.state_mask.count_ones(),
-            1,
-            "collapse_branch called on branch with {} children",
-            branch.state_mask.count_ones(),
-        );
-
-        let child_nibble = branch.state_mask.trailing_zeros() as u8;
-
-        // Build the prefix to prepend: branch extension + child nibble.
-        let ext_start = branch_path.len() - branch.ext_len as usize;
-        let mut prefix = branch_path.slice_unchecked(ext_start, branch_path.len());
-        prefix.push_unchecked(child_nibble);
-
-        match &mut child {
-            ProofTrieBranchChild::Leaf { short_key, .. } => {
-                let mut new_key = prefix;
-                new_key.extend(short_key);
-                *short_key = new_key;
-            }
-            ProofTrieBranchChild::Branch { node, .. } => {
-                let mut new_key = prefix;
-                new_key.extend(&node.key);
-                node.key = new_key;
-                // Recompute the branch_rlp_node since the extension key changed.
-                rlp_encode_buf.clear();
-                BranchNodeRef::new(&node.stack, node.state_mask).encode(rlp_encode_buf);
-                node.branch_rlp_node = Some(RlpNode::from_rlp(rlp_encode_buf));
-            }
-            ProofTrieBranchChild::RlpNode(_) => {
-                panic!("Cannot collapse branch with RlpNode child")
-            }
-        }
-
-        child
     }
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
@@ -896,6 +835,63 @@ where
         Ok(())
     }
 
+    /// Wraps [`TrieCursor::seek`], skipping cached branches whose sub-tries must be recalculated
+    /// from leaves.
+    ///
+    /// A cached branch is skipped when all but at most one of its children match the prefix set.
+    /// In that case those children might all be deleted, leaving a branch with a single child.
+    /// A single-child branch must be collapsed, but collapsing requires the child to be a full
+    /// node (not a cached hash). Skipping the branch avoids this by forcing recalculation.
+    fn trie_cursor_seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, StateProofError> {
+        let mut entry = self.trie_cursor.seek(key)?;
+        while let Some((ref path, ref branch)) = entry {
+            if !self.should_skip_cached_branch(path, branch) {
+                break
+            }
+            entry = self.trie_cursor.next()?;
+        }
+        Ok(entry)
+    }
+
+    /// Returns true if the cached branch should be skipped entirely and its sub-trie recalculated
+    /// from leaves.
+    fn should_skip_cached_branch(
+        &mut self,
+        cached_path: &Nibbles,
+        cached_branch: &BranchNodeCompact,
+    ) -> bool {
+        if !self.prefix_set.contains(cached_path) {
+            return false
+        }
+
+        let mut num_unmatched = 0u32;
+        let mut child_path = *cached_path;
+        for nibble in 0u8..16 {
+            if cached_branch.state_mask.is_bit_set(nibble) {
+                child_path.truncate(cached_path.len());
+                child_path.push_unchecked(nibble);
+                if !self.prefix_set.contains(&child_path) {
+                    num_unmatched += 1;
+                }
+            }
+        }
+
+        if num_unmatched <= 1 {
+            trace!(
+                target: TRACE_TARGET,
+                ?cached_path,
+                ?num_unmatched,
+                "Skipping cached branch: all but <=1 children match prefix set, branch may collapse",
+            );
+            true
+        } else {
+            false
+        }
+    }
+
     /// Attempts to pop off the top branch of the `cached_branch_stack`, returning
     /// [`PopCachedBranchOutcome::Popped`] on success. Returns other variants to indicate that the
     /// stack is empty and what to do about it.
@@ -934,7 +930,7 @@ where
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
             *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor.seek(*uncalculated_lower_bound)?);
+                TrieCursorState::seeked(self.trie_cursor_seek(*uncalculated_lower_bound)?);
 
             // Having just seeked forward we need to check if the cursor is now exhausted,
             // extracting the new path at the same time.
@@ -1220,7 +1216,7 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor.seek(child_path)?);
+                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1301,7 +1297,7 @@ where
         if trie_cursor_state.before(&sub_trie_targets.prefix) {
             trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
             *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor.seek(sub_trie_targets.prefix)?);
+                TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
         }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
