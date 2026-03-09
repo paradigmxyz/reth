@@ -10,7 +10,7 @@ use reth_ethereum::{
 /// This installs the [`NoopNetworkBuilder`] that does not launch a real network.
 pub fn noop_network() {
     Cli::parse_args()
-        .run(|builder, _| async move {
+        .run(async move |builder, _| {
             let handle = builder
                 // use the default ethereum node types
                 .with_types::<EthereumNode>()

@@ -127,12 +127,14 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     AccountHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;
     StorageHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;

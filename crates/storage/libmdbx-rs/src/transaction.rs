@@ -350,9 +350,10 @@ where
                     #[cfg(feature = "read-tx-timeouts")]
                     self.env.txn_manager().remove_active_read_transaction(txn);
 
-                    unsafe {
-                        ffi::mdbx_txn_abort(txn);
-                    }
+                    // Reset and return the handle to the pool for lock-free reuse.
+                    // pool.put() calls mdbx_txn_reset internally and falls back to
+                    // mdbx_txn_abort if the reset fails or the pool is full.
+                    self.env.ro_txn_pool().push(txn);
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
