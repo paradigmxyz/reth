@@ -192,7 +192,12 @@ impl ArenaSparseSubtrie {
                         pruned_leaves += 1;
                     }
 
-                    self.remove_pruned_child(head_idx, nibble);
+                    ArenaParallelSparseTrie::remove_pruned_node(
+                        &mut self.arena,
+                        &self.buffers.cursor,
+                        head_idx,
+                        nibble,
+                    );
                     pruned += 1;
                 }
             }
@@ -202,30 +207,6 @@ impl ArenaSparseSubtrie {
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
         pruned
-    }
-
-    /// Removes a pruned node from the arena. If the cursor's parent is still present in the
-    /// arena (i.e. it is a retained branch at the pruning boundary), replaces its child slot
-    /// with `Blinded`. Otherwise the parent will also be removed later, so blinding is
-    /// unnecessary.
-    fn remove_pruned_child(&mut self, idx: Index, nibble: Option<u8>) {
-        let rlp_node = self.arena[idx].state_ref().and_then(|s| s.cached_rlp_node()).cloned();
-
-        self.arena.remove(idx);
-
-        // Blind the parent's child slot with the pruned node's cached RLP. At the pruning
-        // boundary, the parent is a retained branch whose child (this node) had no retained
-        // descendants. Deeper removals have parents that will also be removed, but blinding
-        // them is harmless. We must blind regardless of whether the RLP is a hash or inline,
-        // otherwise the parent retains a `Revealed(idx)` pointing to the removed arena entry.
-        if let Some(rlp_node) = rlp_node {
-            let parent_idx = self.buffers.cursor.parent().expect("pruned child has parent").index;
-            let child_nibble = nibble.expect("non-root child");
-            let parent_branch = self.arena[parent_idx].branch_mut();
-            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                .expect("child nibble not found in parent state_mask");
-            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
-        }
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
@@ -1755,6 +1736,28 @@ impl ArenaParallelSparseTrie {
         }
     }
 
+    /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
+    /// cached RLP. If the node has no cached RLP (e.g. it was never hashed), the parent slot
+    /// is left dangling — this is safe because the parent will also be removed during pruning.
+    fn remove_pruned_node(
+        arena: &mut NodeArena,
+        cursor: &ArenaCursor,
+        idx: Index,
+        nibble: Option<u8>,
+    ) {
+        let rlp_node = arena[idx].state_ref().and_then(|s| s.cached_rlp_node()).cloned();
+        arena.remove(idx);
+
+        if let Some(rlp_node) = rlp_node {
+            let parent_idx = cursor.parent().expect("pruned child has parent").index;
+            let child_nibble = nibble.expect("non-root child");
+            let parent_branch = arena[parent_idx].branch_mut();
+            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
+                .expect("child nibble not found in parent state_mask");
+            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+        }
+    }
+
     /// Reveals a single proof node using a pre-computed [`SeekResult`] from
     /// [`ArenaCursor::seek`].
     ///
@@ -2292,9 +2295,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn size_hint(&self) -> usize {
         self.upper_arena
             .iter()
-            .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.num_leaves as usize),
-                _ => None,
+            .map(|(_, node)| match node {
+                ArenaSparseNode::Subtrie(s) => s.num_leaves as usize,
+                ArenaSparseNode::Leaf { .. } => 1,
+                _ => 0,
             })
             .sum()
     }
@@ -2348,42 +2352,72 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         loop {
             let result = cursor.next(&mut self.upper_arena, |_, child| {
-                matches!(child, ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_))
+                matches!(
+                    child,
+                    ArenaSparseNode::Branch(_) |
+                        ArenaSparseNode::Subtrie(_) |
+                        ArenaSparseNode::Leaf { .. }
+                )
             });
 
             match result {
                 NextResult::Done => break,
-                NextResult::Branch => continue,
-                NextResult::NonBranch => {}
+                NextResult::NonBranch | NextResult::Branch => {}
             }
 
-            // Head is a subtrie — compute the range of retained leaves for it.
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
-            let subtrie_root_path = head.path;
+            let head_path = head.path;
 
-            let ArenaSparseNode::Subtrie(_) = &self.upper_arena[head_idx] else {
-                unreachable!("NonBranch in prune walk must be a Subtrie")
-            };
+            match &self.upper_arena[head_idx] {
+                ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
+                    // Don't prune the root.
+                    if cursor.depth() == 0 {
+                        continue;
+                    }
 
-            let subtrie_range = prefix_range(&retained_leaves, retained_idx, &subtrie_root_path);
-            retained_idx = subtrie_range.end;
+                    let short_key =
+                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
+                    let mut node_prefix = head_path;
+                    node_prefix.extend(short_key);
 
-            let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
-                unreachable!()
-            };
-            if subtrie.num_leaves >= threshold {
-                let ArenaSparseNode::Subtrie(subtrie) =
-                    mem::replace(&mut self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie)
-                else {
-                    unreachable!()
-                };
-                taken.push((head_idx, subtrie, subtrie_range));
-            } else {
-                let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
-                    unreachable!()
-                };
-                pruned += subtrie.prune(&retained_leaves[subtrie_range]);
+                    let range = prefix_range(&retained_leaves, 0, &node_prefix);
+                    if !range.is_empty() {
+                        continue;
+                    }
+
+                    Self::remove_pruned_node(
+                        &mut self.upper_arena,
+                        &cursor,
+                        head_idx,
+                        head_path.last(),
+                    );
+                    pruned += 1;
+                }
+                ArenaSparseNode::Subtrie(_) => {
+                    let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
+                    retained_idx = subtrie_range.end;
+
+                    let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+                        unreachable!()
+                    };
+                    if subtrie.num_leaves >= threshold {
+                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                            &mut self.upper_arena[head_idx],
+                            ArenaSparseNode::TakenSubtrie,
+                        ) else {
+                            unreachable!()
+                        };
+                        taken.push((head_idx, subtrie, subtrie_range));
+                    } else {
+                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
+                        else {
+                            unreachable!()
+                        };
+                        pruned += subtrie.prune(&retained_leaves[subtrie_range]);
+                    }
+                }
+                _ => unreachable!("NonBranch in prune walk must be Subtrie or Leaf"),
             }
         }
 

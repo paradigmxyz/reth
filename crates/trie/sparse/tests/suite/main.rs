@@ -256,6 +256,16 @@ macro_rules! sparse_trie_tests {
             )*
         }
 
+        mod arena_parallel_sparse_trie {
+            use reth_trie_sparse::ArenaParallelSparseTrie;
+
+            $(
+                #[test]
+                fn $test_fn() {
+                    super::$test_fn::<ArenaParallelSparseTrie>();
+                }
+            )*
+        }
     };
 }
 
