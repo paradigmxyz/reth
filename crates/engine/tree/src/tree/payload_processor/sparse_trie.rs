@@ -716,6 +716,7 @@ where
                     *address,
                     self.trie.take_storage_trie(address).expect("trie was created above"),
                 ));
+                self.pending_storage_roots.insert(*address);
             }
         }
 
