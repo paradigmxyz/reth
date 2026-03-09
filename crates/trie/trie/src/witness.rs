@@ -12,7 +12,7 @@ use alloy_primitives::{
     Bytes, B256, U256,
 };
 use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
-use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
+use alloy_trie::EMPTY_ROOT_HASH;
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
     prefix_set::TriePrefixSets, DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2,
@@ -141,12 +141,12 @@ where
             return Ok(B256Map::from_iter([(root_hash, root_node)]))
         }
 
-        // Build prefix sets for filtering witness nodes. Only nodes whose path is a prefix of
-        // a changed key are recorded.
-        let mut prefix_sets = state.construct_prefix_sets().freeze();
+        // Build prefix sets for storage root computation of accounts without a revealed
+        // storage trie.
+        let prefix_sets = state.construct_prefix_sets().freeze();
 
-        // Record matching nodes from multiproof in the witness.
-        self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
+        // Record all nodes from multiproof in the witness.
+        self.record_multiproof_nodes(&multiproof);
 
         let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
@@ -202,7 +202,7 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
-            self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
+            self.record_multiproof_nodes(&multiproof);
             sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
         }
 
@@ -253,56 +253,32 @@ where
             let multiproof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .multiproof_v2(targets)?;
-            self.record_decoded_multiproof_v2(&multiproof, &mut prefix_sets);
+            self.record_multiproof_nodes(&multiproof);
             sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
         }
 
         Ok(self.witness)
     }
 
-    /// Record nodes from a V2 decoded multiproof in the witness, keeping only nodes whose path is
-    /// a prefix of at least one changed key in the prefix sets.
-    fn record_decoded_multiproof_v2(
-        &mut self,
-        multiproof: &DecodedMultiProofV2,
-        prefix_sets: &mut TriePrefixSets,
-    ) {
+    /// Record all nodes from a V2 decoded multiproof in the witness.
+    fn record_multiproof_nodes(&mut self, multiproof: &DecodedMultiProofV2) {
         let mut encoded = Vec::new();
         for proof_node in &multiproof.account_proofs {
-            if prefix_sets.account_prefix_set.contains(&proof_node.path) {
-                self.record_witness_node(&proof_node.node, &mut encoded);
-            }
+            self.record_witness_node(&proof_node.node, &mut encoded);
         }
-        for (&hashed_address, proof_nodes) in &multiproof.storage_proofs {
-            if let Some(storage_prefix_set) =
-                prefix_sets.storage_prefix_sets.get_mut(&hashed_address)
-            {
-                for proof_node in proof_nodes {
-                    if storage_prefix_set.contains(&proof_node.path) {
-                        self.record_witness_node(&proof_node.node, &mut encoded);
-                    }
-                }
+        for proof_nodes in multiproof.storage_proofs.values() {
+            for proof_node in proof_nodes {
+                self.record_witness_node(&proof_node.node, &mut encoded);
             }
         }
     }
 
-    /// Record a single [`TrieNodeV2`] in the witness. If the node is a branch with a non-empty
-    /// extension key, both the extension encoding and the child branch encoding are recorded as
-    /// separate entries.
+    /// Record a single [`TrieNodeV2`] in the witness.
     fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
         encoded.clear();
         node.encode(encoded);
         let bytes = Bytes::from(encoded.clone());
         self.witness.entry(keccak256(&bytes)).or_insert(bytes);
-
-        if let TrieNodeV2::Branch(branch) = node &&
-            !branch.key.is_empty()
-        {
-            encoded.clear();
-            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
-            let bytes = Bytes::from(encoded.clone());
-            self.witness.entry(keccak256(&bytes)).or_insert(bytes);
-        }
     }
 
     /// Compute the storage root for an account by walking the storage trie from the cursor
