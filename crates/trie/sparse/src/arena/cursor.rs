@@ -99,7 +99,7 @@ impl ArenaCursor {
     }
 
     /// Clears the traversal stack and pushes the given root entry.
-    #[instrument(level = "trace", target = TRACE_TARGET, skip(self))]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(
             self.stack.is_empty() && !self.needs_pop,

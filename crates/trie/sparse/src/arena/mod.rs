@@ -1783,8 +1783,9 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         nibble: Option<u8>,
     ) {
-        let rlp_node = arena[idx].state_ref().and_then(|s| s.cached_rlp_node()).cloned();
-        arena.remove(idx);
+        trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
+        let node = arena.remove(idx).expect("node must exist to be pruned");
+        let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
 
         if let Some(rlp_node) = rlp_node {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
@@ -2374,6 +2375,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         upper + subtrie_size + cleared_size + buffer_size
     }
 
+    #[instrument(
+        level = "trace",
+        target = TRACE_TARGET,
+        skip_all,
+        fields(num_retained_leaves = retained_leaves.len()),
+    )]
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
@@ -2461,7 +2468,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         pruned += subtrie.prune(&retained_leaves[subtrie_range]);
                     }
                 }
-                _ => unreachable!("NonBranch in prune walk must be Subtrie or Leaf"),
+                _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
             }
         }
 
