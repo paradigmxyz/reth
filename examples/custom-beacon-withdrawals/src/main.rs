@@ -5,7 +5,7 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx, StateDB},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
     precompiles::PrecompilesMap,
     revm::context::Block as _,
@@ -17,13 +17,13 @@ use reth_ethereum::{
     cli::interface::Cli,
     evm::{
         primitives::{
+            block::StateDB,
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-            Database, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
-            NextBlockEnvAttributes, OnStateHook,
+            Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
+            OnStateHook,
         },
         revm::{
             context::TxEnv,
-            db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
         },
@@ -187,10 +187,9 @@ pub struct CustomBlockExecutor<'a, Evm> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
 }
 
-impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
+impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+    E: Evm<DB: StateDB, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
