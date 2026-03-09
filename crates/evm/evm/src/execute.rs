@@ -498,7 +498,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
-        let block_access_list = result.block_access_list.clone();
+        let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
@@ -563,7 +563,6 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
-            .without_state_clear()
             .with_bal_builder_if(true)
             .build();
         Self { strategy_factory, db }

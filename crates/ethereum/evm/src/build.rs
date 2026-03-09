@@ -61,7 +61,7 @@ where
         let withdrawals = self
             .chain_spec
             .is_shanghai_active_at_timestamp(timestamp)
-            .then(|| ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default());
+            .then(|| Withdrawals::new(ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default()));
 
         let withdrawals_root =
             withdrawals.as_deref().map(|w| proofs::calculate_withdrawals_root(w));

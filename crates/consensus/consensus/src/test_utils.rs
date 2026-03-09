@@ -1,4 +1,5 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
+use alloy_eip7928::BlockAccessList;
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -51,6 +52,7 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
         &self,
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
+        _block_access_list: Option<BlockAccessList>,
         _receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {

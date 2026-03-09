@@ -13,6 +13,7 @@ extern crate alloc;
 
 use alloc::{boxed::Box, fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::error::Error;
 
@@ -59,6 +60,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        block_access_list: Option<BlockAccessList>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError>;
 }
