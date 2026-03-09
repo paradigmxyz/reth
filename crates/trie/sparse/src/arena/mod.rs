@@ -641,7 +641,7 @@ impl ArenaParallelSparseTrie {
         // the cursor head.
         cursor.pop(&mut self.upper_arena);
 
-        self.recycle_subtrie(subtrie_idx);
+        self.recycle_subtrie_from_idx(subtrie_idx);
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
         let parent_branch = self.upper_arena[parent_idx].branch_mut();
@@ -656,17 +656,25 @@ impl ArenaParallelSparseTrie {
         self.maybe_collapse_or_remove_branch(cursor);
     }
 
-    /// Extracts a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx`, merges its
-    /// buffered updates, clears it, and pushes it onto `cleared_subtries` for reuse.
-    fn recycle_subtrie(&mut self, idx: Index) {
-        let ArenaSparseNode::Subtrie(mut subtrie) =
-            self.upper_arena.remove(idx).expect("subtrie exists in arena")
-        else {
-            unreachable!()
+    /// Merges buffered updates from a [`ArenaSparseNode::Subtrie`], clears it, and pushes it
+    /// onto `cleared_subtries` for reuse.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `node` is not a `Subtrie`.
+    fn recycle_subtrie(&mut self, node: ArenaSparseNode) {
+        let ArenaSparseNode::Subtrie(mut subtrie) = node else {
+            unreachable!("recycle_subtrie called on non-Subtrie node")
         };
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         subtrie.clear();
         self.cleared_subtries.push(*subtrie);
+    }
+
+    /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
+    fn recycle_subtrie_from_idx(&mut self, idx: Index) {
+        let node = self.upper_arena.remove(idx).expect("subtrie exists in arena");
+        self.recycle_subtrie(node);
     }
 
     /// Handles cascading structural changes on the branch at the cursor head after a child
@@ -749,7 +757,7 @@ impl ArenaParallelSparseTrie {
             );
 
             if is_empty_subtrie {
-                self.recycle_subtrie(child_idx);
+                self.recycle_subtrie_from_idx(child_idx);
                 let branch = self.upper_arena[branch_idx].branch_mut();
                 branch.children.remove(0);
                 branch.unset_child_bit(remaining_nibble);
@@ -1782,7 +1790,7 @@ impl ArenaParallelSparseTrie {
         cursor: &ArenaCursor,
         idx: Index,
         nibble: Option<u8>,
-    ) {
+    ) -> ArenaSparseNode {
         trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
         let node = arena.remove(idx).expect("node must exist to be pruned");
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
@@ -1795,6 +1803,8 @@ impl ArenaParallelSparseTrie {
                 .expect("child nibble not found in parent state_mask");
             parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
         }
+
+        node
     }
 
     /// Reveals a single proof node using a pre-computed [`SeekResult`] from
@@ -2448,6 +2458,21 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 ArenaSparseNode::Subtrie(_) => {
                     let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
                     retained_idx = subtrie_range.end;
+
+                    if subtrie_range.is_empty() {
+                        let removed = Self::remove_pruned_node(
+                            &mut self.upper_arena,
+                            &cursor,
+                            head_idx,
+                            head_path.last(),
+                        );
+                        let ArenaSparseNode::Subtrie(s) = &removed else {
+                            unreachable!()
+                        };
+                        pruned += s.num_leaves as usize;
+                        self.recycle_subtrie(removed);
+                        continue;
+                    }
 
                     let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
                         unreachable!()
