@@ -139,6 +139,10 @@ where
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Whether to disable BAL-based parallel execution (falls back to tx-based prewarming).
+    disable_bal_parallel_execution: bool,
+    /// Whether to disable BAL-driven parallel state root computation.
+    disable_bal_parallel_state_root: bool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -173,6 +177,8 @@ where
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            disable_bal_parallel_execution: config.disable_bal_parallel_execution(),
+            disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
         }
     }
 }
@@ -506,14 +512,16 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
+            self.disable_bal_parallel_state_root,
         );
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            let disable_bal_parallel_execution = self.disable_bal_parallel_execution;
             self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
-                } else if let Some(bal) = bal {
+                } else if let Some(bal) = bal.filter(|_| !disable_bal_parallel_execution) {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)

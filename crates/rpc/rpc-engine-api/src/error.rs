@@ -148,11 +148,11 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
+            // Per Engine API spec, payload attributes structure validation errors
+            // should return -38003: Invalid payload attributes.
+            // See: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification-2
             EngineApiError::EngineObjectValidationError(
-                EngineObjectValidationError::PayloadAttributes(
-                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
-                    VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
-                ),
+                EngineObjectValidationError::PayloadAttributes(_),
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
@@ -211,6 +211,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
+    use reth_payload_primitives::VersionSpecificValidationError;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,

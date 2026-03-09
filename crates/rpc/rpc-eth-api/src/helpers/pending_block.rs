@@ -375,7 +375,7 @@ pub trait LoadPendingBlock:
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
@@ -433,6 +433,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
+            slot_number: parent.slot_number(),
         }
     }
 }

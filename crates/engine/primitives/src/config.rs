@@ -151,6 +151,13 @@ pub struct TreeConfig {
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
+    /// Whether to disable BAL (Block Access List, EIP-7928) based parallel execution.
+    /// When disabled, falls back to transaction-based prewarming even when a BAL is available.
+    disable_bal_parallel_execution: bool,
+    /// Whether to disable BAL-driven parallel state root computation.
+    /// When disabled, the BAL hashed post state is not sent to the multiproof task for
+    /// early parallel state root computation.
+    disable_bal_parallel_state_root: bool,
 }
 
 impl Default for TreeConfig {
@@ -181,6 +188,8 @@ impl Default for TreeConfig {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            disable_bal_parallel_execution: false,
+            disable_bal_parallel_state_root: false,
         }
     }
 }
@@ -240,6 +249,8 @@ impl TreeConfig {
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
+            disable_bal_parallel_execution: false,
+            disable_bal_parallel_state_root: false,
         }
     }
 
@@ -547,6 +558,34 @@ impl TreeConfig {
     /// Setter for state root task timeout.
     pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.state_root_task_timeout = timeout;
+        self
+    }
+
+    /// Returns whether BAL-based parallel execution is disabled.
+    pub const fn disable_bal_parallel_execution(&self) -> bool {
+        self.disable_bal_parallel_execution
+    }
+
+    /// Setter for whether to disable BAL-based parallel execution.
+    pub const fn without_bal_parallel_execution(
+        mut self,
+        disable_bal_parallel_execution: bool,
+    ) -> Self {
+        self.disable_bal_parallel_execution = disable_bal_parallel_execution;
+        self
+    }
+
+    /// Returns whether BAL-driven parallel state root computation is disabled.
+    pub const fn disable_bal_parallel_state_root(&self) -> bool {
+        self.disable_bal_parallel_state_root
+    }
+
+    /// Setter for whether to disable BAL-driven parallel state root computation.
+    pub const fn without_bal_parallel_state_root(
+        mut self,
+        disable_bal_parallel_state_root: bool,
+    ) -> Self {
+        self.disable_bal_parallel_state_root = disable_bal_parallel_state_root;
         self
     }
 }

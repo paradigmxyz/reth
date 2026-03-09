@@ -75,6 +75,8 @@ where
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
     parent_span: Span,
+    /// Whether to disable BAL-driven parallel state root computation.
+    disable_bal_parallel_state_root: bool,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -89,6 +91,7 @@ where
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        disable_bal_parallel_state_root: bool,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -107,6 +110,7 @@ where
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
+                disable_bal_parallel_state_root,
             },
             actions_tx,
         )
@@ -290,24 +294,19 @@ where
                 let new_cache = SavedCache::new(hash, caches, cache_metrics)
                     .with_disable_cache_metrics(disable_cache_metrics);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
                 new_cache.update_metrics();
 
+                // Defer `insert_state` until after validation: FixedCache's non-blocking
+                // inserts silently drop writes under concurrent reader contention.
                 if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
+                    if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                        *cached = None;
+                        debug!(target: "engine::caching", "cleared execution cache on update error");
+                        return;
+                    }
+
                     *cached = Some(new_cache);
                 } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
@@ -381,6 +380,9 @@ where
     /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
     /// multiproof task.
     fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
+        if self.disable_bal_parallel_state_root {
+            return;
+        }
         let Some(to_multi_proof) = &self.to_multi_proof else { return };
 
         let provider = match self.ctx.provider.build() {
@@ -569,7 +571,7 @@ where
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
+            evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),

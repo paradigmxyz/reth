@@ -45,6 +45,8 @@ pub struct DefaultEngineValues {
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
+    bal_parallel_execution_disabled: bool,
+    bal_parallel_state_root_disabled: bool,
 }
 
 impl DefaultEngineValues {
@@ -204,6 +206,18 @@ impl DefaultEngineValues {
         self.state_root_task_timeout = v;
         self
     }
+
+    /// Set whether to disable BAL-based parallel execution by default
+    pub const fn with_bal_parallel_execution_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_execution_disabled = v;
+        self
+    }
+
+    /// Set whether to disable BAL-driven parallel state root by default
+    pub const fn with_bal_parallel_state_root_disabled(mut self, v: bool) -> Self {
+        self.bal_parallel_state_root_disabled = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -233,6 +247,8 @@ impl Default for DefaultEngineValues {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
+            bal_parallel_execution_disabled: false,
+            bal_parallel_state_root_disabled: false,
         }
     }
 }
@@ -397,6 +413,16 @@ pub struct EngineArgs {
         default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
+
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back
+    /// to transaction-based prewarming even when a BAL is available.
+    #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
+    pub bal_parallel_execution_disabled: bool,
+
+    /// Disable BAL-driven parallel state root computation. When set, the BAL hashed post state
+    /// is not sent to the multiproof task for early parallel state root computation.
+    #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
+    pub bal_parallel_state_root_disabled: bool,
 }
 
 #[allow(deprecated)]
@@ -427,6 +453,8 @@ impl Default for EngineArgs {
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -459,6 +487,8 @@ impl Default for EngineArgs {
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            bal_parallel_execution_disabled,
+            bal_parallel_state_root_disabled,
         }
     }
 }
@@ -489,6 +519,8 @@ impl EngineArgs {
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
+            .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
     }
 }
 
@@ -543,6 +575,8 @@ mod tests {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            bal_parallel_execution_disabled: true,
+            bal_parallel_state_root_disabled: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -581,6 +615,8 @@ mod tests {
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.disable-bal-parallel-execution",
+            "--engine.disable-bal-parallel-state-root",
         ])
         .args;
 

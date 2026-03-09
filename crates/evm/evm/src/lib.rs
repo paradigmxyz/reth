@@ -121,6 +121,7 @@ pub use alloy_evm::{
 ///     gas_limit: 30_000_000,
 ///     withdrawals: Some(withdrawals),
 ///     parent_beacon_block_root: Some(beacon_root),
+///     slot_number: Some(slot),
 /// };
 ///
 /// // Build a new block on top of parent
@@ -315,7 +316,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
+    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
@@ -328,8 +329,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>, Self::Error>
-    {
+    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>, Self::Error> {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
         Ok(self.create_executor(evm, ctx))
@@ -357,7 +357,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     ) -> impl BlockBuilder<
         Primitives = Self::Primitives,
-        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>,
+        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>,
     >
     where
         DB: Database,
@@ -409,7 +409,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<
         impl BlockBuilder<
             Primitives = Self::Primitives,
-            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>,
+            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>,
         >,
         Self::Error,
     > {
@@ -505,6 +505,8 @@ pub struct NextBlockEnvAttributes {
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,
+    /// Slot number (EIP-7928, Amsterdam).
+    pub slot_number: Option<u64>,
 }
 
 /// Abstraction over transaction environment.

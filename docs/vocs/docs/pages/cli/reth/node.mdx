@@ -1017,6 +1017,12 @@ Engine:
 
           [default: 1s]
 
+      --engine.disable-bal-parallel-execution
+          Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back to transaction-based prewarming even when a BAL is available
+
+      --engine.disable-bal-parallel-state-root
+          Disable BAL-driven parallel state root computation. When set, the BAL hashed post state is not sent to the multiproof task for early parallel state root computation
+
 ERA:
       --era.enable
           Enable import from ERA1 files

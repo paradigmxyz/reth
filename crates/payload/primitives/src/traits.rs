@@ -141,6 +141,9 @@ pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
 
     /// Returns the list of withdrawals to be processed in this block.
     fn withdrawals(&self) -> &Withdrawals;
+
+    /// Returns the slot number to be used in the payload's header.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 /// Basic attributes required to initiate payload construction.
@@ -162,6 +165,11 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-merge blocks, `None` for pre-merge blocks.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the slot number for the new payload.
+    ///
+    /// `Some` for post-Amsterdam blocks, `None` for earlier blocks.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -175,6 +183,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.slot_number
     }
 }
 
@@ -190,6 +202,10 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        None
     }
 }
 

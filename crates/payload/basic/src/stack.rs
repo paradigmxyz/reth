@@ -120,8 +120,14 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
-}
 
+    fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.slot_number(),
+            Self::Right(r) => r.slot_number(),
+        }
+    }
+}
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,
 /// creating a hierarchical fallback system. It's designed to be nestable, allowing
 /// for complex builder arrangements like `Stack<Stack<A, B>, C>` with different

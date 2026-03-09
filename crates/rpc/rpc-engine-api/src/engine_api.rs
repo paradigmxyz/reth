@@ -10,11 +10,14 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
-    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PraguePayloadFields,
 };
+
+// TODO: Replace with alloy types once available in alloy bal-devnet2 branch
+type ExecutionPayloadBodiesV2 = ExecutionPayloadBodiesV1;
+type ExecutionPayloadBodyV2 = ExecutionPayloadBodyV1;
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
@@ -26,7 +29,10 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_api::{
+    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethNewPayloadInput,
+    RethPayloadStatus,
+};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -257,6 +263,66 @@ where
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
     }
+
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post-Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    pub async fn new_payload_v5(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+    }
+
+    /// Metrics version of `new_payload_v5`
+    pub async fn new_payload_v5_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let res = Self::new_payload_v5(self, payload).await;
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        Ok(res?)
+    }
+
+    /// Waits for persistence, execution cache, and sparse trie locks before processing.
+    ///
+    /// Used by `reth_newPayload` endpoint.
+    pub async fn reth_new_payload(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<RethPayloadStatus> {
+        let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
+        Ok(RethPayloadStatus {
+            status,
+            latency_us: timings.latency.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
+            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
+            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
+        })
+    }
+
+    /// Metered version of `reth_new_payload`.
+    pub async fn reth_new_payload_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<RethPayloadStatus> {
+        let start = Instant::now();
+        let res = Self::reth_new_payload(self, payload).await;
+        self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
+        Ok(res?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -342,6 +408,31 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        res
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ slot number,
+    /// but only _after_ amsterdam.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
 
@@ -517,6 +608,29 @@ where
         res
     }
 
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post-Amsterdam payload handler that includes Block Access Lists (BAL).
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    pub async fn get_payload_v6(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+    }
+
+    /// Metrics version of `get_payload_v6`
+    pub async fn get_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        let start = Instant::now();
+        let res = Self::get_payload_v6(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
+        res
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(
@@ -621,10 +735,10 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        // TODO: add block_access_list field once ExecutionPayloadBodyV2 is in alloy bal-devnet2
         self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
             transactions: block.body().encoded_2718_transactions(),
             withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
         })
         .await
     }
@@ -709,10 +823,10 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        // TODO: add block_access_list field once ExecutionPayloadBodyV2 is in alloy bal-devnet2
         self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
             transactions: block.body().encoded_2718_transactions(),
             withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            block_access_list: None,
         })
         .await
     }
@@ -1014,20 +1128,32 @@ where
 
     /// Handler for `engine_newPayloadV5`
     ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    /// Post-Amsterdam payload handler.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
-        _payload: ExecutionPayloadV4,
-        _versioned_hashes: Vec<B256>,
-        _parent_beacon_block_root: B256,
-        _execution_requests: RequestsOrHash,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+            ),
+        };
+
+        Ok(self.new_payload_v5_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1064,6 +1190,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1155,17 +1293,15 @@ where
 
     /// Handler for `engine_getPayloadV6`
     ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    /// Post-Amsterdam payload handler.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
         &self,
-        _payload_id: PayloadId,
+        payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        Ok(self.get_payload_v6_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -1277,14 +1413,65 @@ where
     }
 }
 
+/// Implementation of `RethEngineApiServer` under the `reth_` namespace.
+///
+/// Waits for execution cache and sparse trie locks before processing.
+#[async_trait]
+impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer<ExecutionData>
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    EngineT: EngineTypes<ExecutionData = ExecutionData>,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    async fn reth_new_payload(
+        &self,
+        input: RethNewPayloadInput<ExecutionData>,
+    ) -> RpcResult<RethPayloadStatus> {
+        trace!(target: "rpc::engine", "Serving reth_newPayload");
+        match input {
+            RethNewPayloadInput::ExecutionData(payload) => {
+                self.reth_new_payload_metered(payload).await
+            }
+            RethNewPayloadInput::BlockRlp(rlp) => {
+                let block = alloy_rlp::Decodable::decode(&mut rlp.as_ref())
+                    .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+                let payload = EngineT::block_to_payload(
+                    reth_primitives_traits::SealedBlock::new_unhashed(block),
+                );
+                self.reth_new_payload_metered(payload).await
+            }
+        }
+    }
+
+    async fn reth_forkchoice_updated(
+        &self,
+        forkchoice_state: ForkchoiceState,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, forkchoice_state, None)
+            .await
+            .map_err(Into::into)
+    }
+}
+
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
-    Self: EngineApiServer<EngineT>,
+    Self: EngineApiServer<EngineT> + RethEngineApiServer<ExecutionData>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
-        EngineApiServer::<EngineT>::into_rpc(self).remove_context()
+        let mut module = EngineApiServer::<EngineT>::into_rpc(self.clone()).remove_context();
+
+        // Merge reth_newPayload endpoint
+        module
+            .merge(RethEngineApiServer::<ExecutionData>::into_rpc(self).remove_context())
+            .expect("No conflicting methods");
+
+        module
     }
 }
 
