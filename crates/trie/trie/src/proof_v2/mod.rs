@@ -976,6 +976,21 @@ where
         Ok(PopCachedBranchOutcome::Popped(cached))
     }
 
+    // Pop any under-construction branches that are now complete. Assumes that all trie data prior
+    // to `next_path`, if any, has been computed. Any branches which were under-construction
+    // previously, and which do not share a perfix with `next_path`, can be assumed to be completed;
+    // they will not have any further keys added to them.
+    fn commit_branches<'a>(
+        &mut self,
+        targets: &mut Option<TargetsCursor<'a>>,
+        next_path: &Nibbles,
+    ) -> Result<(), StateProofError> {
+        while !next_path.starts_with(&self.branch_path) {
+            self.pop_branch(targets)?;
+        }
+        Ok(())
+    }
+
     /// Accepts the current state of both hashed and trie cursors, and determines the next range of
     /// hashed keys which need to be processed using [`Self::push_leaf`].
     ///
@@ -991,6 +1006,9 @@ where
     ///
     /// - `Some(lower, Some(upper))`: Indicates to call `push_leaf` on all keys starting at `lower`,
     ///   up to but excluding `upper`, and then call this method once done.
+    ///
+    /// Once returned the `branch_stack` will be in the correct state to start calculating leaves
+    /// for the given range, if any.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
@@ -1000,17 +1018,6 @@ where
         sub_trie_upper_bound: Option<&Nibbles>,
         mut uncalculated_lower_bound: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
-        // Pop any under-construction branches that are now complete.
-        // All trie data prior to the current cached branch, if any, has been computed. Any branches
-        // which were under-construction previously, and which are not on the same path as this
-        // cached branch, can be assumed to be completed; they will not have any further keys added.
-        // to them.
-        if let Some(cached_path) = self.cached_branch_stack.last().map(|kv| kv.0) {
-            while !cached_path.starts_with(&self.branch_path) {
-                self.pop_branch(targets)?;
-            }
-        }
-
         loop {
             // Pop the currently cached branch node.
             //
@@ -1028,10 +1035,14 @@ where
                     // unbounded range of leaves to be processed. `uncalculated_lower_bound` is
                     // used to return that range.
                     trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
-                    return Ok(uncalculated_lower_bound
-                        .map(|lower| (lower, sub_trie_upper_bound.copied())));
+                    if let Some(lower) = uncalculated_lower_bound {
+                        self.commit_branches(targets, &lower)?;
+                        return Ok(Some((lower, sub_trie_upper_bound.copied())));
+                    }
+                    return Ok(None)
                 }
                 PopCachedBranchOutcome::CalculateLeaves(range) => {
+                    self.commit_branches(targets, &range.0)?;
                     return Ok(Some(range));
                 }
             };
@@ -1045,6 +1056,8 @@ where
                 cached_branch_hash_mask = ?cached_branch.hash_mask,
                 "loop",
             );
+
+            self.commit_branches(targets, &cached_path)?;
 
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
@@ -1782,6 +1795,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
+    use pretty_assertions::assert_eq;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
         updates::{StorageTrieUpdates, TrieUpdates},
@@ -3113,5 +3127,135 @@ mod tests {
             root_with_collapse,
             "Root hash after collapsing branch (removed child after remaining) should match fresh computation"
         );
+    }
+
+    #[test]
+    fn test_skipped_parent_branch_with_unskipped_child() {
+        reth_tracing::init_test_tracing();
+        use reth_trie_common::prefix_set::PrefixSetMut;
+
+        let account_addr = B256::ZERO;
+        let val = U256::from(1u64);
+        let updated_val = U256::from(2u64);
+
+        // We need cached branches at [2], [2,f], and [3] in the trie DB.
+        // Keys under [2,0] — will be dirty (in prefix set)
+        let key_2 = B256::right_padding_from(&[0x20]);
+
+        // Keys under [2,f] — NOT dirty. Deep structure to force [2,f] into DB.
+        // Under [2,f,0]: two leaf groups to create branch [2,f,0]
+        let key_2f00 = B256::right_padding_from(&[0x2f, 0x00]);
+        let key_2f01 = B256::right_padding_from(&[0x2f, 0x01]);
+        // Under [2,f,1]: two leaf groups to create branch [2,f,1]
+        let key_2f10 = B256::right_padding_from(&[0x2f, 0x10]);
+        let key_2f11 = B256::right_padding_from(&[0x2f, 0x11]);
+
+        // Keys under [3] — NOT dirty. Deep structure to force [4] into DB.
+        let key_300 = B256::right_padding_from(&[0x30, 0x00]);
+        let key_301 = B256::right_padding_from(&[0x30, 0x10]);
+        let key_310 = B256::right_padding_from(&[0x31, 0x00]);
+        let key_311 = B256::right_padding_from(&[0x31, 0x10]);
+
+        // Keys under [5] — NOT dirty. Prevents root from being skipped.
+        let key_500 = B256::right_padding_from(&[0x50, 0x00]);
+        let key_501 = B256::right_padding_from(&[0x50, 0x10]);
+        let key_510 = B256::right_padding_from(&[0x51, 0x00]);
+        let key_511 = B256::right_padding_from(&[0x51, 0x10]);
+
+        let all_keys = [
+            key_2, key_2f00, key_2f01, key_2f10, key_2f11, key_300, key_301, key_310, key_311,
+            key_500, key_501, key_510, key_511,
+        ];
+
+        // Build original state and compute trie updates with real cached hashes.
+        let original_storage: BTreeMap<B256, U256> = all_keys.iter().map(|k| (*k, val)).collect();
+        let original_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, original_storage)]),
+        );
+        let empty_trie = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, BTreeMap::new())]),
+        );
+
+        let (_original_root, _, trie_updates) = crate::StorageRoot::new_hashed(
+            empty_trie,
+            original_hashed,
+            account_addr,
+            PrefixSet::default(),
+        )
+        .root_with_updates()
+        .expect("StorageRoot should succeed for original state");
+
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            trie_updates.storage_nodes.into_iter().collect();
+
+        // Verify that the expected branches exist in the trie.
+        let branch_2 = Nibbles::from_nibbles([0x2]);
+        let branch_2f = Nibbles::from_nibbles([0x2, 0xf]);
+        let branch_3 = Nibbles::from_nibbles([0x3]);
+        assert!(
+            storage_nodes.contains_key(&branch_2),
+            "Trie should have a branch at [2], got: {:?}",
+            storage_nodes.keys().collect::<Vec<_>>(),
+        );
+        assert!(
+            storage_nodes.contains_key(&branch_2f),
+            "Trie should have a branch at [2,f], got: {:?}",
+            storage_nodes.keys().collect::<Vec<_>>(),
+        );
+        assert!(
+            storage_nodes.contains_key(&branch_3),
+            "Trie should have a branch at [4], got: {:?}",
+            storage_nodes.keys().collect::<Vec<_>>(),
+        );
+
+        // Build updated state: change the leaf under [2,0] only. Everything else unchanged.
+        // This means:
+        // - Prefix set contains [2,0,...] → prefix_set.contains([2]) = true
+        // - [2] has children 0 and f. Child [2,0] is in prefix set, child [2,f] is NOT.
+        //   num_unmatched=1 → [2] IS skipped.
+        // - [2,f]: prefix_set.contains([2,f]) = false → NOT skipped.
+        let updated_storage: BTreeMap<B256, U256> = all_keys
+            .iter()
+            .map(|k| if *k == key_2 { (*k, updated_val) } else { (*k, val) })
+            .collect();
+        let updated_hashed = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, updated_storage)]),
+        );
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([(account_addr, storage_nodes)]),
+        );
+
+        // Build prefix set: only the changed key is dirty.
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::unpack(key_2));
+        let prefix_set = prefix_set_mut.freeze();
+
+        let (expected_root, _, _) = crate::StorageRoot::new_hashed(
+            trie_cursor_factory.clone(),
+            updated_hashed.clone(),
+            account_addr,
+            prefix_set.clone(),
+        )
+        .root_with_updates()
+        .expect("StorageRoot should succeed for updated state");
+
+        // Compute root with cached branches + prefix set — triggers the bug.
+        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
+        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
+                .with_prefix_set(prefix_set);
+        let root_node =
+            calculator.storage_root_node(account_addr).expect("storage_root_node should succeed");
+
+        let got_root = calculator
+            .compute_root_hash(&[root_node])
+            .expect("root hash should succeed")
+            .expect("root should get hashed");
+        assert_eq!(expected_root, got_root);
     }
 }
