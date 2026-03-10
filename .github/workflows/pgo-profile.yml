@@ -7,14 +7,14 @@ on:
         description: "Number of blocks to execute for PGO profiling"
         required: false
         type: string
-        default: "10"
+        default: "20"
   workflow_dispatch:
     inputs:
       pgo_blocks:
         description: "Number of blocks to execute for PGO profiling"
         required: false
         type: string
-        default: "10"
+        default: "20"
 
 jobs:
   collect:
@@ -72,8 +72,8 @@ jobs:
         run: |
           DATADIR="$SCHELK_MOUNT/datadir" \
           RPC_URL="$BENCH_RPC_URL" \
-          PGO_BLOCKS="${{ inputs.pgo_blocks || '10' }}" \
-          BOLT_BLOCKS="${{ inputs.pgo_blocks || '10' }}" \
+          PGO_BLOCKS="${{ inputs.pgo_blocks || '20' }}" \
+          BOLT_BLOCKS="${{ inputs.pgo_blocks || '20' }}" \
           COLLECT_PGO_ONLY=true \
           SKIP_BOLT=true \
           PROFILE=maxperf-symbols \
@@ -81,6 +81,15 @@ jobs:
           TARGET=x86_64-unknown-linux-gnu \
           EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
             .github/scripts/build_pgo_bolt.sh
+
+      - name: Show PGO profile stats
+        run: |
+          LLVM_PROFDATA=$(find "$(rustc --print sysroot)" -name llvm-profdata -type f | head -1)
+          if [ -z "$LLVM_PROFDATA" ]; then
+            echo "::error::llvm-profdata not found in rust toolchain"
+            exit 1
+          fi
+          "$LLVM_PROFDATA" show --detailed-summary --topn=20 target/pgo-profiles/merged.profdata
 
       - name: Upload PGO profile
         uses: actions/upload-artifact@v7

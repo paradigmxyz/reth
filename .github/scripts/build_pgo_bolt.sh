@@ -12,8 +12,8 @@
 #   RPC_URL    - Source RPC URL for reth-bench to fetch payloads from
 #
 # Optional environment variables:
-#   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 10)
-#   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 10)
+#   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 20)
+#   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 20)
 #   SKIP_BOLT       - Temporarily skip BOLT phases (default: false)
 #   COLLECT_PGO_ONLY - Stop after producing merged.profdata (default: false)
 #   PGO_PROFDATA    - Path to pre-collected merged.profdata (optional)
@@ -45,8 +45,8 @@ gha_section_end() {
 cd "$(dirname "$0")/../.."
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-PGO_BLOCKS="${PGO_BLOCKS:-10}"
-BOLT_BLOCKS="${BOLT_BLOCKS:-10}"
+PGO_BLOCKS="${PGO_BLOCKS:-20}"
+BOLT_BLOCKS="${BOLT_BLOCKS:-20}"
 SKIP_BOLT="${SKIP_BOLT:-false}"
 COLLECT_PGO_ONLY="${COLLECT_PGO_ONLY:-false}"
 PROFILE="${PROFILE:-maxperf-symbols}"

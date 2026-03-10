@@ -16,7 +16,7 @@ on:
       pgo_blocks:
         description: "Number of blocks to execute for PGO profiling on self-hosted runner"
         type: string
-        default: "10"
+        default: "20"
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -156,7 +156,7 @@ jobs:
   collect-pgo-profile:
     uses: ./.github/workflows/pgo-profile.yml
     with:
-      pgo_blocks: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo_blocks || '10' }}
+      pgo_blocks: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo_blocks || '20' }}
     secrets: inherit
 
   build-pgo:
