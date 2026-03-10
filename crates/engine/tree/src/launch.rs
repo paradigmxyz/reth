@@ -64,6 +64,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     sync_metrics_tx: MetricEventsSender,
     evm_config: C,
     changeset_cache: ChangesetCache,
+    runtime: Runtime,
 ) -> ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
@@ -99,6 +100,7 @@ where
         evm_config,
         changeset_cache,
         use_hashed_state,
+        runtime,
     );
 
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);

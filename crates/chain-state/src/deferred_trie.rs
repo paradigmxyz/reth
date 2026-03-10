@@ -9,7 +9,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
-use tracing::instrument;
+use tracing::{debug_span, instrument};
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -163,6 +163,8 @@ impl DeferredTrieData {
         anchor_hash: B256,
         ancestors: &[Self],
     ) -> ComputedTrieData {
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
+
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
             || match Arc::try_unwrap(hashed_state) {
@@ -187,6 +189,10 @@ impl DeferredTrieData {
             },
         );
 
+        drop(_span);
+
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "build_overlay").entered();
+
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same
         // persisted anchor. If the anchor has changed (e.g., due to persistence),
@@ -205,6 +211,9 @@ impl DeferredTrieData {
                         Arc::clone(&trie_input.state),
                         Default::default(), // prefix_sets are per-block, not cumulative
                     );
+                    let _span =
+                        debug_span!(target: "engine::tree::deferred_trie", "extend_overlay")
+                            .entered();
                     // Only trigger COW clone if there's actually data to add.
                     #[cfg(feature = "rayon")]
                     {
@@ -272,6 +281,7 @@ impl DeferredTrieData {
         sorted_hashed_state: &HashedPostStateSorted,
         sorted_trie_updates: &TrieUpdatesSorted,
     ) -> TrieInputSorted {
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "merge_ancestors", num_ancestors = ancestors.len()).entered();
         let mut overlay = TrieInputSorted::default();
 
         let state_mut = Arc::make_mut(&mut overlay.state);

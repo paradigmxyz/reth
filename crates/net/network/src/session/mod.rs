@@ -377,10 +377,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         if let Some(session) = self.active_sessions.get(peer_id) {
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
                 |e| {
-                    if let TrySendError::Full(_) = e {
+                    if let TrySendError::Full(SessionCommand::Message(msg)) = e {
                         debug!(
                             target: "net::session",
                             ?peer_id,
+                            msg_kind = msg.message_kind(),
+                            items = msg.message_item_count(),
                             "session command buffer full, dropping message"
                         );
                         self.metrics.total_outgoing_peer_messages_dropped.increment(1);

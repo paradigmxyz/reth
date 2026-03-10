@@ -75,7 +75,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hive_assets
           path: ./hive_assets
@@ -198,13 +198,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: reth-${{ matrix.storage }}
           path: /tmp

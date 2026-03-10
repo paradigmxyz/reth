@@ -13,11 +13,12 @@ use reth_provider::{
     AccountExtReader, DBProvider, HashingWriter, StatsReader, StorageSettingsCache,
 };
 use reth_stages_api::{
-    AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    AccountHashingCheckpoint, BlockRangeOutput, EntitiesCheckpoint, ExecInput, ExecOutput, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{
+    collections::BTreeSet,
     fmt::Debug,
     ops::{Range, RangeInclusive},
     sync::mpsc::{self, Receiver},
@@ -39,6 +40,9 @@ pub struct AccountHashingStage {
     pub clean_threshold: u64,
     /// The maximum number of accounts to process before committing during unwind.
     pub commit_threshold: u64,
+    /// The maximum number of changeset entries to process before committing. The stage commits
+    /// after either `commit_threshold` blocks or `commit_entries` entries, whichever comes first.
+    pub commit_entries: u64,
     /// ETL configuration
     pub etl_config: EtlConfig,
 }
@@ -49,6 +53,7 @@ impl AccountHashingStage {
         Self {
             clean_threshold: config.clean_threshold,
             commit_threshold: config.commit_threshold,
+            commit_entries: config.commit_entries,
             etl_config,
         }
     }
@@ -129,6 +134,7 @@ impl Default for AccountHashingStage {
         Self {
             clean_threshold: 500_000,
             commit_threshold: 100_000,
+            commit_entries: 30_000_000,
             etl_config: EtlConfig::default(),
         }
     }
@@ -163,16 +169,18 @@ where
             return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 
-        let (from_block, to_block) = input.next_block_range().into_inner();
+        // Use the total remaining range to decide clean vs incremental.
+        let total_range = input.target() - input.checkpoint().block_number;
+        let from_block = input.next_block();
 
-        // if there are more blocks then threshold it is faster to go over Plain state and hash all
-        // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
-        // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
+        if total_range > self.clean_threshold || from_block == 1 {
+            // if there are more blocks than threshold it is faster to go over Plain state and
+            // hash all accounts otherwise take changesets aggregate the sets and apply
+            // hashing to HashedAccounts table. Also, if we start from genesis, we need to
+            // hash from scratch, as genesis accounts are not in changeset.
             let tx = provider.tx_ref();
 
-            // clear table, load all accounts and hash it
+            // clear table, load all accounts and hash them
             tx.clear::<tables::HashedAccounts>()?;
 
             let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
@@ -220,27 +228,57 @@ where
                 hashed_account_cursor
                     .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
             }
+
+            let checkpoint = StageCheckpoint::new(input.target())
+                .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
+                    progress: stage_checkpoint_progress(provider)?,
+                    ..Default::default()
+                });
+
+            Ok(ExecOutput { checkpoint, done: true })
         } else {
-            // Aggregate all transition changesets and make a list of accounts that have been
-            // changed.
-            let lists = provider.changed_accounts_with_range(from_block..=to_block)?;
-            // Iterate over plain state and get newest value.
-            // Assumption we are okay to make is that plainstate represent
-            // `previous_stage_progress` state.
-            let accounts = provider.basic_accounts(lists)?;
-            // Insert and hash accounts to hashing table
+            // Stream changesets entry-by-entry, bounded by both block count
+            // (commit_threshold) and entry count (commit_entries), whichever comes first.
+            let BlockRangeOutput { block_range, is_final_range } =
+                input.next_block_range_with_threshold(self.commit_threshold);
+            let (from_block, to_block) = block_range.into_inner();
+
+            let tx = provider.tx_ref();
+            let mut changeset_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+            let mut changed = BTreeSet::new();
+            let mut total_entries = 0u64;
+            let mut last_block = from_block;
+
+            for entry in changeset_cursor.walk_range(from_block..=to_block)? {
+                let (block_number, account_before) = entry?;
+
+                // Check the entry limit only at block boundaries so we never
+                // checkpoint mid-block (which would skip the remaining entries
+                // for that block on the next invocation).
+                if block_number != last_block && total_entries >= self.commit_entries {
+                    break;
+                }
+
+                last_block = block_number;
+                changed.insert(account_before.address);
+                total_entries += 1;
+            }
+
+            let accounts = provider.basic_accounts(changed)?;
             provider.insert_account_for_hashing(accounts)?;
+
+            let exhausted = total_entries < self.commit_entries;
+            let done = exhausted && is_final_range;
+            let progress_block = if exhausted { to_block } else { last_block };
+
+            let checkpoint = StageCheckpoint::new(progress_block)
+                .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
+                    progress: stage_checkpoint_progress(provider)?,
+                    ..Default::default()
+                });
+
+            Ok(ExecOutput { checkpoint, done })
         }
-
-        // We finished the hashing stage, no future iterations is expected for the same block range,
-        // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.target())
-            .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
-                progress: stage_checkpoint_progress(provider)?,
-                ..Default::default()
-            });
-
-        Ok(ExecOutput { checkpoint, done: true })
     }
 
     /// Unwind the stage.
@@ -380,6 +418,7 @@ mod tests {
             pub(crate) db: TestStageDB,
             commit_threshold: u64,
             clean_threshold: u64,
+            commit_entries: u64,
             etl_config: EtlConfig,
         }
 
@@ -444,6 +483,7 @@ mod tests {
                     db: TestStageDB::default(),
                     commit_threshold: 1000,
                     clean_threshold: 1000,
+                    commit_entries: u64::MAX,
                     etl_config: EtlConfig::default(),
                 }
             }
@@ -460,6 +500,7 @@ mod tests {
                 Self::S {
                     commit_threshold: self.commit_threshold,
                     clean_threshold: self.clean_threshold,
+                    commit_entries: self.commit_entries,
                     etl_config: self.etl_config.clone(),
                 }
             }
