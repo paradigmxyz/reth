@@ -7,7 +7,7 @@ use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
-use alloy_transport::layers::RetryBackoffLayer;
+use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
@@ -53,9 +53,15 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks
+        // set up alloy client for blocks, retrying on 429/503 (default) and 502
+        let retry_policy =
+            RateLimitRetryPolicy::default().or(|err: &alloy_transport::TransportError| -> bool {
+                err.as_transport_err()
+                    .and_then(|t| t.as_http_error())
+                    .is_some_and(|e| e.status == 502)
+            });
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .layer(RetryBackoffLayer::new_with_policy(10, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
