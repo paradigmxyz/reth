@@ -9,6 +9,7 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus, SlowBlockInfo};
+use reth_ethereum_forks::ChainHardforks;
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
@@ -27,6 +28,22 @@ use tracing::{debug, info, warn};
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
+/// The current canonical head known when the event handler starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalHeadInfo {
+    /// The canonical block number.
+    pub number: BlockNumber,
+    /// The canonical block timestamp.
+    pub timestamp: u64,
+}
+
+impl CanonicalHeadInfo {
+    /// Creates a new canonical head snapshot.
+    pub const fn new(number: BlockNumber, timestamp: u64) -> Self {
+        Self { number, timestamp }
+    }
+}
+
 /// The current high-level state of the node, including the node's database environment, network
 /// connections, current processing stage, and the latest block information. It provides
 /// methods to handle different types of events that affect the node's state, such as pipeline
@@ -38,6 +55,10 @@ struct NodeState {
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
+    /// Timestamp of the latest canonical block seen by the event handler.
+    last_canonical_block_timestamp: Option<u64>,
+    /// Hardfork activation data for the active chain.
+    hardforks: Option<ChainHardforks>,
     /// Hash of the head block last set by fork choice update
     head_block_hash: Option<B256>,
     /// Hash of the safe block last set by fork choice update
@@ -49,14 +70,17 @@ struct NodeState {
 }
 
 impl NodeState {
-    const fn new(
+    fn new(
         peers_info: Option<Box<dyn PeersInfo>>,
-        latest_block: Option<BlockNumber>,
+        latest_canonical_head: Option<CanonicalHeadInfo>,
+        hardforks: Option<ChainHardforks>,
     ) -> Self {
         Self {
             peers_info,
             current_stage: None,
-            latest_block,
+            latest_block: latest_canonical_head.map(|head| head.number),
+            last_canonical_block_timestamp: latest_canonical_head.map(|head| head.timestamp),
+            hardforks,
             head_block_hash: None,
             safe_block_hash: None,
             finalized_block_hash: None,
@@ -66,6 +90,19 @@ impl NodeState {
 
     fn num_connected_peers(&self) -> usize {
         self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
+    }
+
+    fn activated_hardforks(&self, block_number: BlockNumber, timestamp: u64) -> Vec<&'static str> {
+        let Some(hardforks) = self.hardforks.as_ref() else { return Vec::new() };
+
+        hardforks
+            .transitions_at_block_or_timestamp(
+                block_number,
+                timestamp,
+                self.last_canonical_block_timestamp,
+            )
+            .map(|fork| fork.name())
+            .collect()
     }
 
     fn build_current_stage(
@@ -240,6 +277,8 @@ impl NodeState {
             }
             ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
+                let activated_hardforks =
+                    self.activated_hardforks(block.number(), block.timestamp());
                 let mut full = block.gas_used() as f64 * 100.0 / block.gas_limit() as f64;
                 if full.is_nan() {
                     full = 0.0;
@@ -259,9 +298,20 @@ impl NodeState {
                     ?elapsed,
                     "Block added to canonical chain"
                 );
+                if !activated_hardforks.is_empty() {
+                    info!(
+                        number = block.number(),
+                        hash = ?block.hash(),
+                        timestamp = block.timestamp(),
+                        hardforks = ?activated_hardforks,
+                        "Hardfork activated"
+                    );
+                }
+                self.last_canonical_block_timestamp = Some(block.timestamp());
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number());
+                self.last_canonical_block_timestamp = Some(head.timestamp());
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
@@ -432,12 +482,13 @@ pub enum NodeEvent<N: NodePrimitives> {
 /// displays the high-level status of the node.
 pub async fn handle_events<E, N: NodePrimitives>(
     peers_info: Option<Box<dyn PeersInfo>>,
-    latest_block_number: Option<BlockNumber>,
+    latest_canonical_head: Option<CanonicalHeadInfo>,
+    hardforks: Option<ChainHardforks>,
     events: E,
 ) where
     E: Stream<Item = NodeEvent<N>> + Unpin,
 {
-    let state = NodeState::new(peers_info, latest_block_number);
+    let state = NodeState::new(peers_info, latest_canonical_head, hardforks);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);

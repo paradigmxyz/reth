@@ -259,7 +259,8 @@ impl EngineNodeLauncher {
             "events task",
             node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
-                Some(ctx.head().number),
+                Some(node::CanonicalHeadInfo::new(ctx.head().number, ctx.head().timestamp)),
+                Some(ctx.chain_spec().hardforks()),
                 events,
             ),
         );

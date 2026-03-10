@@ -111,6 +111,38 @@ impl ChainHardforks {
         self.fork(fork).active_at_block(block_number)
     }
 
+    /// Returns hardforks that transition on the given block or timestamp boundary.
+    ///
+    /// Block-based and TTD-based forks are detected by checking whether they become active at
+    /// `block_number` after not being active on the previous block.
+    ///
+    /// Timestamp-based forks use `parent_timestamp` when it is available. If the parent timestamp
+    /// is unknown, the timestamp must exactly match the activation time to be considered a
+    /// transition.
+    pub fn transitions_at_block_or_timestamp(
+        &self,
+        block_number: u64,
+        timestamp: u64,
+        parent_timestamp: Option<u64>,
+    ) -> impl Iterator<Item = &dyn Hardfork> {
+        self.forks_iter().filter_map(move |(fork, condition)| {
+            let transitioned = match condition {
+                ForkCondition::Block(_) | ForkCondition::TTD { .. } => {
+                    condition.active_at_block(block_number) &&
+                        !condition.active_at_block(block_number.saturating_sub(1))
+                }
+                ForkCondition::Timestamp(activation_timestamp) => {
+                    parent_timestamp.map_or(timestamp == activation_timestamp, |parent_timestamp| {
+                        condition.transitions_at_timestamp(timestamp, parent_timestamp)
+                    })
+                }
+                ForkCondition::Never => false,
+            };
+
+            transitioned.then_some(fork)
+        })
+    }
+
     /// Inserts a fork with the given [`ForkCondition`], maintaining forks in ascending order
     /// based on the `Ord` implementation of [`ForkCondition`].
     ///
@@ -206,6 +238,7 @@ impl<T: Hardfork, const N: usize> From<[(T, ForkCondition); N]> for ChainHardfor
 mod tests {
     use super::*;
     use alloy_hardforks::hardfork;
+    use alloy_primitives::U256;
 
     hardfork!(AHardfork { A1, A2, A3 });
     hardfork!(BHardfork { B1, B2 });
@@ -318,5 +351,53 @@ mod tests {
         assert_eq!(fork_list[1].0.name(), "B1");
         assert_eq!(fork_list[2].0.name(), "A2");
         assert_eq!(fork_list[2].1, ForkCondition::Timestamp(3000));
+    }
+
+    #[test]
+    fn detects_hardfork_transitions_at_block_and_timestamp_boundaries() {
+        let forks = ChainHardforks::new(vec![
+            (AHardfork::A1.boxed(), ForkCondition::Block(10)),
+            (
+                AHardfork::A2.boxed(),
+                ForkCondition::TTD {
+                    activation_block_number: 20,
+                    fork_block: Some(20),
+                    total_difficulty: U256::from(1_000),
+                },
+            ),
+            (BHardfork::B1.boxed(), ForkCondition::Timestamp(100)),
+        ]);
+
+        let transitions: Vec<_> = forks
+            .transitions_at_block_or_timestamp(10, 99, Some(98))
+            .map(|fork| fork.name())
+            .collect();
+        assert_eq!(transitions, vec!["A1"]);
+
+        let transitions: Vec<_> = forks
+            .transitions_at_block_or_timestamp(20, 99, Some(98))
+            .map(|fork| fork.name())
+            .collect();
+        assert_eq!(transitions, vec!["A2"]);
+
+        let transitions: Vec<_> = forks
+            .transitions_at_block_or_timestamp(21, 100, Some(99))
+            .map(|fork| fork.name())
+            .collect();
+        assert_eq!(transitions, vec!["B1"]);
+    }
+
+    #[test]
+    fn falls_back_to_exact_timestamp_when_parent_timestamp_is_unknown() {
+        let forks =
+            ChainHardforks::new(vec![(BHardfork::B1.boxed(), ForkCondition::Timestamp(100))]);
+
+        let transitions: Vec<_> =
+            forks.transitions_at_block_or_timestamp(1, 100, None).map(|fork| fork.name()).collect();
+        assert_eq!(transitions, vec!["B1"]);
+
+        let transitions: Vec<_> =
+            forks.transitions_at_block_or_timestamp(2, 101, None).map(|fork| fork.name()).collect();
+        assert!(transitions.is_empty());
     }
 }

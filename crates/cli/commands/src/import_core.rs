@@ -1,5 +1,6 @@
 //! Core import functionality without CLI dependencies.
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_config::Config;
@@ -157,7 +158,20 @@ where
 
         let latest_block_number =
             provider_factory.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+        let latest_canonical_head = if let Some(number) = latest_block_number {
+            let header = provider_factory
+                .sealed_header(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+            Some(reth_node_events::node::CanonicalHeadInfo::new(number, header.timestamp()))
+        } else {
+            None
+        };
+        tokio::spawn(reth_node_events::node::handle_events(
+            None,
+            latest_canonical_head,
+            None,
+            events,
+        ));
 
         // Run pipeline
         info!(target: "reth::import", "Starting sync pipeline");

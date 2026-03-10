@@ -1,4 +1,4 @@
-use crate::{ChainSpec, DepositContract};
+use crate::{ChainHardforks, ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
@@ -40,6 +40,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns a string representation of the hardforks.
     fn display_hardforks(&self) -> Box<dyn Display>;
+
+    /// Returns the chain's configured hardfork activation set.
+    fn hardforks(&self) -> ChainHardforks;
 
     /// The genesis header.
     fn genesis_header(&self) -> &Self::Header;
@@ -113,6 +116,10 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
 
     fn display_hardforks(&self) -> Box<dyn Display> {
         Box::new(Self::display_hardforks(self))
+    }
+
+    fn hardforks(&self) -> ChainHardforks {
+        self.hardforks.clone()
     }
 
     fn genesis_header(&self) -> &Self::Header {
