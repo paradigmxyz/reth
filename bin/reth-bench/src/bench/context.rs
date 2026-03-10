@@ -61,7 +61,7 @@ impl BenchContext {
                     .is_some_and(|e| e.status == 502)
             });
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new_with_policy(2, 800, u64::MAX, retry_policy))
+            .layer(RetryBackoffLayer::new_with_policy(10, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
