@@ -555,7 +555,6 @@ pub struct EthRequestHandlerMetrics {
     /// Number of provider errors encountered while serving p2p requests
     pub(crate) eth_req_handler_provider_errors_total: Counter,
 
-
     /// Duration in seconds of call to poll
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub(crate) acc_duration_poll_eth_req_handler: Gauge,
