@@ -50,7 +50,7 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
