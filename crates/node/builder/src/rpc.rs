@@ -981,7 +981,8 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events, .. } =
+            ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1294,18 +1295,6 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
-
-    /// Builds the tree validator with access to shared engine caches.
-    fn build_tree_validator_with_caches(
-        self,
-        ctx: &AddOnsContext<'_, Node>,
-        shared_caches: EngineSharedCaches<Node::Evm>,
-        tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
-    ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send {
-        let _ = shared_caches;
-        self.build_tree_validator(ctx, tree_config, changeset_cache)
-    }
 }
 
 /// Basic implementation of [`EngineValidatorBuilder`].
@@ -1354,22 +1343,10 @@ where
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> eyre::Result<Self::EngineValidator> {
-        self.build_tree_validator_with_caches(
-            ctx,
-            EngineSharedCaches::default(),
-            tree_config,
-            changeset_cache,
-        )
-        .await
-    }
-
-    async fn build_tree_validator_with_caches(
-        self,
-        ctx: &AddOnsContext<'_, Node>,
-        shared_caches: EngineSharedCaches<Node::Evm>,
-        tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
-    ) -> eyre::Result<Self::EngineValidator> {
+        let shared_caches = ctx
+            .resource::<EngineSharedCaches<Node::Evm>>()
+            .cloned()
+            .ok_or_else(|| eyre::eyre!("missing EngineSharedCaches in validator context"))?;
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;

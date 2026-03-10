@@ -15,7 +15,14 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{fmt::Debug, future::Future, marker::PhantomData};
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    fmt::Debug,
+    future::Future,
+    marker::PhantomData,
+    sync::Arc,
+};
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
@@ -60,6 +67,46 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
         BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
     >
 {
+}
+
+/// Launch-owned resources that can be attached to node build contexts.
+#[derive(Clone, Default)]
+pub struct ContextResources {
+    entries: Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
+}
+
+impl ContextResources {
+    /// Stores a typed resource, replacing any existing value of the same type.
+    pub fn insert<T>(&mut self, value: T) -> &mut Self
+    where
+        T: Any + Send + Sync,
+    {
+        Arc::make_mut(&mut self.entries).insert(TypeId::of::<T>(), Arc::new(value));
+        self
+    }
+
+    /// Returns a copy with the given typed resource inserted.
+    pub fn with<T>(mut self, value: T) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        self.insert(value);
+        self
+    }
+
+    /// Returns the typed resource if present.
+    pub fn get<T>(&self) -> Option<&T>
+    where
+        T: Any + Send + Sync,
+    {
+        self.entries.get(&TypeId::of::<T>()).and_then(|value| value.as_ref().downcast_ref())
+    }
+}
+
+impl std::fmt::Debug for ContextResources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextResources").field("resource_count", &self.entries.len()).finish()
+    }
 }
 
 /// Encapsulates all types and components of the node.
@@ -115,6 +162,32 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
+    /// Launch-owned resources exported to add-ons.
+    pub resources: ContextResources,
+}
+
+impl<'a, N: FullNodeComponents> AddOnsContext<'a, N> {
+    /// Returns all launch-owned resources visible to add-ons.
+    pub const fn resources(&self) -> &ContextResources {
+        &self.resources
+    }
+
+    /// Returns a typed launch resource if present.
+    pub fn resource<T>(&self) -> Option<&T>
+    where
+        T: Any + Send + Sync,
+    {
+        self.resources.get::<T>()
+    }
+
+    /// Returns a copy of the context with the given typed launch resource attached.
+    pub fn with_resource<T>(mut self, value: T) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        self.resources.insert(value);
+        self
+    }
 }
 
 /// Customizable node add-on types.
@@ -207,5 +280,27 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
 
     async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ContextResources;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct First(&'static str);
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Second(u64);
+
+    #[test]
+    fn context_resources_store_and_replace_by_type() {
+        let resources = ContextResources::default()
+            .with(First("initial"))
+            .with(Second(7))
+            .with(First("updated"));
+
+        assert_eq!(resources.get::<First>(), Some(&First("updated")));
+        assert_eq!(resources.get::<Second>(), Some(&Second(7)));
     }
 }

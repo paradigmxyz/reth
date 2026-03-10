@@ -23,7 +23,8 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
+    ContextResources, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -736,17 +737,19 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) executor: TaskExecutor,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    /// Launch-owned resources exported during component construction.
+    pub(crate) resources: ContextResources,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Create a new instance of [`BuilderContext`]
-    pub const fn new(
+    pub fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, provider, executor, config_container }
+        Self { head, provider, executor, config_container, resources: Default::default() }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -779,6 +782,28 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// This can be used to execute async tasks or functions during the setup.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
+    }
+
+    /// Returns all launch-owned resources visible during component construction.
+    pub const fn resources(&self) -> &ContextResources {
+        &self.resources
+    }
+
+    /// Returns a typed launch resource if present.
+    pub fn resource<T>(&self) -> Option<&T>
+    where
+        T: std::any::Any + Send + Sync,
+    {
+        self.resources.get::<T>()
+    }
+
+    /// Returns a copy of the context with the given typed launch resource attached.
+    pub fn with_resource<T>(mut self, value: T) -> Self
+    where
+        T: std::any::Any + Send + Sync,
+    {
+        self.resources.insert(value);
+        self
     }
 
     /// Returns the chain spec of the node.

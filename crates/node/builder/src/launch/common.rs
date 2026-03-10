@@ -794,11 +794,11 @@ where
             self.blockchain_db().clone(),
             self.task_executor().clone(),
             self.configs().clone(),
-        );
+        )
+        .with_resource(shared_caches);
 
         debug!(target: "reth::cli", "creating components");
-        let components =
-            components_builder.build_components_with_caches(&builder_ctx, shared_caches).await?;
+        let components = components_builder.build_components(&builder_ctx).await?;
 
         let blockchain_db = self.blockchain_db().clone();
 

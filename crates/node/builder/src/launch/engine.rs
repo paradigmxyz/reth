@@ -89,7 +89,8 @@ impl EngineNodeLauncher {
 
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
-        let main_shared_caches = EngineSharedCaches::default();
+        let main_shared_caches =
+            EngineSharedCaches::<<CB::Components as NodeComponents<T>>::Evm>::default();
 
         // setup the launch context
         let ctx = ctx
@@ -193,18 +194,15 @@ impl EngineNodeLauncher {
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
             engine_events: event_sender.clone(),
-        };
+            resources: Default::default(),
+        }
+        .with_resource(main_shared_caches.clone());
         let validator_builder = add_ons.engine_validator_builder();
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
-            .build_tree_validator_with_caches(
-                &add_ons_ctx,
-                main_shared_caches,
-                engine_tree_config.clone(),
-                changeset_cache.clone(),
-            )
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), changeset_cache.clone())
             .await?;
 
         // Create the consensus engine stream with optional reorg
@@ -217,11 +215,12 @@ impl EngineNodeLauncher {
                 || async {
                     // Create a separate cache for reorg validator (not shared with main engine)
                     let reorg_cache = ChangesetCache::new();
-                    let reorg_shared_caches = EngineSharedCaches::default();
+                    let reorg_shared_caches =
+                        EngineSharedCaches::<<CB::Components as NodeComponents<T>>::Evm>::default();
+                    let reorg_add_ons_ctx = add_ons_ctx.clone().with_resource(reorg_shared_caches);
                     validator_builder
-                        .build_tree_validator_with_caches(
-                            &add_ons_ctx,
-                            reorg_shared_caches,
+                        .build_tree_validator(
+                            &reorg_add_ons_ctx,
                             engine_tree_config.clone(),
                             reorg_cache,
                         )
