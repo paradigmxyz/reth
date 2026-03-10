@@ -165,7 +165,8 @@ where
         )
         .with_storage_prefix_sets(storage_prefix_sets.clone());
         let mut account_calculator =
-            proof_v2::ProofCalculator::new(account_trie_cursor, hashed_account_cursor);
+            proof_v2::ProofCalculator::new(account_trie_cursor, hashed_account_cursor)
+                .with_prefix_set(self.prefix_sets.account_prefix_set.freeze());
         let account_proofs =
             account_calculator.proof(&mut account_value_encoder, &mut account_targets)?;
 
