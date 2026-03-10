@@ -905,6 +905,12 @@ where
         sub_trie_prefix: &Nibbles,
         uncalculated_lower_bound: &Option<Nibbles>,
     ) -> Result<PopCachedBranchOutcome, StateProofError> {
+        // If the `uncalculated_lower_bound` is None it indicates that there can be no more
+        // leaf data, so similarly there can be no more cached branch data.
+        let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
+            return Ok(PopCachedBranchOutcome::Exhausted)
+        };
+
         // If there is a branch on top of the stack we use that.
         if let Some(cached) = self.cached_branch_stack.pop() {
             return Ok(PopCachedBranchOutcome::Popped(cached));
@@ -913,12 +919,6 @@ where
         // There is no cached branch on the stack. It's possible that another one exists
         // farther on in the trie, but we perform some checks first to prevent unnecessary
         // attempts to find it.
-
-        // If the `uncalculated_lower_bound` is None it indicates that there can be no more
-        // leaf data, so similarly there can be no more branches.
-        let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
-            return Ok(PopCachedBranchOutcome::Exhausted)
-        };
 
         // If [`TrieCursorState::path`] returns None it means that the cursor has been
         // exhausted, so there can be no more cached data.
