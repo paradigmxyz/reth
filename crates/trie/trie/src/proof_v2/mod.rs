@@ -2108,7 +2108,7 @@ mod tests {
         let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
 
         let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            [(Nibbles::from_nibbles([0x6]), branch)].into_iter().collect();
+            std::iter::once((Nibbles::from_nibbles([0x6]), branch)).collect();
 
         // Hashed cursor has slots at children 0, 1, 5, 7 — but NOT child 3 (0x63).
         // This simulates the post-state overlay having deleted the slot at 0x63.
@@ -2163,7 +2163,7 @@ mod tests {
         let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
 
         let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            [(Nibbles::from_nibbles([0x6]), branch)].into_iter().collect();
+            std::iter::once((Nibbles::from_nibbles([0x6]), branch)).collect();
 
         // Hashed cursor: slots at 0x60, 0x61, 0x6f, 0x70 — but NOT 0x65.
         let mut harness = TrieTestHarness::new(
@@ -2207,7 +2207,7 @@ mod tests {
 
         let harness = TrieTestHarness::new([(slot_60, val), (slot_61, val)].into_iter().collect());
 
-        let changeset: BTreeMap<B256, U256> = [(slot_63, val)].into_iter().collect();
+        let changeset: BTreeMap<B256, U256> = std::iter::once((slot_63, val)).collect();
         let (expected_root, _) = harness.get_root_with_updates(&changeset);
 
         let mut updated_storage = harness.storage().clone();
@@ -2263,7 +2263,7 @@ mod tests {
                 .collect(),
         );
 
-        let changeset: BTreeMap<B256, U256> = [(slot_65, updated_val)].into_iter().collect();
+        let changeset: BTreeMap<B256, U256> = std::iter::once((slot_65, updated_val)).collect();
         let (expected_root, _) = harness.get_root_with_updates(&changeset);
 
         let mut updated_storage = harness.storage().clone();
@@ -2307,16 +2307,16 @@ mod tests {
     /// Tests branch collapse when the removed child comes BEFORE the remaining child.
     ///
     /// Trie structure (3 hashed storage keys):
-    ///   key_a = 0x20...  (root nibble 2, sub-nibble 0)
-    ///   key_b = 0x21...  (root nibble 2, sub-nibble 1)
-    ///   key_c = 0xb0...  (root nibble b)
+    ///   `key_a` = 0x20...  (root nibble 2, sub-nibble 0)
+    ///   `key_b` = 0x21...  (root nibble 2, sub-nibble 1)
+    ///   `key_c` = 0xb0...  (root nibble b)
     ///
     /// This creates:
     ///   root branch at nibbles {2, b}
     ///   sub-branch at path [2] at nibbles {0, 1}
     ///
-    /// key_a is removed (prefix set marks it dirty, cursor has no value for it).
-    /// The sub-branch at [2] collapses into its remaining child (key_b). The removed child
+    /// `key_a` is removed (prefix set marks it dirty, cursor has no value for it).
+    /// The sub-branch at [2] collapses into its remaining child (`key_b`). The removed child
     /// (nibble 0) comes before the remaining child (nibble 1).
     #[test]
     fn test_branch_collapse_removed_child_before_remaining() {
@@ -2346,7 +2346,7 @@ mod tests {
         );
 
         let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            [(Nibbles::from_nibbles([0x2]), cached_sub_branch)].into_iter().collect();
+            std::iter::once((Nibbles::from_nibbles([0x2]), cached_sub_branch)).collect();
 
         // The hashed cursor contains key_b and key_c (the root's other child). key_a was removed
         // (not in cursor)
@@ -2434,7 +2434,7 @@ mod tests {
         );
 
         let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            [(Nibbles::from_nibbles([0x2]), cached_sub_branch)].into_iter().collect();
+            std::iter::once((Nibbles::from_nibbles([0x2]), cached_sub_branch)).collect();
 
         // The hashed cursor contains key_a and key_c. key_b was removed (not in cursor)
         let mut harness = TrieTestHarness::new([(key_a, val), (key_c, val)].into_iter().collect());
@@ -2528,7 +2528,7 @@ mod tests {
 
         // Change only key_2 — triggers skip of parent branch [2] while child [2,f] is not
         // skipped.
-        let changeset: BTreeMap<B256, U256> = [(key_2, updated_val)].into_iter().collect();
+        let changeset: BTreeMap<B256, U256> = std::iter::once((key_2, updated_val)).collect();
         let (expected_root, _) = harness.get_root_with_updates(&changeset);
 
         let mut updated_storage = harness.storage().clone();
