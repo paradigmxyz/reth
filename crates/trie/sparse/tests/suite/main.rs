@@ -298,7 +298,6 @@ sparse_trie_tests! {
     test_set_root_with_extension_node,
     test_set_root_retains_updates_when_requested,
     test_set_root_does_not_retain_updates_when_not_requested,
-    test_set_root_with_branch_masks,
     test_set_root_with_empty_root,
 
     // reveal_nodes

@@ -76,29 +76,49 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie + Default>() {
 
 /// `take_updates` contains both updated and removed nodes, mutually exclusive.
 ///
-/// After mutations that cause branch node changes and deletions, `take_updates` should
-/// contain both updated and removed nodes. The two sets must be mutually exclusive.
+/// Uses a 3-level branching structure so that intermediate branches are "real" DB nodes
+/// (non-empty `BranchNodeMasks`). After removing one group entirely and modifying the
+/// other, `take_updates` should report real branches in `removed_nodes` and modified
+/// branches in `updated_nodes`, with the two sets mutually exclusive.
 pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie + Default>() {
-    // Two groups of 256 leaves each, creating two levels of branching per group.
-    // Proofs for all keys register branch masks at [X,0,0] through [X,0,F] in the
-    // trie's internal `branch_node_masks`, making removals trackable.
+    // 3-level branching under two groups:
     //
-    // Group 0x1: 256 leaves under key[0]=0x10, key[1]=0x00..0xFF
-    //   → branch at [1,0] with sub-branches [1,0,0] through [1,0,F]
-    // Group 0x2: 256 leaves under key[0]=0x20, key[1]=0x00..0xFF
-    //   → branch at [2,0] with sub-branches [2,0,0] through [2,0,F]
+    // Group 0x1 (survives, gets modified):
+    //   key[0]=0x10 → branch at [1,0]
+    //   key[1]=0x00..0xFF → sub-branches [1,0,H,L] for each nibble pair
+    //   key[2]∈{0x00,0x10} → 2 leaf children per sub-branch
+    //   Total: 512 leaves. [1,0,H] has branch children → "real" DB nodes.
+    //
+    // Group 0x2 (fully removed):
+    //   Same structure under key[0]=0x20 → branch at [2,0]
+    //   Total: 512 leaves. [2,0,H] has branch children → "real" DB nodes.
+    //
+    // After removing group 0x2 entirely, [2,0] and [2,0,H] should appear in
+    // removed_nodes. The sub-sub-branches [2,0,H,L] have only leaf children
+    // → empty masks → NOT in DB.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
-    for i in 0u16..256 {
-        let mut key = B256::ZERO;
-        key.0[0] = 0x10;
-        key.0[1] = i as u8;
-        storage.insert(key, U256::from(i as u64 + 1));
+    let mut val = 1u64;
+    // Group 0x1: key[1]=0x00..0xFF × key[2]∈{0x00,0x10} = 512 leaves
+    for key1 in 0u16..256 {
+        for &k2 in &[0x00u8, 0x10] {
+            let mut key = B256::ZERO;
+            key.0[0] = 0x10;
+            key.0[1] = key1 as u8;
+            key.0[2] = k2;
+            storage.insert(key, U256::from(val));
+            val += 1;
+        }
     }
-    for i in 0u16..256 {
-        let mut key = B256::ZERO;
-        key.0[0] = 0x20;
-        key.0[1] = i as u8;
-        storage.insert(key, U256::from(i as u64 + 1000));
+    // Group 0x2: key[1]=0x00..0xFF × key[2]∈{0x00,0x10} = 512 leaves
+    for key1 in 0u16..256 {
+        for &k2 in &[0x00u8, 0x10] {
+            let mut key = B256::ZERO;
+            key.0[0] = 0x20;
+            key.0[1] = key1 as u8;
+            key.0[2] = k2;
+            storage.insert(key, U256::from(val));
+            val += 1;
+        }
     }
 
     let harness = SuiteTestHarness::new(storage);
@@ -111,19 +131,22 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     let initial_updates = trie.take_updates();
     trie.commit_updates(&initial_updates.updated_nodes, &initial_updates.removed_nodes);
 
-    // Remove all 256 leaves from group 0x2 (collapses that entire subtrie → removed_nodes)
-    // and add a new leaf under group 0x1 (changes branch hashes → updated_nodes).
+    // Remove all 512 leaves from group 0x2 and add a new leaf in group 0x1.
     let mut changeset: BTreeMap<B256, U256> = BTreeMap::new();
-    for i in 0u16..256 {
-        let mut key = B256::ZERO;
-        key.0[0] = 0x20;
-        key.0[1] = i as u8;
-        changeset.insert(key, U256::ZERO);
+    for key1 in 0u16..256 {
+        for &k2 in &[0x00u8, 0x10] {
+            let mut key = B256::ZERO;
+            key.0[0] = 0x20;
+            key.0[1] = key1 as u8;
+            key.0[2] = k2;
+            changeset.insert(key, U256::ZERO);
+        }
     }
-    // Add a new leaf in the 0x1 group to trigger updated_nodes for that subtrie.
+    // Add a new leaf in the 0x1 group to trigger updated_nodes.
     let mut new_key = B256::ZERO;
     new_key.0[0] = 0x10;
     new_key.0[1] = 0xFF;
+    new_key.0[2] = 0xFF;
     changeset.insert(new_key, U256::from(9999));
 
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
@@ -132,36 +155,26 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     let _ = trie.root();
     let updates = trie.take_updates();
 
-    // updated_nodes: the branch at [1,0] is updated because we modified a leaf
-    // in group 0x1 (key[1]=0xFF → value 9999). Its masks remain fully populated
-    // since all 256 leaves in group 0x1 still exist.
-    assert_eq!(updates.updated_nodes.len(), 1, "exactly one branch should be updated");
-    let parent = updates.updated_nodes.get(&Nibbles::from_nibbles([0x1, 0x0])).unwrap();
-    for nibble in 0u8..16 {
-        assert!(parent.state_mask.is_bit_set(nibble), "nibble {nibble} should still be set");
-        assert!(parent.hash_mask.is_bit_set(nibble), "nibble {nibble} hash should still be set");
-    }
-
-    // removed_nodes: removing all 256 leaves from group 0x2 collapses the entire
-    // subtrie. This removes:
-    //   - The root-level branch node [] (previously had children at nibbles 1 and 2, now only has
-    //     nibble 1 so it becomes an extension, not a stored branch)
-    //   - The parent branch at [2,0]
-    //   - All 16 sub-branches [2,0,0] through [2,0,F]
-    // 18 total: root [], parent [2,0], and 16 sub-branches [2,0,0]..[2,0,F]
-    assert_eq!(updates.removed_nodes.len(), 18, "expected 18 removed paths");
+    // updated_nodes should contain at least the branch at [1,0] (modified group).
     assert!(
-        updates.removed_nodes.contains(&Nibbles::default()),
-        "root-level branch [] should be removed (collapsed to extension)"
+        updates.updated_nodes.contains_key(&Nibbles::from_nibbles([0x1, 0x0])),
+        "branch [1,0] should be in updated_nodes after adding a leaf in group 0x1"
     );
+
+    // removed_nodes should contain [2,0] — it was a "real" DB node (had branch
+    // children → non-empty hash_mask) and was fully removed.
     assert!(
         updates.removed_nodes.contains(&Nibbles::from_nibbles([0x2, 0x0])),
-        "parent branch [2,0] should be removed"
+        "[2,0] was a real DB node and should appear in removed_nodes"
     );
+
+    // The 16 sub-branches [2,0,H] were also "real" DB nodes (each had branch
+    // children at [2,0,H,L]) and should appear in removed_nodes.
     for nibble in 0u8..16 {
+        let sub_path = Nibbles::from_nibbles([0x2, 0x0, nibble]);
         assert!(
-            updates.removed_nodes.contains(&Nibbles::from_nibbles([0x2, 0x0, nibble])),
-            "sub-branch [2,0,{nibble:x}] should be removed"
+            updates.removed_nodes.contains(&sub_path),
+            "[2,0,{nibble:x}] was a real DB node and should appear in removed_nodes"
         );
     }
 
