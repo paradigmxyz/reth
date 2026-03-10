@@ -36,6 +36,82 @@ type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 const TRACE_TARGET: &str = "trie::arena";
 
+/// A freelist of arena indices for deferred pruning.
+///
+/// When subtrees are pruned, only the boundary nodes (direct children of retained branches)
+/// are blinded immediately. The pruned subtree roots are pushed onto this freelist instead of
+/// being recursively removed. When new nodes need to be allocated, the freelist is drained:
+/// each popped node's revealed children are pushed back onto the freelist, and the slot is
+/// freed in the arena (making it available for reuse by `arena.insert()`).
+///
+/// This amortizes the O(subtree) removal cost across future allocations.
+#[derive(Debug, Clone, Default)]
+struct ArenaFreelist {
+    /// LIFO stack of arena indices pending removal. Depth-first draining keeps the stack
+    /// shorter on average because children pushed by a branch pop are consumed before
+    /// earlier entries.
+    stack: Vec<Index>,
+}
+
+impl ArenaFreelist {
+    /// Pushes a pruned node index onto the freelist for deferred removal.
+    fn push(&mut self, idx: Index) {
+        self.stack.push(idx);
+    }
+
+    /// Evicts one node from the freelist, freeing its arena slot. If the evicted node is a
+    /// branch, its revealed children are pushed onto the freelist for future eviction.
+    ///
+    /// Returns the number of leaves evicted (0 or 1) so the caller can maintain `num_leaves`.
+    /// Returns `None` if the freelist was empty.
+    fn evict_one(&mut self, arena: &mut NodeArena) -> Option<u64> {
+        let idx = self.stack.pop()?;
+        let evicted_leaf = matches!(arena[idx], ArenaSparseNode::Leaf { .. }) as u64;
+        Self::push_children_of(arena, idx, &mut self.stack);
+        arena.remove(idx);
+        Some(evicted_leaf)
+    }
+
+    /// Allocates a new node in the arena, evicting one freelist entry first (if any) so
+    /// the arena can reuse the freed slot. Returns `(new_index, evicted_leaves)`.
+    fn alloc(
+        &mut self,
+        arena: &mut NodeArena,
+        node: ArenaSparseNode,
+    ) -> (Index, u64) {
+        let evicted_leaves = self.evict_one(arena).unwrap_or(0);
+        (arena.insert(node), evicted_leaves)
+    }
+
+    /// Drains the entire freelist, removing all pending nodes from the arena.
+    /// Returns the total number of leaves evicted.
+    fn drain_all(&mut self, arena: &mut NodeArena) -> u64 {
+        let mut leaves = 0u64;
+        while let Some(l) = self.evict_one(arena) {
+            leaves += l;
+        }
+        leaves
+    }
+
+    /// Pushes the revealed children of the node at `idx` onto `stack`.
+    fn push_children_of(arena: &NodeArena, idx: Index, stack: &mut Vec<Index>) {
+        match &arena[idx] {
+            ArenaSparseNode::Branch(b) => {
+                for child in &b.children {
+                    if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
+                        stack.push(*child_idx);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn clear(&mut self) {
+        self.stack.clear();
+    }
+}
+
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
@@ -105,18 +181,25 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Freelist of arena indices for deferred pruning. Pruned subtree roots are pushed
+    /// here instead of being recursively removed; their slots are freed lazily when
+    /// new nodes are allocated.
+    freelist: ArenaFreelist,
 }
 
 impl ArenaSparseSubtrie {
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
     #[cfg(debug_assertions)]
     fn debug_assert_counters(&self) {
-        let (actual_leaves, actual_dirty) =
+        let (reachable_leaves, actual_dirty) =
             ArenaParallelSparseTrie::count_leaves_and_dirty(&self.arena, self.root);
+        // Leaves on the freelist are still counted in num_leaves until evicted.
+        let freelist_leaves = self.count_freelist_leaves();
+        let actual_leaves = reachable_leaves + freelist_leaves;
         debug_assert_eq!(
             self.num_leaves, actual_leaves,
-            "subtrie {:?} num_leaves mismatch: stored {} vs actual {}",
-            self.path, self.num_leaves, actual_leaves,
+            "subtrie {:?} num_leaves mismatch: stored {} vs actual {} (reachable {} + freelist {})",
+            self.path, self.num_leaves, actual_leaves, reachable_leaves, freelist_leaves,
         );
         debug_assert_eq!(
             self.num_dirty_leaves, actual_dirty,
@@ -125,7 +208,22 @@ impl ArenaSparseSubtrie {
         );
     }
 
+    /// Counts the total number of leaf nodes reachable from the freelist entries.
+    #[cfg(debug_assertions)]
+    fn count_freelist_leaves(&self) -> u64 {
+        let mut leaves = 0u64;
+        let mut stack = self.freelist.stack.clone();
+        while let Some(idx) = stack.pop() {
+            if matches!(self.arena[idx], ArenaSparseNode::Leaf { .. }) {
+                leaves += 1;
+            }
+            ArenaFreelist::push_children_of(&self.arena, idx, &mut stack);
+        }
+        leaves
+    }
+
     fn clear(&mut self) {
+        self.freelist.clear();
         self.arena.clear();
         self.buffers.clear();
         self.required_proofs.clear();
@@ -135,11 +233,10 @@ impl ArenaSparseSubtrie {
 
     /// Prunes revealed subtrees that are not ancestors of any retained leaf.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. The method
-    /// walks all nodes depth-first with the cursor, removing non-retained nodes bottom-up.
-    /// Only the boundary nodes (direct children of retained branches) have their parent's
-    /// child slot replaced with `Blinded`; deeper nodes are simply removed since their parent
-    /// will also be removed.
+    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. This performs
+    /// a **shallow** walk: only direct children of each branch are inspected. Non-retained
+    /// children have their parent's child slot replaced with `Blinded` and their arena index
+    /// is pushed onto the freelist for deferred removal (see [`ArenaFreelist`]).
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
@@ -153,62 +250,71 @@ impl ArenaSparseSubtrie {
             "retained_leaves must be sorted"
         );
 
+        // Shallow boundary walk: use a stack of (branch_index, branch_path) to visit
+        // each branch's direct children. Non-retained children are blinded and deferred
+        // to the freelist; retained branches are pushed for further inspection.
+        let mut stack: SmallVec<[(Index, Nibbles); 32]> = SmallVec::new();
+        stack.push((self.root, self.path));
+
         let mut pruned: usize = 0;
-        let mut pruned_leaves: u64 = 0;
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        while let Some((branch_idx, branch_path)) = stack.pop() {
+            let ArenaSparseNode::Branch(branch) = &self.arena[branch_idx] else {
+                continue;
+            };
+            let short_key = branch.short_key;
+            let state_mask = branch.state_mask;
 
-        loop {
-            let result = self.buffers.cursor.next(&mut self.arena, |_, node| {
-                matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
-            });
+            // The logical path includes the branch's short_key (extension key).
+            let mut logical_path = branch_path;
+            logical_path.extend(&short_key);
 
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {
-                    // Don't prune the root.
-                    if self.buffers.cursor.depth() == 0 {
-                        continue;
+            for (dense_idx, nibble) in state_mask.iter().enumerate() {
+                let child_ref = &self.arena[branch_idx].branch_ref().children[dense_idx];
+                let child_idx = match child_ref {
+                    ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                let mut child_path = logical_path;
+                child_path.push_unchecked(nibble);
+
+                // Compute the child's full prefix for the retention check.
+                let child_prefix = match self.arena[child_idx].short_key() {
+                    Some(key) => {
+                        let mut p = child_path;
+                        p.extend(key);
+                        p
                     }
+                    None => child_path,
+                };
 
-                    let head = self.buffers.cursor.head().expect("cursor is non-empty");
-                    let head_idx = head.index;
-                    let nibble = head.path.last();
-
-                    // Compute the node's key prefix for the retention check. We use
-                    // `short_key()` directly rather than `head_logical_branch_path()`
-                    // because the head can be a leaf.
-                    let short_key =
-                        self.arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head.path;
-                    node_prefix.extend(short_key);
-
-                    // Check if this node (or any descendant) is retained. Always search
-                    // from 0 because DFS order is not lexicographic — backtracking can
-                    // revisit prefixes earlier than previously visited subtrees.
-                    let range = prefix_range(retained_leaves, 0, &node_prefix);
-                    if !range.is_empty() {
-                        continue;
+                let range = prefix_range(retained_leaves, 0, &child_prefix);
+                if !range.is_empty() {
+                    // This child (or a descendant) is retained. If it's a branch,
+                    // recurse into it to check its children.
+                    if matches!(self.arena[child_idx], ArenaSparseNode::Branch(_)) {
+                        stack.push((child_idx, child_path));
                     }
-
-                    if matches!(self.arena[head_idx], ArenaSparseNode::Leaf { .. }) {
-                        pruned_leaves += 1;
-                    }
-
-                    ArenaParallelSparseTrie::remove_pruned_node(
-                        &mut self.arena,
-                        &self.buffers.cursor,
-                        head_idx,
-                        nibble,
-                    );
-                    pruned += 1;
+                    continue;
                 }
+
+                // Non-retained child: blind the parent's slot and defer removal.
+                let rlp_node = self.arena[child_idx]
+                    .state_ref()
+                    .and_then(|s| s.cached_rlp_node())
+                    .cloned();
+                if let Some(rlp_node) = rlp_node {
+                    let parent_branch = self.arena[branch_idx].branch_mut();
+                    parent_branch.children[dense_idx] =
+                        ArenaSparseNodeBranchChild::Blinded(rlp_node);
+                }
+
+                self.freelist.push(child_idx);
+                pruned += 1;
             }
         }
 
-        self.num_leaves -= pruned_leaves;
-        #[cfg(debug_assertions)]
-        self.debug_assert_counters();
         pruned
     }
 
@@ -256,9 +362,9 @@ impl ArenaSparseSubtrie {
 
             match update {
                 LeafUpdate::Changed(value) if !value.is_empty() => {
-                    // Upsert: insert or update a leaf with the given value.
                     let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
+                        &mut self.freelist,
                         &mut self.buffers.cursor,
                         &mut self.root,
                         full_path,
@@ -272,6 +378,7 @@ impl ArenaSparseSubtrie {
                 LeafUpdate::Changed(_) => {
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
+                        &mut self.freelist,
                         &mut self.buffers.cursor,
                         &mut self.root,
                         key,
@@ -317,13 +424,16 @@ impl ArenaSparseSubtrie {
 
         for node in nodes.iter_mut() {
             let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
-            if ArenaParallelSparseTrie::reveal_node(
+
+            let (child_idx, evicted_leaves) = ArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
+                &mut self.freelist,
                 &self.buffers.cursor,
                 node,
                 find_result,
-            )
-            .is_some_and(|child_idx| matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }))
+            );
+            self.num_leaves -= evicted_leaves;
+            if child_idx.is_some_and(|idx| matches!(self.arena[idx], ArenaSparseNode::Leaf { .. }))
             {
                 self.num_leaves += 1;
             }
@@ -553,6 +663,7 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
+                freelist: ArenaFreelist::default(),
             }
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
@@ -1223,11 +1334,12 @@ impl ArenaParallelSparseTrie {
     /// it).
     fn split_and_insert_leaf(
         arena: &mut NodeArena,
+        freelist: &mut ArenaFreelist,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         new_leaf_path: Nibbles,
         value: &[u8],
-    ) -> bool {
+    ) -> (bool, u64) {
         let old_child_entry = cursor.head().expect("cursor must have head");
         let old_child_idx = old_child_entry.index;
         let old_child_short_key = arena[old_child_idx].short_key().expect("top of stack is a leaf");
@@ -1267,11 +1379,14 @@ impl ArenaParallelSparseTrie {
         let new_leaf_nibble = new_leaf_path.get_unchecked(diverge_len);
         debug_assert_ne!(old_child_nibble, new_leaf_nibble);
 
-        let new_leaf_idx = arena.insert(ArenaSparseNode::Leaf {
-            state: ArenaSparseNodeState::Dirty,
-            key: new_leaf_path.slice(diverge_len + 1..),
-            value: value.to_vec(),
-        });
+        let (new_leaf_idx, mut evicted_leaves) = freelist.alloc(
+            arena,
+            ArenaSparseNode::Leaf {
+                state: ArenaSparseNodeState::Dirty,
+                key: new_leaf_path.slice(diverge_len + 1..),
+                value: value.to_vec(),
+            },
+        );
 
         let (first_nibble, first_child, second_nibble, second_child) =
             if old_child_nibble < new_leaf_nibble {
@@ -1285,16 +1400,20 @@ impl ArenaParallelSparseTrie {
         children.push(ArenaSparseNodeBranchChild::Revealed(first_child));
         children.push(ArenaSparseNodeBranchChild::Revealed(second_child));
 
-        let new_branch_idx = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children,
-            state_mask,
-            short_key,
-            branch_masks: BranchNodeMasks::default(),
-        }));
+        let (new_branch_idx, evicted) = freelist.alloc(
+            arena,
+            ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                state: ArenaSparseNodeState::Dirty,
+                children,
+                state_mask,
+                short_key,
+                branch_masks: BranchNodeMasks::default(),
+            }),
+        );
+        evicted_leaves += evicted;
 
         cursor.replace_head_index(arena, root, new_branch_idx);
-        newly_dirtied_existing
+        (newly_dirtied_existing, evicted_leaves)
     }
 
     /// Performs a leaf upsert using a pre-computed [`SeekResult`] from
@@ -1314,6 +1433,7 @@ impl ArenaParallelSparseTrie {
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(full_path = ?full_path))]
     fn upsert_leaf(
         arena: &mut NodeArena,
+        freelist: &mut ArenaFreelist,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         full_path: &Nibbles,
@@ -1365,8 +1485,9 @@ impl ArenaParallelSparseTrie {
                 let head_path = head.path;
                 let full_path_from_head = full_path.slice(head_path.len()..);
 
-                let split_dirtied_existing =
-                    Self::split_and_insert_leaf(arena, cursor, root, full_path_from_head, value);
+                let (split_dirtied_existing, evicted_leaves) = Self::split_and_insert_leaf(
+                    arena, freelist, cursor, root, full_path_from_head, value,
+                );
 
                 let result = if cursor.depth() >= 1 {
                     UpsertLeafResult::NewChild
@@ -1376,7 +1497,7 @@ impl ArenaParallelSparseTrie {
                 (
                     result,
                     SubtrieCounterDeltas {
-                        num_leaves_delta: 1,
+                        num_leaves_delta: 1 - evicted_leaves as i64,
                         num_dirty_leaves_delta: 1 + split_dirtied_existing as i64,
                     },
                 )
@@ -1389,11 +1510,14 @@ impl ArenaParallelSparseTrie {
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
-                let new_leaf = arena.insert(ArenaSparseNode::Leaf {
-                    state: ArenaSparseNodeState::Dirty,
-                    key: leaf_key,
-                    value: value.to_vec(),
-                });
+                let (new_leaf, evicted_leaves) = freelist.alloc(
+                    arena,
+                    ArenaSparseNode::Leaf {
+                        state: ArenaSparseNodeState::Dirty,
+                        key: leaf_key,
+                        value: value.to_vec(),
+                    },
+                );
 
                 let branch = arena[head_idx].branch_mut();
                 branch.state_mask.set_bit(child_nibble);
@@ -1407,7 +1531,10 @@ impl ArenaParallelSparseTrie {
 
                 (
                     UpsertLeafResult::NewChild,
-                    SubtrieCounterDeltas { num_leaves_delta: 1, num_dirty_leaves_delta: 1 },
+                    SubtrieCounterDeltas {
+                        num_leaves_delta: 1 - evicted_leaves as i64,
+                        num_dirty_leaves_delta: 1,
+                    },
                 )
             }
             SeekResult::RevealedSubtrie => {
@@ -1433,6 +1560,7 @@ impl ArenaParallelSparseTrie {
     /// [`SeekResult::RevealedSubtrie`] before calling this function.
     fn remove_leaf(
         arena: &mut NodeArena,
+        freelist: &mut ArenaFreelist,
         cursor: &mut ArenaCursor,
         root: &mut Index,
         key: B256,
@@ -1504,12 +1632,14 @@ impl ArenaParallelSparseTrie {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
                     arena.remove(head_idx);
-                    *root = arena.insert(ArenaSparseNode::EmptyRoot);
+                    let (new_root, evicted_leaves) =
+                        freelist.alloc(arena, ArenaSparseNode::EmptyRoot);
+                    *root = new_root;
                     cursor.reset(arena, *root, head_path);
                     return (
                         RemoveLeafResult::Removed,
                         SubtrieCounterDeltas {
-                            num_leaves_delta: -1,
+                            num_leaves_delta: -1 - evicted_leaves as i64,
                             num_dirty_leaves_delta: -(removed_was_dirty as i64),
                         },
                     );
@@ -1850,20 +1980,21 @@ impl ArenaParallelSparseTrie {
     /// [`ArenaCursor::seek`].
     ///
     /// If the result is `Blinded`, the blinded child is replaced with the proof node (converted to
-    /// an arena node with `Cached` state). All other cases (already revealed, no child, diverged,
-    /// leaf head) are no-ops — the proof node is skipped.
-    ///
-    /// Returns the `Index` of the revealed node in the arena, if any was revealed.
+    /// an arena node with `Cached` state). If the child is a branch, it is pushed onto the stack.
+    /// All other cases (already revealed, no child, diverged, leaf head) are no-ops — the proof
+    /// node is skipped.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
+    /// Returns `(revealed_child_index, evicted_leaves)`.
     fn reveal_node(
         arena: &mut NodeArena,
+        freelist: &mut ArenaFreelist,
         cursor: &ArenaCursor,
         node: &mut ProofTrieNodeV2,
         find_result: SeekResult,
-    ) -> Option<Index> {
+    ) -> (Option<Index>, u64) {
         let SeekResult::Blinded = find_result else {
             // Already revealed, no child slot, or diverged — skip this proof node.
-            return None;
+            return (None, 0);
         };
 
         let head = cursor.head().expect("cursor is non-empty");
@@ -1886,7 +2017,7 @@ impl ArenaParallelSparseTrie {
 
         let cached_rlp = match &head_branch.children[dense_child_idx] {
             ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
-            ArenaSparseNodeBranchChild::Revealed(_) => return None,
+            ArenaSparseNodeBranchChild::Revealed(_) => return (None, 0),
         };
 
         trace!(
@@ -1902,11 +2033,12 @@ impl ArenaParallelSparseTrie {
         let state = arena_node.state_mut();
         *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
 
-        let child_idx = arena.insert(arena_node);
+        let (child_idx, evicted_leaves) = freelist.alloc(arena, arena_node);
+
         arena[head_idx].branch_mut().children[dense_child_idx] =
             ArenaSparseNodeBranchChild::Revealed(child_idx);
 
-        Some(child_idx)
+        (Some(child_idx), evicted_leaves)
     }
 
     #[cfg(debug_assertions)]
@@ -1940,6 +2072,14 @@ impl ArenaParallelSparseTrie {
 #[cfg(debug_assertions)]
 impl Drop for ArenaParallelSparseTrie {
     fn drop(&mut self) {
+        // Drain all freelists before checking for orphans, since freelist nodes are
+        // intentionally unreachable from the root.
+        for (_, node) in &mut self.upper_arena {
+            if let ArenaSparseNode::Subtrie(subtrie) = node {
+                subtrie.freelist.drain_all(&mut subtrie.arena);
+            }
+        }
+
         Self::assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
 
         for (_, node) in &self.upper_arena {
@@ -2094,8 +2234,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 SeekResult::Blinded => {
                     // Save the proof node's path before reveal_node consumes it.
                     let child_path = nodes[node_idx].path;
-                    let child_idx = Self::reveal_node(
+                    let (child_idx, _evicted) = Self::reveal_node(
                         &mut self.upper_arena,
+                        &mut ArenaFreelist::default(),
                         &cursor,
                         &mut nodes[node_idx],
                         SeekResult::Blinded,
@@ -2749,6 +2890,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     LeafUpdate::Changed(v) if !v.is_empty() => {
                         let (result, _deltas) = Self::upsert_leaf(
                             &mut self.upper_arena,
+                            &mut ArenaFreelist::default(),
                             &mut cursor,
                             &mut self.root,
                             full_path,
@@ -2780,6 +2922,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     LeafUpdate::Changed(_) => {
                         let (result, _deltas) = Self::remove_leaf(
                             &mut self.upper_arena,
+                            &mut ArenaFreelist::default(),
                             &mut cursor,
                             &mut self.root,
                             key,
