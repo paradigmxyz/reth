@@ -205,6 +205,14 @@ impl TrieTestHarness {
         &self.storage_trie_updates
     }
 
+    /// Replaces the trie cursor factory with one backed by the given trie nodes.
+    pub fn set_trie_nodes(&mut self, trie_nodes: BTreeMap<Nibbles, BranchNodeCompact>) {
+        self.trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::new(),
+            once((self.hashed_address(), trie_nodes)).collect(),
+        );
+    }
+
     /// Returns a clone of the mock trie cursor factory.
     pub fn trie_cursor_factory(&self) -> MockTrieCursorFactory {
         self.trie_cursor_factory.clone()
