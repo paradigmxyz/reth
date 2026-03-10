@@ -192,30 +192,19 @@ where
         }
     }
 
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    /// Commits trie updates and returns the trie for storage, without pruning.
     ///
-    /// Should be called after the state root result has been sent.
-    ///
-    /// When `disable_pruning` is true, the trie is preserved without any node pruning,
-    /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
-    /// benchmarking purposes.
-    pub(super) fn into_trie_for_reuse(
+    /// This is the fast path called while holding the preserved-trie lock. Pruning is
+    /// deferred to when the next block takes the trie via
+    /// [`PreservedSparseTrie::into_trie_for`], so the next block is not blocked waiting
+    /// for the expensive prune operation.
+    pub(super) fn into_trie_for_storage(
         self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        disable_pruning: bool,
         updates: &TrieUpdates,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
-        if !disable_pruning {
-            trie.prune(max_hot_slots, max_hot_accounts);
-            trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        }
-        let deferred = trie.take_deferred_drops();
-        (trie, deferred)
+        trie
     }
 
     /// Clears and shrinks the trie, discarding all state.

@@ -62,14 +62,38 @@ impl PreservedTrieGuard<'_> {
     }
 }
 
+/// Configuration for deferred pruning of a preserved sparse trie.
+#[derive(Debug, Clone)]
+pub(super) struct DeferredPruneConfig {
+    /// Maximum number of hot storage slots to retain.
+    pub(super) max_hot_slots: usize,
+    /// Maximum number of hot accounts to retain.
+    pub(super) max_hot_accounts: usize,
+    /// Maximum node capacity after shrinking.
+    pub(super) max_nodes_capacity: usize,
+    /// Maximum values capacity after shrinking.
+    pub(super) max_values_capacity: usize,
+}
+
 /// A preserved sparse trie that can be reused across payload validations.
 ///
-/// The trie exists in one of two states:
-/// - **Anchored**: Has a computed state root and can be reused for payloads whose parent state root
-///   matches the anchor.
+/// The trie exists in one of three states:
+/// - **Unpruned**: Has a computed state root but has not been pruned yet. Pruning was deferred
+///   to avoid blocking the next block's start under the preserved-trie lock.
+/// - **Anchored**: Has a computed state root and has been pruned for reuse.
 /// - **Cleared**: Trie data has been cleared but allocations are preserved for reuse.
 #[derive(Debug)]
 pub(super) enum PreservedSparseTrie {
+    /// Trie that has been committed but not yet pruned. Pruning will be applied when the
+    /// trie is taken for the next block, or by a background pruning pass.
+    Unpruned {
+        /// The sparse state trie (committed but not pruned).
+        trie: SparseTrie,
+        /// The state root this trie represents.
+        state_root: B256,
+        /// Pruning configuration to apply when the trie is prepared for reuse.
+        prune_config: DeferredPruneConfig,
+    },
     /// Trie with a computed state root that can be reused for continuation payloads.
     Anchored {
         /// The sparse state trie (pruned after root computation).
@@ -86,10 +110,17 @@ pub(super) enum PreservedSparseTrie {
 }
 
 impl PreservedSparseTrie {
-    /// Creates a new anchored preserved trie.
-    ///
-    /// The `state_root` is the computed state root from the trie, which becomes the
-    /// anchor for determining if subsequent payloads can reuse this trie.
+    /// Creates a new unpruned preserved trie. Pruning will be applied later, outside the
+    /// preserved-trie lock, to avoid blocking the next block's start.
+    pub(super) fn unpruned(
+        trie: SparseTrie,
+        state_root: B256,
+        prune_config: DeferredPruneConfig,
+    ) -> Self {
+        Self::Unpruned { trie, state_root, prune_config }
+    }
+
+    /// Creates a new anchored preserved trie (already pruned).
     pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
         Self::Anchored { trie, state_root }
     }
@@ -99,13 +130,30 @@ impl PreservedSparseTrie {
         Self::Cleared { trie }
     }
 
+    /// Returns `true` if this trie is in the `Unpruned` state.
+    pub(super) const fn is_unpruned(&self) -> bool {
+        matches!(self, Self::Unpruned { .. })
+    }
+
     /// Consumes self and returns the trie for reuse.
     ///
-    /// If the preserved trie is anchored and the parent state root matches, the pruned
-    /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
-    /// are preserved to reduce memory overhead.
+    /// If the preserved trie is anchored/unpruned and the parent state root matches, the
+    /// trie structure is reused directly. For unpruned tries, pruning is applied before reuse.
+    /// Otherwise, the trie is cleared but allocations are preserved.
     pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
         match self {
+            Self::Unpruned { mut trie, state_root, prune_config }
+                if state_root == parent_state_root =>
+            {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %state_root,
+                    "Reusing unpruned sparse trie for continuation payload, pruning now"
+                );
+                trie.prune(prune_config.max_hot_slots, prune_config.max_hot_accounts);
+                trie.shrink_to(prune_config.max_nodes_capacity, prune_config.max_values_capacity);
+                trie
+            }
             Self::Anchored { trie, state_root } if state_root == parent_state_root => {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -114,12 +162,13 @@ impl PreservedSparseTrie {
                 );
                 trie
             }
-            Self::Anchored { mut trie, state_root } => {
+            Self::Anchored { mut trie, state_root }
+            | Self::Unpruned { mut trie, state_root, .. } => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     anchor_root = %state_root,
                     %parent_state_root,
-                    "Clearing anchored sparse trie - parent state root mismatch"
+                    "Clearing sparse trie - parent state root mismatch"
                 );
                 trie.clear();
                 trie

@@ -60,7 +60,9 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use preserved_sparse_trie::{
+    DeferredPruneConfig, PreservedSparseTrie, SharedPreservedSparseTrie,
+};
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -586,7 +588,17 @@ where
                 .record(start.elapsed().as_secs_f64());
 
             let mut sparse_state_trie = preserved
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
+                .map(|preserved| {
+                    let needs_prune = preserved.is_unpruned();
+                    let prune_start = Instant::now();
+                    let trie = preserved.into_trie_for(parent_state_root);
+                    if needs_prune {
+                        trie_metrics
+                            .sparse_trie_deferred_prune_duration_histogram
+                            .record(prune_start.elapsed().as_secs_f64());
+                    }
+                    trie
+                })
                 .unwrap_or_else(|| {
                     debug!(
                         target: "engine::tree::payload_processor",
@@ -650,31 +662,52 @@ where
                 return;
             }
 
-            // Only preserve the trie as anchored if computation succeeded.
+            // Only preserve the trie if computation succeeded.
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(result) = task_result {
+            if let Some(result) = task_result {
                 let start = Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
-                    max_hot_slots,
-                    max_hot_accounts,
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                    disable_cache_pruning,
-                    &result.trie_updates,
-                );
-                trie_metrics
-                    .into_trie_for_reuse_duration_histogram
-                    .record(start.elapsed().as_secs_f64());
+                // Fast path: commit updates and store the trie immediately without
+                // pruning. This minimizes the time the lock is held, so the next block
+                // is not stalled waiting for the expensive prune operation.
+                let mut trie = task.into_trie_for_storage(&result.trie_updates);
+                // Take deferred drops (proof node buffers) before storing — they are
+                // not needed for reuse and should be dropped outside the lock.
+                let deferred = trie.take_deferred_drops();
                 trie_metrics
                     .sparse_trie_retained_memory_bytes
                     .set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
-                deferred
+
+                let prune_config = DeferredPruneConfig {
+                    max_hot_slots,
+                    max_hot_accounts,
+                    max_nodes_capacity: SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                    max_values_capacity: SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                };
+
+                if disable_cache_pruning {
+                    guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                } else {
+                    guard.store(PreservedSparseTrie::unpruned(
+                        trie,
+                        result.state_root,
+                        prune_config,
+                    ));
+                }
+                trie_metrics
+                    .into_trie_for_reuse_duration_histogram
+                    .record(start.elapsed().as_secs_f64());
+
+                // Release the lock immediately so the next block can proceed.
+                // Pruning is deferred to when the next block takes the trie via
+                // `into_trie_for()`, where it can overlap with execution.
+                drop(guard);
+                // Drop proof node buffers after the lock is released.
+                drop(deferred);
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -685,11 +718,10 @@ where
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                // Drop guard before deferred to release lock before expensive deallocations
+                drop(guard);
+                drop(deferred);
             };
-            // Drop guard before deferred to release lock before expensive deallocations
-            drop(guard);
-            drop(deferred);
         });
     }
 

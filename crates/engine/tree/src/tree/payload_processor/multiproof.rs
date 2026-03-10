@@ -186,8 +186,11 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
-    /// Time spent preparing the sparse trie for reuse after state root computation.
+    /// Time spent preparing the sparse trie for reuse after state root computation
+    /// (commit updates and store, excluding pruning).
     pub into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent on deferred pruning after the preserved-trie lock was released.
+    pub sparse_trie_deferred_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
 
