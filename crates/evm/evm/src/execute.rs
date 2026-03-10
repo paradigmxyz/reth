@@ -27,6 +27,7 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
+    state::bal::Bal,
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -146,6 +147,9 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
+
+    /// Take built [`BlockAccessList`] from executor
+    fn take_bal(&mut self) -> Option<BlockAccessList>;
 
     /// The size hint of the batch's tracked state size.
     ///
@@ -464,6 +468,8 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()?;
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -480,6 +486,8 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
+            // Bump BAL index after each committed transaction (EIP-7928)
+            self.executor.evm_mut().db_mut().bump_bal_index();
 
             Ok(Some(gas_used))
         } else {
@@ -498,7 +506,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
-        let block_access_list = result.block_access_list.clone();
+        let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
@@ -563,7 +571,6 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
-            .without_state_clear()
             .with_bal_builder_if(true)
             .build();
         Self { strategy_factory, db }
@@ -583,11 +590,21 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let result = self
+        let mut executor = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?
-            .execute_block(block.transactions_recovered())?;
+            .map_err(BlockExecutionError::other)?;
+
+        executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+        executor.apply_pre_execution_changes()?;
+        executor.evm_mut().db_mut().bump_bal_index();
+
+        for tx in block.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
+
+        let result = executor.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -616,6 +633,10 @@ where
 
     fn into_state(self) -> State<DB> {
         self.db
+    }
+
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
+        self.db.take_built_alloy_bal()
     }
 
     fn size_hint(&self) -> usize {
@@ -721,6 +742,10 @@ mod tests {
 
         fn into_state(self) -> State<DB> {
             unreachable!()
+        }
+
+        fn take_bal(&mut self) -> Option<BlockAccessList> {
+            None
         }
 
         fn size_hint(&self) -> usize {
