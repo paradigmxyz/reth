@@ -83,6 +83,24 @@ impl ArenaFreelist {
         (arena.insert(node), evicted_leaves)
     }
 
+    /// Evicts up to `n` nodes from the freelist, freeing their arena slots.
+    /// Returns the total number of leaves evicted.
+    fn drain_n(&mut self, arena: &mut NodeArena, n: usize) -> u64 {
+        let mut leaves = 0u64;
+        for _ in 0..n {
+            match self.evict_one(arena) {
+                Some(l) => leaves += l,
+                None => break,
+            }
+        }
+        leaves
+    }
+
+    /// Returns `true` if the freelist has pending nodes to evict.
+    fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
     /// Drains the entire freelist, removing all pending nodes from the arena.
     /// Returns the total number of leaves evicted.
     fn drain_all(&mut self, arena: &mut NodeArena) -> u64 {
@@ -220,6 +238,17 @@ impl ArenaSparseSubtrie {
             ArenaFreelist::push_children_of(&self.arena, idx, &mut stack);
         }
         leaves
+    }
+
+    /// Evicts up to `n` freelist entries. Returns the number of nodes evicted.
+    fn maintain(&mut self, n: usize) -> usize {
+        if self.freelist.is_empty() {
+            return 0;
+        }
+        let before = self.freelist.stack.len();
+        let evicted_leaves = self.freelist.drain_n(&mut self.arena, n);
+        self.num_leaves -= evicted_leaves;
+        before - self.freelist.stack.len()
     }
 
     fn clear(&mut self) {
@@ -1600,7 +1629,18 @@ impl ArenaParallelSparseTrie {
                             .expect("leaf nibble not found in parent state_mask");
                         // With exactly 2 bits set the dense array has indices 0 and 1.
                         let sibling_dense_idx = 1 - child_idx.get();
-                        if parent_branch.children[sibling_dense_idx].is_blinded() {
+
+                        // Cannot collapse if the sibling is blinded or is a taken subtrie
+                        // (temporarily removed for parallel processing).
+                        let sibling_uncollapsible =
+                            match &parent_branch.children[sibling_dense_idx] {
+                                ArenaSparseNodeBranchChild::Blinded(_) => true,
+                                ArenaSparseNodeBranchChild::Revealed(idx) => {
+                                    matches!(arena[*idx], ArenaSparseNode::TakenSubtrie)
+                                }
+                            };
+
+                        if sibling_uncollapsible {
                             let sibling_nibble = parent_branch
                                 .state_mask
                                 .iter()
@@ -1608,7 +1648,7 @@ impl ArenaParallelSparseTrie {
                                 .expect("branch has two children");
                             let mut sibling_path = cursor.parent_logical_branch_path(arena);
                             sibling_path.push_unchecked(sibling_nibble);
-                            trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
+                            trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded/taken sibling, requesting proof");
                             return (
                                 RemoveLeafResult::NeedsProof {
                                     key,
@@ -3069,6 +3109,28 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         Ok(())
+    }
+
+    fn maintain(&mut self, budget: usize) -> bool {
+        if budget == 0 {
+            return false;
+        }
+
+        let mut remaining = budget;
+        for (_, node) in &mut self.upper_arena {
+            if remaining == 0 {
+                // Budget exhausted before scanning all subtries — more work likely remains.
+                return true;
+            }
+            if let ArenaSparseNode::Subtrie(subtrie) = node {
+                let evicted = subtrie.maintain(remaining);
+                remaining = remaining.saturating_sub(evicted);
+            }
+        }
+
+        // We visited every subtrie. If any budget was consumed, there might still be
+        // remaining work in the last subtrie that exhausted the budget.
+        remaining == 0
     }
 
     fn commit_updates(

@@ -50,6 +50,9 @@ pub struct SparseStateTrie<
     hot_slots_lfu: BucketedLfu<HotSlotKey>,
     /// Global LFU tracker for hot account entries.
     hot_accounts_lfu: BucketedLfu<B256>,
+    /// Offset into `storage.tries` for round-robin maintenance iteration. Avoids scanning
+    /// all storage tries each call — picks up where the previous call left off.
+    maintain_storage_offset: usize,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -69,6 +72,7 @@ where
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
+            maintain_storage_offset: 0,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -741,6 +745,7 @@ where
         self.state.clear();
         self.storage.clear();
         self.account_rlp_buf.clear();
+        self.maintain_storage_offset = 0;
     }
 
     /// Returns a heuristic for the total in-memory size of this state trie in bytes.
@@ -862,6 +867,54 @@ where
             storage_tries_after = total_storage_tries_before - storage_tries_evicted,
             "SparseStateTrie::prune completed"
         );
+    }
+
+    /// Performs background maintenance on the account and storage tries.
+    ///
+    /// `budget` is a hint for how many internal operations to perform. The account trie
+    /// gets the full budget. Storage tries are visited round-robin starting from where the
+    /// previous call left off, capped at `budget` tries per invocation.
+    ///
+    /// Returns `true` if there is still maintenance work remaining.
+    pub fn maintain(&mut self, budget: usize) -> bool {
+        let account_remaining = self
+            .state
+            .as_revealed_mut()
+            .map(|trie| trie.maintain(budget))
+            .unwrap_or(false);
+
+        let total = self.storage.tries.len();
+        if total == 0 {
+            return account_remaining;
+        }
+
+        // Cap the number of storage tries we visit per call.
+        let cap = budget.min(total);
+        let offset = self.maintain_storage_offset.min(total);
+
+        let mut storage_remaining = false;
+        let mut visited = 0usize;
+        for trie in self.storage.tries.values_mut().skip(offset) {
+            if visited >= cap {
+                break;
+            }
+            if let Some(trie) = trie.as_revealed_mut() {
+                storage_remaining |= trie.maintain(budget);
+            }
+            visited += 1;
+        }
+
+        // If we didn't reach the end, there are unvisited tries.
+        let reached_end = offset + visited >= total;
+
+        if !reached_end {
+            self.maintain_storage_offset = offset + visited;
+            return true;
+        }
+
+        // We reached the end. Wrap around for next call.
+        self.maintain_storage_offset = 0;
+        account_remaining || storage_remaining
     }
 
     /// Commits the [`TrieUpdates`] to the sparse trie.

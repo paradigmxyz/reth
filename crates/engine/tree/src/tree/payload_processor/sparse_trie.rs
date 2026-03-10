@@ -38,6 +38,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Number of freelist nodes to evict per idle maintenance pass.
+const MAINTAIN_BUDGET: usize = 128;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
     /// Sender for proof results.
@@ -247,56 +250,24 @@ where
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        let mut needs_maintain = true;
+
         loop {
             let mut t = Instant::now();
-            crossbeam_channel::select_biased! {
-                recv(self.updates) -> message => {
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(t.elapsed());
 
-                    let update = match message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            return Err(ParallelStateRootError::Other(
-                                "updates channel disconnected before state root calculation".to_string(),
-                            ))
-                        }
-                    };
-
-                    self.on_message(update);
-                    self.pending_updates += 1;
-                }
-                recv(self.proof_result_rx) -> message => {
-                    let phase_end = Instant::now();
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(phase_end.duration_since(t));
-                    t = phase_end;
-
-                    let Ok(result) = message else {
-                        unreachable!("we own the sender half")
-                    };
-
-                    let mut result = result.result?;
-                    while let Ok(next) = self.proof_result_rx.try_recv() {
-                        let res = next.result?;
-                        result.extend(res);
-                    }
-
-                    let phase_end = Instant::now();
-                    self.metrics
-                        .sparse_trie_proof_coalesce_duration_histogram
-                        .record(phase_end.duration_since(t));
-                    t = phase_end;
-
-                    self.on_proof_result(result)?;
-                    self.metrics
-                        .sparse_trie_reveal_multiproof_duration_histogram
-                        .record(t.elapsed());
-                },
+            // When maintenance work is pending, do a burst then check for a message
+            // without blocking so we don't starve other threads. When idle (no
+            // maintenance), block-wait for the next message.
+            if needs_maintain {
+                needs_maintain = self.trie.maintain(MAINTAIN_BUDGET);
+                // Check for a message without blocking — prioritize handling it.
+                self.try_recv_message()?;
+            } else {
+                self.recv_message(&mut t)?;
             }
 
+            // Process pending work regardless of whether we got a message — maintenance
+            // iterations must still drive updates and dispatch targets.
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
@@ -306,17 +277,17 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
 
                 self.dispatch_pending_targets();
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
-                // If we don't have any pending updates OR we've accumulated a lot already, apply
-                // them to the trie,
+                // If we don't have any pending updates OR we've accumulated a lot already,
+                // apply them to the trie.
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
@@ -357,6 +328,99 @@ where
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
+    }
+
+    /// Blocking receive: waits for the next message on either channel, handles it, and
+    /// records channel-wait metrics. Returns `Err` only if the updates channel disconnects.
+    fn recv_message(&mut self, t: &mut Instant) -> Result<(), ParallelStateRootError> {
+        crossbeam_channel::select_biased! {
+            recv(self.updates) -> message => {
+                self.metrics
+                    .sparse_trie_channel_wait_duration_histogram
+                    .record(t.elapsed());
+
+                let update = match message {
+                    Ok(m) => m,
+                    Err(_) => {
+                        return Err(ParallelStateRootError::Other(
+                            "updates channel disconnected before state root calculation"
+                                .to_string(),
+                        ))
+                    }
+                };
+
+                self.on_message(update);
+                self.pending_updates += 1;
+            }
+            recv(self.proof_result_rx) -> message => {
+                let phase_end = Instant::now();
+                self.metrics
+                    .sparse_trie_channel_wait_duration_histogram
+                    .record(phase_end.duration_since(*t));
+                *t = phase_end;
+
+                let Ok(result) = message else {
+                    unreachable!("we own the sender half")
+                };
+
+                self.handle_proof_result(result, t)?;
+            },
+        }
+        Ok(())
+    }
+
+    /// Non-blocking receive: tries both channels without waiting. Returns `Ok(true)` if a
+    /// message was handled, `Ok(false)` if both channels were empty.
+    fn try_recv_message(&mut self) -> Result<bool, ParallelStateRootError> {
+        // Prioritize updates over proof results.
+        match self.updates.try_recv() {
+            Ok(update) => {
+                self.on_message(update);
+                self.pending_updates += 1;
+                return Ok(true);
+            }
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                return Err(ParallelStateRootError::Other(
+                    "updates channel disconnected before state root calculation".to_string(),
+                ))
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+        }
+
+        match self.proof_result_rx.try_recv() {
+            Ok(result) => {
+                let mut t = Instant::now();
+                self.handle_proof_result(result, &mut t)?;
+                Ok(true)
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => Ok(false),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                unreachable!("we own the sender half")
+            }
+        }
+    }
+
+    /// Handles a proof result message, coalescing any additional pending results.
+    fn handle_proof_result(
+        &mut self,
+        result: ProofResultMessage,
+        t: &mut Instant,
+    ) -> Result<(), ParallelStateRootError> {
+        let mut result = result.result?;
+        while let Ok(next) = self.proof_result_rx.try_recv() {
+            let res = next.result?;
+            result.extend(res);
+        }
+
+        let phase_end = Instant::now();
+        self.metrics
+            .sparse_trie_proof_coalesce_duration_histogram
+            .record(phase_end.duration_since(*t));
+        *t = phase_end;
+
+        self.on_proof_result(result)?;
+        self.metrics.sparse_trie_reveal_multiproof_duration_histogram.record(t.elapsed());
+        Ok(())
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
@@ -629,8 +693,8 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address)
+                && !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
@@ -729,7 +793,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 

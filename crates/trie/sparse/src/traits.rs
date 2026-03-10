@@ -294,6 +294,16 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// and auxiliary data structures.
     fn memory_size(&self) -> usize;
 
+    /// Performs background maintenance work such as draining deferred-pruning freelists.
+    ///
+    /// `budget` is a hint for how many internal operations to perform. Implementations
+    /// should return promptly so the caller can check for higher-priority work.
+    ///
+    /// Returns `true` if there is still maintenance work remaining.
+    fn maintain(&mut self, _budget: usize) -> bool {
+        false
+    }
+
     /// Prunes all subtrees that do not contain retained leaves.
     ///
     /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
@@ -530,6 +540,10 @@ mod configurable_sparse_trie {
 
         fn memory_size(&self) -> usize {
             delegate!(self, memory_size)
+        }
+
+        fn maintain(&mut self, budget: usize) -> bool {
+            delegate!(self, maintain, budget)
         }
 
         fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
