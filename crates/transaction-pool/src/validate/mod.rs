@@ -369,6 +369,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.max_fee_per_gas()
     }
 
+    /// Returns the EIP-1559 Max priority fee the caller is willing to pay, or `None` for
+    /// non-EIP-1559 transactions.
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.transaction.max_priority_fee_per_gas()
+    }
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.

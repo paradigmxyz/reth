@@ -6,7 +6,9 @@ use reth_chainspec::{ChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
-    config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
+    config_cmd, db, download,
+    download::manifest_cmd,
+    dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
     p2p, prune, re_execute, stage,
@@ -19,7 +21,7 @@ use reth_node_core::{
     args::{LogArgs, OtlpInitStatus, OtlpLogsStatus, TraceArgs},
     version::version_metadata,
 };
-use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::{info, warn};
@@ -221,7 +223,9 @@ impl<
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
-        let guard = self.logs.init_tracing_with_layers(layers)?;
+        // Enable reload support if debug RPC namespace is available
+        let enable_reload = self.command.debug_namespace_enabled();
+        let file_guard = self.logs.init_tracing_with_layers(layers, enable_reload)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -244,7 +248,7 @@ impl<
             OtlpLogsStatus::Disabled => {}
         }
 
-        Ok(guard)
+        Ok(file_guard)
     }
 }
 
@@ -281,6 +285,9 @@ pub enum Commands<
     /// Download public node snapshots
     #[command(name = "download")]
     Download(download::DownloadCommand<C>),
+    /// Generate a snapshot manifest from local archive files.
+    #[command(name = "snapshot-manifest")]
+    SnapshotManifest(manifest_cmd::SnapshotManifestCommand),
     /// Manipulate individual stages.
     #[command(name = "stage")]
     Stage(stage::Command<C>),
@@ -333,6 +340,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
             Self::Download(cmd) => cmd.chain_spec(),
+            Self::SnapshotManifest(_) => None,
             Self::Stage(cmd) => cmd.chain_spec(),
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
@@ -341,6 +349,16 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
             Self::Ext(_) => None,
+        }
+    }
+
+    /// Returns `true` if this is a node command with debug RPC namespace enabled.
+    ///
+    /// This is used to determine whether to enable runtime log level changes.
+    pub fn debug_namespace_enabled(&self) -> bool {
+        match self {
+            Self::Node(cmd) => cmd.rpc.is_namespace_enabled(RethRpcModule::Debug),
+            _ => false,
         }
     }
 }

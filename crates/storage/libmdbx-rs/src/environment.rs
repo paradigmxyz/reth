@@ -4,6 +4,7 @@ use crate::{
     flags::EnvironmentFlags,
     transaction::{RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
+    txn_pool::ReadTxnPool,
     Mode, SyncMode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
@@ -95,9 +96,21 @@ impl Environment {
     }
 
     /// Create a read-only transaction for use with the environment.
+    ///
+    /// Reuses a previously-reset transaction handle from the internal pool when available,
+    /// avoiding the `lck_rdt_lock` mutex in MDBX's `mvcc_bind_slot` on each new transaction.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
+        if let Some(txn_ptr) = self.inner.ro_txn_pool.pop() {
+            return Ok(Transaction::new_from_ptr(self.clone(), txn_ptr));
+        }
         Transaction::new(self.clone())
+    }
+
+    /// Returns the read transaction pool.
+    #[inline]
+    pub(crate) fn ro_txn_pool(&self) -> &ReadTxnPool {
+        &self.inner.ro_txn_pool
     }
 
     /// Create a read-write transaction for use with the environment. This method will block while
@@ -239,10 +252,15 @@ struct EnvironmentInner {
     env_kind: EnvironmentKind,
     /// Transaction manager
     txn_manager: TxnManager,
+    /// Pool of reset read-only transaction handles for reuse.
+    ro_txn_pool: ReadTxnPool,
 }
 
 impl Drop for EnvironmentInner {
     fn drop(&mut self) {
+        // Abort all pooled read transactions before closing the environment.
+        self.ro_txn_pool.drain();
+
         // Close open mdbx environment on drop
         unsafe {
             ffi::mdbx_env_close_ex(self.env, false);
@@ -750,7 +768,12 @@ impl EnvironmentBuilder {
             }
         };
 
-        let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
+        let env = EnvironmentInner {
+            env,
+            txn_manager,
+            env_kind: self.kind,
+            ro_txn_pool: ReadTxnPool::new(),
+        };
 
         Ok(Environment { inner: Arc::new(env) })
     }

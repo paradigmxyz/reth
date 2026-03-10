@@ -14,6 +14,7 @@ impl ChainSpecInfo {
         let labels: [(&str, String); 1] = [("name", self.name.clone())];
 
         describe_gauge!("chain_spec", "Information about the chain");
-        let _gauge = gauge!("chain_spec", &labels);
+        let gauge = gauge!("chain_spec", &labels);
+        gauge.set(1);
     }
 }

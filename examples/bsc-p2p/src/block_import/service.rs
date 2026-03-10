@@ -361,9 +361,9 @@ mod tests {
             handle_engine_msg(from_engine, responses).await;
 
             let (service, handle) = ImportService::new(consensus, engine_handle);
-            tokio::spawn(Box::pin(async move {
+            tokio::spawn(async move {
                 service.await.unwrap();
-            }));
+            });
 
             Self { handle }
         }
@@ -411,7 +411,7 @@ mod tests {
         mut from_engine: mpsc::UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
         responses: EngineResponses,
     ) {
-        tokio::spawn(Box::pin(async move {
+        tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
                     BeaconEngineMessage::NewPayload { payload: _, tx } => {
@@ -433,6 +433,6 @@ mod tests {
                     _ => {}
                 }
             }
-        }));
+        });
     }
 }

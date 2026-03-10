@@ -16,7 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
+    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target, RlpNode,
+    TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -28,24 +29,13 @@ mod node;
 use node::*;
 
 mod target;
-pub use target::*;
+pub(crate) use target::*;
 
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
-
-/// A [`Nibbles`] which contains 64 zero nibbles.
-static PATH_ALL_ZEROS: Nibbles = {
-    let mut path = Nibbles::new();
-    let mut i = 0;
-    while i < 64 {
-        path.push_unchecked(0);
-        i += 1;
-    }
-    path
-};
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -226,22 +216,24 @@ where
             // forward to 0xabc2 (because all children will have been visited already). At this
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
-            if lower.key.starts_with(path) {
+            if lower.key_nibbles.starts_with(path) {
                 return !check_min_len ||
                     (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
-                            .take_while(|target| target.key.starts_with(path))
+                            .take_while(|target| target.key_nibbles.starts_with(path))
                             .any(|target| path.len() >= target.min_len as usize) ||
                         targets
                             .rev_iter()
-                            .take_while(|target| target.key.starts_with(path))
+                            .take_while(|target| target.key_nibbles.starts_with(path))
                             .any(|target| path.len() >= target.min_len as usize))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
-            if upper.is_some_and(|upper| depth_first::cmp(path, &upper.key) != Ordering::Less) {
+            if upper
+                .is_some_and(|upper| depth_first::cmp(path, &upper.key_nibbles) != Ordering::Less)
+            {
                 (lower, upper) = targets.next();
                 trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
@@ -672,8 +664,7 @@ where
         // leaf value can begin ASAP.
         let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
             debug_assert_eq!(key_b256.len(), 32);
-            // SAFETY: key is a B256 and so is exactly 32-bytes.
-            let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
+            let key = Nibbles::unpack_array(key_b256.as_ref());
             let val = value_encoder.deferred_encoder(key_b256, val);
             (key, val)
         };
@@ -880,7 +871,7 @@ where
         // If the next cached branch's path is all zeros then we can skip this catch-up step,
         // because there cannot be any keys prior to that range.
         let cached_path = &cached.0;
-        if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
+        if uncalculated_lower_bound < cached_path && !cached_path.is_zeroes() {
             let range = (*uncalculated_lower_bound, Some(*cached_path));
             trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
 
@@ -984,8 +975,8 @@ where
             let curr_branch =
                 self.branch_stack.last().expect("top of branch_stack corresponds to cached branch");
 
-            let cached_state_mask = cached_branch.state_mask.get();
-            let curr_state_mask = curr_branch.state_mask.get();
+            let cached_state_mask = cached_branch.state_mask;
+            let curr_state_mask = curr_branch.state_mask;
 
             // Determine all child nibbles which are set in the cached branch but not the
             // under-construction branch.
@@ -998,7 +989,7 @@ where
 
             // If there are no further children to construct for this branch then pop it off both
             // stacks and loop using the parent branch.
-            if next_child_nibbles == 0 {
+            if next_child_nibbles.is_empty() {
                 trace!(
                     target: TRACE_TARGET,
                     path=?cached_path,
@@ -1014,7 +1005,7 @@ where
                 // The just-popped branch is completely processed; we know there can be no more keys
                 // with that prefix. Set the lower bound which can be returned from this method to
                 // be the next possible prefix, if any.
-                uncalculated_lower_bound = increment_and_strip_trailing_zeros(&cached_path);
+                uncalculated_lower_bound = cached_path.next_without_prefix();
 
                 continue
             }
@@ -1044,7 +1035,7 @@ where
                     // we first need to calculate the mask of which cached hashes have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
                     // index of the next hash in the array to use.
-                    let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
+                    let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
                     let hash_idx = curr_hashed_used_mask.count_ones() as usize;
                     let hash = cached_branch.hashes[hash_idx];
 
@@ -1065,7 +1056,7 @@ where
 
                     // Update the `uncalculated_lower_bound` to indicate that the child whose bit
                     // was just set is completely processed.
-                    uncalculated_lower_bound = increment_and_strip_trailing_zeros(&child_path);
+                    uncalculated_lower_bound = child_path.next_without_prefix();
 
                     // Push the current cached branch back onto the stack before looping.
                     self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1109,7 +1100,7 @@ where
             // There is no cached data for the sub-trie at this child, we must recalculate the
             // sub-trie root (this child) using the leaves. Return the range of keys based on the
             // child path.
-            let child_path_upper = increment_and_strip_trailing_zeros(&child_path);
+            let child_path_upper = child_path.next_without_prefix();
             trace!(
                 target: TRACE_TARGET,
                 lower=?child_path,
@@ -1286,12 +1277,22 @@ where
         Ok(())
     }
 
+    /// Clears internal computation state. Called after errors to ensure the calculator is not
+    /// left in a partially-computed state when reused.
+    fn clear_computation_state(&mut self) {
+        self.branch_stack.clear();
+        self.branch_path = Nibbles::new();
+        self.child_stack.clear();
+        self.cached_branch_stack.clear();
+        self.retained_proofs.clear();
+    }
+
     /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
         &mut self,
         value_encoder: &mut VE,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
@@ -1307,12 +1308,15 @@ where
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
-            self.proof_subtrie(
+            if let Err(err) = self.proof_subtrie(
                 value_encoder,
                 &mut trie_cursor_state,
                 &mut hashed_cursor_current,
                 sub_trie_targets,
-            )?;
+            ) {
+                self.clear_computation_state();
+                return Err(err);
+            }
         }
 
         trace!(
@@ -1325,7 +1329,7 @@ where
 
     /// Generate a proof for the given targets.
     ///
-    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
@@ -1335,7 +1339,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &mut VE,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1381,16 +1385,19 @@ where
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
-        static EMPTY_TARGETS: [Target; 0] = [];
+        static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
             SubTrieTargets { prefix: Nibbles::new(), targets: &EMPTY_TARGETS, retain_root: true };
 
-        self.proof_subtrie(
+        if let Err(err) = self.proof_subtrie(
             value_encoder,
             &mut trie_cursor_state,
             &mut hashed_cursor_current,
             sub_trie_targets,
-        )?;
+        ) {
+            self.clear_computation_state();
+            return Err(err);
+        }
 
         // proof_subtrie will retain the root node if retain_proof is true, regardless of if there
         // are any targets.
@@ -1430,7 +1437,7 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
@@ -1440,7 +1447,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: &mut [Target],
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
@@ -1492,29 +1499,29 @@ where
     }
 }
 
-/// Helper type wrapping a slice of [`Target`]s, primarily used to iterate through targets in
+/// Helper type wrapping a slice of [`ProofV2Target`]s, primarily used to iterate through targets in
 /// [`ProofCalculator::should_retain`].
 ///
 /// It is assumed that the underlying slice is never empty, and that the iterator is never
 /// exhausted.
 struct TargetsCursor<'a> {
-    targets: &'a [Target],
+    targets: &'a [ProofV2Target],
     i: usize,
 }
 
 impl<'a> TargetsCursor<'a> {
-    /// Wraps a slice of [`Target`]s with the `TargetsCursor`.
+    /// Wraps a slice of [`ProofV2Target`]s with the `TargetsCursor`.
     ///
     /// # Panics
     ///
     /// Will panic in debug mode if called with an empty slice.
-    fn new(targets: &'a [Target]) -> Self {
+    fn new(targets: &'a [ProofV2Target]) -> Self {
         debug_assert!(!targets.is_empty());
         Self { targets, i: 0 }
     }
 
-    /// Returns the current and next [`Target`] that the cursor is pointed at.
-    fn current(&self) -> (&'a Target, Option<&'a Target>) {
+    /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
+    fn current(&self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         (&self.targets[self.i], self.targets.get(self.i + 1))
     }
 
@@ -1523,19 +1530,20 @@ impl<'a> TargetsCursor<'a> {
     /// # Panics
     ///
     /// Will panic if the cursor is exhausted.
-    fn next(&mut self) -> (&'a Target, Option<&'a Target>) {
+    fn next(&mut self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         self.i += 1;
         debug_assert!(self.i < self.targets.len());
         self.current()
     }
 
-    // Iterate forwards over the slice, starting from the [`Target`] after the current.
-    fn skip_iter(&self) -> impl Iterator<Item = &'a Target> {
+    // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
+    fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[self.i + 1..].iter()
     }
 
-    /// Iterated backwards over the slice, starting from the [`Target`] previous to the current.
-    fn rev_iter(&self) -> impl Iterator<Item = &'a Target> {
+    /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
+    /// current.
+    fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[..self.i].iter().rev()
     }
 }
@@ -1611,26 +1619,6 @@ enum PopCachedBranchOutcome {
     /// Need to calculate leaves from this range (exclusive upper) before the cached branch
     /// (catch-up range). If None then
     CalculateLeaves((Nibbles, Option<Nibbles>)),
-}
-
-/// Increments the nibbles and strips any trailing zeros.
-///
-/// This function wraps `Nibbles::increment` and when it returns a value with trailing zeros,
-/// it strips those zeros using bit manipulation on the underlying U256.
-fn increment_and_strip_trailing_zeros(nibbles: &Nibbles) -> Option<Nibbles> {
-    let mut result = nibbles.increment()?;
-
-    // If result is empty, just return it
-    if result.is_empty() {
-        return Some(result);
-    }
-
-    // Get access to the underlying U256 to detect trailing zeros
-    let uint_val = *result.as_mut_uint_unchecked();
-    let non_zero_prefix_len = 64 - (uint_val.trailing_zeros() / 4);
-    result.truncate(non_zero_prefix_len);
-
-    Some(result)
 }
 
 #[cfg(test)]
@@ -1738,16 +1726,16 @@ mod tests {
         /// the results.
         fn assert_proof(
             &self,
-            targets: impl IntoIterator<Item = Target>,
+            targets: impl IntoIterator<Item = ProofV2Target>,
         ) -> Result<(), StateProofError> {
             let targets_vec = targets.into_iter().collect::<Vec<_>>();
 
-            // Convert Target keys to MultiProofTargets for legacy implementation
+            // Convert ProofV2Target keys to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
             // Legacy implementation only uses the keys, not the prefix
             let legacy_targets = targets_vec
                 .iter()
-                .map(|target| (B256::from_slice(&target.key.pack()), B256Set::default()))
+                .map(|target| (B256::from_slice(&target.key_nibbles.pack()), B256Set::default()))
                 .collect::<MultiProofTargets>();
 
             // Create ProofCalculator (proof_v2) with account cursors
@@ -1790,7 +1778,7 @@ mod tests {
             let node_matches_target = |node_path: &Nibbles| -> bool {
                 targets_vec.iter().any(|target| {
                     // Node path must be a prefix of the target's key
-                    target.key.starts_with(node_path) &&
+                    target.key_nibbles.starts_with(node_path) &&
                     // Node path must be at least `min_len` long
                     node_path.len() >= target.min_len as usize
                 })
@@ -1855,6 +1843,79 @@ mod tests {
         }
     }
 
+    /// Tests that `clear_computation_state` properly resets internal stacks, allowing a
+    /// `ProofCalculator` to be reused after a mid-computation error left stale state.
+    /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
+    /// could cause a `usize` underflow panic in `pop_branch`.
+    #[test]
+    fn test_proof_calculator_reuse_after_error() {
+        use alloy_primitives::U256;
+
+        reth_tracing::init_test_tracing();
+
+        let mut post_state = HashedPostState::default();
+        let addresses = [
+            B256::right_padding_from(&[0x10]),
+            B256::right_padding_from(&[0x20]),
+            B256::right_padding_from(&[0x30]),
+            B256::right_padding_from(&[0x40]),
+        ];
+        for addr in &addresses {
+            let account =
+                Account { nonce: 1, balance: U256::from(100u64), bytecode_hash: Some(B256::ZERO) };
+            post_state.accounts.insert(*addr, Some(account));
+        }
+
+        let harness = ProofTestHarness::new(post_state);
+
+        let trie_cursor = harness.trie_cursor_factory.account_trie_cursor().unwrap();
+        let hashed_cursor = harness.hashed_cursor_factory.hashed_account_cursor().unwrap();
+        let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+
+        // Simulate stale state left by a mid-computation error: push fake entries onto internal
+        // stacks and set a non-empty branch_path.
+        proof_calculator.branch_stack.push(ProofTrieBranch {
+            ext_len: 2,
+            state_mask: TrieMask::new(0b1111),
+            masks: None,
+        });
+        proof_calculator.branch_stack.push(ProofTrieBranch {
+            ext_len: 0,
+            state_mask: TrieMask::new(0b11),
+            masks: None,
+        });
+        proof_calculator
+            .child_stack
+            .push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&B256::ZERO)));
+        proof_calculator.branch_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+
+        // clear_computation_state should reset everything so a subsequent proof() call works.
+        proof_calculator.clear_computation_state();
+
+        let mut value_encoder = SyncAccountValueEncoder::new(
+            harness.trie_cursor_factory.clone(),
+            harness.hashed_cursor_factory.clone(),
+        );
+        let mut sorted_addresses = addresses.to_vec();
+        sorted_addresses.sort();
+        let mut targets: Vec<ProofV2Target> =
+            sorted_addresses.iter().copied().map(ProofV2Target::new).collect();
+
+        let result = proof_calculator.proof(&mut value_encoder, &mut targets).unwrap();
+
+        // Compare against a fresh calculator to verify correctness.
+        let trie_cursor = harness.trie_cursor_factory.account_trie_cursor().unwrap();
+        let hashed_cursor = harness.hashed_cursor_factory.hashed_account_cursor().unwrap();
+        let mut fresh_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
+        let mut value_encoder = SyncAccountValueEncoder::new(
+            harness.trie_cursor_factory.clone(),
+            harness.hashed_cursor_factory,
+        );
+        let fresh_result = fresh_calculator.proof(&mut value_encoder, &mut targets).unwrap();
+
+        pretty_assertions::assert_eq!(fresh_result, result);
+    }
+
     mod proptest_tests {
         use super::*;
         use alloy_primitives::{map::B256Map, U256};
@@ -1888,7 +1949,9 @@ mod tests {
 
         /// Generate a strategy for proof targets that are 80% from the `HashedPostState` accounts
         /// and 20% random keys. Each target has a random `min_len` of 0..16.
-        fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<Target>> {
+        fn proof_targets_strategy(
+            account_keys: Vec<B256>,
+        ) -> impl Strategy<Value = Vec<ProofV2Target>> {
             let num_accounts = account_keys.len();
 
             // Generate between 0 and (num_accounts + 5) targets
@@ -1909,7 +1972,7 @@ mod tests {
                         }),
                         0u8..16u8, // Random min_len from 0 to 15
                     )
-                        .prop_map(|(key, min_len)| Target::new(key).with_min_len(min_len)),
+                        .prop_map(|(key, min_len)| ProofV2Target::new(key).with_min_len(min_len)),
                     count,
                 )
             })
@@ -1977,34 +2040,10 @@ mod tests {
         // Create test harness
         let harness = ProofTestHarness::new(post_state);
 
-        // Assert the proof (convert B256 to Target with no min_len for this test)
+        // Assert the proof (convert B256 to ProofV2Target with no min_len for this test)
         harness
-            .assert_proof(targets.into_iter().map(Target::new))
+            .assert_proof(targets.into_iter().map(ProofV2Target::new))
             .expect("Proof generation failed");
-    }
-
-    #[test]
-    fn test_increment_and_strip_trailing_zeros() {
-        let test_cases: Vec<(Nibbles, Option<Nibbles>)> = vec![
-            // Basic increment without trailing zeros
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3]), Some(Nibbles::from_nibbles([0x1, 0x2, 0x4]))),
-            // Increment with trailing zeros - should be stripped
-            (Nibbles::from_nibbles([0x0, 0x0, 0xF]), Some(Nibbles::from_nibbles([0x0, 0x1]))),
-            (Nibbles::from_nibbles([0x0, 0xF, 0xF]), Some(Nibbles::from_nibbles([0x1]))),
-            // Overflow case
-            (Nibbles::from_nibbles([0xF, 0xF, 0xF]), None),
-            // Empty nibbles
-            (Nibbles::new(), None),
-            // Single nibble
-            (Nibbles::from_nibbles([0x5]), Some(Nibbles::from_nibbles([0x6]))),
-            // All Fs except last - results in trailing zeros after increment
-            (Nibbles::from_nibbles([0xE, 0xF, 0xF]), Some(Nibbles::from_nibbles([0xF]))),
-        ];
-
-        for (input, expected) in test_cases {
-            let result = increment_and_strip_trailing_zeros(&input);
-            assert_eq!(result, expected, "Failed for input: {:?}", input);
-        }
     }
 
     #[test]
@@ -2384,12 +2423,18 @@ mod tests {
 
         // Create targets from test case input - these are Nibbles in hex form
         let targets = vec![
-            Target::new(b256("0153000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
-            Target::new(b256("0000000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
-            Target::new(b256("2300000000000000000000000000000000000000000000000000000000000000"))
-                .with_min_len(2),
+            ProofV2Target::new(b256(
+                "0153000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
+            ProofV2Target::new(b256(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
+            ProofV2Target::new(b256(
+                "2300000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .with_min_len(2),
         ];
 
         // Test proof generation

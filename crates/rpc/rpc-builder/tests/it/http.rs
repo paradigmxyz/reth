@@ -496,13 +496,14 @@ where
     .err()
     .unwrap();
     TraceApiClient::<TransactionRequest>::trace_block(client, block_id).await.unwrap_err();
-    TraceApiClient::<TransactionRequest>::replay_block_transactions(
+    assert!(TraceApiClient::<TransactionRequest>::replay_block_transactions(
         client,
         block_id,
         HashSet::default(),
     )
     .await
-    .unwrap_err();
+    .unwrap()
+    .is_none());
 
     TraceApiClient::<TransactionRequest>::trace_filter(client, trace_filter).await.unwrap();
 }
