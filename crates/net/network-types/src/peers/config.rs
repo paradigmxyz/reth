@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_COUNT_PEERS_INBOUND: u32 = 30;
 /// Maximum number of available slots for concurrent outgoing dials.
 ///
 /// This restricts how many outbound dials can be performed concurrently.
-pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 15;
+pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 30;
 
 /// A temporary timeout for ips on incoming connection attempts.
 pub const INBOUND_IP_THROTTLE_DURATION: Duration = Duration::from_secs(30);

@@ -8,6 +8,8 @@ extern crate alloc;
 mod state;
 pub use state::*;
 
+mod lfu;
+
 mod trie;
 pub use trie::*;
 

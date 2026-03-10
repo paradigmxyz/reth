@@ -36,6 +36,7 @@ use std::{
         mpsc::{Receiver, Sender},
         Arc,
     },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 
@@ -415,14 +416,13 @@ impl ValidatorTestHarness {
 
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = crossbeam_channel::bounded(1);
-
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -759,7 +759,12 @@ async fn test_tree_state_on_new_head_reorg() {
     assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
 
     // send the response so we can advance again
-    sender.send(Some(blocks[1].recovered_block().num_hash())).unwrap();
+    sender
+        .send(PersistenceResult {
+            last_block: Some(blocks[1].recovered_block().num_hash()),
+            commit_duration: Some(Duration::ZERO),
+        })
+        .unwrap();
 
     // we should be persisting blocks[1] because we threw out the prev action
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
@@ -1582,6 +1587,39 @@ mod check_invalid_ancestors_tests {
         }
     }
 
+    /// Test that `find_invalid_ancestor` detects the block itself in the invalid cache
+    #[test]
+    fn test_find_invalid_ancestor_detects_block_itself() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Read block 1
+        let s1 = include_str!("../../test-data/holesky/1.rlp");
+        let data1 = Bytes::from_str(s1).unwrap();
+        let block1 = Block::decode(&mut data1.as_ref()).unwrap();
+        let sealed1 = block1.seal_slow();
+        let hash1 = sealed1.hash();
+        let parent1 = sealed1.parent_hash();
+
+        // Mark block 1 itself as invalid (simulates a block that failed execution)
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
+
+        // Create payload for block 1 (same block, sent again by CL)
+        let payload1 = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(hash1, &sealed1.into_block()).into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // find_invalid_ancestor should detect the block itself without re-execution
+        let result = test_harness.tree.find_invalid_ancestor(&payload1);
+        assert!(result.is_some(), "Should detect block itself in invalid headers cache");
+    }
+
     /// Helper function to create a malformed payload that descends from a given parent
     fn create_malformed_payload_descending_from(parent_hash: B256) -> ExecutionData {
         // Create a block with invalid hash (mismatch between computed and provided hash)
@@ -2034,7 +2072,12 @@ mod forkchoice_updated_tests {
                 if let Some(last) = saved_blocks.last() {
                     last_persisted_number = last.recovered_block().number;
                 }
-                sender.send(saved_blocks.last().map(|b| b.recovered_block().num_hash())).unwrap();
+                sender
+                    .send(PersistenceResult {
+                        last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        commit_duration: Some(Duration::ZERO),
+                    })
+                    .unwrap();
             }
         }
 

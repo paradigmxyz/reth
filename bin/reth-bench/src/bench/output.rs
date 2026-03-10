@@ -24,7 +24,7 @@ pub(crate) struct GasRampPayloadFile {
     /// Engine API version (1-5).
     ///
     /// `None` indicates that `reth_newPayload` should be used.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) version: Option<u8>,
     /// The block hash for FCU.
     pub(crate) block_hash: B256,
@@ -114,16 +114,27 @@ impl CombinedResult {
 
 impl std::fmt::Display for CombinedResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let np = &self.new_payload_result;
         write!(
             f,
             "Block {} processed at {:.4} Ggas/s, used {} total gas. Combined: {:.4} Ggas/s. fcu: {:?}, newPayload: {:?}",
             self.block_number,
-            self.new_payload_result.gas_per_second() / GIGAGAS as f64,
-            self.new_payload_result.gas_used,
+            np.gas_per_second() / GIGAGAS as f64,
+            np.gas_used,
             self.combined_gas_per_second() / GIGAGAS as f64,
             self.fcu_latency,
-            self.new_payload_result.latency
-        )
+            np.latency,
+        )?;
+        if !np.execution_cache_wait.is_zero() {
+            write!(f, ", execution cache wait: {:?}", np.execution_cache_wait)?;
+        }
+        if !np.sparse_trie_wait.is_zero() {
+            write!(f, ", trie cache wait: {:?}", np.sparse_trie_wait)?;
+        }
+        if let Some(d) = np.persistence_wait {
+            write!(f, ", persistence wait: {d:?}")?;
+        }
+        Ok(())
     }
 }
 
