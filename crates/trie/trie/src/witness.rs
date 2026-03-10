@@ -150,60 +150,71 @@ where
         let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
 
-        // Build storage leaf updates for all accounts with storage changes.
-        let mut storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
+        // Build storage leaf updates for all accounts with storage changes, split into
+        // removals and upserts. Removals must be applied first so that branch collapse
+        // detection fires correctly: if a removal and an insertion target siblings under
+        // the same branch, processing the removal first may reduce the branch to a single
+        // blinded child, triggering a proof fetch for the sibling. Processing the insertion
+        // first would add a new child that keeps the count above one, masking the need.
+        let mut storage_removals: B256Map<B256Map<LeafUpdate>> = B256Map::default();
+        let mut storage_upserts: B256Map<B256Map<LeafUpdate>> = B256Map::default();
         for (hashed_address, storage) in &state.storages {
-            let slot_updates = storage
-                .storage
-                .iter()
-                .map(|(&hashed_slot, value)| {
-                    if value.is_zero() {
-                        (hashed_slot, LeafUpdate::Changed(vec![]))
-                    } else {
-                        (
-                            hashed_slot,
-                            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(value).to_vec()),
-                        )
-                    }
-                })
-                .collect();
-            storage_updates.insert(*hashed_address, slot_updates);
+            for (&hashed_slot, value) in &storage.storage {
+                if value.is_zero() {
+                    storage_removals
+                        .entry(*hashed_address)
+                        .or_default()
+                        .insert(hashed_slot, LeafUpdate::Changed(vec![]));
+                } else {
+                    storage_upserts.entry(*hashed_address).or_default().insert(
+                        hashed_slot,
+                        LeafUpdate::Changed(alloy_rlp::encode_fixed_size(value).to_vec()),
+                    );
+                }
+            }
         }
 
-        // Apply storage updates, fetching additional proofs as needed.
-        loop {
-            let mut targets = MultiProofTargetsV2::default();
+        // Apply storage removals first, then upserts, fetching additional proofs as needed.
+        for storage_updates in [&mut storage_removals, &mut storage_upserts] {
+            loop {
+                let mut targets = MultiProofTargetsV2::default();
 
-            for (&hashed_address, slot_updates) in &mut storage_updates {
-                if slot_updates.is_empty() {
-                    continue;
+                for (&hashed_address, slot_updates) in storage_updates.iter_mut() {
+                    if slot_updates.is_empty() {
+                        continue;
+                    }
+                    let storage_trie = sparse_trie
+                        .storage_trie_mut(&hashed_address)
+                        .expect("storage trie was revealed from multiproof");
+                    storage_trie
+                        .update_leaves(slot_updates, |key, min_len| {
+                            targets
+                                .storage_targets
+                                .entry(hashed_address)
+                                .or_default()
+                                .push(ProofV2Target::new(key).with_min_len(min_len));
+                        })
+                        .map_err(|err| {
+                            SparseStateTrieErrorKind::SparseStorageTrie(
+                                hashed_address,
+                                err.into_kind(),
+                            )
+                        })?;
                 }
-                let storage_trie = sparse_trie
-                    .storage_trie_mut(&hashed_address)
-                    .expect("storage trie was revealed from multiproof");
-                storage_trie
-                    .update_leaves(slot_updates, |key, min_len| {
-                        targets
-                            .storage_targets
-                            .entry(hashed_address)
-                            .or_default()
-                            .push(ProofV2Target::new(key).with_min_len(min_len));
-                    })
-                    .map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
-            }
 
-            if targets.is_empty() {
-                break;
-            }
+                if targets.is_empty() {
+                    break;
+                }
 
-            let multiproof =
-                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                    .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .multiproof_v2(targets)?;
-            self.record_multiproof_nodes(&multiproof);
-            sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+                let multiproof = Proof::new(
+                    self.trie_cursor_factory.clone(),
+                    self.hashed_cursor_factory.clone(),
+                )
+                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .multiproof_v2(targets)?;
+                self.record_multiproof_nodes(&multiproof);
+                sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+            }
         }
 
         // Build account leaf updates.
