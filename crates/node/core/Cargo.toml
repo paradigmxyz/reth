@@ -93,11 +93,8 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]
 
-# Route supported tables to RocksDB instead of MDBX
-rocksdb = ["reth-storage-api/rocksdb"]
-
 # Marker feature for edge/unstable builds - enables rocksdb and sets v2 defaults
-edge = ["rocksdb"]
+edge = ["reth-storage-api/edge"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

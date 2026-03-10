@@ -1051,7 +1051,7 @@ mod tests {
             )
         };
 
-        #[cfg(feature = "rocksdb")]
+        #[cfg(feature = "edge")]
         {
             let settings = factory.cached_storage_settings();
             let rocksdb = factory.rocksdb_provider();
@@ -1080,7 +1080,7 @@ mod tests {
             assert_eq!(storages, expected_storages);
         }
 
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(not(feature = "edge"))]
         {
             let (accounts, storages) = collect_from_mdbx(&factory);
             assert_eq!(accounts, expected_accounts);

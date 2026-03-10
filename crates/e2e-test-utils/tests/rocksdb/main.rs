@@ -1,6 +1,6 @@
 //! E2E tests for `RocksDB` provider functionality.
 
-#![cfg(all(feature = "rocksdb", unix))]
+#![cfg(all(feature = "edge", unix))]
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
