@@ -3,11 +3,16 @@ name: Pull request audit
 on:
   pull_request:
     types: [labeled]
+  issue_comment:
+    types: [created]
 
 jobs:
-  publish:
+  publish-on-label:
     runs-on: ubuntu-latest
-    if: github.event.label.name == 'cyclops'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'labeled'
+      && github.event.label.name == 'cyclops'
     steps:
       - name: Publish event
         run: |
@@ -26,5 +31,44 @@ jobs:
               "data": {
                 "pr_number": ${{ github.event.pull_request.number }},
                 "sha": "${{ github.event.pull_request.head.sha }}"
+              }
+            }'
+
+  publish-on-comment:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.action == 'created'
+      && github.event.issue.pull_request
+      && contains(github.event.comment.body, 'cyclops review')
+    steps:
+      - name: Resolve PR head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER=${{ github.event.issue.number }}
+          SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid -q .headRefOid)
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish event
+        run: |
+          set -euo pipefail
+
+          echo "${{ secrets.EVENTS_KEY }}" > ${{ runner.temp }}/key
+          echo "${{ secrets.EVENTS_CERT }}" > ${{ runner.temp }}/cert
+
+          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
+            -H "Content-Type: application/json" \
+            --key ${{ runner.temp }}/key \
+            --cert ${{ runner.temp }}/cert \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "event": "pr_audit",
+              "data": {
+                "pr_number": ${{ steps.pr.outputs.number }},
+                "sha": "${{ steps.pr.outputs.sha }}"
               }
             }'
