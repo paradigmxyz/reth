@@ -15,6 +15,7 @@
 #   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 10)
 #   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 10)
 #   SKIP_BOLT       - Temporarily skip BOLT phases (default: false)
+#   COLLECT_PGO_ONLY - Stop after producing merged.profdata (default: false)
 #   PGO_PROFDATA    - Path to pre-collected merged.profdata (optional)
 #   PROFILE         - Cargo profile (default: maxperf-symbols)
 #   FEATURES        - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
@@ -47,6 +48,7 @@ cd "$(dirname "$0")/../.."
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
 BOLT_BLOCKS="${BOLT_BLOCKS:-10}"
 SKIP_BOLT="${SKIP_BOLT:-false}"
+COLLECT_PGO_ONLY="${COLLECT_PGO_ONLY:-false}"
 PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
@@ -60,6 +62,11 @@ RPC_URL="${RPC_URL:-}"
 SKIP_BOLT_BOOL=false
 if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
     SKIP_BOLT_BOOL=true
+fi
+
+COLLECT_PGO_ONLY_BOOL=false
+if [[ "${COLLECT_PGO_ONLY,,}" == "true" || "$COLLECT_PGO_ONLY" == "1" ]]; then
+    COLLECT_PGO_ONLY_BOOL=true
 fi
 
 USE_PRECOLLECTED_PGO=false
@@ -109,6 +116,7 @@ echo "LLVM:        $LLVM_VERSION"
 echo "PGO blocks:  $PGO_BLOCKS"
 echo "BOLT blocks: $BOLT_BLOCKS"
 echo "Skip BOLT:   $SKIP_BOLT"
+echo "Collect only: $COLLECT_PGO_ONLY"
 echo "PGO profdata: ${PGO_PROFDATA:-<collect with reth-bench>}"
 echo "RUSTFLAGS:   ${BASE_RUSTFLAGS:-<unset>}"
 echo "EXTRA_RUSTFLAGS: ${EXTRA_RUSTFLAGS:-<unset>}"
@@ -288,6 +296,14 @@ else
     "$LLVM_PROFDATA" merge -o "$PGO_DIR/merged.profdata" "$PGO_DIR"/*.profraw
     echo "PGO profile: $PGO_DIR/merged.profdata ($(ls -lh "$PGO_DIR/merged.profdata" | awk '{print $5}'))"
     gha_section_end
+fi
+
+if [ "$COLLECT_PGO_ONLY_BOOL" = true ]; then
+    gha_section_start "PGO Collection Complete"
+    echo "COLLECT_PGO_ONLY=true, skipping PGO/BOLT optimized binary build"
+    echo "Profile: $PGO_DIR/merged.profdata"
+    gha_section_end
+    exit 0
 fi
 
 if [ "$SKIP_BOLT_BOOL" = true ]; then

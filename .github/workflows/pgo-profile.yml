@@ -74,6 +74,7 @@ jobs:
           RPC_URL="$BENCH_RPC_URL" \
           PGO_BLOCKS="${{ inputs.pgo_blocks || '10' }}" \
           BOLT_BLOCKS="${{ inputs.pgo_blocks || '10' }}" \
+          COLLECT_PGO_ONLY=true \
           SKIP_BOLT=true \
           PROFILE=maxperf-symbols \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
