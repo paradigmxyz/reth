@@ -520,8 +520,7 @@ impl ChangesetCache {
         let start = Instant::now();
 
         // Compute changesets
-        let changesets =
-            compute_block_trie_changesets(provider, block_number).map_err(ProviderError::other)?;
+        let changesets = compute_block_trie_changesets(provider, block_number)?;
 
         let changesets = Arc::new(changesets);
         let elapsed = start.elapsed();
