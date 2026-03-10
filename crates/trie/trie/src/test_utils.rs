@@ -68,9 +68,6 @@ use reth_trie_common::{
 use reth_trie_sparse::SparseTrieUpdates;
 use std::{collections::BTreeMap, iter::once};
 
-/// A fixed hashed address used by the harness for all storage trie operations.
-const HASHED_ADDRESS: B256 = B256::ZERO;
-
 /// General-purpose test harness for storage trie tests.
 ///
 /// Manages a base storage dataset, computes expected roots via [`StorageRoot`], and generates
@@ -98,11 +95,11 @@ impl TrieTestHarness {
             storage_trie_updates: StorageTrieUpdates::default(),
             trie_cursor_factory: MockTrieCursorFactory::new(
                 BTreeMap::new(),
-                once((HASHED_ADDRESS, BTreeMap::new())).collect(),
+                once((B256::ZERO, BTreeMap::new())).collect(),
             ),
             hashed_cursor_factory: MockHashedCursorFactory::new(
                 BTreeMap::new(),
-                once((HASHED_ADDRESS, BTreeMap::new())).collect(),
+                once((B256::ZERO, BTreeMap::new())).collect(),
             ),
         };
         harness.apply_changeset(storage);
@@ -127,7 +124,7 @@ impl TrieTestHarness {
             HashedStorage::from_iter(false, changeset.iter().map(|(&k, &v)| (k, v)));
         let overlay = HashedPostStateSorted::new(
             Vec::new(),
-            once((HASHED_ADDRESS, hashed_storage.into_sorted())).collect(),
+            once((self.hashed_address(), hashed_storage.into_sorted())).collect(),
         );
         let overlay_cursor_factory =
             HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
@@ -135,7 +132,7 @@ impl TrieTestHarness {
         let (root, _, updates) = StorageRoot::new_hashed(
             self.trie_cursor_factory.clone(),
             overlay_cursor_factory,
-            HASHED_ADDRESS,
+            self.hashed_address(),
             prefix_set.freeze(),
             #[cfg(feature = "metrics")]
             crate::metrics::TrieRootMetrics::new(crate::TrieType::Storage),
@@ -172,12 +169,12 @@ impl TrieTestHarness {
 
         self.hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::new(),
-            once((HASHED_ADDRESS, self.storage.clone())).collect(),
+            once((self.hashed_address(), self.storage.clone())).collect(),
         );
 
         self.trie_cursor_factory = MockTrieCursorFactory::new(
             BTreeMap::new(),
-            once((HASHED_ADDRESS, merged_trie_nodes.clone())).collect(),
+            once((self.hashed_address(), merged_trie_nodes.clone())).collect(),
         );
 
         self.original_root = original_root;
@@ -186,6 +183,11 @@ impl TrieTestHarness {
             storage_nodes: merged_trie_nodes.into_iter().collect(),
             removed_nodes: Default::default(),
         };
+    }
+
+    /// Returns the hashed address used for all storage trie operations.
+    pub const fn hashed_address(&self) -> B256 {
+        B256::ZERO
     }
 
     /// Returns a reference to the base storage dataset.
@@ -217,16 +219,16 @@ impl TrieTestHarness {
     pub fn root_node(&self) -> ProofTrieNodeV2 {
         let trie_cursor = self
             .trie_cursor_factory
-            .storage_trie_cursor(HASHED_ADDRESS)
+            .storage_trie_cursor(self.hashed_address())
             .expect("storage trie cursor should succeed");
         let hashed_cursor = self
             .hashed_cursor_factory
-            .hashed_storage_cursor(HASHED_ADDRESS)
+            .hashed_storage_cursor(self.hashed_address())
             .expect("hashed storage cursor should succeed");
 
         let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
         proof_calculator
-            .storage_root_node(HASHED_ADDRESS)
+            .storage_root_node(self.hashed_address())
             .expect("storage_root_node should succeed")
     }
 
@@ -237,16 +239,16 @@ impl TrieTestHarness {
     pub fn proof_v2(&self, targets: &mut [ProofV2Target]) -> (Vec<ProofTrieNodeV2>, Option<B256>) {
         let trie_cursor = self
             .trie_cursor_factory
-            .storage_trie_cursor(HASHED_ADDRESS)
+            .storage_trie_cursor(self.hashed_address())
             .expect("storage trie cursor should succeed");
         let hashed_cursor = self
             .hashed_cursor_factory
-            .hashed_storage_cursor(HASHED_ADDRESS)
+            .hashed_storage_cursor(self.hashed_address())
             .expect("hashed storage cursor should succeed");
 
         let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
         let proofs = proof_calculator
-            .storage_proof(HASHED_ADDRESS, targets)
+            .storage_proof(self.hashed_address(), targets)
             .expect("proof_v2 should succeed");
         let root_hash =
             proof_calculator.compute_root_hash(&proofs).expect("compute_root_hash should succeed");

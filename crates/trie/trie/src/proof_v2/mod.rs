@@ -1637,9 +1637,6 @@ mod tests {
     use reth_trie_common::{ProofTrieNode, TrieNode};
     use std::collections::BTreeMap;
 
-    /// A fixed hashed address used by the harness for all storage trie operations.
-    const HASHED_ADDRESS: B256 = B256::ZERO;
-
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
     ///
@@ -1707,7 +1704,7 @@ mod tests {
             let proof_legacy_result = LegacyStorageProof::new_hashed(
                 self.trie_cursor_factory(),
                 self.hashed_cursor_factory(),
-                HASHED_ADDRESS,
+                self.hashed_address(),
             )
             .with_branch_node_masks(true)
             .with_added_removed_keys(Some(AddedRemovedKeys::default().with_assume_added(true)))
@@ -1785,8 +1782,9 @@ mod tests {
         let trie_cursor_factory = harness.trie_cursor_factory();
         let hashed_cursor_factory = harness.hashed_cursor_factory();
 
-        let trie_cursor = trie_cursor_factory.storage_trie_cursor(HASHED_ADDRESS).unwrap();
-        let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(HASHED_ADDRESS).unwrap();
+        let hashed_address = harness.hashed_address();
+        let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address).unwrap();
         let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Simulate stale state left by a mid-computation error: push fake entries onto internal
@@ -1814,13 +1812,13 @@ mod tests {
         let mut targets: Vec<ProofV2Target> =
             sorted_slots.iter().copied().map(ProofV2Target::new).collect();
 
-        let result = proof_calculator.storage_proof(HASHED_ADDRESS, &mut targets).unwrap();
+        let result = proof_calculator.storage_proof(hashed_address, &mut targets).unwrap();
 
         // Compare against a fresh calculator to verify correctness.
-        let trie_cursor = trie_cursor_factory.storage_trie_cursor(HASHED_ADDRESS).unwrap();
-        let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(HASHED_ADDRESS).unwrap();
+        let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address).unwrap();
         let mut fresh_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-        let fresh_result = fresh_calculator.storage_proof(HASHED_ADDRESS, &mut targets).unwrap();
+        let fresh_result = fresh_calculator.storage_proof(hashed_address, &mut targets).unwrap();
 
         pretty_assertions::assert_eq!(fresh_result, result);
     }
