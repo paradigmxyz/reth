@@ -615,13 +615,15 @@ impl ArenaParallelSparseTrie {
 
         let ArenaSparseNode::Branch(b) = &self.upper_arena[head_idx] else { return };
         let short_key = b.short_key;
-        let state_mask = b.state_mask;
+        let children: SmallVec<[_; 4]> = b
+            .child_iter()
+            .filter_map(|(nibble, child)| match child {
+                ArenaSparseNodeBranchChild::Revealed(idx) => Some((nibble, *idx)),
+                ArenaSparseNodeBranchChild::Blinded(_) => None,
+            })
+            .collect();
 
-        for (idx, nibble) in BranchChildIter::new(state_mask) {
-            let child_idx = match &self.upper_arena[head_idx].branch_ref().children[idx] {
-                ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
-                ArenaSparseNodeBranchChild::Blinded(_) => continue,
-            };
+        for (nibble, child_idx) in children {
             let mut child_path = head_path;
             child_path.extend(&short_key);
             child_path.push_unchecked(nibble);
@@ -856,14 +858,14 @@ impl ArenaParallelSparseTrie {
     fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
         let mut masks = BranchNodeMasks::default();
 
-        for (child_idx, nibble) in BranchChildIter::new(branch.state_mask) {
-            let (hash_bit, tree_bit) = match branch.children[child_idx] {
+        for (nibble, child) in branch.child_iter() {
+            let (hash_bit, tree_bit) = match child {
                 ArenaSparseNodeBranchChild::Blinded(_) => (
                     branch.branch_masks.hash_mask.is_bit_set(nibble),
                     branch.branch_masks.tree_mask.is_bit_set(nibble),
                 ),
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child = &arena[child_idx];
+                    let child = &arena[*child_idx];
                     (child.hash_mask_bit(), child.tree_mask_bit())
                 }
             };
@@ -1000,6 +1002,7 @@ impl ArenaParallelSparseTrie {
             // Encode the branch, optionally wrapping in an extension if it has a short_key.
             let b = arena[head_idx].branch_ref();
             let short_key = b.short_key;
+            let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);

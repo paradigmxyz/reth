@@ -80,12 +80,19 @@ impl ArenaSparseNodeBranch {
         self.state_mask.unset_bit(nibble);
     }
 
+    /// Iterates over `(nibble, &ArenaSparseNodeBranchChild)` pairs in nibble order.
+    pub(super) fn child_iter(
+        &self,
+    ) -> impl Iterator<Item = (u8, &ArenaSparseNodeBranchChild)> + '_ {
+        BranchChildIter::new(self.state_mask).map(|(idx, nibble)| (nibble, &self.children[idx]))
+    }
+
     /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
     pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
         let mut hashes = Vec::new();
-        for (child_idx, nibble) in BranchChildIter::new(self.state_mask) {
+        for (nibble, child) in self.child_iter() {
             if self.branch_masks.hash_mask.is_bit_set(nibble) {
-                let hash = match &self.children[child_idx] {
+                let hash = match child {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                         rlp_node.as_hash().expect("blinded child must be a hash")
                     }
