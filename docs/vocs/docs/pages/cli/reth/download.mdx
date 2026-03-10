@@ -115,12 +115,15 @@ Storage:
   -u, --url <URL>
           Specify a snapshot URL or let the command propose a default one.
 
+          Browse available snapshots at https://snapshots.reth.rs
+          or use --list-snapshots to see them from the CLI.
+
           Available snapshot sources:
-          - https://www.merkle.io/snapshots (default, mainnet archive)
+          - https://snapshots.reth.rs (default)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest archive snapshot for the selected chain
-          will be proposed for download from https://downloads.merkle.io.
+          will be proposed for download from https://snapshots-r2.reth.rs.
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
@@ -167,6 +170,11 @@ Storage:
           Maximum number of concurrent modular archive workers
 
           [default: 8]
+
+      --list
+          List available snapshots from snapshots.reth.rs and exit.
+
+          Queries the snapshots API and prints all available snapshots for the selected chain, including block number, size, and manifest URL.
 
 Logging:
       --log.stdout.format <FORMAT>
