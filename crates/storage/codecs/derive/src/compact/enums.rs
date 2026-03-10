@@ -66,8 +66,7 @@ impl<'a> EnumHandler<'a> {
                     // Unnamed type
                     self.enum_lines.push(quote! {
                         #current_variant_index => {
-                            let (inner, new_buf) = #field_type::#from_compact_ident(buf, buf.len());
-                            buf = new_buf;
+                            let (inner, buf) = #field_type::#from_compact_ident(buf, buf.len());
                             #ident::#variant_name(inner)
                         }
                     });

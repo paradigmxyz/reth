@@ -95,6 +95,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
+        if min_block > max_block {
+            eyre::bail!("--from ({min_block}) is beyond --to ({max_block}), nothing to re-execute");
+        }
+
         let num_tasks = self.num_tasks.unwrap_or_else(|| {
             std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
         });

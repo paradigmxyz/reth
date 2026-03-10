@@ -324,20 +324,21 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // if it's not pending, we should always use block_hash over block_number to ensure that
             // different provider calls query data related to the same block.
             if !is_block_target_pending {
-                target_block = self
+                let Some(block_hash) = self
                     .provider()
                     .block_hash_for_id(target_block)
-                    .map_err(|_| EthApiError::HeaderNotFound(target_block))?
-                    .ok_or_else(|| EthApiError::HeaderNotFound(target_block))?
-                    .into();
+                    .map_err(Self::Error::from_eth_err::<ProviderError>)?
+                else {
+                    return Err(EthApiError::HeaderNotFound(target_block).into())
+                };
+                target_block = block_hash.into();
             }
 
-            let ((evm_env, _), block) = futures::try_join!(
-                self.evm_env_at(target_block),
-                self.recovered_block(target_block)
-            )?;
-
-            let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let block = self
+                .recovered_block(target_block)
+                .await?
+                .ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we're essentially replaying the transactions in the block here, hence we need the
             // state that points to the beginning of the block, which is the state at

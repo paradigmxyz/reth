@@ -367,7 +367,7 @@ where
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
 
-    let sealed_block = Arc::new(block.sealed_block().clone());
+    let sealed_block = Arc::new(block.into_sealed_block());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {

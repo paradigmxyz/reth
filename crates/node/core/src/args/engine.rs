@@ -1,9 +1,10 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
+use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
-    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -39,8 +40,9 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
-    sparse_trie_prune_depth: usize,
-    sparse_trie_max_storage_tries: usize,
+    sparse_trie_max_hot_slots: usize,
+    sparse_trie_max_hot_accounts: usize,
+    slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
 }
@@ -173,15 +175,21 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the sparse trie prune depth by default
-    pub const fn with_sparse_trie_prune_depth(mut self, v: usize) -> Self {
-        self.sparse_trie_prune_depth = v;
+    /// Set the LFU hot-slot capacity for sparse trie pruning by default
+    pub const fn with_sparse_trie_max_hot_slots(mut self, v: usize) -> Self {
+        self.sparse_trie_max_hot_slots = v;
         self
     }
 
-    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
-    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
-        self.sparse_trie_max_storage_tries = v;
+    /// Set the LFU hot-account capacity for sparse trie pruning by default
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, v: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = v;
+        self
+    }
+
+    /// Set the default slow block threshold.
+    pub const fn with_slow_block_threshold(mut self, v: Option<Duration>) -> Self {
+        self.slow_block_threshold = v;
         self
     }
 
@@ -220,8 +228,9 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             prewarming_threads: None,
             cache_metrics_disabled: false,
-            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
         }
@@ -349,19 +358,35 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
 
-    /// Sparse trie prune depth.
-    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
-    pub sparse_trie_prune_depth: usize,
+    /// LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles.
+    #[arg(long = "engine.sparse-trie-max-hot-slots", alias = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_slots)]
+    pub sparse_trie_max_hot_slots: usize,
 
-    /// Maximum number of storage tries to retain after sparse trie pruning.
-    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
-    pub sparse_trie_max_storage_tries: usize,
+    /// LFU hot-account capacity: max account addresses retained across sparse trie prune cycles.
+    #[arg(long = "engine.sparse-trie-max-hot-accounts", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_accounts)]
+    pub sparse_trie_max_hot_accounts: usize,
+
+    /// Configure the slow block logging threshold in milliseconds.
+    ///
+    /// When set, blocks that take longer than this threshold to execute will be logged
+    /// with detailed metrics including timing, state operations, and cache statistics.
+    ///
+    /// Set to 0 to log all blocks (useful for debugging/profiling).
+    ///
+    /// When not set, slow block logging is disabled (default).
+    #[arg(long = "engine.slow-block-threshold", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = Resettable::from(DefaultEngineValues::get_global().slow_block_threshold.map(|threshold| format_duration_as_secs_or_ms(threshold).into())))]
+    pub slow_block_threshold: Option<Duration>,
 
     /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
     /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
     /// the effects of retaining the full trie cache.
     #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
+
+    /// Enable the arena-based sparse trie implementation instead of the default hash-map-based
+    /// one.
+    #[arg(long = "engine.enable-arena-sparse-trie", default_value_t = false)]
+    pub enable_arena_sparse_trie: bool,
 
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
@@ -377,6 +402,19 @@ pub struct EngineArgs {
         default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
+
+    /// Add random jitter before each proof computation (trie-debug only).
+    /// Each proof worker sleeps for a random duration up to this value before
+    /// starting work. Useful for stress-testing timing-sensitive proof logic.
+    ///
+    /// --engine.proof-jitter 100ms
+    /// --engine.proof-jitter 1s
+    #[cfg(feature = "trie-debug")]
+    #[arg(
+        long = "engine.proof-jitter",
+        value_parser = humantime::parse_duration,
+    )]
+    pub proof_jitter: Option<Duration>,
 }
 
 #[allow(deprecated)]
@@ -402,8 +440,9 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
@@ -431,12 +470,16 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 }
@@ -444,7 +487,7 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        TreeConfig::default()
+        let config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -462,10 +505,15 @@ impl EngineArgs {
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
-            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
+            .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
+            .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
-            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_enable_arena_sparse_trie(self.enable_arena_sparse_trie)
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()));
+        #[cfg(feature = "trie-debug")]
+        let config = config.with_proof_jitter(self.proof_jitter);
+        config
     }
 }
 
@@ -515,10 +563,14 @@ mod tests {
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
             cache_metrics_disabled: true,
-            sparse_trie_prune_depth: 10,
-            sparse_trie_max_storage_tries: 100,
+            sparse_trie_max_hot_slots: 100,
+            sparse_trie_max_hot_accounts: 500,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
+            enable_arena_sparse_trie: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -550,16 +602,47 @@ mod tests {
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",
-            "--engine.sparse-trie-prune-depth",
-            "10",
-            "--engine.sparse-trie-max-storage-tries",
+            "--engine.sparse-trie-max-hot-slots",
             "100",
+            "--engine.sparse-trie-max-hot-accounts",
+            "500",
             "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.enable-arena-sparse-trie",
             "--engine.state-root-task-timeout",
             "2s",
         ])
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_parse_slow_block_threshold() {
+        // Test default value (None - disabled)
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.slow_block_threshold, None);
+
+        // Test setting to 0 (log all blocks)
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.slow-block-threshold", "0"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::ZERO));
+
+        // Test setting to custom value
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::from_secs(500)));
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500ms",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(Duration::from_millis(500)));
     }
 }

@@ -39,7 +39,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     where
         Self: FullEthApiTypes,
     {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
+        async move {
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let header =
+                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            Ok(Some(header))
+        }
     }
 
     /// Returns the populated rpc block object for the given block id.
