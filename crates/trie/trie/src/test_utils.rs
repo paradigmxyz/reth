@@ -191,17 +191,17 @@ impl TrieTestHarness {
     }
 
     /// Returns a reference to the base storage dataset.
-    pub fn storage(&self) -> &BTreeMap<B256, U256> {
+    pub const fn storage(&self) -> &BTreeMap<B256, U256> {
         &self.storage
     }
 
     /// Returns the expected storage root.
-    pub fn original_root(&self) -> B256 {
+    pub const fn original_root(&self) -> B256 {
         self.original_root
     }
 
     /// Returns a reference to the storage trie updates.
-    pub fn storage_trie_updates(&self) -> &StorageTrieUpdates {
+    pub const fn storage_trie_updates(&self) -> &StorageTrieUpdates {
         &self.storage_trie_updates
     }
 
