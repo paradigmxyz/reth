@@ -211,11 +211,12 @@ jobs:
           RPC_URL="$BENCH_RPC_URL" \
           PGO_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
           BOLT_BLOCKS="${{ github.event.inputs.pgo_blocks || '10' }}" \
+          SKIP_BOLT=true \
           PROFILE=maxperf-symbols \
           FEATURES="jemalloc,asm-keccak,min-debug-logs" \
           TARGET=x86_64-unknown-linux-gnu \
           EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
-            .github/scripts/build_pgo_bolt_full.sh
+            .github/scripts/build_pgo_bolt.sh
 
       - name: Recover snapshot
         if: always()

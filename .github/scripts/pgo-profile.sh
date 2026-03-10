@@ -24,6 +24,22 @@
 #   target/pgo-profiles/merged.profdata
 set -euo pipefail
 
+gha_section_start() {
+    local title="$1"
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "::group::$title"
+    else
+        echo ""
+        echo "=== $title ==="
+    fi
+}
+
+gha_section_end() {
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "::endgroup::"
+    fi
+}
+
 cd "$(dirname "$0")/../.."
 
 : "${DATADIR:?DATADIR must be set to the reth data directory}"
@@ -41,20 +57,21 @@ else
     PROFILE_DIR=$PROFILE
 fi
 
-echo "=== PGO Profile Collection ==="
+gha_section_start "PGO Profile Collection"
 echo "Blocks: $PGO_BLOCKS"
 echo "Datadir: $DATADIR"
 echo "RPC URL: $RPC_URL"
 echo "Profile: $PROFILE"
 echo "Features: $FEATURES"
 echo "Target: $TARGET"
+gha_section_end
 
 # Clean old profiles
 rm -rf "$PGO_DIR"
 mkdir -p "$PGO_DIR"
 
 # Build instrumented binary
-echo "=== Building PGO-instrumented binary ==="
+gha_section_start "Building PGO-instrumented binary"
 rustup component add llvm-tools-preview
 RUSTFLAGS="-Cprofile-generate=$PGO_DIR ${EXTRA_RUSTFLAGS:-}" \
     cargo build --profile "$PROFILE" --features "$FEATURES" \
@@ -64,13 +81,15 @@ RUSTFLAGS="-Cprofile-generate=$PGO_DIR ${EXTRA_RUSTFLAGS:-}" \
 RETH_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
 echo "Instrumented binary: $RETH_BIN"
 ls -lh "$RETH_BIN"
+gha_section_end
 
 # Also build reth-bench (non-instrumented)
-echo "=== Building reth-bench ==="
+gha_section_start "Building reth-bench"
 cargo build --profile "$PROFILE" --features "$FEATURES" \
     --manifest-path bin/reth-bench/Cargo.toml --bin reth-bench --locked
 RETH_BENCH_BIN="$(find target -name reth-bench -type f -executable | head -1)"
 echo "reth-bench binary: $RETH_BENCH_BIN"
+gha_section_end
 
 # Cleanup handler — stop reth on exit
 RETH_PID=
@@ -91,7 +110,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Start reth node
-echo "=== Starting reth node ==="
+gha_section_start "Running reth-bench workload"
+echo "Starting reth node..."
 sudo "$RETH_BIN" node \
     --datadir "$DATADIR" \
     --log.file.directory /tmp/reth-pgo-logs \
@@ -121,7 +141,7 @@ for i in $(seq 1 120); do
 done
 
 # Run reth-bench to execute blocks and generate PGO profiles
-echo "=== Running reth-bench for $PGO_BLOCKS blocks ==="
+echo "Running reth-bench for $PGO_BLOCKS blocks..."
 "$RETH_BENCH_BIN" new-payload-fcu \
     --rpc-url "$RPC_URL" \
     --engine-rpc-url http://127.0.0.1:8551 \
@@ -130,7 +150,7 @@ echo "=== Running reth-bench for $PGO_BLOCKS blocks ==="
     --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
 # Stop reth gracefully to flush profraw files
-echo "=== Stopping reth ==="
+echo "Stopping reth..."
 sudo kill "$RETH_PID" 2>/dev/null || true
 for i in $(seq 1 60); do
     sudo kill -0 "$RETH_PID" 2>/dev/null || break
@@ -138,12 +158,13 @@ for i in $(seq 1 60); do
 done
 sudo kill -9 "$RETH_PID" 2>/dev/null || true
 RETH_PID=
+gha_section_end
 
 # Fix ownership (reth ran as root)
 sudo chown -R "$(id -un):$(id -gn)" "$PGO_DIR" 2>/dev/null || true
 
 # Merge profiles
-echo "=== Merging PGO profiles ==="
+gha_section_start "Merging PGO profiles"
 PROFRAW_COUNT=$(find "$PGO_DIR" -name '*.profraw' | wc -l)
 echo "Found $PROFRAW_COUNT .profraw files"
 
@@ -160,6 +181,8 @@ fi
 
 "$LLVM_PROFDATA" merge -o "$PGO_DIR/merged.profdata" "$PGO_DIR"/*.profraw
 ls -lh "$PGO_DIR/merged.profdata"
+gha_section_end
 
-echo "=== PGO Profile Collection Complete ==="
+gha_section_start "PGO Profile Collection Complete"
 echo "Profile: $PGO_DIR/merged.profdata"
+gha_section_end

@@ -14,6 +14,7 @@
 # Optional environment variables:
 #   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 10)
 #   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 10)
+#   SKIP_BOLT       - Temporarily skip BOLT phases (default: false)
 #   PROFILE         - Cargo profile (default: maxperf-symbols)
 #   FEATURES        - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET          - Target triple (default: auto-detected)
@@ -23,6 +24,22 @@
 #   target/$PROFILE_DIR/reth  — final optimized binary
 set -euo pipefail
 
+gha_section_start() {
+    local title="$1"
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "::group::$title"
+    else
+        echo ""
+        echo "=== $title ==="
+    fi
+}
+
+gha_section_end() {
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "::endgroup::"
+    fi
+}
+
 cd "$(dirname "$0")/../.."
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -31,6 +48,7 @@ cd "$(dirname "$0")/../.."
 
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
 BOLT_BLOCKS="${BOLT_BLOCKS:-10}"
+SKIP_BOLT="${SKIP_BOLT:-false}"
 PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
@@ -53,7 +71,7 @@ CARGO_ARGS=(--profile "$PROFILE" --features "$FEATURES" --manifest-path "$MANIFE
 PROFILE_UPPER=$(echo "$PROFILE" | tr '[:lower:]-' '[:upper:]_')
 export "CARGO_PROFILE_${PROFILE_UPPER}_STRIP=debuginfo"
 
-echo "=== Full PGO+BOLT Build ==="
+gha_section_start "Full PGO+BOLT Build"
 echo "Binary:      reth"
 echo "Manifest:    $MANIFEST_PATH"
 echo "Target:      $TARGET"
@@ -62,11 +80,13 @@ echo "Features:    $FEATURES"
 echo "LLVM:        $LLVM_VERSION"
 echo "PGO blocks:  $PGO_BLOCKS"
 echo "BOLT blocks: $BOLT_BLOCKS"
+echo "Skip BOLT:   $SKIP_BOLT"
 echo "Datadir:     $DATADIR"
 echo "RPC URL:     $RPC_URL"
+gha_section_end
 
 # ── Prerequisites ──────────────────────────────────────────────────────────────
-echo "=== Installing prerequisites ==="
+gha_section_start "Installing prerequisites"
 rustup component add llvm-tools-preview
 
 LLVM_PROFDATA=$(find "$(rustc --print sysroot)" -name llvm-profdata -type f | head -1)
@@ -89,14 +109,20 @@ install_bolt() {
     sudo ln -sf "/usr/bin/llvm-bolt-$LLVM_VERSION" /usr/local/bin/llvm-bolt
     sudo ln -sf "/usr/bin/merge-fdata-$LLVM_VERSION" /usr/local/bin/merge-fdata
 }
-install_bolt
+if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
+    echo "Skipping BOLT installation (SKIP_BOLT=$SKIP_BOLT)"
+else
+    install_bolt
+fi
+gha_section_end
 
 # Build reth-bench once (non-instrumented) — reused for both phases
-echo "=== Building reth-bench ==="
+gha_section_start "Building reth-bench"
 cargo build --profile "$PROFILE" --features "$FEATURES" \
     --manifest-path bin/reth-bench/Cargo.toml --bin reth-bench --locked
 RETH_BENCH_BIN="$(find target -name reth-bench -type f -executable | head -1)"
 echo "reth-bench: $RETH_BENCH_BIN"
+gha_section_end
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 RETH_PID=
@@ -168,11 +194,19 @@ run_bench_workload() {
     RETH_PID=
 }
 
+publish_binary() {
+    local source_bin="$1"
+    for out in "target/$TARGET/$PROFILE_DIR" "target/$PROFILE_DIR"; do
+        local destination="$out/reth"
+        mkdir -p "$out"
+        if [ "$source_bin" != "$destination" ]; then
+            cp "$source_bin" "$destination"
+        fi
+    done
+}
+
 # ── Phase 1: PGO profile collection ───────────────────────────────────────────
-echo ""
-echo "============================================================"
-echo "  Phase 1: PGO Profile Collection"
-echo "============================================================"
+gha_section_start "Phase 1: PGO Profile Collection"
 
 rm -rf "$PGO_DIR"
 mkdir -p "$PGO_DIR"
@@ -199,91 +233,95 @@ if [ "$PROFRAW_COUNT" -eq 0 ]; then
 fi
 "$LLVM_PROFDATA" merge -o "$PGO_DIR/merged.profdata" "$PGO_DIR"/*.profraw
 echo "PGO profile: $PGO_DIR/merged.profdata ($(ls -lh "$PGO_DIR/merged.profdata" | awk '{print $5}'))"
+gha_section_end
 
-# ── Phase 2: BOLT profile collection (with PGO) ──────────────────────────────
-echo ""
-echo "============================================================"
-echo "  Phase 2: BOLT Profile Collection (with PGO)"
-echo "============================================================"
+if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
+    gha_section_start "BOLT Phase Skipped"
+    echo "SKIP_BOLT=$SKIP_BOLT, building PGO-only binary"
+    echo "Building PGO-optimized binary..."
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata ${EXTRA_RUSTFLAGS:-}" \
+        cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
-rm -rf "$BOLT_DIR"
-mkdir -p "$BOLT_DIR"
+    BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
+    echo "Stripping debug symbols..."
+    strip "$BUILT_BIN"
+    publish_binary "$BUILT_BIN"
+    gha_section_end
+else
+    # ── Phase 2: BOLT profile collection (with PGO) ──────────────────────────
+    gha_section_start "Phase 2: BOLT Profile Collection (with PGO)"
 
-echo "Building BOLT-instrumented binary with PGO..."
-# --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
-    cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
+    rm -rf "$BOLT_DIR"
+    mkdir -p "$BOLT_DIR"
 
-# Instrument with BOLT
-BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
-BOLT_INSTRUMENTED_BIN="$BUILT_BIN-bolt-instrumented"
+    echo "Building BOLT-instrumented binary with PGO..."
+    # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+        cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
-echo "Instrumenting binary with BOLT..."
-# --skip-funcs: skip compiler-generated drop_in_place functions that BOLT can't handle
-# as split functions in relocation mode (triggered by --emit-relocs)
-llvm-bolt "$BUILT_BIN" \
-    -instrument \
-    --instrumentation-file-append-pid \
-    --instrumentation-file="$BOLT_DIR/prof" \
-    --skip-funcs='.*drop_in_place.*' \
-    -o "$BOLT_INSTRUMENTED_BIN"
-echo "BOLT-instrumented binary: $BOLT_INSTRUMENTED_BIN ($(ls -lh "$BOLT_INSTRUMENTED_BIN" | awk '{print $5}'))"
+    # Instrument with BOLT
+    BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
+    BOLT_INSTRUMENTED_BIN="$BUILT_BIN-bolt-instrumented"
 
-run_bench_workload "$BOLT_INSTRUMENTED_BIN" "$BOLT_BLOCKS" "bolt"
+    echo "Instrumenting binary with BOLT..."
+    # --skip-funcs: skip compiler-generated drop_in_place functions that BOLT can't handle
+    # as split functions in relocation mode (triggered by --emit-relocs)
+    llvm-bolt "$BUILT_BIN" \
+        -instrument \
+        --instrumentation-file-append-pid \
+        --instrumentation-file="$BOLT_DIR/prof" \
+        --skip-funcs='.*drop_in_place.*' \
+        -o "$BOLT_INSTRUMENTED_BIN"
+    echo "BOLT-instrumented binary: $BOLT_INSTRUMENTED_BIN ($(ls -lh "$BOLT_INSTRUMENTED_BIN" | awk '{print $5}'))"
 
-# Fix ownership for BOLT profiles
-sudo chown -R "$(id -un):$(id -gn)" "$BOLT_DIR" 2>/dev/null || true
+    run_bench_workload "$BOLT_INSTRUMENTED_BIN" "$BOLT_BLOCKS" "bolt"
 
-# Merge BOLT profiles
-echo "Merging BOLT profiles..."
-FDATA_COUNT=$(find "$BOLT_DIR" -name '*.fdata' | wc -l)
-echo "Found $FDATA_COUNT .fdata files"
-if [ "$FDATA_COUNT" -eq 0 ]; then
-    echo "error: no .fdata files — BOLT-instrumented binary did not produce profiles"
-    exit 1
+    # Fix ownership for BOLT profiles
+    sudo chown -R "$(id -un):$(id -gn)" "$BOLT_DIR" 2>/dev/null || true
+
+    # Merge BOLT profiles
+    echo "Merging BOLT profiles..."
+    FDATA_COUNT=$(find "$BOLT_DIR" -name '*.fdata' | wc -l)
+    echo "Found $FDATA_COUNT .fdata files"
+    if [ "$FDATA_COUNT" -eq 0 ]; then
+        echo "error: no .fdata files — BOLT-instrumented binary did not produce profiles"
+        exit 1
+    fi
+    merge-fdata "$BOLT_DIR"/*.fdata > "$BOLT_DIR/merged.fdata"
+    echo "BOLT profile: $BOLT_DIR/merged.fdata ($(ls -lh "$BOLT_DIR/merged.fdata" | awk '{print $5}'))"
+    gha_section_end
+
+    # ── Phase 3: Final optimized build ───────────────────────────────────────
+    gha_section_start "Phase 3: Final PGO+BOLT Optimized Build"
+
+    echo "Building PGO-optimized binary..."
+    # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+        cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
+
+    BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
+    OPTIMIZED_BIN="$BUILT_BIN-bolt-optimized"
+
+    echo "Optimizing with BOLT..."
+    llvm-bolt "$BUILT_BIN" \
+        -o "$OPTIMIZED_BIN" \
+        --data "$BOLT_DIR/merged.fdata" \
+        -reorder-blocks=ext-tsp \
+        -reorder-functions=cdsort \
+        -split-functions \
+        -split-all-cold \
+        -dyno-stats \
+        -icf=1 \
+        -use-gnu-stack \
+        --skip-funcs='.*drop_in_place.*'
+
+    echo "Stripping debug symbols..."
+    strip "$OPTIMIZED_BIN"
+    publish_binary "$OPTIMIZED_BIN"
+    gha_section_end
 fi
-merge-fdata "$BOLT_DIR"/*.fdata > "$BOLT_DIR/merged.fdata"
-echo "BOLT profile: $BOLT_DIR/merged.fdata ($(ls -lh "$BOLT_DIR/merged.fdata" | awk '{print $5}'))"
 
-# ── Phase 3: Final optimized build ───────────────────────────────────────────
-echo ""
-echo "============================================================"
-echo "  Phase 3: Final PGO+BOLT Optimized Build"
-echo "============================================================"
-
-echo "Building PGO-optimized binary..."
-# --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
-RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
-    cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
-
-BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
-OPTIMIZED_BIN="$BUILT_BIN-bolt-optimized"
-
-echo "Optimizing with BOLT..."
-llvm-bolt "$BUILT_BIN" \
-    -o "$OPTIMIZED_BIN" \
-    --data "$BOLT_DIR/merged.fdata" \
-    -reorder-blocks=ext-tsp \
-    -reorder-functions=cdsort \
-    -split-functions \
-    -split-all-cold \
-    -dyno-stats \
-    -icf=1 \
-    -use-gnu-stack \
-    --skip-funcs='.*drop_in_place.*'
-
-echo "Stripping debug symbols..."
-strip "$OPTIMIZED_BIN"
-
-# Copy to expected output locations
-for out in "target/$TARGET/$PROFILE_DIR" "target/$PROFILE_DIR"; do
-    mkdir -p "$out"
-    cp "$OPTIMIZED_BIN" "$out/reth"
-done
-
-echo ""
-echo "============================================================"
-echo "  Build Complete"
-echo "============================================================"
+gha_section_start "Build Complete"
 ls -lh "target/$PROFILE_DIR/reth"
 echo "Output: target/$PROFILE_DIR/reth"
+gha_section_end
