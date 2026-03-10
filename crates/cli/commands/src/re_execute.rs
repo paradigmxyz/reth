@@ -180,7 +180,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         };
 
                         let bal= executor.take_bal();
-                        tracing::info!("Bal from executor: {:?}",bal);
+
                         if let Err(err) = consensus
                             .validate_block_post_execution(&block, &result, None, bal, true)
                             .wrap_err_with(|| {

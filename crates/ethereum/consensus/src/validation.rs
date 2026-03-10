@@ -42,7 +42,6 @@ where
     R: Receipt,
     ChainSpec: EthereumHardforks,
 {
-    tracing::info!("bal {:?}, bal check {}", block_access_list, allow_bal_check);
     // EIP-7778: When Amsterdam is active, block header gas_used tracks gas before refunds,
     // but receipt cumulative_gas_used still tracks gas after refunds. Use the execution
     // result's gas_used which always matches the header semantics.
