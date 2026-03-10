@@ -5,7 +5,7 @@
 //! precompile address.
 
 use alloy_primitives::map::FbBuildHasher;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
@@ -73,8 +73,11 @@ where
 type PrecompileLruMap<S> = LruMap<Vec<u8>, CacheEntry<S>, ByLength>;
 
 /// Cache for precompiles, for each input stores the result.
+///
+/// Internally backed by [`schnellru::LruMap`] behind an `Arc<Mutex<..>>` so that multiple
+/// [`CachedPrecompile`] instances for the same address share state.
 #[derive(Clone)]
-pub struct PrecompileCache<S>(Arc<RwLock<PrecompileLruMap<S>>>)
+pub struct PrecompileCache<S>(Arc<Mutex<PrecompileLruMap<S>>>)
 where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -83,7 +86,7 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let map = self.0.read();
+        let map = self.0.lock();
         f.debug_struct("PrecompileCache").field("len", &map.len()).finish()
     }
 }
@@ -102,17 +105,16 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn new(capacity: u32) -> Self {
-        Self(Arc::new(RwLock::new(LruMap::new(ByLength::new(capacity)))))
+        Self(Arc::new(Mutex::new(LruMap::new(ByLength::new(capacity)))))
     }
 
-    /// Uses `peek` (shared lock) instead of `get` to avoid exclusive locking on reads.
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.read().peek(input).filter(|e| e.spec == spec).cloned()
+        self.0.lock().get(input).filter(|e| e.spec == spec).cloned()
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
     fn insert(&self, input: &[u8], value: CacheEntry<S>) -> usize {
-        let mut map = self.0.write();
+        let mut map = self.0.lock();
         map.insert(input.to_vec(), value);
         map.len()
     }
