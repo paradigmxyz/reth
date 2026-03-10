@@ -1,8 +1,9 @@
 //! Payload service component for the node builder.
 
-use crate::{BuilderContext, FullNodeTypes};
+use crate::{BuilderContext, ConfigureEvm, FullNodeTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chain_state::CanonStateSubscriptions;
+use reth_engine_tree::tree::EngineSharedCaches;
 use reth_node_api::{NodeTypes, PayloadBuilderFor};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand};
 use reth_transaction_pool::TransactionPool;
@@ -25,6 +26,22 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
         evm_config: EvmConfig,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
            + Send;
+
+    /// Spawns the payload service with access to shared engine caches.
+    fn spawn_payload_builder_service_with_caches(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+        evm_config: EvmConfig,
+        shared_caches: EngineSharedCaches<EvmConfig>,
+    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
+           + Send
+    where
+        EvmConfig: ConfigureEvm,
+    {
+        let _ = shared_caches;
+        self.spawn_payload_builder_service(ctx, pool, evm_config)
+    }
 }
 
 impl<Node, F, Fut, Pool, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig> for F
@@ -62,6 +79,21 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
         pool: Pool,
         evm_config: EvmConfig,
     ) -> impl Future<Output = eyre::Result<Self::PayloadBuilder>> + Send;
+
+    /// Builds the payload builder with access to shared engine caches.
+    fn build_payload_builder_with_caches(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+        evm_config: EvmConfig,
+        shared_caches: EngineSharedCaches<EvmConfig>,
+    ) -> impl Future<Output = eyre::Result<Self::PayloadBuilder>> + Send
+    where
+        EvmConfig: ConfigureEvm,
+    {
+        let _ = shared_caches;
+        self.build_payload_builder(ctx, pool, evm_config)
+    }
 }
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
@@ -80,7 +112,7 @@ impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EvmConfig: Send,
+    EvmConfig: ConfigureEvm + Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,
 {
     async fn spawn_payload_builder_service(
@@ -89,7 +121,24 @@ where
         pool: Pool,
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool, evm_config).await?;
+        self.spawn_payload_builder_service_with_caches(
+            ctx,
+            pool,
+            evm_config,
+            EngineSharedCaches::default(),
+        )
+        .await
+    }
+
+    async fn spawn_payload_builder_service_with_caches(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+        evm_config: EvmConfig,
+        shared_caches: EngineSharedCaches<EvmConfig>,
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
+        let payload_builder =
+            self.0.build_payload_builder_with_caches(ctx, pool, evm_config, shared_caches).await?;
 
         let conf = ctx.config().builder.clone();
 

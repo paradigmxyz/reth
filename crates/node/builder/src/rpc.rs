@@ -1,8 +1,8 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+use reth_engine_tree::tree::{EngineSharedCaches, WaitForCaches};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 pub use reth_trie_db::ChangesetCache;
 
@@ -1294,6 +1294,18 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
+
+    /// Builds the tree validator with access to shared engine caches.
+    fn build_tree_validator_with_caches(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+        shared_caches: EngineSharedCaches<Node::Evm>,
+        tree_config: TreeConfig,
+        changeset_cache: ChangesetCache,
+    ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send {
+        let _ = shared_caches;
+        self.build_tree_validator(ctx, tree_config, changeset_cache)
+    }
 }
 
 /// Basic implementation of [`EngineValidatorBuilder`].
@@ -1342,6 +1354,22 @@ where
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
     ) -> eyre::Result<Self::EngineValidator> {
+        self.build_tree_validator_with_caches(
+            ctx,
+            EngineSharedCaches::default(),
+            tree_config,
+            changeset_cache,
+        )
+        .await
+    }
+
+    async fn build_tree_validator_with_caches(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+        shared_caches: EngineSharedCaches<Node::Evm>,
+        tree_config: TreeConfig,
+        changeset_cache: ChangesetCache,
+    ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
@@ -1353,6 +1381,7 @@ where
             validator,
             tree_config,
             invalid_block_hook,
+            shared_caches,
             changeset_cache,
             ctx.node.task_executor().clone(),
         ))

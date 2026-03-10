@@ -45,6 +45,7 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
+use reth_engine_tree::tree::EngineSharedCaches;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
@@ -773,6 +774,7 @@ where
     pub async fn with_components<CB>(
         self,
         components_builder: CB,
+        shared_caches: EngineSharedCaches<<CB::Components as NodeComponents<T>>::Evm>,
         on_component_initialized: Box<
             dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
         >,
@@ -795,7 +797,8 @@ where
         );
 
         debug!(target: "reth::cli", "creating components");
-        let components = components_builder.build_components(&builder_ctx).await?;
+        let components =
+            components_builder.build_components_with_caches(&builder_ctx, shared_caches).await?;
 
         let blockchain_db = self.blockchain_db().clone();
 
@@ -911,9 +914,9 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism() &&
-            !self.is_dev() &&
-            self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism()
+            && !self.is_dev()
+            && self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
@@ -1106,8 +1109,8 @@ where
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
-                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
-                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration)
+                    | ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
                         let block_hash = executed.recovered_block.num_hash().hash;
                         let block_number = executed.recovered_block.num_hash().number;
                         if let Err(e) = ethstats_for_events

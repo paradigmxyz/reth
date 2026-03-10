@@ -203,6 +203,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            EngineSharedCaches::default(),
             changeset_cache.clone(),
             reth_tasks::Runtime::test(),
         );
@@ -407,6 +408,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            EngineSharedCaches::default(),
             changeset_cache,
             reth_tasks::Runtime::test(),
         );
@@ -934,8 +936,8 @@ async fn test_get_canonical_blocks_to_persist() {
     assert!(!blocks_to_persist.iter().any(|b| b.recovered_block().hash() == fork_block_hash));
 
     // check that the original block 4 is still included
-    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4 &&
-        b.recovered_block().hash() == blocks[4].recovered_block().hash()));
+    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4
+        && b.recovered_block().hash() == blocks[4].recovered_block().hash()));
 
     // check that if we advance persistence, the persistence action is the correct value
     test_harness.tree.advance_persistence().expect("advancing persistence should succeed");

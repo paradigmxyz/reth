@@ -9,6 +9,7 @@ use crate::{
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{noop::NoopConsensus, FullConsensus};
+use reth_engine_tree::tree::EngineSharedCaches;
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
@@ -376,6 +377,14 @@ where
         self,
         context: &BuilderContext<Node>,
     ) -> eyre::Result<Self::Components> {
+        self.build_components_with_caches(context, EngineSharedCaches::default()).await
+    }
+
+    async fn build_components_with_caches(
+        self,
+        context: &BuilderContext<Node>,
+        shared_caches: EngineSharedCaches<<Self::Components as NodeComponents<Node>>::Evm>,
+    ) -> eyre::Result<Self::Components> {
         let Self {
             pool_builder,
             payload_builder,
@@ -389,7 +398,12 @@ where
         let pool = pool_builder.build_pool(context, evm_config.clone()).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder_handle = payload_builder
-            .spawn_payload_builder_service(context, pool.clone(), evm_config.clone())
+            .spawn_payload_builder_service_with_caches(
+                context,
+                pool.clone(),
+                evm_config.clone(),
+                shared_caches,
+            )
             .await?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
@@ -434,6 +448,19 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
         self,
         ctx: &BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
+
+    /// Consumes the type and returns the created components with access to shared engine caches.
+    fn build_components_with_caches(
+        self,
+        ctx: &BuilderContext<Node>,
+        shared_caches: EngineSharedCaches<<Self::Components as NodeComponents<Node>>::Evm>,
+    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send
+    where
+        Self: Sized,
+    {
+        let _ = shared_caches;
+        self.build_components(ctx)
+    }
 }
 
 impl<Node, Net, F, Fut, Pool, EVM, Cons> NodeComponentsBuilder<Node> for F
