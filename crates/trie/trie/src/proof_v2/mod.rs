@@ -1781,12 +1781,12 @@ enum PopCachedBranchOutcome {
 mod tests {
     use super::*;
     use crate::{
-        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        hashed_cursor::HashedCursorFactory,
         proof::StorageProof as LegacyStorageProof,
         test_utils::TrieTestHarness,
-        trie_cursor::{depth_first, mock::MockTrieCursorFactory, TrieCursorFactory},
+        trie_cursor::{depth_first, TrieCursorFactory},
     };
-    use alloy_primitives::map::{B256Map, B256Set};
+    use alloy_primitives::map::B256Set;
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
@@ -2090,7 +2090,6 @@ mod tests {
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
 
-        let account_addr = B256::ZERO;
         let val = U256::from(42u64);
 
         // All storage keys share a common first nibble (0x6), so the branch is at path 0x6. The
@@ -2108,29 +2107,26 @@ mod tests {
         let hashes = vec![B256::repeat_byte(0xaa); hash_mask.count_ones() as usize];
         let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
 
-        let mut storage_nodes = BTreeMap::new();
-        storage_nodes.insert(Nibbles::from_nibbles([0x6]), branch);
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            [(Nibbles::from_nibbles([0x6]), branch)].into_iter().collect();
 
         // Hashed cursor has slots at children 0, 1, 5, 7 — but NOT child 3 (0x63).
         // This simulates the post-state overlay having deleted the slot at 0x63.
-        let post_state_storage: BTreeMap<B256, U256> =
-            [slot_60, slot_61, slot_65, slot_67].iter().map(|s| (*s, val)).collect();
-        let hashed_cursor_factory = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, post_state_storage)]),
+        let mut harness = TrieTestHarness::new(
+            [slot_60, slot_61, slot_65, slot_67].iter().map(|s| (*s, val)).collect(),
         );
-        let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, storage_nodes)]),
-        );
+        harness.set_trie_nodes(storage_nodes);
 
-        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor =
-            hashed_cursor_factory.hashed_storage_cursor(account_addr).unwrap();
+        let storage_trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_storage_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
         let mut calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
         let root_node = calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(harness.hashed_address())
             .expect("storage_root_node should succeed with masked empty child");
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
@@ -2150,7 +2146,6 @@ mod tests {
     fn test_node_with_masked_empty_child_lower_bound_past_branch() {
         reth_tracing::init_test_tracing();
 
-        let account_addr = B256::ZERO;
         let val = U256::from(42u64);
 
         // Leaf keys under 0x6 and one beyond (0x70) to keep the cursor alive after 0x6.
@@ -2167,28 +2162,25 @@ mod tests {
         let hashes = vec![B256::repeat_byte(0xaa); hash_mask.count_ones() as usize];
         let branch = BranchNodeCompact::new(state_mask, TrieMask::new(0), hash_mask, hashes, None);
 
-        let mut storage_nodes = BTreeMap::new();
-        storage_nodes.insert(Nibbles::from_nibbles([0x6]), branch);
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            [(Nibbles::from_nibbles([0x6]), branch)].into_iter().collect();
 
         // Hashed cursor: slots at 0x60, 0x61, 0x6f, 0x70 — but NOT 0x65.
-        let post_state_storage: BTreeMap<B256, U256> =
-            [slot_60, slot_61, slot_6f, slot_70].iter().map(|s| (*s, val)).collect();
-        let hashed_cursor_factory = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, post_state_storage)]),
+        let mut harness = TrieTestHarness::new(
+            [slot_60, slot_61, slot_6f, slot_70].iter().map(|s| (*s, val)).collect(),
         );
-        let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, storage_nodes)]),
-        );
+        harness.set_trie_nodes(storage_nodes);
 
-        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor =
-            hashed_cursor_factory.hashed_storage_cursor(account_addr).unwrap();
+        let storage_trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_storage_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
         let mut calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
         let root_node = calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(harness.hashed_address())
             .expect("storage_root_node should succeed when lower bound advances past branch");
 
         let root_hash = calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap();
@@ -2331,10 +2323,8 @@ mod tests {
         reth_tracing::init_test_tracing();
         use reth_trie_common::prefix_set::PrefixSetMut;
 
-        let account_addr = B256::ZERO;
         let val = U256::from(1u64);
 
-        // Construct hashed keys directly (no keccak — MockHashedCursorFactory uses these as-is).
         let key_a = B256::right_padding_from(&[0x20]); // root nibble 2, sub-nibble 0
         let key_b = B256::right_padding_from(&[0x21]); // root nibble 2, sub-nibble 1
         let key_c = B256::right_padding_from(&[0xb0]); // root nibble b
@@ -2360,16 +2350,8 @@ mod tests {
 
         // The hashed cursor contains key_b and key_c (the root's other child). key_a was removed
         // (not in cursor)
-        let updated_storage: BTreeMap<B256, U256> =
-            [(key_b, val), (key_c, val)].into_iter().collect();
-        let updated_hashed = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, updated_storage.clone())]),
-        );
-        let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, storage_nodes)]),
-        );
+        let mut harness = TrieTestHarness::new([(key_b, val), (key_c, val)].into_iter().collect());
+        harness.set_trie_nodes(storage_nodes);
 
         // Prefix set marks key_a as dirty (removed).
         let mut prefix_set_mut = PrefixSetMut::default();
@@ -2377,34 +2359,37 @@ mod tests {
         let prefix_set = prefix_set_mut.freeze();
 
         // Compute root with cached branches + prefix set — triggers sub-branch collapse.
-        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let storage_trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_storage_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
         let mut calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
                 .with_prefix_set(prefix_set);
         let root_node = calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(harness.hashed_address())
             .expect("storage_root_node should succeed after branch collapse");
         let root_with_collapse =
             calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
 
         // Compute reference root from scratch (no cached branches) using the full final state.
-        let final_storage: BTreeMap<B256, U256> =
-            [(key_b, val), (key_c, val)].into_iter().collect();
-        let empty_trie = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, BTreeMap::new())]),
-        );
-        let fresh_hashed = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, final_storage)]),
-        );
-        let storage_trie_cursor = empty_trie.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor = fresh_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_harness =
+            TrieTestHarness::new([(key_b, val), (key_c, val)].into_iter().collect());
+        fresh_harness.set_trie_nodes(BTreeMap::new());
+        let storage_trie_cursor = fresh_harness
+            .trie_cursor_factory()
+            .storage_trie_cursor(fresh_harness.hashed_address())
+            .unwrap();
+        let hashed_storage_cursor = fresh_harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(fresh_harness.hashed_address())
+            .unwrap();
         let mut fresh_calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
         let fresh_root_node = fresh_calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(fresh_harness.hashed_address())
             .expect("fresh storage_root_node should succeed");
         let expected_root = fresh_calculator
             .compute_root_hash(core::slice::from_ref(&fresh_root_node))
@@ -2428,7 +2413,6 @@ mod tests {
         reth_tracing::init_test_tracing();
         use reth_trie_common::prefix_set::PrefixSetMut;
 
-        let account_addr = B256::ZERO;
         let val = U256::from(1u64);
 
         // key_a at sub-nibble 4, key_b at sub-nibble 9 (under root nibble 2).
@@ -2453,16 +2437,8 @@ mod tests {
             [(Nibbles::from_nibbles([0x2]), cached_sub_branch)].into_iter().collect();
 
         // The hashed cursor contains key_a and key_c. key_b was removed (not in cursor)
-        let updated_storage: BTreeMap<B256, U256> =
-            [(key_a, val), (key_c, val)].into_iter().collect();
-        let updated_hashed = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, updated_storage.clone())]),
-        );
-        let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, storage_nodes)]),
-        );
+        let mut harness = TrieTestHarness::new([(key_a, val), (key_c, val)].into_iter().collect());
+        harness.set_trie_nodes(storage_nodes);
 
         // Prefix set marks key_b as dirty (removed).
         let mut prefix_set_mut = PrefixSetMut::default();
@@ -2470,34 +2446,37 @@ mod tests {
         let prefix_set = prefix_set_mut.freeze();
 
         // Compute root with cached branches + prefix set — triggers sub-branch collapse.
-        let storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor = updated_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let storage_trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_storage_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
         let mut calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor)
                 .with_prefix_set(prefix_set);
         let root_node = calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(harness.hashed_address())
             .expect("storage_root_node should succeed after branch collapse");
         let root_with_collapse =
             calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
 
         // Compute reference root from scratch (no cached branches) using the full final state.
-        let final_storage: BTreeMap<B256, U256> =
-            [(key_a, val), (key_c, val)].into_iter().collect();
-        let empty_trie = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, BTreeMap::new())]),
-        );
-        let fresh_hashed = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            B256Map::from_iter([(account_addr, final_storage)]),
-        );
-        let storage_trie_cursor = empty_trie.storage_trie_cursor(account_addr).unwrap();
-        let hashed_storage_cursor = fresh_hashed.hashed_storage_cursor(account_addr).unwrap();
+        let mut fresh_harness =
+            TrieTestHarness::new([(key_a, val), (key_c, val)].into_iter().collect());
+        fresh_harness.set_trie_nodes(BTreeMap::new());
+        let storage_trie_cursor = fresh_harness
+            .trie_cursor_factory()
+            .storage_trie_cursor(fresh_harness.hashed_address())
+            .unwrap();
+        let hashed_storage_cursor = fresh_harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(fresh_harness.hashed_address())
+            .unwrap();
         let mut fresh_calculator =
             StorageProofCalculator::new_storage(storage_trie_cursor, hashed_storage_cursor);
         let fresh_root_node = fresh_calculator
-            .storage_root_node(account_addr)
+            .storage_root_node(fresh_harness.hashed_address())
             .expect("fresh storage_root_node should succeed");
         let expected_root = fresh_calculator
             .compute_root_hash(core::slice::from_ref(&fresh_root_node))
