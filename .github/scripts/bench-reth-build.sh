@@ -26,11 +26,16 @@ COMMIT="$3"
 # and frame pointers for accurate stack traces.
 EXTRA_FEATURES=""
 EXTRA_RUSTFLAGS=""
-TRACY_SUFFIX=""
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   EXTRA_FEATURES="tracy,tracy-client/ondemand"
   EXTRA_RUSTFLAGS=" -C force-frame-pointers=yes"
-  TRACY_SUFFIX="-tracy"
+fi
+
+# Cache suffix: hash of features+rustflags so different build configs get separate cache entries
+if [ -n "$EXTRA_FEATURES" ] || [ -n "$EXTRA_RUSTFLAGS" ]; then
+  BUILD_SUFFIX="-$(echo "${EXTRA_FEATURES}${EXTRA_RUSTFLAGS}" | sha256sum | cut -c1-12)"
+else
+  BUILD_SUFFIX=""
 fi
 
 # Verify a cached reth binary was built from the expected commit.
@@ -53,7 +58,7 @@ verify_binary() {
 
 case "$MODE" in
   baseline|main)
-    BUCKET="minio/reth-binaries/${COMMIT}${TRACY_SUFFIX}"
+    BUCKET="minio/reth-binaries/${COMMIT}${BUILD_SUFFIX}"
     mkdir -p "${SOURCE_DIR}/target/profiling"
 
     CACHE_VALID=false
@@ -86,7 +91,7 @@ case "$MODE" in
 
   feature|branch)
     BRANCH_SHA="${4:-$COMMIT}"
-    BUCKET="minio/reth-binaries/${BRANCH_SHA}${TRACY_SUFFIX}"
+    BUCKET="minio/reth-binaries/${BRANCH_SHA}${BUILD_SUFFIX}"
 
     CACHE_VALID=false
     if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
