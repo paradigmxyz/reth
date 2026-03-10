@@ -56,7 +56,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// receipt root and logs bloom instead of computing them from the receipts.
     ///
     ///  If `allow_bal_check` is enabled, we calculate the bal hash and match with the header bal hash. We
-    /// don't do by default because for payload validation, we do the same check before this check
+    /// don't do by default because for payload validation, we do the same bal check
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
