@@ -264,7 +264,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an immutable reference to the inner type if this an eth68 announcement.
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -272,7 +272,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -280,7 +280,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth66 announcement.
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
@@ -288,7 +288,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth68 announcement.
+    /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -296,7 +296,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth66 announcement.
+    /// Returns the inner type if this is an eth66 announcement.
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),

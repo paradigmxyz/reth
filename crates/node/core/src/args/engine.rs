@@ -383,6 +383,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
 
+    /// Enable the arena-based sparse trie implementation instead of the default hash-map-based
+    /// one.
+    #[arg(long = "engine.enable-arena-sparse-trie", default_value_t = false)]
+    pub enable_arena_sparse_trie: bool,
+
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
@@ -397,6 +402,19 @@ pub struct EngineArgs {
         default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
+
+    /// Add random jitter before each proof computation (trie-debug only).
+    /// Each proof worker sleeps for a random duration up to this value before
+    /// starting work. Useful for stress-testing timing-sensitive proof logic.
+    ///
+    /// --engine.proof-jitter 100ms
+    /// --engine.proof-jitter 1s
+    #[cfg(feature = "trie-debug")]
+    #[arg(
+        long = "engine.proof-jitter",
+        value_parser = humantime::parse_duration,
+    )]
+    pub proof_jitter: Option<Duration>,
 }
 
 #[allow(deprecated)]
@@ -456,9 +474,12 @@ impl Default for EngineArgs {
             sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 }
@@ -466,7 +487,7 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        TreeConfig::default()
+        let config = TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -488,7 +509,11 @@ impl EngineArgs {
             .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
-            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_enable_arena_sparse_trie(self.enable_arena_sparse_trie)
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()));
+        #[cfg(feature = "trie-debug")]
+        let config = config.with_proof_jitter(self.proof_jitter);
+        config
     }
 }
 
@@ -542,7 +567,10 @@ mod tests {
             sparse_trie_max_hot_accounts: 500,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
+            enable_arena_sparse_trie: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -579,6 +607,7 @@ mod tests {
             "--engine.sparse-trie-max-hot-accounts",
             "500",
             "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.enable-arena-sparse-trie",
             "--engine.state-root-task-timeout",
             "2s",
         ])
