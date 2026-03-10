@@ -406,25 +406,14 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
-        // Destructure to allow simultaneous mutable borrows of disjoint fields, so we can
-        // hoist per-address outer-map lookups out of the per-slot inner loop.
-        let Self {
-            trie,
-            new_storage_updates,
-            storage_updates,
-            new_account_updates,
-            pending_account_updates,
-            ..
-        } = self;
-
         for (address, storage) in hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
-                let new_updates = new_storage_updates.entry(address).or_default();
-                let mut existing_updates = storage_updates.get_mut(&address);
+                let new_updates = self.new_storage_updates.entry(address).or_default();
+                let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (slot, value) in storage.storage {
-                    trie.record_slot_touch(address, slot);
+                    self.trie.record_slot_touch(address, slot);
 
                     let encoded = if value.is_zero() {
                         Vec::new()
@@ -442,25 +431,25 @@ where
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
             // trie for storage root update.
-            new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
 
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
-            pending_account_updates.entry(address).or_insert(None);
+            self.pending_account_updates.entry(address).or_insert(None);
         }
 
         for (address, account) in hashed_state_update.accounts {
-            trie.record_account_touch(address);
+            self.trie.record_account_touch(address);
 
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
             // is already tracked in the trie and can be easily fetched again.
-            new_account_updates.insert(address, LeafUpdate::Touched);
+            self.new_account_updates.insert(address, LeafUpdate::Touched);
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            pending_account_updates.insert(address, Some(account));
+            self.pending_account_updates.insert(address, Some(account));
         }
     }
 
