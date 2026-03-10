@@ -22,16 +22,8 @@
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
-use reth_trie::{
-    hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
-    prefix_set::PrefixSet,
-    proof_v2::StorageProofCalculator,
-    trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
-    StorageRoot,
-};
-use reth_trie_common::{
-    updates::StorageTrieUpdates, Nibbles, ProofTrieNodeV2, ProofV2Target, TrieNodeV2,
-};
+use reth_trie::test_utils::TrieTestHarness;
+use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -51,122 +43,36 @@ mod take_updates;
 mod update_leaves;
 mod wipe_clear;
 
-/// A fixed hashed address used by the harness for all storage trie operations.
-const HASHED_ADDRESS: B256 = B256::ZERO;
-
 // ---------------------------------------------------------------------------
 // Test harness
 // ---------------------------------------------------------------------------
 
-/// Generic test harness for `SparseTrie` tests.
+/// Test harness for `SparseTrie` tests.
 ///
-/// Manages a base storage dataset, computes expected roots via `StorageRoot`, and generates
-/// V2 proofs via `StorageProofCalculator` using mock cursors.
+/// Wraps [`TrieTestHarness`] and adds `SparseTrie`-specific helpers for reveal-update loops,
+/// trie initialization, and leaf update construction.
 struct SuiteTestHarness {
-    /// The base storage dataset (hashed slot → value). Zero-valued entries are absent.
-    storage: BTreeMap<B256, U256>,
-    /// The expected storage root, calculated by `StorageRoot`.
-    original_root: B256,
-    /// The starting storage trie updates, used for minimization.
-    storage_trie_updates: StorageTrieUpdates,
-    /// Mock factory for trie cursors.
-    trie_cursor_factory: MockTrieCursorFactory,
-    /// Mock factory for hashed cursors.
-    hashed_cursor_factory: MockHashedCursorFactory,
+    /// The inner general-purpose harness.
+    inner: TrieTestHarness,
+}
+
+impl std::ops::Deref for SuiteTestHarness {
+    type Target = TrieTestHarness;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for SuiteTestHarness {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl SuiteTestHarness {
     /// Creates a new test harness from a map of hashed storage slots to values.
     fn new(storage: BTreeMap<B256, U256>) -> Self {
-        let mut harness = Self {
-            storage: BTreeMap::new(),
-            original_root: B256::ZERO,
-            storage_trie_updates: StorageTrieUpdates::default(),
-            trie_cursor_factory: MockTrieCursorFactory::new(BTreeMap::new(), Default::default()),
-            hashed_cursor_factory: MockHashedCursorFactory::new(
-                BTreeMap::new(),
-                Default::default(),
-            ),
-        };
-        harness.apply_changeset(storage);
-        harness
-    }
-
-    /// Merges `changeset` into the base storage (zero values remove entries) and
-    /// recomputes the storage root, trie updates, and cursor factories.
-    fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
-        for (k, v) in changeset {
-            if v == U256::ZERO {
-                self.storage.remove(&k);
-            } else {
-                self.storage.insert(k, v);
-            }
-        }
-
-        self.hashed_cursor_factory = MockHashedCursorFactory::new(
-            BTreeMap::new(),
-            once((HASHED_ADDRESS, self.storage.clone())).collect(),
-        );
-
-        let empty_trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            once((HASHED_ADDRESS, BTreeMap::new())).collect(),
-        );
-
-        let (original_root, _, storage_trie_updates) = StorageRoot::new_hashed(
-            empty_trie_cursor_factory,
-            self.hashed_cursor_factory.clone(),
-            HASHED_ADDRESS,
-            PrefixSet::default(),
-            #[cfg(feature = "metrics")]
-            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-        )
-        .root_with_updates()
-        .expect("StorageRoot should succeed");
-
-        self.trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::new(),
-            once((
-                HASHED_ADDRESS,
-                storage_trie_updates.storage_nodes.iter().map(|(k, v)| (*k, v.clone())).collect(),
-            ))
-            .collect(),
-        );
-
-        self.original_root = original_root;
-        self.storage_trie_updates = storage_trie_updates;
-    }
-
-    /// Obtains the root node of the storage trie via `StorageProofCalculator`.
-    fn root_node(&self) -> ProofTrieNodeV2 {
-        let trie_cursor = self
-            .trie_cursor_factory
-            .storage_trie_cursor(HASHED_ADDRESS)
-            .expect("storage trie cursor should succeed");
-        let hashed_cursor = self
-            .hashed_cursor_factory
-            .hashed_storage_cursor(HASHED_ADDRESS)
-            .expect("hashed storage cursor should succeed");
-
-        let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-        proof_calculator
-            .storage_root_node(HASHED_ADDRESS)
-            .expect("storage_root_node should succeed")
-    }
-
-    /// Generates storage proofs for the given targets using `StorageProofCalculator`.
-    fn proof_v2(&self, targets: &mut [ProofV2Target]) -> Vec<ProofTrieNodeV2> {
-        let trie_cursor = self
-            .trie_cursor_factory
-            .storage_trie_cursor(HASHED_ADDRESS)
-            .expect("storage trie cursor should succeed");
-        let hashed_cursor = self
-            .hashed_cursor_factory
-            .hashed_storage_cursor(HASHED_ADDRESS)
-            .expect("hashed storage cursor should succeed");
-
-        let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-        proof_calculator.storage_proof(HASHED_ADDRESS, targets).expect("proof_v2 should succeed")
+        Self { inner: TrieTestHarness::new(storage) }
     }
 
     /// Builds leaf updates from a changeset. Non-zero values become inserts/modifies,
@@ -204,7 +110,7 @@ impl SuiteTestHarness {
                 break;
             }
 
-            let mut proof_nodes = self.proof_v2(&mut targets);
+            let (mut proof_nodes, _) = self.proof_v2(&mut targets);
             trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
         }
     }
@@ -224,7 +130,7 @@ impl SuiteTestHarness {
         if !target_keys.is_empty() {
             let mut targets: Vec<ProofV2Target> =
                 target_keys.iter().map(|k| ProofV2Target::new(*k)).collect();
-            let mut proof_nodes = self.proof_v2(&mut targets);
+            let (mut proof_nodes, _) = self.proof_v2(&mut targets);
             trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
         }
 
@@ -233,7 +139,7 @@ impl SuiteTestHarness {
 
     /// Initializes a trie and reveals proofs for all keys in the base storage.
     fn init_trie_fully_revealed<T: SparseTrie + Default>(&self, retain_updates: bool) -> T {
-        let keys: Vec<B256> = self.storage.keys().copied().collect();
+        let keys: Vec<B256> = self.storage().keys().copied().collect();
         self.init_trie_with_targets(&keys, retain_updates)
     }
 }

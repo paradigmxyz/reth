@@ -16,7 +16,7 @@ pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true);
     let root = trie.root();
-    assert_eq!(root, harness.original_root);
+    assert_eq!(root, harness.original_root());
 }
 
 /// Single-leaf root initializes correctly.
@@ -31,7 +31,7 @@ pub(super) fn test_set_root_with_leaf_node<T: SparseTrie + Default>() {
     let mut trie = T::default();
     trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
     let root = trie.root();
-    assert_eq!(root, harness.original_root);
+    assert_eq!(root, harness.original_root());
 }
 
 /// Extension root (shared prefix) initializes correctly.
@@ -51,7 +51,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true);
     let root = trie.root();
-    assert_eq!(root, harness.original_root);
+    assert_eq!(root, harness.original_root());
 }
 
 /// `retain_updates=true` enables update tracking.
