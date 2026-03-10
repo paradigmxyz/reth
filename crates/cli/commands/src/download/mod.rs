@@ -218,22 +218,30 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
     with_state_history: bool,
 
+    /// Include transaction sender static files. Requires `--with-txs`.
+    #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
+    with_senders: bool,
+
+    /// Include RocksDB index files.
+    #[arg(long, conflicts_with_all = ["minimal", "full", "archive", "without_rocksdb"])]
+    with_rocksdb: bool,
+
     /// Download all available components (archive node, no pruning).
-    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "minimal", "full"])]
+    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "minimal", "full"])]
     archive: bool,
 
     /// Download the minimal component set (same default as --non-interactive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "archive", "full"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "full"])]
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
     ///
     /// This affects `--archive`/`--all` and TUI archive preset (`a`).
-    #[arg(long, conflicts_with = "url")]
+    #[arg(long, conflicts_with_all = ["url", "with_rocksdb"])]
     without_rocksdb: bool,
 
     /// Skip interactive component selection. Downloads the minimal set
@@ -504,7 +512,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             });
         }
 
-        let has_explicit_flags = self.with_txs || self.with_receipts || self.with_state_history;
+        let has_explicit_flags = self.with_txs ||
+            self.with_receipts ||
+            self.with_state_history ||
+            self.with_senders ||
+            self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
@@ -530,6 +542,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     selections
                         .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
                 }
+            }
+            if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
+                selections
+                    .insert(SnapshotComponentType::TransactionSenders, ComponentSelection::All);
+            }
+            if self.with_rocksdb && available(SnapshotComponentType::RocksdbIndices) {
+                selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
             }
             return Ok(ResolvedComponents { selections, preset: None });
         }
