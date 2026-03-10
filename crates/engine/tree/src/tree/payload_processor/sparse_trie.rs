@@ -384,11 +384,13 @@ where
         }
 
         for (address, slots) in targets.storage_targets {
-            // Look up outer map once per address instead of once per slot.
-            let new_updates = self.new_storage_updates.entry(address).or_default();
-            for slot in slots {
-                // Only touch storages that are not yet present in the updates set.
-                new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+            if !slots.is_empty() {
+                // Look up outer map once per address instead of once per slot.
+                let new_updates = self.new_storage_updates.entry(address).or_default();
+                for slot in slots {
+                    // Only touch storages that are not yet present in the updates set.
+                    new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                }
             }
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
@@ -416,23 +418,25 @@ where
         } = self;
 
         for (address, storage) in hashed_state_update.storages {
-            // Look up outer maps once per address instead of once per slot.
-            let new_updates = new_storage_updates.entry(address).or_default();
-            let mut existing_updates = storage_updates.get_mut(&address);
+            if !storage.storage.is_empty() {
+                // Look up outer maps once per address instead of once per slot.
+                let new_updates = new_storage_updates.entry(address).or_default();
+                let mut existing_updates = storage_updates.get_mut(&address);
 
-            for (slot, value) in storage.storage {
-                trie.record_slot_touch(address, slot);
+                for (slot, value) in storage.storage {
+                    trie.record_slot_touch(address, slot);
 
-                let encoded = if value.is_zero() {
-                    Vec::new()
-                } else {
-                    alloy_rlp::encode_fixed_size(&value).to_vec()
-                };
-                new_updates.insert(slot, LeafUpdate::Changed(encoded));
+                    let encoded = if value.is_zero() {
+                        Vec::new()
+                    } else {
+                        alloy_rlp::encode_fixed_size(&value).to_vec()
+                    };
+                    new_updates.insert(slot, LeafUpdate::Changed(encoded));
 
-                // Remove an existing storage update if it exists.
-                if let Some(ref mut existing) = existing_updates {
-                    existing.remove(&slot);
+                    // Remove an existing storage update if it exists.
+                    if let Some(ref mut existing) = existing_updates {
+                        existing.remove(&slot);
+                    }
                 }
             }
 
