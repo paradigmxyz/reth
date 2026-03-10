@@ -2083,9 +2083,9 @@ mod tests {
     /// Tests that `root_node` handles a cached branch with a `state_mask` bit set for a child
     /// that has no corresponding `hash_mask` bit and no leaf data in the hashed cursor.
     ///
-    /// This scenario occurs when `MaskedTrieCursorFactory` clears a child's `hash_mask` bit
-    /// (because the child's path is in the prefix set) but leaves the `state_mask` bit intact,
-    /// while the `HashedPostStateCursorFactory` overlay has deleted the leaf data for that child.
+    /// This scenario occurs when a child's `hash_mask` bit is cleared (because the child's path
+    /// is in the prefix set) but the `state_mask` bit is left intact, while the
+    /// `HashedPostStateCursorFactory` overlay has deleted the leaf data for that child.
     #[test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
@@ -2100,8 +2100,8 @@ mod tests {
         let slot_67 = B256::right_padding_from(&[0x67]);
 
         // Construct a branch node at path 0x6 with state_mask bits 0,1,3,5,7.
-        // hash_mask has bits 0,1,5,7 (NOT 3) — simulating MaskedTrieCursorFactory clearing
-        // nibble 3's hash because it's in the prefix set. Hashes are dummy values.
+        // hash_mask has bits 0,1,5,7 (NOT 3) — nibble 3's hash is cleared because it's in the
+        // prefix set. Hashes are dummy values.
         let state_mask = TrieMask::new(0b10101011); // bits 0,1,3,5,7
         let hash_mask = TrieMask::new(0b10100011); // bits 0,1,5,7 (NOT 3)
         let hashes = vec![B256::repeat_byte(0xaa); hash_mask.count_ones() as usize];
@@ -2137,7 +2137,7 @@ mod tests {
     /// entirely past a cached branch that still has unprocessed children in its `state_mask`.
     ///
     /// Branch at `0x6` has `state_mask` bits 0,1,5,f where nibble 5 has its `hash_mask`
-    /// cleared (simulating `MaskedTrieCursorFactory`) and no leaf data. The last child (nibble f)
+    /// cleared and no leaf data. The last child (nibble f)
     /// causes `calculate_key_range` to be called with range `(0x6f, Some(0x7))`. After that range,
     /// the hashed cursor still has keys (at `0x70...`), so `proof_subtrie` does not break and
     /// re-enters `next_uncached_key_range` with `uncalculated_lower_bound = Some(0x7)`.
