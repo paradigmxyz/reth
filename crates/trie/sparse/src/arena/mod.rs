@@ -604,6 +604,31 @@ impl ArenaParallelSparseTrie {
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
 
+    /// If the cursor head is a branch, wraps any revealed children that sit at
+    /// the subtrie boundary depth (`UPPER_TRIE_MAX_DEPTH`). This is needed after
+    /// structural changes like root-level splits or subtrie unwraps that can place
+    /// non-subtrie nodes at the boundary depth.
+    fn maybe_wrap_branch_children(&mut self, cursor: &ArenaCursor) {
+        let head = cursor.head().expect("cursor is non-empty");
+        let head_idx = head.index;
+        let head_path = head.path;
+
+        let ArenaSparseNode::Branch(b) = &self.upper_arena[head_idx] else { return };
+        let short_key = b.short_key;
+        let state_mask = b.state_mask;
+
+        for (idx, nibble) in BranchChildIter::new(state_mask) {
+            let child_idx = match &self.upper_arena[head_idx].branch_ref().children[idx] {
+                ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
+                ArenaSparseNodeBranchChild::Blinded(_) => continue,
+            };
+            let mut child_path = head_path;
+            child_path.extend(&short_key);
+            child_path.push_unchecked(nibble);
+            self.maybe_wrap_in_subtrie(child_idx, &child_path);
+        }
+    }
+
     /// Checks whether the subtrie at the cursor head has become empty after updates.
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
     /// child slot is removed from the parent branch entirely, the subtrie is recycled, and
@@ -796,6 +821,11 @@ impl ArenaParallelSparseTrie {
                 );
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
+
+                // The migrated subtrie root may be a branch whose children now live in
+                // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
+                // such children as subtries.
+                self.maybe_wrap_branch_children(cursor);
             }
             return;
         }
@@ -2466,9 +2496,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             head_idx,
                             head_path.last(),
                         );
-                        let ArenaSparseNode::Subtrie(s) = &removed else {
-                            unreachable!()
-                        };
+                        let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
                         pruned += s.num_leaves as usize;
                         self.recycle_subtrie(removed);
                         continue;
@@ -2647,9 +2675,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             v,
                             find_result,
                         );
-                        if matches!(result, UpsertLeafResult::NewChild) {
-                            let child_entry = cursor.head().expect("cursor is at the new child");
-                            self.maybe_wrap_in_subtrie(child_entry.index, &child_entry.path);
+                        match result {
+                            UpsertLeafResult::NewChild => {
+                                let head = cursor.head().expect("cursor is non-empty");
+                                if Self::should_be_subtrie(head.path.len()) {
+                                    // The new child itself sits at the subtrie
+                                    // boundary — wrap it directly.
+                                    self.maybe_wrap_in_subtrie(head.index, &head.path);
+                                } else {
+                                    // The new child is above the boundary (e.g. a
+                                    // split at depth 1 creates children at depth 2).
+                                    // Wrap any of its children that land there.
+                                    self.maybe_wrap_branch_children(&cursor);
+                                }
+                            }
+                            UpsertLeafResult::NewLeaf => {
+                                // A root-level split may create children at the
+                                // subtrie boundary depth. Wrap them.
+                                self.maybe_wrap_branch_children(&cursor);
+                            }
+                            UpsertLeafResult::Updated => {}
                         }
                     }
                     LeafUpdate::Changed(_) => {
@@ -2662,11 +2707,28 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             find_result,
                             &mut self.buffers.updates,
                         );
-                        if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
-                            proof_required_fn(proof_key, min_len);
-                            let update =
-                                mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
-                            updates.insert(key, update);
+                        match result {
+                            RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
+                                proof_required_fn(proof_key, min_len);
+                                let update =
+                                    mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
+                                updates.insert(key, update);
+                            }
+                            RemoveLeafResult::Removed => {
+                                // remove_leaf may have called collapse_branch, which
+                                // can leave structural invariants violated:
+                                // 1. A branch with 0-1 children that needs further collapse or
+                                //    removal.
+                                // 2. A Subtrie at a depth shallower than UPPER_TRIE_MAX_DEPTH that
+                                //    needs unwrapping.
+                                // 3. A non-Subtrie node at UPPER_TRIE_MAX_DEPTH that needs
+                                //    wrapping.
+                                self.maybe_collapse_or_remove_branch(&mut cursor);
+                                let head =
+                                    cursor.head().expect("cursor always has root after collapse");
+                                self.maybe_wrap_in_subtrie(head.index, &head.path);
+                            }
+                            RemoveLeafResult::NotFound => {}
                         }
                     }
                     LeafUpdate::Touched => {}
@@ -2681,6 +2743,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            #[cfg(debug_assertions)]
+            self.debug_assert_subtrie_structure();
             return Ok(());
         }
 
