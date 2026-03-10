@@ -199,9 +199,11 @@ publish_binary() {
     for out in "target/$TARGET/$PROFILE_DIR" "target/$PROFILE_DIR"; do
         local destination="$out/reth"
         mkdir -p "$out"
-        if [ "$source_bin" != "$destination" ]; then
-            cp "$source_bin" "$destination"
+        # Skip copying when source and destination resolve to the same inode.
+        if [ -e "$destination" ] && [ "$source_bin" -ef "$destination" ]; then
+            continue
         fi
+        cp "$source_bin" "$destination"
     done
 }
 
