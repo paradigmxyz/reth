@@ -27,6 +27,7 @@ use std::{
 };
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::debug;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -93,56 +94,64 @@ where
 
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
-            BlockHashOrNumber::Number(num) => {
-                let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers
-                };
-                hash.into()
-            }
+            BlockHashOrNumber::Number(num) => match self.client.block_hash(num) {
+                Ok(Some(hash)) => hash.into(),
+                Ok(None) => return headers,
+                Err(err) => {
+                    self.metrics.eth_req_handler_provider_errors_total.increment(1);
+                    debug!(target: "net::eth", %err, %num, "Failed to fetch block hash for p2p request");
+                    return headers;
+                }
+            },
         };
 
         let skip = skip as u64;
         let mut total_bytes = 0;
 
         for _ in 0..limit {
-            if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
-                let number = header.number();
-                let parent_hash = header.parent_hash();
-
-                total_bytes += header.length();
-                headers.push(header);
-
-                if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+            let header = match self.client.header_by_hash_or_number(block) {
+                Ok(Some(header)) => header,
+                Ok(None) => break,
+                Err(err) => {
+                    self.metrics.eth_req_handler_provider_errors_total.increment(1);
+                    debug!(target: "net::eth", %err, ?block, "Failed to fetch header for p2p request");
+                    break;
                 }
+            };
 
-                match direction {
-                    HeadersDirection::Rising => {
-                        if let Some(next) = number.checked_add(1).and_then(|n| n.checked_add(skip))
+            let number = header.number();
+            let parent_hash = header.parent_hash();
+
+            total_bytes += header.length();
+            headers.push(header);
+
+            if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
+                break
+            }
+
+            match direction {
+                HeadersDirection::Rising => {
+                    if let Some(next) = number.checked_add(1).and_then(|n| n.checked_add(skip)) {
+                        block = next.into()
+                    } else {
+                        break
+                    }
+                }
+                HeadersDirection::Falling => {
+                    if skip > 0 {
+                        // prevent under flows for block.number == 0 and `block.number - skip <
+                        // 0`
+                        if let Some(next) =
+                            number.checked_sub(1).and_then(|num| num.checked_sub(skip))
                         {
                             block = next.into()
                         } else {
                             break
                         }
-                    }
-                    HeadersDirection::Falling => {
-                        if skip > 0 {
-                            // prevent under flows for block.number == 0 and `block.number - skip <
-                            // 0`
-                            if let Some(next) =
-                                number.checked_sub(1).and_then(|num| num.checked_sub(skip))
-                            {
-                                block = next.into()
-                            } else {
-                                break
-                            }
-                        } else {
-                            block = parent_hash.into()
-                        }
+                    } else {
+                        block = parent_hash.into()
                     }
                 }
-            } else {
-                break
             }
         }
 
@@ -172,15 +181,21 @@ where
         let mut total_bytes = 0;
 
         for hash in request {
-            if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let body = block.into_body();
-                total_bytes += body.length();
-                bodies.push(body);
-
-                if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+            let block = match self.client.block_by_hash(hash) {
+                Ok(Some(block)) => block,
+                Ok(None) => break,
+                Err(err) => {
+                    self.metrics.eth_req_handler_provider_errors_total.increment(1);
+                    debug!(target: "net::eth", %err, %hash, "Failed to fetch block for p2p request");
+                    break;
                 }
-            } else {
+            };
+
+            let body = block.into_body();
+            total_bytes += body.length();
+            bodies.push(body);
+
+            if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                 break
             }
         }
@@ -241,10 +256,17 @@ where
                 break
             }
 
-            let Some(mut block_receipts) =
-                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
-            else {
-                break
+            let mut block_receipts = match self
+                .client
+                .receipts_by_block(BlockHashOrNumber::Hash(hash))
+            {
+                Ok(Some(receipts)) => receipts,
+                Ok(None) => break,
+                Err(err) => {
+                    self.metrics.eth_req_handler_provider_errors_total.increment(1);
+                    debug!(target: "net::eth", %err, %hash, "Failed to fetch receipts for p2p request");
+                    break;
+                }
             };
 
             if idx == 0 && first_block_receipt_index > 0 {
@@ -305,17 +327,24 @@ where
         let mut total_bytes = 0;
 
         for hash in request {
-            if let Some(receipts_by_block) =
-                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
+            let receipts_by_block = match self
+                .client
+                .receipts_by_block(BlockHashOrNumber::Hash(hash))
             {
-                let transformed_receipts = transform_fn(receipts_by_block);
-                total_bytes += transformed_receipts.length();
-                receipts.push(transformed_receipts);
-
-                if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                Ok(Some(receipts)) => receipts,
+                Ok(None) => break,
+                Err(err) => {
+                    self.metrics.eth_req_handler_provider_errors_total.increment(1);
+                    debug!(target: "net::eth", %err, %hash, "Failed to fetch receipts for p2p request");
+                    break;
                 }
-            } else {
+            };
+
+            let transformed_receipts = transform_fn(receipts_by_block);
+            total_bytes += transformed_receipts.length();
+            receipts.push(transformed_receipts);
+
+            if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                 break
             }
         }
