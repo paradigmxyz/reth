@@ -217,10 +217,14 @@ where
             }
         }
 
-        // Build account leaf updates.
-        let mut account_updates: B256Map<LeafUpdate> = B256Map::default();
+        // Build account leaf updates, split into removals and upserts (same reasoning
+        // as for storage updates above).
+        let mut account_removals: B256Map<LeafUpdate> = B256Map::default();
+        let mut account_upserts: B256Map<LeafUpdate> = B256Map::default();
         for &hashed_address in state.accounts.keys().chain(state.storages.keys()) {
-            if account_updates.contains_key(&hashed_address) {
+            if account_removals.contains_key(&hashed_address) ||
+                account_upserts.contains_key(&hashed_address)
+            {
                 continue;
             }
 
@@ -238,35 +242,39 @@ where
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-                account_updates.insert(hashed_address, LeafUpdate::Changed(vec![]));
+                account_removals.insert(hashed_address, LeafUpdate::Changed(vec![]));
             } else {
                 let mut rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
                 account.into_trie_account(storage_root).encode(&mut rlp);
-                account_updates.insert(hashed_address, LeafUpdate::Changed(rlp));
+                account_upserts.insert(hashed_address, LeafUpdate::Changed(rlp));
             }
         }
 
-        // Apply account updates, fetching additional proofs as needed.
-        loop {
-            let mut targets = MultiProofTargetsV2::default();
+        // Apply account removals first, then upserts, fetching additional proofs as needed.
+        for account_updates in [&mut account_removals, &mut account_upserts] {
+            loop {
+                let mut targets = MultiProofTargetsV2::default();
 
-            sparse_trie
-                .trie_mut()
-                .update_leaves(&mut account_updates, |key, min_len| {
-                    targets.account_targets.push(ProofV2Target::new(key).with_min_len(min_len));
-                })
-                .map_err(SparseStateTrieErrorKind::from)?;
+                sparse_trie
+                    .trie_mut()
+                    .update_leaves(account_updates, |key, min_len| {
+                        targets.account_targets.push(ProofV2Target::new(key).with_min_len(min_len));
+                    })
+                    .map_err(SparseStateTrieErrorKind::from)?;
 
-            if targets.is_empty() {
-                break;
+                if targets.is_empty() {
+                    break;
+                }
+
+                let multiproof = Proof::new(
+                    self.trie_cursor_factory.clone(),
+                    self.hashed_cursor_factory.clone(),
+                )
+                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .multiproof_v2(targets)?;
+                self.record_multiproof_nodes(&multiproof);
+                sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
-
-            let multiproof =
-                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                    .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .multiproof_v2(targets)?;
-            self.record_multiproof_nodes(&multiproof);
-            sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
         }
 
         Ok(self.witness)
