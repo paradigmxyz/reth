@@ -1,16 +1,17 @@
-//! Precompile cache backed by [`schnellru::LruMap`] (LRU by length).
+//! Precompile cache backed by [`fixed_cache::Cache`] (lock-free, fixed-size).
 
-use alloy_primitives::map::FbBuildHasher;
-use parking_lot::Mutex;
+use alloy_primitives::{map::FbBuildHasher};
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
-use revm_primitives::Address;
-use schnellru::{ByLength, LruMap};
+use revm_primitives::{map::DefaultHashBuilder, Address};
 use std::{fmt, hash::Hash, sync::Arc};
 
-/// Default max cache size for [`PrecompileCache`].
-const MAX_CACHE_SIZE: u32 = 10_000;
+/// Default number of cache entries per precompile.
+const DEFAULT_CACHE_ENTRIES: usize = 1 << 14; // 16384
+
+/// Fixed-size cache type used for precompile results.
+type PrecompileFixedCache<S> = fixed_cache::Cache<Vec<u8>, CacheEntry<S>, DefaultHashBuilder>;
 
 /// Stores caches for each precompile.
 #[derive(Clone, Default)]
@@ -45,15 +46,12 @@ where
     }
 }
 
-/// Inner LRU map type used by [`PrecompileCache`].
-type PrecompileLruMap<S> = LruMap<Vec<u8>, CacheEntry<S>, ByLength>;
-
 /// Cache for precompiles, for each input stores the result.
 ///
-/// Internally backed by [`schnellru::LruMap`] behind an `Arc<Mutex<..>>` so that multiple
+/// Internally backed by [`fixed_cache::Cache`] behind an `Arc` so that multiple
 /// [`CachedPrecompile`] instances for the same address share state.
 #[derive(Clone)]
-pub struct PrecompileCache<S>(Arc<Mutex<PrecompileLruMap<S>>>)
+pub struct PrecompileCache<S>(Arc<PrecompileFixedCache<S>>)
 where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -62,8 +60,7 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let map = self.0.lock();
-        f.debug_struct("PrecompileCache").field("len", &map.len()).finish()
+        f.debug_struct("PrecompileCache").finish()
     }
 }
 
@@ -72,7 +69,7 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(LruMap::new(ByLength::new(MAX_CACHE_SIZE)))))
+        Self(Arc::new(PrecompileFixedCache::new(DEFAULT_CACHE_ENTRIES, Default::default())))
     }
 }
 
@@ -81,14 +78,12 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.lock().get(input).filter(|e| e.spec == spec).cloned()
+        self.0.get(input).filter(|e| e.spec == spec)
     }
 
-    /// Inserts the given key and value into the cache, returning the new cache size.
-    fn insert(&self, input: &[u8], value: CacheEntry<S>) -> usize {
-        let mut map = self.0.lock();
-        map.insert(input.to_vec(), value);
-        map.len()
+    /// Inserts the given key and value into the cache.
+    fn insert(&self, input: &[u8], value: CacheEntry<S>) {
+        self.0.insert(input.to_vec(), value);
     }
 }
 
@@ -166,12 +161,6 @@ where
         }
     }
 
-    fn set_precompile_cache_size_metric(&self, to: f64) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_size.set(to);
-        }
-    }
-
     fn increment_by_one_precompile_errors(&self) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_errors.increment(1);
@@ -200,11 +189,10 @@ where
 
         match &result {
             Ok(output) => {
-                let size = self.cache.insert(
+                self.cache.insert(
                     calldata,
                     CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
                 );
-                self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
             }
             _ => {
@@ -224,9 +212,6 @@ pub struct CachedPrecompileMetrics {
 
     /// Precompile cache misses
     pub precompile_cache_misses: metrics::Counter,
-
-    /// Precompile cache size. Uses the LRU cache length as the size metric.
-    pub precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
     pub precompile_errors: metrics::Counter,
