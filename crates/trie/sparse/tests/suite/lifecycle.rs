@@ -487,8 +487,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
 
     // Step 1: Touched on a key in group B's blinded subtrie → callback fires.
     let target_key = group_b_keys[0];
-    let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((target_key, LeafUpdate::Touched)).collect();
+    let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
@@ -505,8 +504,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
 
     // Step 3: Replace Touched with Changed(new_value) in the map.
     let new_value = U256::from(999);
-    leaf_updates
-        .insert(target_key, LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_value).to_vec()));
+    leaf_updates.insert(target_key, LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
 
     // Step 4: update_leaves again — key should now be drained.
     trie.update_leaves(&mut leaf_updates, |_, _| {})
@@ -553,16 +551,16 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie + Defaul
 
     // Step 2: Decode the value and verify it matches expected.
     let decoded: U256 =
-        alloy_rlp::Decodable::decode(&mut existing_rlp.as_slice()).expect("should decode as U256");
+        Decodable::decode(&mut existing_rlp.as_slice()).expect("should decode as U256");
     assert_eq!(decoded, U256::from(100), "decoded value should match original");
 
     // Step 3: Modify the value (simulates changing balance while keeping storage root).
     let new_value = U256::from(999);
-    let new_value_rlp = alloy_rlp::encode_fixed_size(&new_value).to_vec();
+    let new_value_rlp = encode_fixed_size(&new_value).to_vec();
 
     // Step 4: Update the leaf with the re-encoded value.
     let mut leaf_updates: B256Map<LeafUpdate> =
-        std::iter::once((key1, LeafUpdate::Changed(new_value_rlp))).collect();
+        once((key1, LeafUpdate::Changed(new_value_rlp))).collect();
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Step 5: Compute root and verify against reference.
@@ -612,11 +610,8 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie + De
     let new_key2_value = U256::from(222);
     let new_insert_value = U256::from(444);
     let mut leaf_updates: B256Map<LeafUpdate> = [
-        (key2, LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_key2_value).to_vec())),
-        (
-            nonexistent_key,
-            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_insert_value).to_vec()),
-        ),
+        (key2, LeafUpdate::Changed(encode_fixed_size(&new_key2_value).to_vec())),
+        (nonexistent_key, LeafUpdate::Changed(encode_fixed_size(&new_insert_value).to_vec())),
     ]
     .into_iter()
     .collect();

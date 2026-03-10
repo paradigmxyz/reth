@@ -133,10 +133,7 @@ pub(super) fn test_prune_requires_computed_hashes<T: SparseTrie + Default>() {
 
     // Dirty the trie by updating a leaf — do NOT call root() to compute hashes.
     let mut leaf_updates: B256Map<LeafUpdate> = B256Map::default();
-    leaf_updates.insert(
-        keys[0],
-        LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(999)).to_vec()),
-    );
+    leaf_updates.insert(keys[0], LeafUpdate::Changed(encode_fixed_size(&U256::from(999)).to_vec()));
     trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
 
     // Prune without having called root() — dirty nodes lack cached hashes.
@@ -177,8 +174,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie + Default>
 
     let new_value = U256::from(999);
     let mut leaf_updates: B256Map<LeafUpdate> = B256Map::default();
-    leaf_updates
-        .insert(keys[0], LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_value).to_vec()));
+    leaf_updates.insert(keys[0], LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     let root_after = trie.root();
@@ -213,8 +209,7 @@ pub(super) fn test_prune_then_reveal_pruned_subtree<T: SparseTrie + Default>() {
 
     let new_value = U256::from(777);
     let mut leaf_updates: B256Map<LeafUpdate> = B256Map::default();
-    leaf_updates
-        .insert(keys[2], LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&new_value).to_vec()));
+    leaf_updates.insert(keys[2], LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     let root_after = trie.root();
@@ -289,7 +284,7 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie + Default>() {
     // Insert a brand-new key not previously in the trie.
     let mut new_key = B256::ZERO;
     new_key.0[0] = 0xFF;
-    let value_bytes = alloy_rlp::encode_fixed_size(&U256::from(999));
+    let value_bytes = encode_fixed_size(&U256::from(999));
     let mut leaf_updates =
         B256Map::from_iter([(new_key, LeafUpdate::Changed(value_bytes.to_vec()))]);
 
