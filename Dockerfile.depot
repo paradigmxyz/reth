@@ -49,6 +49,10 @@ ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 ARG USE_PGO_BOLT=false
 ENV USE_PGO_BOLT=$USE_PGO_BOLT
 
+# Optional path to a pre-collected merged.profdata file in build context.
+ARG PGO_PROFDATA=""
+ENV PGO_PROFDATA=$PGO_PROFDATA
+
 # Build application
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
 ARG TARGETPLATFORM
@@ -59,11 +63,14 @@ RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
     export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
     sccache --start-server && \
-    if [ "$USE_PGO_BOLT" = "true" ]; then \
+    if [ "$USE_PGO_BOLT" = "true" ] && [ "$TARGETPLATFORM" = "linux/amd64" ] && [ -n "$PGO_PROFDATA" ] && [ -f "$PGO_PROFDATA" ]; then \
         apt-get update && apt-get install -y -qq lsb-release wget sudo && \
-        BINARY="$BINARY" PROFILE="$BUILD_PROFILE" FEATURES="$FEATURES" \
+        BINARY="$BINARY" PROFILE="$BUILD_PROFILE" FEATURES="$FEATURES" SKIP_BOLT=true PGO_PROFDATA="$PGO_PROFDATA" \
             ./.github/scripts/build_pgo_bolt.sh; \
     else \
+        if [ "$USE_PGO_BOLT" = "true" ]; then \
+            echo "PGO requested but pre-collected profile missing at '${PGO_PROFDATA:-<unset>}' - falling back to non-PGO build"; \
+        fi; \
         if [ -n "$RUSTFLAGS" ]; then \
             export RUSTFLAGS="$RUSTFLAGS"; \
         elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \

@@ -15,6 +15,7 @@
 #   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 10)
 #   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 10)
 #   SKIP_BOLT       - Temporarily skip BOLT phases (default: false)
+#   PGO_PROFDATA    - Path to pre-collected merged.profdata (optional)
 #   PROFILE         - Cargo profile (default: maxperf-symbols)
 #   FEATURES        - Cargo features (default: jemalloc,asm-keccak,min-debug-logs)
 #   TARGET          - Target triple (default: auto-detected)
@@ -43,15 +44,42 @@ gha_section_end() {
 cd "$(dirname "$0")/../.."
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-: "${DATADIR:?DATADIR must be set to the reth data directory}"
-: "${RPC_URL:?RPC_URL must be set}"
-
 PGO_BLOCKS="${PGO_BLOCKS:-10}"
 BOLT_BLOCKS="${BOLT_BLOCKS:-10}"
 SKIP_BOLT="${SKIP_BOLT:-false}"
 PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
+BASE_RUSTFLAGS="${RUSTFLAGS:-}"
+EXTRA_RUSTFLAGS="${EXTRA_RUSTFLAGS:-}"
+COMBINED_RUSTFLAGS="$BASE_RUSTFLAGS $EXTRA_RUSTFLAGS"
+PGO_PROFDATA="${PGO_PROFDATA:-}"
+DATADIR="${DATADIR:-}"
+RPC_URL="${RPC_URL:-}"
+
+SKIP_BOLT_BOOL=false
+if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
+    SKIP_BOLT_BOOL=true
+fi
+
+USE_PRECOLLECTED_PGO=false
+if [ -n "$PGO_PROFDATA" ]; then
+    if [ ! -f "$PGO_PROFDATA" ]; then
+        echo "error: PGO_PROFDATA points to a missing file: $PGO_PROFDATA"
+        exit 1
+    fi
+    USE_PRECOLLECTED_PGO=true
+fi
+
+NEEDS_BENCH_WORKLOAD=true
+if [ "$USE_PRECOLLECTED_PGO" = true ] && [ "$SKIP_BOLT_BOOL" = true ]; then
+    NEEDS_BENCH_WORKLOAD=false
+fi
+
+if [ "$NEEDS_BENCH_WORKLOAD" = true ]; then
+    : "${DATADIR:?DATADIR must be set to the reth data directory}"
+    : "${RPC_URL:?RPC_URL must be set}"
+fi
 
 if [[ "$PROFILE" == dev ]]; then
     PROFILE_DIR=debug
@@ -81,8 +109,16 @@ echo "LLVM:        $LLVM_VERSION"
 echo "PGO blocks:  $PGO_BLOCKS"
 echo "BOLT blocks: $BOLT_BLOCKS"
 echo "Skip BOLT:   $SKIP_BOLT"
-echo "Datadir:     $DATADIR"
-echo "RPC URL:     $RPC_URL"
+echo "PGO profdata: ${PGO_PROFDATA:-<collect with reth-bench>}"
+echo "RUSTFLAGS:   ${BASE_RUSTFLAGS:-<unset>}"
+echo "EXTRA_RUSTFLAGS: ${EXTRA_RUSTFLAGS:-<unset>}"
+if [ "$NEEDS_BENCH_WORKLOAD" = true ]; then
+    echo "Datadir:     $DATADIR"
+    echo "RPC URL:     $RPC_URL"
+else
+    echo "Datadir:     <not required>"
+    echo "RPC URL:     <not required>"
+fi
 gha_section_end
 
 # ── Prerequisites ──────────────────────────────────────────────────────────────
@@ -109,20 +145,27 @@ install_bolt() {
     sudo ln -sf "/usr/bin/llvm-bolt-$LLVM_VERSION" /usr/local/bin/llvm-bolt
     sudo ln -sf "/usr/bin/merge-fdata-$LLVM_VERSION" /usr/local/bin/merge-fdata
 }
-if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
+if [ "$SKIP_BOLT_BOOL" = true ]; then
     echo "Skipping BOLT installation (SKIP_BOLT=$SKIP_BOLT)"
 else
     install_bolt
 fi
 gha_section_end
 
-# Build reth-bench once (non-instrumented) — reused for both phases
-gha_section_start "Building reth-bench"
-cargo build --profile "$PROFILE" --features "$FEATURES" \
-    --manifest-path bin/reth-bench/Cargo.toml --bin reth-bench --locked
-RETH_BENCH_BIN="$(find target -name reth-bench -type f -executable | head -1)"
-echo "reth-bench: $RETH_BENCH_BIN"
-gha_section_end
+if [ "$NEEDS_BENCH_WORKLOAD" = true ]; then
+    # Build reth-bench once (non-instrumented) — reused for both phases.
+    gha_section_start "Building reth-bench"
+    RUSTFLAGS="$COMBINED_RUSTFLAGS" \
+        cargo build --profile "$PROFILE" --features "$FEATURES" \
+        --manifest-path bin/reth-bench/Cargo.toml --bin reth-bench --locked
+    RETH_BENCH_BIN="$(find target -name reth-bench -type f -executable | head -1)"
+    echo "reth-bench: $RETH_BENCH_BIN"
+    gha_section_end
+else
+    gha_section_start "Building reth-bench"
+    echo "Skipping reth-bench build (pre-collected PGO with SKIP_BOLT=true)"
+    gha_section_end
+fi
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 RETH_PID=
@@ -207,41 +250,51 @@ publish_binary() {
     done
 }
 
-# ── Phase 1: PGO profile collection ───────────────────────────────────────────
-gha_section_start "Phase 1: PGO Profile Collection"
+if [ "$USE_PRECOLLECTED_PGO" = true ]; then
+    gha_section_start "Phase 1: Using Pre-Collected PGO Profile"
+    rm -rf "$PGO_DIR"
+    mkdir -p "$PGO_DIR"
+    cp "$PGO_PROFDATA" "$PGO_DIR/merged.profdata"
+    echo "Using pre-collected profile: $PGO_PROFDATA"
+    echo "PGO profile: $PGO_DIR/merged.profdata ($(ls -lh "$PGO_DIR/merged.profdata" | awk '{print $5}'))"
+    gha_section_end
+else
+    # ── Phase 1: PGO profile collection ───────────────────────────────────────
+    gha_section_start "Phase 1: PGO Profile Collection"
 
-rm -rf "$PGO_DIR"
-mkdir -p "$PGO_DIR"
+    rm -rf "$PGO_DIR"
+    mkdir -p "$PGO_DIR"
 
-echo "Building PGO-instrumented binary..."
-RUSTFLAGS="-Cprofile-generate=$PGO_DIR -Crelocation-model=pic ${EXTRA_RUSTFLAGS:-}" \
-    cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
+    echo "Building PGO-instrumented binary..."
+    RUSTFLAGS="-Cprofile-generate=$PGO_DIR -Crelocation-model=pic $COMBINED_RUSTFLAGS" \
+        cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
-PGO_RETH_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
-echo "Instrumented binary: $PGO_RETH_BIN ($(ls -lh "$PGO_RETH_BIN" | awk '{print $5}'))"
+    PGO_RETH_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
+    echo "Instrumented binary: $PGO_RETH_BIN ($(ls -lh "$PGO_RETH_BIN" | awk '{print $5}'))"
 
-run_bench_workload "$PGO_RETH_BIN" "$PGO_BLOCKS" "pgo"
+    run_bench_workload "$PGO_RETH_BIN" "$PGO_BLOCKS" "pgo"
 
-# Fix ownership if reth ran as root
-sudo chown -R "$(id -un):$(id -gn)" "$PGO_DIR" 2>/dev/null || true
+    # Fix ownership if reth ran as root.
+    sudo chown -R "$(id -un):$(id -gn)" "$PGO_DIR" 2>/dev/null || true
 
-# Merge PGO profiles
-echo "Merging PGO profiles..."
-PROFRAW_COUNT=$(find "$PGO_DIR" -name '*.profraw' | wc -l)
-echo "Found $PROFRAW_COUNT .profraw files"
-if [ "$PROFRAW_COUNT" -eq 0 ]; then
-    echo "error: no .profraw files — instrumented binary did not produce profiles"
-    exit 1
+    # Merge PGO profiles.
+    echo "Merging PGO profiles..."
+    PROFRAW_COUNT=$(find "$PGO_DIR" -name '*.profraw' | wc -l)
+    echo "Found $PROFRAW_COUNT .profraw files"
+    if [ "$PROFRAW_COUNT" -eq 0 ]; then
+        echo "error: no .profraw files — instrumented binary did not produce profiles"
+        exit 1
+    fi
+    "$LLVM_PROFDATA" merge -o "$PGO_DIR/merged.profdata" "$PGO_DIR"/*.profraw
+    echo "PGO profile: $PGO_DIR/merged.profdata ($(ls -lh "$PGO_DIR/merged.profdata" | awk '{print $5}'))"
+    gha_section_end
 fi
-"$LLVM_PROFDATA" merge -o "$PGO_DIR/merged.profdata" "$PGO_DIR"/*.profraw
-echo "PGO profile: $PGO_DIR/merged.profdata ($(ls -lh "$PGO_DIR/merged.profdata" | awk '{print $5}'))"
-gha_section_end
 
-if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
+if [ "$SKIP_BOLT_BOOL" = true ]; then
     gha_section_start "BOLT Phase Skipped"
     echo "SKIP_BOLT=$SKIP_BOLT, building PGO-only binary"
     echo "Building PGO-optimized binary..."
-    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata ${EXTRA_RUSTFLAGS:-}" \
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata $COMBINED_RUSTFLAGS" \
         cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
     BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
@@ -258,7 +311,7 @@ else
 
     echo "Building BOLT-instrumented binary with PGO..."
     # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt -instrument
-    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs $COMBINED_RUSTFLAGS" \
         cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
     # Instrument with BOLT
@@ -298,7 +351,7 @@ else
 
     echo "Building PGO-optimized binary..."
     # --emit-relocs preserves relocation entries in the binary, required by llvm-bolt for code reordering
-    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs ${EXTRA_RUSTFLAGS:-}" \
+    RUSTFLAGS="-Cprofile-use=$PGO_DIR/merged.profdata -Clink-arg=-Wl,--emit-relocs $COMBINED_RUSTFLAGS" \
         cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
     BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"

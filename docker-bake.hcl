@@ -31,7 +31,12 @@ variable "VERGEN_GIT_DIRTY" {
 
 // Enable PGO+BOLT optimization (Linux only)
 variable "USE_PGO_BOLT" {
-  default = "true"
+  default = "false"
+}
+
+// Optional path to pre-collected merged.profdata in build context.
+variable "PGO_PROFDATA" {
+  default = ""
 }
 
 // Common settings for all targets
@@ -54,6 +59,7 @@ target "_base" {
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
     VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
     USE_PGO_BOLT        = "${USE_PGO_BOLT}"
+    PGO_PROFDATA        = "${PGO_PROFDATA}"
   }
   secret = [
     {
