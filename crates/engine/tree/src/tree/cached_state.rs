@@ -18,7 +18,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -55,8 +54,17 @@ const fn fixed_cache_key_size_with_value<K>(value: usize) -> usize {
     raw_size.div_ceil(FIXED_CACHE_ALIGNMENT) * FIXED_CACHE_ALIGNMENT
 }
 
-/// Size in bytes of a single code cache entry.
-const CODE_CACHE_ENTRY_SIZE: usize = fixed_cache_key_size_with_value::<Address>(MAX_CODE_SIZE);
+/// Estimated average bytecode size for cache budget calculation.
+///
+/// The fixed-cache stores `Option<Bytecode>` inline (pointer-sized), but each cached contract
+/// also holds bytecode on the heap. For budget estimation we use 8 KiB, which is close to the
+/// observed mainnet average (~7 KiB). Using `MAX_CODE_SIZE` (48 KiB) overestimates by ~7x,
+/// yielding only 4096 entries for a 228 MB code-cache budget when 16384 fit comfortably.
+const ESTIMATED_AVG_CODE_SIZE: usize = 8 * 1024;
+
+/// Size in bytes of a single code cache entry (inline metadata + estimated heap).
+const CODE_CACHE_ENTRY_SIZE: usize =
+    fixed_cache_key_size_with_value::<Address>(ESTIMATED_AVG_CODE_SIZE);
 
 /// Size in bytes of a single storage cache entry.
 const STORAGE_CACHE_ENTRY_SIZE: usize =
@@ -1212,5 +1220,21 @@ mod tests {
         // Verify only addr1 was removed
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
+    }
+
+    #[test]
+    fn test_code_cache_capacity_with_default_budget() {
+        // Default cross-block cache is 4 GB; code gets 5.56% = ~228 MB.
+        let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
+        let code_budget = (total_cache_size * 556) / 10000; // 228 MB
+
+        let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
+
+        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
+        // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.
+        assert_eq!(
+            capacity, 16384,
+            "code cache should have 16384 entries with default 4 GB budget"
+        );
     }
 }
