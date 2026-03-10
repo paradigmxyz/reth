@@ -28,6 +28,45 @@ pub struct DeferredDrops {
     pub proof_nodes_bufs: Vec<Vec<ProofTrieNodeV2>>,
 }
 
+/// A persistent background thread that receives [`DeferredDrops`] and deallocates them
+/// off the critical path.
+///
+/// Dropping proof node buffers can be expensive (thousands of nested `Vec`s). This thread
+/// keeps that cost from blocking state root computation or lock-holding code.
+#[cfg(feature = "std")]
+#[derive(Debug)]
+pub struct DeferredDropThread {
+    tx: std::sync::mpsc::Sender<DeferredDrops>,
+}
+
+#[cfg(feature = "std")]
+impl DeferredDropThread {
+    /// Spawns a named background thread for deferred deallocation.
+    pub fn spawn() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<DeferredDrops>();
+        std::thread::Builder::new()
+            .name("reth-deferred-drop".into())
+            .spawn(move || {
+                while let Ok(drops) = rx.recv() {
+                    drop(drops);
+                }
+            })
+            .expect("failed to spawn deferred-drop thread");
+        Self { tx }
+    }
+
+    /// Sends [`DeferredDrops`] to the background thread for deallocation.
+    ///
+    /// If the background thread has exited, the drops are deallocated inline as a fallback.
+    pub fn schedule_drop(&self, drops: DeferredDrops) {
+        if drops.proof_nodes_bufs.is_empty() {
+            return;
+        }
+        // If the receiver is gone, fall back to inline drop.
+        let _ = self.tx.send(drops);
+    }
+}
+
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<

@@ -39,7 +39,8 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+    DeferredDropThread, ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie,
+    SparseStateTrie,
 };
 use std::{
     ops::Not,
@@ -139,6 +140,8 @@ where
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Persistent background thread for dropping expensive proof node buffers.
+    deferred_drop_thread: Arc<DeferredDropThread>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -173,6 +176,7 @@ where
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            deferred_drop_thread: Arc::new(DeferredDropThread::spawn()),
         }
     }
 }
@@ -564,6 +568,7 @@ where
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
+        let deferred_drop_thread = Arc::clone(&self.deferred_drop_thread);
 
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
@@ -633,9 +638,8 @@ where
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-                // Drop guard before deferred to release lock before expensive deallocations
                 drop(guard);
-                drop(deferred);
+                deferred_drop_thread.schedule_drop(deferred);
                 return;
             }
 
@@ -676,9 +680,8 @@ where
                 guard.store(PreservedSparseTrie::cleared(trie));
                 deferred
             };
-            // Drop guard before deferred to release lock before expensive deallocations
             drop(guard);
-            drop(deferred);
+            deferred_drop_thread.schedule_drop(deferred);
         });
     }
 
