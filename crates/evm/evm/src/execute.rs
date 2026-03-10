@@ -27,6 +27,7 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
+    state::bal::Bal,
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -589,11 +590,21 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let result = self
+        let mut executor = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?
-            .execute_block(block.transactions_recovered())?;
+            .map_err(BlockExecutionError::other)?;
+
+        executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+        executor.apply_pre_execution_changes()?;
+        executor.evm_mut().db_mut().bump_bal_index();
+
+        for tx in block.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
+
+        let result = executor.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
