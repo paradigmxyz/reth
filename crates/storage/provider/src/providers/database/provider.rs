@@ -557,7 +557,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             nums
         };
 
-        let mut timings = metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
+        let mut timings =
+            metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
