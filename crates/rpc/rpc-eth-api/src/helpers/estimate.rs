@@ -62,10 +62,6 @@ pub trait EstimateCall: Call {
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
 
-        // Disable EIP-7825 transaction gas limit cap so that gas estimation
-        // is not capped at 2^24 (~16.7M) post-Osaka.
-        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
