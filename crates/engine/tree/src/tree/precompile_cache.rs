@@ -1,8 +1,4 @@
 //! Precompile cache backed by [`schnellru::LruMap`] (LRU by length).
-//!
-//! Each precompile address gets its own [`PrecompileCache`] with a capacity tuned to its
-//! mainnet working-set size. The caches are stored in a [`PrecompileCacheMap`] keyed by
-//! precompile address.
 
 use alloy_primitives::map::FbBuildHasher;
 use parking_lot::Mutex;
@@ -14,23 +10,7 @@ use schnellru::{ByLength, LruMap};
 use std::{fmt, hash::Hash, sync::Arc};
 
 /// Default max cache size for [`PrecompileCache`].
-const DEFAULT_CACHE_SIZE: u32 = 10_000;
-
-/// Returns the recommended cache capacity for a given precompile address.
-///
-/// Capacities are based on mainnet production hit-rate data at the default 10K capacity:
-/// - ecMul (`0x07`): 55% hit rate → needs 50K
-/// - modexp (`0x05`), ecAdd (`0x06`): ~70% hit rate → 30K
-/// - Others: default 10K (sufficient)
-fn default_cache_size_for_address(address: &Address) -> u32 {
-    match address.0[19] {
-        // ecMul — largest working set
-        0x07 => 50_000,
-        // modexp, ecAdd
-        0x05 | 0x06 => 30_000,
-        _ => DEFAULT_CACHE_SIZE,
-    }
-}
+const MAX_CACHE_SIZE: u32 = 10_000;
 
 /// Stores caches for each precompile.
 #[derive(Clone, Default)]
@@ -52,9 +32,6 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Get the precompile cache for the given address.
-    ///
-    /// If no cache exists for this address, a new one is created with a capacity tuned to
-    /// the precompile's expected working-set size.
     pub fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
         // Try just using `.get` first to avoid acquiring a write lock.
         if let Some(cache) = self.0.get(&address) {
@@ -64,8 +41,7 @@ where
         //
         // This should be very rare as caches for all precompiles will be initialized as soon as
         // first EVM is created.
-        let capacity = default_cache_size_for_address(&address);
-        self.0.entry(address).or_insert_with(|| PrecompileCache::new(capacity)).clone()
+        self.0.entry(address).or_default().clone()
     }
 }
 
@@ -96,7 +72,7 @@ where
     S: Eq + Hash + fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self::new(DEFAULT_CACHE_SIZE)
+        Self::new(MAX_CACHE_SIZE)
     }
 }
 
@@ -417,95 +393,4 @@ mod tests {
         assert_eq!(result3.as_ref(), b"output_from_precompile_1");
     }
 
-    #[test]
-    fn test_per_address_cache_sizing() {
-        let cache_map: PrecompileCacheMap<SpecId> = PrecompileCacheMap::default();
-
-        // ecMul (0x07) should get 50K capacity
-        let _ecmul_cache = cache_map.cache_for_address(Address::with_last_byte(0x07));
-
-        // ecAdd (0x06) should get 30K capacity
-        let _ecadd_cache = cache_map.cache_for_address(Address::with_last_byte(0x06));
-
-        // SHA256 (0x02) should get default 10K capacity
-        let _sha256_cache = cache_map.cache_for_address(Address::with_last_byte(0x02));
-
-        // All three addresses should have separate caches
-        assert_eq!(cache_map.0.len(), 3);
-    }
-
-    /// Simulates a DeFi-like precompile access pattern and measures cache hit rates
-    /// at different capacities.
-    ///
-    /// The model uses three tiers (hot/warm/cold) that reflect real mainnet behavior:
-    /// popular `DeFi` pools reuse the same curve inputs repeatedly (hot), less popular
-    /// ones are accessed occasionally (warm), and one-off operations form a long tail
-    /// (cold). At 10K capacity the warm set is partially evicted by cold accesses,
-    /// matching the ~55% hit rate observed for ecMul in production.
-    #[test]
-    fn test_cache_hit_rate_improves_with_larger_capacity() {
-        use rand::Rng;
-
-        let num_accesses: u64 = 200_000;
-        let mut rng = rand::rng();
-
-        // Three-tier access model calibrated to match ecMul production data (~55% at 10K):
-        //   40% hot:  3K unique inputs (top DeFi pools)
-        //   30% warm: 25K unique inputs (less popular pools)
-        //   30% cold: 200K unique inputs (one-off / rare operations)
-        let hot_size: u64 = 3_000;
-        let warm_size: u64 = 25_000;
-        let cold_size: u64 = 200_000;
-
-        let accesses: Vec<u64> = (0..num_accesses)
-            .map(|_| {
-                let r: f64 = rng.random();
-                if r < 0.40 {
-                    // hot tier
-                    rng.random_range(0..hot_size)
-                } else if r < 0.70 {
-                    // warm tier (offset past hot)
-                    hot_size + rng.random_range(0..warm_size)
-                } else {
-                    // cold tier (offset past warm)
-                    hot_size + warm_size + rng.random_range(0..cold_size)
-                }
-            })
-            .collect();
-
-        // Measure hit rate at 10K capacity (current default for all precompiles)
-        let hits_10k = simulate_lru_hits(&accesses, 10_000);
-        let rate_10k = hits_10k as f64 / num_accesses as f64 * 100.0;
-
-        // Measure hit rate at 50K capacity (our new ecMul capacity)
-        let hits_50k = simulate_lru_hits(&accesses, 50_000);
-        let rate_50k = hits_50k as f64 / num_accesses as f64 * 100.0;
-
-        // 50K cache should meaningfully beat 10K cache because it can hold the full
-        // warm set (25K) without eviction from cold accesses.
-        assert!(
-            hits_50k > hits_10k,
-            "50K cache ({rate_50k:.1}%) should beat 10K cache ({rate_10k:.1}%)"
-        );
-
-        let improvement = rate_50k - rate_10k;
-        assert!(
-            improvement > 5.0,
-            "Expected >5pp improvement, got {improvement:.1}pp ({rate_10k:.1}% → {rate_50k:.1}%)"
-        );
-    }
-
-    /// Simple LRU cache simulation — returns the number of hits.
-    fn simulate_lru_hits(accesses: &[u64], capacity: u32) -> u64 {
-        let mut cache: LruMap<u64, (), ByLength> = LruMap::new(ByLength::new(capacity));
-        let mut hits = 0u64;
-        for &key in accesses {
-            if cache.get(&key).is_some() {
-                hits += 1;
-            } else {
-                cache.insert(key, ());
-            }
-        }
-        hits
-    }
 }
