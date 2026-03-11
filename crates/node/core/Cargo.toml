@@ -93,9 +93,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]
 
-# Marker feature for edge/unstable builds
-edge = []
-
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
 vergen-git2.workspace = true

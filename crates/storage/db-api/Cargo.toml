@@ -93,4 +93,3 @@ op = [
     "reth-codecs/op",
     "reth-primitives-traits/op",
 ]
-edge = []

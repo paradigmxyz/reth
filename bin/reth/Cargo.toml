@@ -190,7 +190,6 @@ min-trace-logs = [
 ]
 
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
-edge = []
 
 [[bin]]
 name = "reth"

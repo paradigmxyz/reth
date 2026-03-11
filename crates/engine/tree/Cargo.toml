@@ -139,7 +139,6 @@ trie-debug = [
     "reth-engine-primitives/trie-debug",
     "dep:serde_json",
 ]
-edge = []
 
 [[test]]
 name = "e2e_testsuite"

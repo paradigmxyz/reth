@@ -36,7 +36,6 @@ serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-edge = []
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",
