@@ -6,7 +6,7 @@ use alloy_primitives::{
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -458,6 +458,55 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_range(
+        &self,
+        account: Address,
+        keys: &[StorageKey],
+    ) -> ProviderResult<Vec<(StorageKey, StorageValue)>> {
+        let mut uncached_keys = Vec::new();
+        let mut result = Vec::with_capacity(keys.len());
+
+        for &key in keys {
+            if let Some(value) = self.caches.get_storage(account, key) {
+                if !value.is_zero() {
+                    result.push((key, value));
+                }
+            } else {
+                uncached_keys.push(key);
+            }
+        }
+
+        // Batch-fetch all uncached keys from the inner provider
+        if !uncached_keys.is_empty() {
+            let mut fetched = self.state_provider.storage_range(account, &uncached_keys)?;
+            // Sort by raw key to align with uncached_keys for the merge-join below.
+            // The inner provider may return results in a different order (e.g. hashed state
+            // iterates by hashed slot).
+            fetched.sort_unstable_by_key(|(k, _)| *k);
+            // Merge-join to find zero slots without allocating a HashSet.
+            let mut fetched_iter = fetched.iter();
+            let mut next = fetched_iter.next();
+            for &key in &uncached_keys {
+                if let Some(&(fk, fv)) = next &&
+                    fk == key
+                {
+                    let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                        Ok::<_, ProviderError>(fv)
+                    });
+                    result.push((key, fv));
+                    next = fetched_iter.next();
+                    continue;
+                }
+                // key not returned by inner provider → zero slot
+                let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                    Ok::<_, ProviderError>(StorageValue::ZERO)
+                });
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
@@ -746,6 +795,11 @@ impl ExecutionCache {
         } else {
             Ok(CachedStatus::Cached(result))
         }
+    }
+
+    /// Returns a cached storage value if present, without inserting.
+    pub fn get_storage(&self, address: Address, key: StorageKey) -> Option<StorageValue> {
+        self.0.storage_cache.get(&(address, key))
     }
 
     /// Insert storage value into cache.

@@ -6,7 +6,7 @@
 /// Used to implement provider traits.
 #[macro_export]
 macro_rules! delegate_impls_to_as_ref {
-    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
+    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self, $($arg:ident: $argty:ty),*) -> $ret:ty;)* })* ) => {
 
         $(
           impl<'a, $($($generics)*)?> $trait for $target {
@@ -41,6 +41,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])? {
                 fn storage(&self, account: alloy_primitives::Address, storage_key: alloy_primitives::StorageKey) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
+                fn storage_range(&self, account: alloy_primitives::Address, keys: &[alloy_primitives::StorageKey]) -> reth_storage_api::errors::provider::ProviderResult<Vec<(alloy_primitives::StorageKey, alloy_primitives::StorageValue)>>;
             }
             BytecodeReader $(where [$($generics)*])? {
                 fn bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>;

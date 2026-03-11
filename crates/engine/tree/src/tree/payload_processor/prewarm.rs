@@ -22,6 +22,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
+use itertools::{EitherOrBoth, Itertools};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -355,7 +356,12 @@ where
         let ctx = self.ctx.clone();
         self.executor.prewarming_pool().install_fn(|| {
             bal.par_iter().for_each_init(
-                || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
+                || {
+                    (
+                        ctx.clone(),
+                        None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+                    )
+                },
                 |(ctx, provider), account| {
                     if ctx.should_stop() {
                         return;
@@ -602,7 +608,7 @@ where
     /// thread.
     fn prefetch_bal_account(
         &self,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
         let state_provider = match provider {
@@ -623,7 +629,7 @@ where
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
                 let cache_metrics = saved_cache.metrics().clone();
-                slot.insert(CachedStateProvider::new(built, caches, cache_metrics))
+                slot.insert(CachedStateProvider::new_prewarm(built, caches, cache_metrics))
             }
         };
 
@@ -631,12 +637,16 @@ where
 
         let _ = state_provider.basic_account(&account.address);
 
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
-        }
+        let slots: Vec<StorageKey> = account
+            .storage_changes
+            .iter()
+            .map(|s| StorageKey::from(s.slot))
+            .merge_join_by(account.storage_reads.iter().map(|&s| StorageKey::from(s)), Ord::cmp)
+            .map(|either| match either {
+                EitherOrBoth::Left(k) | EitherOrBoth::Right(k) | EitherOrBoth::Both(k, _) => k,
+            })
+            .collect();
+        let _ = state_provider.storage_range(account.address, &slots);
 
         self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
     }
