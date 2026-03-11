@@ -24,7 +24,7 @@ use reth_ethereum::{
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
-        providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
+        providers::{BalProvider, BlockchainProvider, RocksDBProvider, StaticFileProvider},
         ProviderFactory,
     },
     rpc::{
