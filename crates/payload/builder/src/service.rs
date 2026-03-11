@@ -459,6 +459,7 @@ where
                                     if this
                                         .cached_payload_rx
                                         .borrow()
+                                        .as_ref()
                                         .is_some_and(|(cached_id, _, _)| *cached_id == id)
                                     {
                                         trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
