@@ -95,10 +95,37 @@ pub fn log_layer(
 
     let logger_provider = SdkLoggerProvider::builder()
         .with_resource(resource)
+        .with_log_processor(TimestampLogProcessor)
         .with_batch_exporter(log_exporter)
         .build();
 
     Ok(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logger_provider))
+}
+
+/// Sets `timestamp` on every log record so backends receive a stable client-side
+/// event time. The `opentelemetry-appender-tracing` bridge only sets
+/// `observed_timestamp`, which means backends that don't fall back to it (e.g.
+/// VictoriaLogs receiving OTLP directly) use ingestion time instead. If the same
+/// log is delivered twice (retry, duplicate exporter), the two copies get
+/// different ingestion times, making deduplication impossible.
+#[cfg(feature = "otlp-logs")]
+#[derive(Debug)]
+struct TimestampLogProcessor;
+
+#[cfg(feature = "otlp-logs")]
+impl opentelemetry_sdk::logs::LogProcessor for TimestampLogProcessor {
+    fn emit(
+        &self,
+        record: &mut opentelemetry_sdk::logs::SdkLogRecord,
+        _instrumentation: &opentelemetry::InstrumentationScope,
+    ) {
+        use opentelemetry::logs::LogRecord;
+        record.set_timestamp(std::time::SystemTime::now());
+    }
+
+    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+        Ok(())
+    }
 }
 
 /// Configuration for OTLP trace export.
