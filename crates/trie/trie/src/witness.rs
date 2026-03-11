@@ -15,8 +15,7 @@ use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
-    prefix_set::TriePrefixSets, DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2,
-    ProofV2Target, TrieNodeV2,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieNodeV2,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
 
@@ -140,10 +139,6 @@ where
             return Ok(B256Map::from_iter([(root_hash, root_node)]))
         }
 
-        // Build prefix sets for storage root computation of accounts without a revealed
-        // storage trie.
-        let prefix_sets = state.construct_prefix_sets().freeze();
-
         // Record all nodes from multiproof in the witness.
         self.record_multiproof_nodes(&multiproof);
 
@@ -238,7 +233,7 @@ where
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
                     storage_trie.root()
                 } else {
-                    self.storage_root_from_cursor(hashed_address, &prefix_sets)?
+                    self.account_storage_root(hashed_address)?
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -310,13 +305,9 @@ where
         }
     }
 
-    /// Compute the storage root for an account by walking the storage trie from the cursor
-    /// factories. Records the root node in the witness.
-    fn storage_root_from_cursor(
-        &mut self,
-        hashed_address: B256,
-        prefix_sets: &TriePrefixSets,
-    ) -> Result<B256, TrieWitnessError> {
+    /// Compute the storage root for an account by walking the storage trie using the cursor
+    /// factories and trie input prefix sets. Records the root node in the witness.
+    fn account_storage_root(&mut self, hashed_address: B256) -> Result<B256, TrieWitnessError> {
         let storage_trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(hashed_address)
@@ -329,8 +320,8 @@ where
             storage_trie_cursor,
             hashed_storage_cursor,
         );
-        if let Some(prefix_set) = prefix_sets.storage_prefix_sets.get(&hashed_address) {
-            calculator = calculator.with_prefix_set(prefix_set.clone());
+        if let Some(prefix_set) = self.prefix_sets.storage_prefix_sets.get(&hashed_address) {
+            calculator = calculator.with_prefix_set(prefix_set.clone().freeze());
         }
         let root_node = calculator.storage_root_node(hashed_address)?;
         let root_hash = calculator
