@@ -1415,8 +1415,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(head_block) = &self.head_block {
             database_end = head_block.anchor().number;
 
-            let chain = head_block.chain().collect::<Vec<_>>();
-            for state in chain {
+            for state in head_block.chain() {
                 let block_changesets = state
                     .block_ref()
                     .execution_output
@@ -1597,8 +1596,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             // the anchor is the end of the db range
             database_end = head_block.anchor().number;
 
-            let chain = head_block.chain().collect::<Vec<_>>();
-            for state in chain {
+            for state in head_block.chain() {
                 // found block in memory, collect its changesets
                 let block_changesets = state
                     .block_ref()
@@ -2038,7 +2036,6 @@ mod tests {
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
-                                block_access_list: Default::default(),
                             },
                         }),
                         ..Default::default()
@@ -2392,7 +2389,6 @@ mod tests {
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
-                        block_access_list: Default::default(),
                     },
                 }),
                 ..Default::default()
@@ -2491,7 +2487,6 @@ mod tests {
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
-                        block_access_list: Default::default(),
                     },
                 }),
                 ..Default::default()
@@ -2594,7 +2589,6 @@ mod tests {
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
-                        block_access_list: Default::default(),
                     },
                 }),
                 ..Default::default()
@@ -2691,7 +2685,6 @@ mod tests {
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
-                        block_access_list: Default::default(),
                     },
                 }),
                 ..Default::default()

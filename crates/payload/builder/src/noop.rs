@@ -45,7 +45,7 @@ where
                 return Poll::Ready(())
             };
             match cmd {
-                PayloadServiceCommand::BuildNewPayload(attr, tx) => {
+                PayloadServiceCommand::BuildNewPayload(attr, _, tx) => {
                     let id = attr.payload_id();
                     tx.send(Ok(id)).ok()
                 }

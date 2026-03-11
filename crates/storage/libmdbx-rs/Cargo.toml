@@ -17,6 +17,7 @@ reth-mdbx-sys.workspace = true
 bitflags.workspace = true
 byteorder.workspace = true
 derive_more.workspace = true
+crossbeam-queue.workspace = true
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true

@@ -95,6 +95,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
+        if min_block > max_block {
+            eyre::bail!("--from ({min_block}) is beyond --to ({max_block}), nothing to re-execute");
+        }
+
         let num_tasks = self.num_tasks.unwrap_or_else(|| {
             std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
         });
@@ -175,8 +179,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         };
 
+                        let bal= executor.take_bal();
+
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None)
+                            .validate_block_post_execution(&block, &result, None, bal, true)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",

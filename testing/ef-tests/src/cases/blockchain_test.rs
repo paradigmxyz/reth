@@ -246,7 +246,6 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let state_provider = provider.latest();
         let state_db = StateProviderDatabase(&state_provider);
         let executor = executor_provider.batch_executor(state_db);
-
         let output = executor
             .execute(&(*block).clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
@@ -258,7 +257,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             &output.receipts,
             &output.requests,
             None,
-            &output.block_access_list,
+            &None, // Todo Bal
+            false,
             Some(output.gas_used),
         )
         .map_err(|err| Error::block_failed(block_number, err))?;

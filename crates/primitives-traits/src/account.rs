@@ -4,8 +4,6 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
-#[cfg(any(test, feature = "reth-codec"))]
-use revm_bytecode::BytecodeKind;
 use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
 use revm_state::AccountInfo;
 
@@ -18,10 +16,10 @@ pub mod compact_ids {
     /// Identifier for removed bytecode variant.
     pub const REMOVED_BYTECODE_ID: u8 = 1;
 
-    /// Identifier for [`LegacyAnalyzed`](revm_bytecode::BytecodeKind::LegacyAnalyzed).
+    /// Identifier for legacy analyzed bytecode.
     pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-    /// Identifier for [`Eip7702`](revm_bytecode::BytecodeKind::Eip7702).
+    /// Identifier for EIP-7702 bytecode.
     pub const EIP7702_BYTECODE_ID: u8 = 4;
 }
 
@@ -143,22 +141,23 @@ impl reth_codecs::Compact for Bytecode {
     {
         use compact_ids::{EIP7702_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
 
-        let bytecode = self.0.bytecode();
+        let bytecode = self.0.bytes_ref();
         buf.put_u32(bytecode.len() as u32);
         buf.put_slice(bytecode.as_ref());
-        let len = match self.0.kind() {
+        let len = if self.0.is_legacy() {
             // [`REMOVED_BYTECODE_ID`] has been removed.
-            BytecodeKind::LegacyAnalyzed => {
+            if let Some(jump_table) = self.0.legacy_jump_table() {
                 buf.put_u8(LEGACY_ANALYZED_BYTECODE_ID);
                 buf.put_u64(self.0.len() as u64);
-                let map = self.0.legacy_jump_table().unwrap().as_slice();
+                let map = jump_table.as_slice();
                 buf.put_slice(map);
                 1 + 8 + map.len()
+            } else {
+                unreachable!("legacy bytecode must contain a jump table")
             }
-            BytecodeKind::Eip7702 => {
-                buf.put_u8(EIP7702_BYTECODE_ID);
-                1
-            }
+        } else {
+            buf.put_u8(EIP7702_BYTECODE_ID);
+            1
         };
         len + bytecode.len() + 4
     }

@@ -1,9 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
-    cached_state::CachedStateProvider,
+    cached_state::{CacheStats, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::InstrumentedStateProvider,
+    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -11,16 +11,18 @@ use crate::tree::{
     StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{total_bal_items, BlockAccessList, ITEM_COST};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::Decodable;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
-use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
+use reth_chain_state::{
+    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
+};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -43,20 +45,35 @@ use reth_provider::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::Address;
+use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
+        Arc,
+    },
+    time::Duration,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
+/// Output of block or payload validation.
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
+    Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), E>;
+
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
+
+/// Result type for block validation with optional timing stats.
+type InsertPayloadResult<N> = Result<
+    (ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>),
+    InsertPayloadError<<N as NodePrimitives>::Block>,
+>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -86,7 +103,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     ) -> Self {
         Self { state, canonical_in_memory_state }
     }
+}
 
+impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a reference to the engine tree state
     pub const fn state(&self) -> &EngineApiTreeState<N> {
         &*self.state
@@ -277,7 +296,7 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<ExecutedBlock<N>, InsertPayloadError<N::Block>>
+    ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -330,7 +349,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
-    ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
+    ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
@@ -482,25 +501,39 @@ where
             block_access_list,
         ));
 
+        // Create optional cache stats for detailed block logging
+        let slow_block_enabled = self.config.slow_block_threshold().is_some();
+        let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
+
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider =
-                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
+            state_provider = Box::new(
+                CachedStateProvider::new(state_provider, caches, cache_metrics)
+                    .with_cache_stats(cache_stats.clone()),
+            );
         };
 
-        if self.config.state_provider_metrics() {
-            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
-        }
+        let state_provider_stats = if slow_block_enabled || self.config.state_provider_metrics() {
+            let instrumented_state_provider =
+                InstrumentedStateProvider::new(state_provider, "engine");
+            let stats = slow_block_enabled.then(|| instrumented_state_provider.stats());
+            state_provider = Box::new(instrumented_state_provider);
+            stats
+        } else {
+            None
+        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             };
+        let execution_duration = execute_block_start.elapsed();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -733,18 +766,37 @@ where
             .into())
         }
 
+        let timing_stats = state_provider_stats.map(|stats| {
+            self.calculate_timing_stats(
+                &block,
+                stats,
+                cache_stats,
+                &output,
+                execution_duration,
+                root_elapsed,
+            )
+        });
+
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
         }
 
-        Ok(self.spawn_deferred_trie_task(
+        // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
+        // eviction cannot race with us. If we deferred this to the background task, persistence
+        // could advance and evict changeset cache entries between factory creation and the task
+        // actually running, causing expensive DB fallback computations when building the overlay.
+        let changeset_provider =
+            ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
+
+        let executed_block = self.spawn_deferred_trie_task(
             block,
             output,
             &ctx,
             hashed_state,
             trie_output,
-            overlay_factory,
-        ))
+            changeset_provider,
+        );
+        Ok((executed_block, timing_stats))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -822,11 +874,27 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = input.block_access_list().is_some();
+        if has_bal {
+            let bal = input
+                .block_access_list()
+                .transpose()
+                .map_err(BlockExecutionError::other)?
+                .unwrap_or_default();
+
+            let bal_items = total_bal_items(&bal);
+
+            if bal_items > input.gas_limit() / ITEM_COST as u64 {
+                debug!(target: "engine::tree::payload_validator", bal_items, "{} {}", input.gas_limit(), "BAL is invalid since it contains more items than the gas limit allows");
+                return Err(InsertBlockErrorKind::Consensus(
+                    ConsensusError::BlockAccessListCostMoreThanGasLimit,
+                ));
+            }
+        }
+
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .with_bal_builder_if(has_bal)
                 .build()
         });
@@ -844,19 +912,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -870,6 +940,7 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
+        let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let executor = executor.with_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
         );
@@ -882,6 +953,8 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
+            &executed_tx_index,
+            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -902,7 +975,7 @@ where
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
 
-            let built_bal = &result.block_access_list;
+            let built_bal = db.take_built_alloy_bal();
 
             // Compute hashes and compare
             let expected_hash = expected_bal
@@ -927,8 +1000,8 @@ where
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
-
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
+
         Ok((output, senders, result_rx))
     }
 
@@ -948,6 +1021,8 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        executed_tx_index: &AtomicUsize,
+        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -963,6 +1038,11 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        if has_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -995,6 +1075,9 @@ where
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
+            // advance the shared counter so prewarm workers skip already-executed txs
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
@@ -1003,6 +1086,10 @@ where
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
+            }
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
         drop(exec_span);
@@ -1314,9 +1401,13 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
-        {
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            block,
+            output,
+            receipt_root_bloom,
+            None,
+            false,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
@@ -1557,7 +1648,7 @@ where
         ctx: &TreeCtx<'_, N>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1586,7 +1677,11 @@ where
         // Capture block info and cache handle for changeset computation
         let block_hash = block.hash();
         let block_number = block.number();
-        let changeset_cache = self.changeset_cache.clone();
+
+        // Register a pending changeset entry so that concurrent readers will wait for
+        // this computation to finish rather than falling back to the expensive DB path.
+        // The guard ensures the pending entry is cancelled if the task panics.
+        let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1621,20 +1716,15 @@ where
                         .record(anchored.trie_input.state.total_len() as f64);
                 }
 
-                // Compute and cache changesets using the computed trie_updates
+                // Compute and cache changesets using the computed trie_updates.
+                // Use the pre-created provider to avoid races with changeset cache
+                // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                // Get a provider from the overlay factory for trie cursor access
-                let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
-                        reth_trie::changesets::compute_trie_changesets(
-                            &provider,
-                            &computed.trie_updates,
-                        )
-                        .map_err(ProviderError::Database)
-                    });
-
-                match changeset_result {
+                match reth_trie::changesets::compute_trie_changesets(
+                    &changeset_provider,
+                    &computed.trie_updates,
+                ) {
                     Ok(changesets) => {
                         debug!(
                             target: "engine::tree::changeset",
@@ -1643,7 +1733,7 @@ where
                             "Computed and caching changesets"
                         );
 
-                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
+                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                     }
                     Err(e) => {
                         warn!(
@@ -1675,10 +1765,142 @@ where
             deferred_trie_data,
         )
     }
-}
 
-/// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> = Result<ExecutedBlock<N>, E>;
+    fn calculate_timing_stats(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        provider_stats: Arc<StateProviderStats>,
+        cache_stats: Option<Arc<CacheStats>>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        execution_duration: Duration,
+        state_hash_duration: Duration,
+    ) -> Box<ExecutionTimingStats> {
+        let accounts_read = provider_stats.total_account_fetches();
+        let storage_read = provider_stats.total_storage_fetches();
+        let code_read = provider_stats.total_code_fetches();
+        let code_bytes_read = provider_stats.total_code_fetched_bytes();
+
+        // Write stats from BundleState (final state changes)
+        let accounts_changed = output.state.state.len();
+        let accounts_deleted =
+            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
+        let storage_slots_changed =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let storage_slots_deleted = output
+            .state
+            .state
+            .values()
+            .flat_map(|account| account.storage.values())
+            .filter(|slot| {
+                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
+            })
+            .count();
+
+        // Helper: check if account represents a new contract deployment
+        let is_new_deployment = |acc: &BundleAccount| -> bool {
+            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+            let had_no_code_before = acc
+                .original_info
+                .as_ref()
+                .map(|info| info.code_hash == KECCAK_EMPTY)
+                .unwrap_or(true);
+            has_code_now && had_no_code_before
+        };
+
+        let bytecodes_changed =
+            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+
+        // Unique new code hashes to count actual bytes persisted (deduplicated)
+        let unique_new_code_hashes: B256Set = output
+            .state
+            .state
+            .values()
+            .filter(|acc| is_new_deployment(acc))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+            .collect();
+        let code_bytes_written: usize = unique_new_code_hashes
+            .iter()
+            .filter_map(|hash| {
+                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+            })
+            .sum();
+
+        // Total time spent fetching state during execution
+        let state_read_duration = provider_stats.total_account_fetch_latency() +
+            provider_stats.total_storage_fetch_latency() +
+            provider_stats.total_code_fetch_latency();
+
+        // EIP-7702 delegation tracking from bytecode changes
+        // Count new EIP-7702 bytecodes as delegations set
+        let eip7702_delegations_set =
+            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+        // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
+        // This detects when an EIP-7702 delegation is removed by setting code to empty
+        // Note: Clearing a delegation does NOT destroy the account - it just empties the
+        // bytecode
+        let eip7702_delegations_cleared = output
+            .state
+            .state
+            .values()
+            .filter(|acc| {
+                // Check if original bytecode was EIP-7702
+                let original_was_eip7702 = acc
+                    .original_info
+                    .as_ref()
+                    .and_then(|info| info.code.as_ref())
+                    .map(|bytecode| bytecode.is_eip7702())
+                    .unwrap_or(false);
+
+                // Check if current code is empty (delegation cleared)
+                let code_now_empty =
+                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+
+                original_was_eip7702 && code_now_empty
+            })
+            .count();
+
+        // Get cache statistics for detailed block logging
+        let (account_cache_hits, account_cache_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.account_hits(), s.account_misses()))
+            .unwrap_or_default();
+        let (storage_cache_hits, storage_cache_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.storage_hits(), s.storage_misses()))
+            .unwrap_or_default();
+        let (code_cache_hits, code_cache_misses) =
+            cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
+
+        // Build execution timing stats for detailed block logging
+        Box::new(ExecutionTimingStats {
+            block_number: block.number(),
+            block_hash: block.hash(),
+            gas_used: output.result.gas_used,
+            tx_count: block.transaction_count(),
+            execution_duration,
+            state_read_duration,
+            state_hash_duration,
+            accounts_read,
+            storage_read,
+            code_read,
+            code_bytes_read,
+            accounts_changed,
+            accounts_deleted,
+            storage_slots_changed,
+            storage_slots_deleted,
+            bytecodes_changed,
+            code_bytes_written,
+            eip7702_delegations_set,
+            eip7702_delegations_cleared,
+            account_cache_hits,
+            account_cache_misses,
+            storage_cache_hits,
+            storage_cache_misses,
+            code_cache_hits,
+            code_cache_misses,
+        })
+    }
+}
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1913,6 +2135,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_used(),
             Self::Block(block) => block.gas_used(),
+        }
+    }
+
+    /// Returns the gas limit used by the block.
+    pub fn gas_limit(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_limit(),
+            Self::Block(block) => block.gas_limit(),
         }
     }
 }

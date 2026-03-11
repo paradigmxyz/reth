@@ -66,6 +66,16 @@ impl TransactionPropagationMode {
         }
     }
 }
+impl std::fmt::Display for TransactionPropagationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sqrt => write!(f, "sqrt"),
+            Self::All => write!(f, "all"),
+            Self::Max(max) => write!(f, "max:{max}"),
+        }
+    }
+}
+
 impl FromStr for TransactionPropagationMode {
     type Err = String;
 

@@ -332,11 +332,15 @@ pub struct HashingConfig {
     pub clean_threshold: u64,
     /// The maximum number of entities to process before committing progress to the database.
     pub commit_threshold: u64,
+    /// The maximum number of changeset entries to process before committing progress. The stage
+    /// commits after either `commit_threshold` blocks or `commit_entries` entries, whichever
+    /// comes first. This bounds memory usage when blocks contain many state changes.
+    pub commit_entries: u64,
 }
 
 impl Default for HashingConfig {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+        Self { clean_threshold: 500_000, commit_threshold: 100_000, commit_entries: 30_000_000 }
     }
 }
 
