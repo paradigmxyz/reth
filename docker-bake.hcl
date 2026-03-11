@@ -39,6 +39,11 @@ variable "PGO_PROFDATA" {
   default = ""
 }
 
+// Whether to strip debug symbols in PGO build path.
+variable "STRIP_SYMBOLS" {
+  default = "true"
+}
+
 // Common settings for all targets
 group "default" {
   targets = ["ethereum"]
@@ -60,6 +65,7 @@ target "_base" {
     VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
     USE_PGO_BOLT        = "${USE_PGO_BOLT}"
     PGO_PROFDATA        = "${PGO_PROFDATA}"
+    STRIP_SYMBOLS       = "${STRIP_SYMBOLS}"
   }
   secret = [
     {

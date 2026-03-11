@@ -139,6 +139,7 @@ jobs:
             ${{ steps.params.outputs.ethereum_set }}
             *.args.USE_PGO_BOLT=${{ steps.pgo.outputs.use_pgo_bolt }}
             *.args.PGO_PROFDATA=${{ steps.pgo.outputs.pgo_profdata }}
+            *.args.STRIP_SYMBOLS=false
 
       - name: Verify image architectures
         env:
