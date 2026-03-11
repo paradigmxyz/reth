@@ -957,6 +957,10 @@ where
 
         // Preserve block hashes learned during execution for subsequent blocks.
         self.block_hash_cache = std::mem::take(&mut db.block_hashes);
+        self.metrics
+            .block_validation
+            .block_hash_cache_size
+            .record(self.block_hash_cache.iter().count() as f64);
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
