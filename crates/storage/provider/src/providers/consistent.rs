@@ -2219,7 +2219,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
         let consistent_provider = provider.consistent_provider()?;
 
         let outcome =
