@@ -1029,8 +1029,14 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
+          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
+          if [ "${BENCH_ABBA:-true}" = "true" ]; then
+            BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+            FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          fi
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
@@ -1057,8 +1063,14 @@ jobs:
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
           CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
-          CHART_ARGS="$CHART_ARGS --feature $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
-          CHART_ARGS="$CHART_ARGS --baseline $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
+          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
+          if [ "${BENCH_ABBA:-true}" = "true" ]; then
+            FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+            BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          fi
+          CHART_ARGS="$CHART_ARGS --feature $FEATURE_CSVS"
+          CHART_ARGS="$CHART_ARGS --baseline $BASELINE_CSVS"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
@@ -1134,7 +1146,8 @@ jobs:
 
             // Samply profile links (URLs point directly to Firefox Profiler)
             if (process.env.BENCH_SAMPLY === 'true') {
-              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
+              const runs = abba ? ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'] : ['baseline-1', 'feature-1'];
               const links = [];
               for (const run of runs) {
                 try {
@@ -1196,12 +1209,13 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
+            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
             const steps_status = [
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
-              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
@@ -1230,12 +1244,13 @@ jobs:
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
           script: |
+            const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
             const steps_status = [
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
-              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
-              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+              ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
+              ...(abba ? [['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}']] : []),
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
