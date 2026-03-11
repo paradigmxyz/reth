@@ -181,18 +181,20 @@ impl Default for BalProvider {
 }
 
 impl BalProvider {
-    fn new(store: Arc<dyn BalStore>, cache: BalCache) -> Self {
+    /// Creates a new `BalProvider` with the given store and cache.
+    pub fn new(store: Arc<dyn BalStore>, cache: BalCache) -> Self {
         Self { store, cache }
     }
 
+    /// Returns a reference to the in-memory cache.
     pub const fn cache(&self) -> &BalCache {
         &self.cache
     }
 
-    // Persist first: store is the source of truth. We only populate the in-memory cache if
-    // durability succeeds, so cache visibility cannot outlive failed persistence.
-    // `Bytes` is consumed by each insert call, so we clone once for store and move the original
-    // into cache.
+    /// Persist first: store is the source of truth. We only populate the in-memory cache if
+    /// durability succeeds, so cache visibility cannot outlive failed persistence.
+    /// `Bytes` is consumed by each insert call, so we clone once for store and move the original
+    /// into cache.
     pub fn cache_bal(
         &self,
         block_hash: BlockHash,
@@ -204,7 +206,7 @@ impl BalProvider {
         Ok(())
     }
 
-    // Cache-first lookup: keep request order and fill only cache misses from durable storage.
+    /// Cache-first lookup: keep request order and fill only cache misses from durable storage.
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
         let mut results = self.cache.get_by_hashes(block_hashes);
 
@@ -240,8 +242,8 @@ impl BalProvider {
         results
     }
 
-    // Cache range reads are contiguous and stop at the first gap.
-    // Only the missing suffix is queried from store to avoid re-reading cached prefix.
+    /// Cache range reads are contiguous and stop at the first gap.
+    /// Only the missing suffix is queried from store to avoid re-reading cached prefix.
     pub fn get_by_range(&self, start: BlockNumber, count: u64) -> Vec<Bytes> {
         let mut cache_results = self.cache.get_by_range(start, count);
         if cache_results.len() as u64 == count {
