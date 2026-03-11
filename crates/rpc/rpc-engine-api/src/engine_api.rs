@@ -1,18 +1,13 @@
 use crate::{
-    bal_cache::BalCache,
-    bal_store::{BalStore, BalStoreError},
-    capabilities::EngineCapabilities,
-    metrics::EngineApiMetrics,
-    EngineApiError, EngineApiResult,
+    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
-    BlockNumHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -23,12 +18,13 @@ use alloy_rpc_types_engine::{
 
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
+use reth_bal_store::{BalStore, BalStoreError};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, MessageValidationKind,
+    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
@@ -336,7 +332,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -750,8 +746,7 @@ where
                 block_access_list: None,
             })
             .await?;
-        let bals =
-            self.inner.bal_provider.get_by_range(start, count, &self.inner.metrics.bal_metrics);
+        let bals = self.inner.provider.get_by_range(start, count)?;
         for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
             if let Some(body) = body_opt.as_mut() {
                 body.block_access_list = Some(bal);
@@ -848,10 +843,10 @@ where
             })
             .await?;
 
-        let bals = self.inner.bal_provider.get_by_hashes(&hashes, &self.inner.metrics.bal_metrics);
+        let bals = self.get_bals_by_hash(hashes)?;
         for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
             if let Some(body) = body_opt.as_mut() {
-                body.block_access_list = bal;
+                body.block_access_list = Some(bal);
             }
         }
         return Ok(bodies)
@@ -1075,20 +1070,28 @@ where
     ///
     /// Returns the RLP-encoded BALs for blocks found in the cache or BAL store.
     /// Missing blocks are returned as empty bytes.
-    pub fn get_bals_by_hash(&self, block_hashes: Vec<BlockHash>) -> Vec<alloy_primitives::Bytes> {
-        self.inner
-            .bal_provider
-            .get_by_hashes(&block_hashes, &self.inner.metrics.bal_metrics)
+    pub fn get_bals_by_hash(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> Result<Vec<alloy_primitives::Bytes>, BalStoreError> {
+        Ok(self
+            .inner
+            .provider
+            .get_by_hashes(&block_hashes)?
             .into_iter()
             .map(|opt| opt.unwrap_or_default())
-            .collect()
+            .collect())
     }
 
     /// Retrieves BALs for a range of blocks from the cache or BAL store.
     ///
     /// Returns the RLP-encoded BALs for blocks in the range `[start, start + count)`.
-    pub fn get_bals_by_range(&self, start: u64, count: u64) -> Vec<alloy_primitives::Bytes> {
-        self.inner.bal_provider.get_by_range(start, count, &self.inner.metrics.bal_metrics)
+    pub fn get_bals_by_range(
+        &self,
+        start: u64,
+        count: u64,
+    ) -> Result<Vec<alloy_primitives::Bytes>, BalStoreError> {
+        self.inner.provider.get_by_range(start, count)
     }
 }
 
@@ -1097,7 +1100,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -1466,7 +1469,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer<ExecutionData>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,

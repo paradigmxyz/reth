@@ -12,16 +12,6 @@
 /// The Engine API implementation.
 mod engine_api;
 
-/// Block Access List (BAL) cache for EIP-7928.
-mod bal_cache;
-pub use bal_cache::BalCache;
-
-/// Block Access List (BAL) storage abstraction and implementations.
-pub mod bal_store;
-pub use bal_store::{
-    BalStore, BalStoreError, DiskFileBalStore, DiskFileBalStoreConfig,
-    DEFAULT_MAX_BAL_STORE_ENTRIES,
-};
 /// Reth-specific engine API extensions.
 mod reth_engine_api;
 
