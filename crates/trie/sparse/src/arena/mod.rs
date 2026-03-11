@@ -508,7 +508,7 @@ pub struct ArenaParallelSparseTrie {
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
-    cleared_subtries: Vec<ArenaSparseSubtrie>,
+    cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
 }
@@ -539,7 +539,7 @@ impl ArenaParallelSparseTrie {
             debug_assert!(s.arena.is_empty());
             s
         } else {
-            ArenaSparseSubtrie {
+            Box::new(ArenaSparseSubtrie {
                 arena: SlotMap::new(),
                 root: Index::null(),
                 path: Nibbles::default(),
@@ -547,13 +547,13 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
-            }
+            })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
         if self.updates.is_some() {
             subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         }
-        Box::new(subtrie)
+        subtrie
     }
 
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
@@ -695,7 +695,7 @@ impl ArenaParallelSparseTrie {
         };
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         subtrie.clear();
-        self.cleared_subtries.push(*subtrie);
+        self.cleared_subtries.push(subtrie);
     }
 
     /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
@@ -822,7 +822,7 @@ impl ArenaParallelSparseTrie {
                     &mut subtrie.buffers.updates,
                 );
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
 
                 // The migrated subtrie root may be a branch whose children now live in
                 // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
@@ -2340,7 +2340,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.upper_arena.remove(idx).expect("subtrie exists in arena")
             {
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
             }
         }
         self.upper_arena.clear();
