@@ -491,6 +491,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
 
+            // Disable EIP-7825 transaction gas limit cap so that the gas limit
+            // fallback (block gas limit) is not rejected when it exceeds the
+            // per-tx cap (2^24 ≈ 16.7M post-Osaka).
+            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+
             if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
                 let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
