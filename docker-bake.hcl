@@ -50,7 +50,7 @@ group "default" {
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling"]
+  targets = ["ethereum", "ethereum-profiling"]
 }
 
 // Base target with shared configuration
@@ -100,17 +100,6 @@ target "ethereum-profiling" {
   tags = ["${REGISTRY}/reth:nightly-profiling"]
 }
 
-target "ethereum-edge-profiling" {
-  inherits = ["_base_profiling"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc-prof edge"
-  }
-  tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
-}
-
 // Hive test targets — single-platform, hivetests profile, tar output
 target "_base_hive" {
   inherits  = ["_base"]
@@ -129,17 +118,6 @@ target "hive-stable" {
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
-  }
-  tags   = ["reth:local"]
-  output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
-}
-
-target "hive-edge" {
-  inherits = ["_base_hive"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-    FEATURES      = "edge"
   }
   tags   = ["reth:local"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]

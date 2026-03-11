@@ -22,13 +22,6 @@ jobs:
       artifact_name: "reth-stable"
     secrets: inherit
 
-  build-reth-edge:
-    uses: ./.github/workflows/docker-test.yml
-    with:
-      hive_target: hive-edge
-      artifact_name: "reth-edge"
-    secrets: inherit
-
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
@@ -84,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        storage: [stable, edge]
+        storage: [stable]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -185,7 +178,6 @@ jobs:
             limit: .*tests/paris.*
     needs:
       - build-reth-stable
-      - build-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
