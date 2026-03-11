@@ -48,7 +48,7 @@ jobs:
     secrets: inherit
 
   build:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'paradigmxyz/reth' && !failure() && !cancelled()
     name: Build Docker images
     runs-on: ubuntu-24.04
     needs: collect-pgo-profile
