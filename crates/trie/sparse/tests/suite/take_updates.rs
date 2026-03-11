@@ -249,7 +249,8 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
     let root_after_remove = trie.root();
 
     assert_eq!(
-        harness.original_root, root_after_remove,
+        harness.original_root(),
+        root_after_remove,
         "root should match original after insert+remove round-trip"
     );
 
