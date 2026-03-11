@@ -508,6 +508,7 @@ pub struct ArenaParallelSparseTrie {
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
+    #[allow(clippy::vec_box)]
     cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
