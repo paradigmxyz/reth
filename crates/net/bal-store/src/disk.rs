@@ -468,6 +468,28 @@ impl std::fmt::Display for DiskFileBalStore {
     }
 }
 
+impl<T: BalStore + ?Sized> BalStore for Arc<T> {
+    fn insert(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: Bytes,
+    ) -> Result<(), BalStoreError> {
+        (**self).insert(block_hash, block_number, bal)
+    }
+
+    fn get_by_hashes(
+        &self,
+        block_hashes: &[BlockHash],
+    ) -> Result<Vec<Option<Bytes>>, BalStoreError> {
+        (**self).get_by_hashes(block_hashes)
+    }
+
+    fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
+        (**self).get_by_range(start, count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
