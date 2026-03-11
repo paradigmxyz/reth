@@ -110,7 +110,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
 
 [features]
-default = []
+default = ["rocksdb"]
 arbitrary = [
     "dep:proptest",
     "dep:arbitrary",

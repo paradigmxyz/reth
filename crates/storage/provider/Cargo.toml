@@ -87,6 +87,7 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+default = ["rocksdb"]
 rocksdb = ["reth-storage-api/rocksdb", "dep:rocksdb"]
 edge = ["rocksdb"]
 test-utils = [

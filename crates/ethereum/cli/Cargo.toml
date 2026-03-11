@@ -36,7 +36,7 @@ tracing.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
+default = ["rocksdb"]
 
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
 otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
