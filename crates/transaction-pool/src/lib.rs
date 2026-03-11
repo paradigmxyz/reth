@@ -740,7 +740,8 @@ where
         sender: Address,
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
+        let sender_id = self.pool.sender_id(&sender)?;
+        let transaction_id = TransactionId::new(sender_id, nonce);
 
         self.inner().get_pool_data().all().get(&transaction_id).map(|tx| tx.transaction.clone())
     }
