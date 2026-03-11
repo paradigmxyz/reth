@@ -371,17 +371,16 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.pruning.prune_config(&self.chain)
     }
 
-    /// Returns the effective storage settings derived from `--storage.v2`.
+    /// Returns the effective storage settings for this node.
     ///
-    /// The base storage mode is determined by `--storage.v2`:
-    /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
-    /// - Otherwise: uses [`StorageSettings::base()`] defaults
+    /// Always returns [`StorageSettings::v2()`] — v2 storage is the default for
+    /// new nodes. Existing nodes retain whatever settings are persisted in their
+    /// database metadata (checked during genesis init).
+    ///
+    /// Existing databases retain whatever settings are persisted in their
+    /// metadata (checked during genesis init).
     pub const fn storage_settings(&self) -> StorageSettings {
-        if self.storage.v2 {
-            StorageSettings::v2()
-        } else {
-            StorageSettings::base()
-        }
+        StorageSettings::v2()
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

@@ -110,7 +110,7 @@ impl Compact for AlloyHeader {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (header, _) = Header::from_compact(buf, len);
+        let (header, buf) = Header::from_compact(buf, len);
         let alloy_header = Self {
             parent_hash: header.parent_hash,
             ommers_hash: header.ommers_hash,
