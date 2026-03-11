@@ -63,7 +63,6 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 # parallel utils
 rayon.workspace = true
 
-[target.'cfg(unix)'.dependencies]
 rocksdb = { workspace = true, features = ["jemalloc"] }
 
 [dev-dependencies]

@@ -195,12 +195,10 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
         self.rocksdb_provider.clone()
     }
 
-    #[cfg(unix)]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 
-    #[cfg(unix)]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }

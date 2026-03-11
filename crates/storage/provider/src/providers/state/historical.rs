@@ -1170,7 +1170,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn history_provider_get_storage_hashed_state() {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;
