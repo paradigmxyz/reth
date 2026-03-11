@@ -9203,7 +9203,6 @@ version = "1.11.0"
 dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
- "reth-bal-store",
  "reth-basic-payload-builder",
  "reth-consensus",
  "reth-db-api",
@@ -9972,7 +9971,6 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
- "parking_lot",
  "reth-bal-store",
  "reth-chainspec",
  "reth-engine-primitives",

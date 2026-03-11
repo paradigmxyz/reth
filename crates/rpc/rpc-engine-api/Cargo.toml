@@ -43,7 +43,6 @@ metrics.workspace = true
 async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
-parking_lot.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
