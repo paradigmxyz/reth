@@ -312,7 +312,9 @@ where
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
             let total_chunks = range.clone().step_by(incremental_threshold as usize).count();
-            for (chunk_idx, start_block) in range.step_by(incremental_threshold as usize).enumerate() {
+            for (chunk_idx, start_block) in
+                range.step_by(incremental_threshold as usize).enumerate()
+            {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
                 info!(
