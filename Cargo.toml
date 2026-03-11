@@ -615,7 +615,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.5"
+c-kzg = "2.1.7"
 
 # config
 toml = "0.9"
@@ -639,7 +639,7 @@ insta = "1.41"
 proptest = "1.7"
 proptest-derive = "0.7"
 similar-asserts = { version = "1.5.0", features = ["serde"] }
-tempfile = "3.20"
+tempfile = "3.27"
 test-fuzz = "7"
 rstest = "0.26.1"
 test-case = "3"
@@ -698,7 +698,7 @@ snap = "1.1.1"
 socket2 = { version = "0.6", default-features = false }
 sysinfo = { version = "0.38", default-features = false }
 tracing-journald = "0.3"
-tracing-logfmt = "=0.3.5"
+tracing-logfmt = "=0.3.7"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
