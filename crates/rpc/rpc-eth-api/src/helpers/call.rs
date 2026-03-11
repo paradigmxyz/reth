@@ -73,7 +73,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::other(EthSimulateError::GasLimitReached).into())
             }
 
             let block = block.unwrap_or_default();
