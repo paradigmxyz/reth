@@ -89,7 +89,7 @@ impl TrieTestHarness {
     /// Creates a new test harness from a map of hashed storage slots to values.
     pub fn new(storage: BTreeMap<B256, U256>) -> Self {
         let mut harness = Self {
-            storage: BTreeMap::new(),
+            storage,
             original_root: B256::ZERO,
             storage_trie_updates: StorageTrieUpdates::default(),
             trie_cursor_factory: MockTrieCursorFactory::new(
@@ -101,7 +101,7 @@ impl TrieTestHarness {
                 once((B256::ZERO, BTreeMap::new())).collect(),
             ),
         };
-        harness.apply_changeset(storage);
+        harness.rebuild();
         harness
     }
 
@@ -143,45 +143,50 @@ impl TrieTestHarness {
     }
 
     /// Merges `changeset` into the base storage (zero values remove entries) and
-    /// recomputes the storage root, trie updates, and cursor factories.
+    /// rebuilds the harness from scratch with the resulting storage.
     pub fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
-        let (original_root, storage_trie_updates) = self.get_root_with_updates(&changeset);
-
-        // Merge storage: apply changeset (zero values remove entries).
-        for (k, v) in &changeset {
-            if *v == U256::ZERO {
-                self.storage.remove(k);
+        for (k, v) in changeset {
+            if v == U256::ZERO {
+                self.storage.remove(&k);
             } else {
-                self.storage.insert(*k, *v);
+                self.storage.insert(k, v);
             }
         }
+        self.rebuild();
+    }
 
-        // Merge trie nodes: start from existing, apply updates, remove deletions.
-        let mut merged_trie_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            self.storage_trie_updates.storage_nodes.iter().map(|(k, v)| (*k, v.clone())).collect();
-        for (k, v) in &storage_trie_updates.storage_nodes {
-            merged_trie_nodes.insert(*k, v.clone());
-        }
-        for k in &storage_trie_updates.removed_nodes {
-            merged_trie_nodes.remove(k);
-        }
-
+    /// Recomputes the storage root, trie updates, and cursor factories from `self.storage`.
+    fn rebuild(&mut self) {
         self.hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::new(),
             once((self.hashed_address(), self.storage.clone())).collect(),
         );
 
+        let (root, _, updates) = StorageRoot::new_hashed(
+            MockTrieCursorFactory::new(
+                BTreeMap::new(),
+                once((self.hashed_address(), BTreeMap::new())).collect(),
+            ),
+            self.hashed_cursor_factory.clone(),
+            self.hashed_address(),
+            crate::prefix_set::PrefixSet::default(),
+            #[cfg(feature = "metrics")]
+            crate::metrics::TrieRootMetrics::new(crate::TrieType::Storage),
+        )
+        .root_with_updates()
+        .expect("StorageRoot should succeed");
+
         self.trie_cursor_factory = MockTrieCursorFactory::new(
             BTreeMap::new(),
-            once((self.hashed_address(), merged_trie_nodes.clone())).collect(),
+            once((
+                self.hashed_address(),
+                updates.storage_nodes.iter().map(|(k, v)| (*k, v.clone())).collect(),
+            ))
+            .collect(),
         );
 
-        self.original_root = original_root;
-        self.storage_trie_updates = StorageTrieUpdates {
-            is_deleted: false,
-            storage_nodes: merged_trie_nodes.into_iter().collect(),
-            removed_nodes: Default::default(),
-        };
+        self.original_root = root;
+        self.storage_trie_updates = updates;
     }
 
     /// Returns the hashed address used for all storage trie operations.
