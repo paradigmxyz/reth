@@ -135,6 +135,11 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
 
+    /// Histogram of `min_len` values for account proof targets.
+    pub sparse_trie_account_proof_min_len: Histogram,
+    /// Histogram of `min_len` values for storage proof targets.
+    pub sparse_trie_storage_proof_min_len: Histogram,
+
     /// Number of account leaf updates applied without needing a new proof (cache hits).
     pub sparse_trie_account_cache_hits: Histogram,
     /// Number of account leaf updates that required a new proof (cache misses).
