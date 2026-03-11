@@ -1078,12 +1078,6 @@ mod tests {
             assert_eq!(accounts, expected_accounts);
             assert_eq!(storages, expected_storages);
         }
-
-        {
-            let (accounts, storages) = collect_from_mdbx(&factory);
-            assert_eq!(accounts, expected_accounts);
-            assert_eq!(storages, expected_storages);
-        }
     }
 
     #[test]
