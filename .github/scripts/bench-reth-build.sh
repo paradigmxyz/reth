@@ -22,6 +22,22 @@ MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"
 
+# Tracy support: when BENCH_TRACY is "on" or "full", add Tracy cargo features
+# and frame pointers for accurate stack traces.
+EXTRA_FEATURES=""
+EXTRA_RUSTFLAGS=""
+if [ "${BENCH_TRACY:-off}" != "off" ]; then
+  EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  EXTRA_RUSTFLAGS=" -C force-frame-pointers=yes"
+fi
+
+# Cache suffix: hash of features+rustflags so different build configs get separate cache entries
+if [ -n "$EXTRA_FEATURES" ] || [ -n "$EXTRA_RUSTFLAGS" ]; then
+  BUILD_SUFFIX="-$(echo "${EXTRA_FEATURES}${EXTRA_RUSTFLAGS}" | sha256sum | cut -c1-12)"
+else
+  BUILD_SUFFIX=""
+fi
+
 # Verify a cached reth binary was built from the expected commit.
 # `reth --version` outputs "Commit SHA: <full-sha>" on its own line.
 verify_binary() {
@@ -42,7 +58,7 @@ verify_binary() {
 
 case "$MODE" in
   baseline|main)
-    BUCKET="minio/reth-binaries/${COMMIT}"
+    BUCKET="minio/reth-binaries/${COMMIT}${BUILD_SUFFIX}"
     mkdir -p "${SOURCE_DIR}/target/profiling"
 
     CACHE_VALID=false
@@ -59,14 +75,23 @@ case "$MODE" in
     if [ "$CACHE_VALID" = false ]; then
       echo "Building baseline (${COMMIT}) from source..."
       cd "${SOURCE_DIR}"
-      cargo build --profile profiling --bin reth
+      FEATURES_ARG=""
+      WORKSPACE_ARG=""
+      if [ -n "$EXTRA_FEATURES" ]; then
+        # --workspace is needed for cross-package feature syntax (tracy-client/ondemand)
+        FEATURES_ARG="--features ${EXTRA_FEATURES}"
+        WORKSPACE_ARG="--workspace"
+      fi
+      # shellcheck disable=SC2086
+      RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
+        cargo build --profile profiling --bin reth $WORKSPACE_ARG $FEATURES_ARG
       $MC cp target/profiling/reth "${BUCKET}/reth"
     fi
     ;;
 
   feature|branch)
     BRANCH_SHA="${4:-$COMMIT}"
-    BUCKET="minio/reth-binaries/${BRANCH_SHA}"
+    BUCKET="minio/reth-binaries/${BRANCH_SHA}${BUILD_SUFFIX}"
 
     CACHE_VALID=false
     if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
@@ -85,7 +110,14 @@ case "$MODE" in
       echo "Building feature (${COMMIT}) from source..."
       cd "${SOURCE_DIR}"
       rustup show active-toolchain || rustup default stable
-      make profiling
+      if [ -n "$EXTRA_FEATURES" ]; then
+        # Can't use `make profiling` when adding features; build explicitly
+        # --workspace is needed for cross-package feature syntax (tracy-client/ondemand)
+        RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
+          cargo build --profile profiling --workspace --bin reth --features "${EXTRA_FEATURES}"
+      else
+        make profiling
+      fi
       make install-reth-bench
       $MC cp target/profiling/reth "${BUCKET}/reth"
       $MC cp "$(which reth-bench)" "${BUCKET}/reth-bench"

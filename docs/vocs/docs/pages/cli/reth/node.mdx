@@ -986,18 +986,30 @@ Engine:
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
 
-      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
-          Sparse trie prune depth
+      --engine.sparse-trie-max-hot-slots <SPARSE_TRIE_MAX_HOT_SLOTS>
+          LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles
 
-          [default: 4]
+          [default: 1500]
 
-      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
-          Maximum number of storage tries to retain after sparse trie pruning
+      --engine.sparse-trie-max-hot-accounts <SPARSE_TRIE_MAX_HOT_ACCOUNTS>
+          LFU hot-account capacity: max account addresses retained across sparse trie prune cycles
 
-          [default: 100]
+          [default: 1000]
+
+      --engine.slow-block-threshold <DURATION>
+          Configure the slow block logging threshold in milliseconds.
+
+          When set, blocks that take longer than this threshold to execute will be logged with detailed metrics including timing, state operations, and cache statistics.
+
+          Set to 0 to log all blocks (useful for debugging/profiling).
+
+          When not set, slow block logging is disabled (default).
 
       --engine.disable-sparse-trie-cache-pruning
           Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
+
+      --engine.enable-arena-sparse-trie
+          Enable the arena-based sparse trie implementation instead of the default hash-map-based one
 
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
@@ -1042,16 +1054,6 @@ Static Files:
       --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
           Number of blocks per file for the storage changesets segment
 
-Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
-
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
-
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
-
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
@@ -1066,7 +1068,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

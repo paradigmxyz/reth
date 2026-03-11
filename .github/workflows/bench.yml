@@ -8,11 +8,11 @@
 
 on:
   issue_comment:
-    types: [created, edited]
+    types: [created]
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark"
+        description: "Number of blocks to benchmark (or 'big' for big blocks mode)"
         required: false
         default: "500"
         type: string
@@ -40,6 +40,26 @@ on:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
         default: "0"
+        type: string
+      reth_newPayload:
+        description: "Use reth_newPayload RPC (server-side timing)"
+        required: false
+        default: "true"
+        type: boolean
+      wait_time:
+        description: "Fixed wait time between blocks (e.g. 500ms, 1s)"
+        required: false
+        default: ""
+        type: string
+      baseline_args:
+        description: "Extra CLI args for the baseline reth node"
+        required: false
+        default: ""
+        type: string
+      feature_args:
+        description: "Extra CLI args for the feature reth node"
+        required: false
+        default: ""
         type: string
 
 env:
@@ -73,6 +93,11 @@ jobs:
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
       cores: ${{ steps.args.outputs.cores }}
+      big-blocks: ${{ steps.args.outputs.big-blocks }}
+      reth-new-payload: ${{ steps.args.outputs.reth-new-payload }}
+      wait-time: ${{ steps.args.outputs.wait-time }}
+      baseline-args: ${{ steps.args.outputs.baseline-args }}
+      feature-args: ${{ steps.args.outputs.feature-args }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -100,7 +125,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature, samply, cores;
+            let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -110,6 +135,11 @@ jobs:
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               cores = '${{ github.event.inputs.cores }}' || '0';
+              bigBlocks = blocks === 'big' ? 'true' : 'false';
+              var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
+              var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
+              var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -129,17 +159,28 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['blocks', 'warmup', 'cores']);
+              const intArgs = new Set(['warmup', 'cores']);
+              const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0' };
+              const boolDefaultTrue = new Set(['reth_newPayload']);
+              const durationArgs = new Set(['wait-time']);
+              const stringArgs = new Set(['baseline-args', 'feature-args']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', cores: '0', reth_newPayload: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
-              for (const part of args.split(/\s+/).filter(Boolean)) {
+              // Parse args, handling quoted values like key="value with spaces"
+              const parts = [];
+              const argRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
+              let m;
+              while ((m = argRegex.exec(args)) !== null) parts.push(m[1]);
+              for (const part of parts) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
                   if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else if (boolDefaultTrue.has(part)) {
                     defaults[part] = 'true';
                   } else {
                     unknown.push(part);
@@ -147,12 +188,37 @@ jobs:
                   continue;
                 }
                 const key = part.slice(0, eq);
-                const value = part.slice(eq + 1);
-                if (intArgs.has(key)) {
+                let value = part.slice(eq + 1);
+                // Strip surrounding quotes
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.slice(1, -1);
+                }
+                if (boolDefaultTrue.has(key)) {
+                  if (value === 'true' || value === 'false') {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be true or false)`);
+                  }
+                } else if (durationArgs.has(key)) {
+                  if (/^\d+(ms|s|m)$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a duration like 500ms, 1s, 2m)`);
+                  }
+                } else if (intArgs.has(key)) {
                   if (!/^\d+$/.test(value)) {
                     invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
                   } else {
                     defaults[key] = value;
+                  }
+                } else if (intOrKeywordArgs.has(key)) {
+                  const keywords = intOrKeywordArgs.get(key);
+                  if (keywords.has(value)) {
+                    defaults[key] = value;
+                  } else if (/^\d+$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer or one of: ${[...keywords].join(', ')})`);
                   }
                 } else if (refArgs.has(key)) {
                   if (!value) {
@@ -160,6 +226,8 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
+                } else if (stringArgs.has(key)) {
+                  defaults[key] = value;
                 } else {
                   unknown.push(key);
                 }
@@ -168,7 +236,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [cores=N] [reth_newPayload=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -184,6 +252,11 @@ jobs:
               feature = defaults.feature;
               samply = defaults.samply;
               cores = defaults.cores;
+              bigBlocks = blocks === 'big' ? 'true' : 'false';
+              var rethNewPayload = defaults.reth_newPayload;
+              var waitTime = defaults['wait-time'];
+              var baselineNodeArgs = defaults['baseline-args'];
+              var featureNodeArgs = defaults['feature-args'];
             }
 
             // Resolve display names for baseline/feature
@@ -212,6 +285,11 @@ jobs:
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
             core.setOutput('cores', cores);
+            core.setOutput('big-blocks', bigBlocks);
+            core.setOutput('reth-new-payload', rethNewPayload);
+            core.setOutput('wait-time', waitTime);
+            core.setOutput('baseline-args', baselineNodeArgs);
+            core.setOutput('feature-args', featureNodeArgs);
 
       - name: Acknowledge request
         id: ack
@@ -269,10 +347,20 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
+            const rethNP = '${{ steps.args.outputs.reth-new-payload }}' !== 'false';
+            const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
+            const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -297,10 +385,20 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`;
+            const rethNP = '${{ steps.args.outputs.reth-new-payload }}' !== 'false';
+            const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
+            const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -364,7 +462,13 @@ jobs:
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
       BENCH_CORES: ${{ needs.reth-bench-ack.outputs.cores }}
+      BENCH_BIG_BLOCKS: ${{ needs.reth-bench-ack.outputs.big-blocks }}
+      BENCH_RETH_NEW_PAYLOAD: ${{ needs.reth-bench-ack.outputs.reth-new-payload }}
+      BENCH_WAIT_TIME: ${{ needs.reth-bench-ack.outputs.wait-time }}
+      BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
+      BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
+      BENCH_METRICS_ADDR: "127.0.0.1:9100"
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -383,13 +487,11 @@ jobs:
               repo: context.repo.repo,
               pull_number: parseInt(process.env.BENCH_PR),
             });
-            // For closed/merged PRs, the merge ref doesn't exist — use head SHA
-            if (pr.state !== 'open') {
-              core.info(`PR #${process.env.BENCH_PR} is ${pr.state}, using head SHA ${pr.head.sha}`);
-              core.setOutput('ref', pr.head.sha);
-            } else {
-              core.setOutput('ref', `refs/pull/${process.env.BENCH_PR}/merge`);
-            }
+            // Always use head SHA — the merge ref (refs/pull/N/merge) may not
+            // exist if the PR has conflicts, was force-pushed, or was
+            // merged/closed between this step and checkout.
+            core.info(`PR #${process.env.BENCH_PR} (${pr.state}), using head SHA ${pr.head.sha}`);
+            core.setOutput('ref', pr.head.sha);
 
       - uses: actions/checkout@v6
         with:
@@ -417,10 +519,20 @@ jobs:
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
+            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}`);
+            const rethNP = (process.env.BENCH_RETH_NEW_PAYLOAD || 'true') !== 'false';
+            const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
+            const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${coresNote}${rethNPNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -680,6 +792,45 @@ jobs:
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"
 
+      - name: Download big blocks
+        if: env.BENCH_BIG_BLOCKS == 'true'
+        run: |
+          set -euo pipefail
+          MC="mc --config-dir /home/ubuntu/.mc"
+          BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous-big-blocks.tar.zst"
+          BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
+          rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
+          echo "Downloading big blocks from $BUCKET..."
+          $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
+          echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
+          # Verify expected directory structure
+          if [ ! -d "$BIG_BLOCKS_DIR/gas-ramp-dir" ] || [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
+            echo "::error::Big blocks archive missing expected gas-ramp-dir/ or payloads/ directories"
+            ls -laR "$BIG_BLOCKS_DIR"
+            exit 1
+          fi
+          echo "Payload files: $(find "$BIG_BLOCKS_DIR/payloads" -name '*.json' | wc -l)"
+
+      - name: Start metrics proxy
+        run: |
+          BENCH_ID="ci-${{ github.run_id }}"
+          BENCH_REFERENCE_EPOCH=$(date +%s)
+          echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
+          echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
+
+          LABELS_FILE="/tmp/bench-metrics-labels.json"
+          echo '{}' > "$LABELS_FILE"
+          echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
+
+          python3 .github/scripts/bench-metrics-proxy.py \
+            --labels "$LABELS_FILE" \
+            --upstream "http://${BENCH_METRICS_ADDR}/" \
+            --subnet 10.10.0.0/24 \
+            --port 9090 &
+          PROXY_PID=$!
+          echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
+          echo "Metrics proxy started (PID $PROXY_PID)"
+
       - name: Update status (running benchmarks)
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
@@ -693,19 +844,58 @@ jobs:
       # thermal drift and cache warming.
       - name: "Run benchmark: baseline (1/2)"
         id: run-baseline-1
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
+        env:
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+        env:
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
         id: run-feature-2
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+        env:
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
         id: run-baseline-2
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+        env:
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+        run: |
+          LAST_RUN_START=$(date +%s)
+          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+
+      - name: Stop metrics proxy & generate Grafana URL
+        id: metrics
+        if: "!cancelled()"
+        run: |
+          kill "$BENCH_METRICS_PROXY_PID" 2>/dev/null || true
+
+          LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
+          FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
+          TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
+          echo "Grafana URL: ${GRAFANA_URL}"
 
       - name: Scan logs for errors
         if: "!cancelled()"
@@ -813,6 +1003,18 @@ jobs:
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
+          if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
+            # Read gas ramp blocks count from first baseline run (same for all runs)
+            GAS_RAMP_FILE="$BENCH_WORK_DIR/baseline-1/gas_ramp_blocks.txt"
+            if [ -f "$GAS_RAMP_FILE" ]; then
+              SUMMARY_ARGS="$SUMMARY_ARGS --gas-ramp-blocks $(cat "$GAS_RAMP_FILE" | tr -d '[:space:]')"
+            fi
+          fi
+          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          if [ -n "$GRAFANA_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
@@ -832,7 +1034,7 @@ jobs:
 
       - name: Upload results
         if: "!cancelled()"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: bench-reth-results
           path: ${{ env.BENCH_WORK_DIR }}
@@ -913,6 +1115,12 @@ jobs:
               if (links.length > 0) {
                 comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
               }
+            }
+
+            // Grafana dashboard link
+            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
+            if (grafanaUrl) {
+              comment += `\n\n### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n`;
             }
 
             // Node errors (panics / ERROR logs)
