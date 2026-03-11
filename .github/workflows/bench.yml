@@ -1110,7 +1110,7 @@ jobs:
           rm -rf "${TMP_DIR}"
 
       - name: Compare & comment
-        if: success() && env.BENCH_COMMENT_ID && env.BENCH_QUIET != 'true'
+        if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.DEREK_PAT }}
