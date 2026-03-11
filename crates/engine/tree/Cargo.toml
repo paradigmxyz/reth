@@ -97,6 +97,9 @@ reth-e2e-test-utils.workspace = true
 # revm
 revm-state.workspace = true
 
+# benches
+criterion.workspace = true
+
 assert_matches.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
@@ -150,3 +153,7 @@ edge = ["rocksdb"]
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+
+[[bench]]
+name = "sparse_trie_account_promotion"
+harness = false

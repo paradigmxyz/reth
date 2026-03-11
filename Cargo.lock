@@ -8392,6 +8392,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "codspeed-criterion-compat",
  "crossbeam-channel",
  "derive_more",
  "eyre",

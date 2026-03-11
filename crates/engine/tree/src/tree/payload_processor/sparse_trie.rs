@@ -88,8 +88,6 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Cache of storage proof targets that have already been fetched/requested from the proof
     /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
-    /// Reusable buffer for RLP encoding of accounts.
-    account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
     /// Accumulated account leaf update cache hits.
@@ -148,7 +146,6 @@ where
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
-            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             account_cache_hits: 0,
             account_cache_misses: 0,
@@ -675,7 +672,6 @@ where
         loop {
             let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
-            let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
@@ -684,8 +680,12 @@ where
                         return true;
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                        upsert_account_leaf_update(
+                            &mut self.account_updates,
+                            *addr,
+                            account,
+                            storage_root,
+                        );
                         num_promoted += 1;
                         return false;
                     }
@@ -715,8 +715,7 @@ where
                     (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
-                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                upsert_account_leaf_update(&mut self.account_updates, *addr, account, storage_root);
                 num_promoted += 1;
 
                 false
@@ -773,15 +772,65 @@ where
 fn encode_account_leaf_value(
     account: Option<Account>,
     storage_root: B256,
-    account_rlp_buf: &mut Vec<u8>,
-) -> Vec<u8> {
+    encoded_leaf: &mut Vec<u8>,
+) {
     if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-        return Vec::new();
+        encoded_leaf.clear();
+        return;
     }
 
-    account_rlp_buf.clear();
-    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-    account_rlp_buf.clone()
+    encoded_leaf.clear();
+    account.unwrap_or_default().into_trie_account(storage_root).encode(encoded_leaf);
+}
+
+/// Inserts/updates account leaf update while reusing allocated encoded buffers when possible.
+fn upsert_account_leaf_update(
+    account_updates: &mut B256Map<LeafUpdate>,
+    addr: B256,
+    account: Option<Account>,
+    storage_root: B256,
+) {
+    match account_updates.entry(addr) {
+        Entry::Occupied(mut entry) => match entry.get_mut() {
+            LeafUpdate::Changed(encoded_leaf) => {
+                encode_account_leaf_value(account, storage_root, encoded_leaf)
+            }
+            leaf_update @ LeafUpdate::Touched => {
+                let mut encoded_leaf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+                encode_account_leaf_value(account, storage_root, &mut encoded_leaf);
+                *leaf_update = LeafUpdate::Changed(encoded_leaf);
+            }
+        },
+        Entry::Vacant(entry) => {
+            let mut encoded_leaf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+            encode_account_leaf_value(account, storage_root, &mut encoded_leaf);
+            entry.insert(LeafUpdate::Changed(encoded_leaf));
+        }
+    }
+}
+
+/// Benchmark hook for account leaf promotion/encoding loops.
+#[doc(hidden)]
+pub fn bench_encode_account_leaf_value(
+    account: Option<Account>,
+    storage_root: B256,
+    _account_rlp_buf: &mut Vec<u8>,
+    encoded_leaf: &mut Vec<u8>,
+) {
+    encode_account_leaf_value(account, storage_root, encoded_leaf);
+}
+
+/// Benchmark hook that applies account leaf updates through the same map-update path used by
+/// pending-account promotion.
+#[doc(hidden)]
+pub fn bench_promote_account_leaf_update(
+    address: B256,
+    account: Option<Account>,
+    storage_root: B256,
+    _account_rlp_buf: &mut Vec<u8>,
+    account_updates: &mut B256Map<LeafUpdate>,
+) {
+    upsert_account_leaf_update(account_updates, address, account, storage_root);
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
@@ -903,12 +952,10 @@ mod tests {
 
     #[test]
     fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
-        let mut account_rlp_buf = vec![0xAB];
-        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+        let mut encoded = vec![0xAB];
+        encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut encoded);
 
         assert!(encoded.is_empty());
-        // Early return should not touch the caller's buffer.
-        assert_eq!(account_rlp_buf, vec![0xAB]);
     }
 
     #[test]
@@ -919,14 +966,39 @@ mod tests {
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
         });
-        let mut account_rlp_buf = vec![0x00, 0x01];
+        let mut encoded = vec![0x00, 0x01];
 
-        let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
+        encode_account_leaf_value(account, storage_root, &mut encoded);
         let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
 
         assert_eq!(decoded.nonce, 7);
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
-        assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn test_upsert_account_leaf_update_reuses_changed_buffer() {
+        let addr = B256::from([0x11; 32]);
+        let mut updates = B256Map::default();
+        updates.insert(addr, LeafUpdate::Changed(vec![0xCD; TRIE_ACCOUNT_RLP_MAX_SIZE]));
+
+        let first_ptr = match updates.get(&addr).unwrap() {
+            LeafUpdate::Changed(encoded) => encoded.as_ptr(),
+            LeafUpdate::Touched => unreachable!(),
+        };
+
+        upsert_account_leaf_update(
+            &mut updates,
+            addr,
+            Some(Account { nonce: 1, balance: U256::from(1), bytecode_hash: None }),
+            B256::from([0x77; 32]),
+        );
+
+        let second_ptr = match updates.get(&addr).unwrap() {
+            LeafUpdate::Changed(encoded) => encoded.as_ptr(),
+            LeafUpdate::Touched => unreachable!(),
+        };
+
+        assert_eq!(first_ptr, second_ptr);
     }
 }
