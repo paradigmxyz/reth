@@ -16,3 +16,4 @@ mod trace;
 mod transaction;
 
 pub use sync_listener::SyncListener;
+pub mod block_access_list;

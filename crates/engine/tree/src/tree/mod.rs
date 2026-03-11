@@ -2072,7 +2072,6 @@ where
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
-                block_access_list: Default::default(),
             },
         });
 
