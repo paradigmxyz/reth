@@ -392,5 +392,4 @@ mod tests {
             .unwrap();
         assert_eq!(result3.as_ref(), b"output_from_precompile_1");
     }
-
 }
