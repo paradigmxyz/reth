@@ -44,7 +44,10 @@ use reth_provider::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_revm::db::{
+    states::{block_hash_cache::BlockHashCache, bundle_state::BundleRetention},
+    BundleAccount, State,
+};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -156,6 +159,9 @@ where
     validator: V,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Block hash cache reused across block validations to avoid redundant DB lookups for the
+    /// `BLOCKHASH` opcode. Consecutive blocks share most of the 256-block window.
+    block_hash_cache: BlockHashCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
 }
@@ -212,6 +218,7 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
+            block_hash_cache: BlockHashCache::default(),
             runtime,
         }
     }
@@ -873,6 +880,7 @@ where
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
+                .with_block_hashes(self.block_hash_cache.clone())
                 .build()
         });
 
@@ -946,6 +954,9 @@ where
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
+
+        // Preserve block hashes learned during execution for subsequent blocks.
+        self.block_hash_cache = std::mem::take(&mut db.block_hashes);
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
