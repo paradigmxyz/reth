@@ -72,6 +72,9 @@ pub enum RecordedOp {
         /// The root trie node that was set.
         node: ProofTrieNodeRecord,
     },
+    /// Records a `prune` call. Emitted before the post-prune `SetRoot`/`RevealNodes`
+    /// so consumers know the following initial state is the result of pruning.
+    Prune,
 }
 
 /// A serializable record of a proof trie node.
@@ -88,6 +91,23 @@ pub struct ProofTrieNodeRecord {
     /// branch, so this replaces separate `Extension` node records.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub short_key: Option<Nibbles>,
+    /// The node's state (`Revealed`, `Cached`, or `Dirty`), if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<NodeStateRecord>,
+}
+
+/// A serializable record of a node's state, mirroring the arena trie's `ArenaSparseNodeState`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum NodeStateRecord {
+    /// The node has been revealed but its RLP encoding is not cached.
+    Revealed,
+    /// The node has a cached RLP encoding that is still valid.
+    Cached {
+        /// The cached RLP-encoded node, hex-encoded.
+        rlp_node: String,
+    },
+    /// The node has been modified and its RLP encoding needs recomputation.
+    Dirty,
 }
 
 impl ProofTrieNodeRecord {
@@ -98,6 +118,7 @@ impl ProofTrieNodeRecord {
             node: TrieNodeRecord(node.node.clone()),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
             short_key: None,
+            state: None,
         }
     }
 
@@ -121,6 +142,7 @@ impl ProofTrieNodeRecord {
             node: TrieNodeRecord(trie_node),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
             short_key,
+            state: None,
         }
     }
 }

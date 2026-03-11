@@ -544,8 +544,19 @@ impl ArenaParallelSparseTrie {
     /// node into a [`crate::debug_recorder::ProofTrieNodeRecord`].
     #[cfg(feature = "trie-debug")]
     fn record_initial_state(&mut self) {
-        use crate::debug_recorder::TrieNodeRecord;
+        use crate::debug_recorder::{NodeStateRecord, TrieNodeRecord};
+        use alloy_primitives::hex;
         use alloy_trie::nodes::{BranchNode, TrieNode};
+
+        fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
+            match state {
+                ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
+                ArenaSparseNodeState::Cached { rlp_node } => {
+                    NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
+                }
+                ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
+            }
+        }
 
         /// Converts an [`ArenaSparseNode`] into a [`ProofTrieNodeRecord`] at the given path.
         /// For branch children, resolves revealed children's cached RLP from `arena`.
@@ -561,6 +572,7 @@ impl ArenaParallelSparseTrie {
                     node: TrieNodeRecord(TrieNode::EmptyRoot),
                     masks: None,
                     short_key: None,
+                    state: None,
                 }),
                 ArenaSparseNode::Branch(b) => {
                     let stack = b
@@ -589,9 +601,10 @@ impl ArenaParallelSparseTrie {
                             b.branch_masks.tree_mask.get(),
                         )),
                         short_key: (!b.short_key.is_empty()).then_some(b.short_key),
+                        state: Some(state_to_record(&b.state)),
                     })
                 }
-                ArenaSparseNode::Leaf { key, value, .. } => Some(ProofTrieNodeRecord {
+                ArenaSparseNode::Leaf { key, value, state, .. } => Some(ProofTrieNodeRecord {
                     path,
                     node: TrieNodeRecord(TrieNode::Leaf(alloy_trie::nodes::LeafNode::new(
                         *key,
@@ -599,6 +612,7 @@ impl ArenaParallelSparseTrie {
                     ))),
                     masks: None,
                     short_key: None,
+                    state: Some(state_to_record(state)),
                 }),
                 ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => None,
             }
@@ -662,8 +676,9 @@ impl ArenaParallelSparseTrie {
             }
         }
 
-        // Reset the recorder and record the initial state.
+        // Reset the recorder and record that we pruned, then the initial state.
         self.debug_recorder.reset();
+        self.debug_recorder.record(RecordedOp::Prune);
 
         // First node is the root → SetRoot, remaining → RevealNodes.
         if let Some(root_record) = nodes.first() {
@@ -2933,6 +2948,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if taken.is_empty() {
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
+
+            #[cfg(feature = "trie-debug")]
+            self.debug_recorder.record(RecordedOp::UpdateLeaves {
+                updates: recorded_updates,
+                proof_targets: recorded_proof_targets,
+            });
+
             return Ok(());
         }
 
