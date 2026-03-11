@@ -46,7 +46,7 @@ pub(super) fn test_reveal_nodes_single_leaf<T: SparseTrie + Default>() {
     // Set root and reveal only one leaf's proof.
     let mut trie: T = harness.init_trie_with_targets(&[key_a], true);
     let root = trie.root();
-    assert_eq!(root, harness.original_root);
+    assert_eq!(root, harness.original_root());
 }
 
 /// Double reveal doesn't corrupt state.
@@ -68,12 +68,12 @@ pub(super) fn test_reveal_nodes_idempotent<T: SparseTrie + Default>() {
     // First reveal: set root and reveal all proof nodes.
     let mut trie: T = harness.init_trie_fully_revealed(true);
     let root_first = trie.root();
-    assert_eq!(root_first, harness.original_root);
+    assert_eq!(root_first, harness.original_root());
 
     // Second reveal: reveal the same proof nodes again.
-    let keys: Vec<B256> = harness.storage.keys().copied().collect();
+    let keys: Vec<B256> = harness.storage().keys().copied().collect();
     let mut targets: Vec<ProofV2Target> = keys.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("second reveal_nodes should succeed");
 
     let root_second = trie.root();
@@ -137,9 +137,9 @@ pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie + Default>() {
     ]);
     let harness = SuiteTestHarness::new(storage);
 
-    let keys: Vec<B256> = harness.storage.keys().copied().collect();
+    let keys: Vec<B256> = harness.storage().keys().copied().collect();
     let mut targets: Vec<ProofV2Target> = keys.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
 
     // Create a trie with an empty root.
     let mut trie = T::default();
@@ -196,33 +196,38 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     trie.set_root(root_node.node, root_node.masks, false).expect("set_root should succeed");
 
     let mut targets_a: Vec<ProofV2Target> = keys_a.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_a = harness.proof_v2(&mut targets_a);
+    let (mut proof_a, _) = harness.proof_v2(&mut targets_a);
     trie.reveal_nodes(&mut proof_a).expect("reveal group A should succeed");
 
     // Verify root is correct with partial reveal.
     let root_after_a = trie.root();
-    assert_eq!(root_after_a, harness.original_root, "root after group A reveal should match");
+    assert_eq!(root_after_a, harness.original_root(), "root after group A reveal should match");
 
     // Now generate proofs for group B keys and reveal them as extra nodes.
     // These include boundary leaves that extend the trie into subtries the partial
     // reveal didn't cover. They should be handled gracefully.
     let mut targets_b: Vec<ProofV2Target> = keys_b.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_b = harness.proof_v2(&mut targets_b);
+    let (mut proof_b, _) = harness.proof_v2(&mut targets_b);
     trie.reveal_nodes(&mut proof_b).expect("reveal extra group B nodes should succeed");
 
     // Root must still be correct — extra reveals should not corrupt state.
     let root_after_b = trie.root();
-    assert_eq!(root_after_b, harness.original_root, "root should be unchanged after extra reveal");
+    assert_eq!(
+        root_after_b,
+        harness.original_root(),
+        "root should be unchanged after extra reveal"
+    );
 
     // Additionally, reveal ALL proofs at once (including duplicates) — still correct.
     let mut targets_all: Vec<ProofV2Target> =
         keys_a.iter().chain(keys_b.iter()).map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_all = harness.proof_v2(&mut targets_all);
+    let (mut proof_all, _) = harness.proof_v2(&mut targets_all);
     trie.reveal_nodes(&mut proof_all).expect("reveal all nodes should succeed");
 
     let root_after_all = trie.root();
     assert_eq!(
-        root_after_all, harness.original_root,
+        root_after_all,
+        harness.original_root(),
         "root should be unchanged after revealing all proofs"
     );
 }
@@ -254,7 +259,7 @@ pub(super) fn test_reveal_insert_reveal_preserves_branch_state<T: SparseTrie + D
 
     // Reveal proof for key_c from the *original* 2-leaf harness (stale proof).
     let mut targets = vec![ProofV2Target::new(key_c)];
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal stale proof for key_c should succeed");
 
     // Root must match a reference trie with all 3 keys.
@@ -263,7 +268,8 @@ pub(super) fn test_reveal_insert_reveal_preserves_branch_state<T: SparseTrie + D
         BTreeMap::from([(key_a, U256::from(1)), (key_b, insert_value), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie with all 3 keys after stale reveal"
     );
 }
@@ -306,7 +312,7 @@ pub(super) fn test_remove_then_reveal_does_not_overwrite_collapsed_node<T: Spars
 
     // Reveal stale proof for key_b from the *original* 3-key harness (which has a branch at root).
     let mut targets = vec![ProofV2Target::new(key_b)];
-    let mut stale_proof = harness.proof_v2(&mut targets);
+    let (mut stale_proof, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut stale_proof).expect("revealing stale proof should succeed");
 
     // Root must match a reference trie with only key_b and key_c.
@@ -314,7 +320,8 @@ pub(super) fn test_remove_then_reveal_does_not_overwrite_collapsed_node<T: Spars
     let expected_storage = BTreeMap::from([(key_b, U256::from(2)), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match 2-key reference after removal + stale reveal"
     );
 }
@@ -358,7 +365,7 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie + 
 
     // Reveal stale proof for key_a from the *original* 2-key harness (which has extension at root).
     let mut targets = vec![ProofV2Target::new(key_a)];
-    let mut stale_proof = harness.proof_v2(&mut targets);
+    let (mut stale_proof, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut stale_proof).expect("revealing stale proof should succeed");
 
     // Root must match a reference trie with all 3 keys.
@@ -367,7 +374,8 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie + 
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, insert_value)]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match 3-key reference after insert + stale reveal"
     );
 }

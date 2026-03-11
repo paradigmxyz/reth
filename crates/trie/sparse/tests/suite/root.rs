@@ -24,7 +24,7 @@ pub(super) fn test_root_cached_returns_without_recomputation<T: SparseTrie + Def
     let mut trie: T = harness.init_trie_fully_revealed(true);
 
     let root1 = trie.root();
-    assert_eq!(root1, harness.original_root, "first root should match reference");
+    assert_eq!(root1, harness.original_root(), "first root should match reference");
 
     assert!(trie.is_root_cached(), "root should be cached after first computation");
 
@@ -50,7 +50,7 @@ pub(super) fn test_root_after_single_leaf_update<T: SparseTrie + Default>() {
     let mut trie: T = harness.init_trie_fully_revealed(false);
 
     let original_root = trie.root();
-    assert_eq!(original_root, harness.original_root, "initial root should match reference");
+    assert_eq!(original_root, harness.original_root(), "initial root should match reference");
 
     // Modify key_b's value from 2 to 999.
     let changes: BTreeMap<B256, U256> = BTreeMap::from([(key_b, U256::from(999))]);
@@ -65,7 +65,8 @@ pub(super) fn test_root_after_single_leaf_update<T: SparseTrie + Default>() {
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(999)), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        new_root, expected_harness.original_root,
+        new_root,
+        expected_harness.original_root(),
         "root should match updated reference trie"
     );
 }
@@ -124,7 +125,7 @@ pub(super) fn test_root_deterministic_across_update_orders<T: SparseTrie + Defau
     // Also verify against a reference trie built from sorted storage.
     let all_storage: BTreeMap<B256, U256> = pairs.iter().copied().collect();
     let harness = SuiteTestHarness::new(all_storage);
-    assert_eq!(root_a, harness.original_root, "root should match reference trie");
+    assert_eq!(root_a, harness.original_root(), "root should match reference trie");
 }
 
 /// Small RLP root (<32 bytes) handled correctly.
@@ -142,7 +143,7 @@ pub(super) fn test_root_handles_small_root_node_without_hash<T: SparseTrie + Def
     let mut trie: T = harness.init_trie_fully_revealed(false);
 
     let root1 = trie.root();
-    assert_eq!(root1, harness.original_root, "first root() should match reference trie");
+    assert_eq!(root1, harness.original_root(), "first root() should match reference trie");
 
     let root2 = trie.root();
     assert_eq!(root2, root1, "second root() should return cached result without panic");
