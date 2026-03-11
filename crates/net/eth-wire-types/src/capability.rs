@@ -1,6 +1,6 @@
 //! All capability related types
 
-use crate::{EthMessageID, EthVersion};
+use crate::{EthMessageID, EthVersion, SnapVersion};
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_primitives::bytes::Bytes;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -115,6 +115,21 @@ impl Capability {
         Self::eth(EthVersion::Eth71)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    pub const fn snap(version: SnapVersion) -> Self {
+        Self::new_static("snap", version as usize)
+    }
+
+    /// Returns the snap/1 capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::Snap1)
+    }
+
+    /// Returns the snap/2 capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::Snap2)
+    }
+
     /// Whether this is eth v66 protocol.
     #[inline]
     pub fn is_eth_v66(&self) -> bool {
@@ -161,6 +176,24 @@ impl Capability {
             self.is_eth_v70() ||
             self.is_eth_v71()
     }
+
+    /// Whether this is snap/1 protocol.
+    #[inline]
+    pub fn is_snap_v1(&self) -> bool {
+        self.name == "snap" && self.version == 1
+    }
+
+    /// Whether this is snap/2 protocol.
+    #[inline]
+    pub fn is_snap_v2(&self) -> bool {
+        self.name == "snap" && self.version == 2
+    }
+
+    /// Whether this is any snap version.
+    #[inline]
+    pub fn is_snap(&self) -> bool {
+        self.is_snap_v1() || self.is_snap_v2()
+    }
 }
 
 impl fmt::Display for Capability {
@@ -196,6 +229,8 @@ pub struct Capabilities {
     eth_69: bool,
     eth_70: bool,
     eth_71: bool,
+    snap_1: bool,
+    snap_2: bool,
 }
 
 impl Capabilities {
@@ -208,6 +243,8 @@ impl Capabilities {
             eth_69: value.iter().any(Capability::is_eth_v69),
             eth_70: value.iter().any(Capability::is_eth_v70),
             eth_71: value.iter().any(Capability::is_eth_v71),
+            snap_1: value.iter().any(Capability::is_snap_v1),
+            snap_2: value.iter().any(Capability::is_snap_v2),
             inner: value,
         }
     }
@@ -264,6 +301,24 @@ impl Capabilities {
     pub const fn supports_eth_v71(&self) -> bool {
         self.eth_71
     }
+
+    /// Whether the peer supports `snap` sub-protocol.
+    #[inline]
+    pub const fn supports_snap(&self) -> bool {
+        self.snap_1 || self.snap_2
+    }
+
+    /// Whether this peer supports snap/1 protocol.
+    #[inline]
+    pub const fn supports_snap_v1(&self) -> bool {
+        self.snap_1
+    }
+
+    /// Whether this peer supports snap/2 protocol.
+    #[inline]
+    pub const fn supports_snap_v2(&self) -> bool {
+        self.snap_2
+    }
 }
 
 impl From<Vec<Capability>> for Capabilities {
@@ -289,6 +344,8 @@ impl Decodable for Capabilities {
             eth_69: inner.iter().any(Capability::is_eth_v69),
             eth_70: inner.iter().any(Capability::is_eth_v70),
             eth_71: inner.iter().any(Capability::is_eth_v71),
+            snap_1: inner.iter().any(Capability::is_snap_v1),
+            snap_2: inner.iter().any(Capability::is_snap_v2),
             inner,
         })
     }
