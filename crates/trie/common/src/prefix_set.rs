@@ -1,6 +1,7 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
+use core::ops::Range;
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]
@@ -217,6 +218,36 @@ impl PrefixSet {
             }
 
             if key > prefix {
+                self.index += idx;
+                return false
+            }
+        }
+
+        false
+    }
+
+    /// Returns `true` if any key in the set falls within the given half-open range
+    /// `[start, end)`.
+    ///
+    /// Like [`Self::contains`], this method maintains the internal index for sequential access
+    /// optimization.
+    #[inline]
+    pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
+        if self.all {
+            return true
+        }
+
+        while self.index > 0 && &self.keys[self.index] >= range.end {
+            self.index -= 1;
+        }
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key >= range.start && key < range.end {
+                self.index += idx;
+                return true
+            }
+
+            if key >= range.end {
                 self.index += idx;
                 return false
             }
