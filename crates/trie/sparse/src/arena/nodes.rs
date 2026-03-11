@@ -1,4 +1,7 @@
-use super::{branch_child_idx::{BranchChildIdx, BranchChildIter}, ArenaSparseSubtrie};
+use super::{
+    branch_child_idx::{BranchChildIdx, BranchChildIter},
+    ArenaSparseSubtrie,
+};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
@@ -96,8 +99,8 @@ impl ArenaSparseNodeBranch {
     ///
     /// Panics if `nibble` is not set in the state mask.
     pub(super) fn remove_child(&mut self, nibble: u8) {
-        let child_idx = BranchChildIdx::new(self.state_mask, nibble)
-            .expect("nibble not found in state_mask");
+        let child_idx =
+            BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
         self.children.remove(child_idx.get());
         self.unset_child_bit(nibble);
         self.state = ArenaSparseNodeState::Dirty;
