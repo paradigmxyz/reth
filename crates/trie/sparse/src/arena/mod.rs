@@ -1377,9 +1377,6 @@ impl ArenaParallelSparseTrie {
             }
             SeekResult::NoChild { child_nibble } => {
                 let head_idx = head.index;
-                let head_branch = arena[head_idx].branch_ref();
-                let state_mask = head_branch.state_mask;
-                let insert_pos = BranchChildIdx::insertion_point(state_mask, child_nibble);
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
@@ -1390,11 +1387,7 @@ impl ArenaParallelSparseTrie {
                 });
 
                 let branch = arena[head_idx].branch_mut();
-                branch.state_mask.set_bit(child_nibble);
-                branch
-                    .children
-                    .insert(insert_pos.get(), ArenaSparseNodeBranchChild::Revealed(new_leaf));
-                branch.state = ArenaSparseNodeState::Dirty;
+                branch.set_child(child_nibble, ArenaSparseNodeBranchChild::Revealed(new_leaf));
 
                 // Re-seek to position the cursor on the newly inserted leaf.
                 cursor.seek(arena, full_path);
@@ -1514,16 +1507,10 @@ impl ArenaParallelSparseTrie {
                 let parent_idx = parent_entry.index;
                 let child_nibble = head_path.last().expect("non-root leaf");
 
-                let parent_branch = arena[parent_idx].branch_ref();
-                let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                    .expect("leaf nibble not found in parent state_mask");
-
                 // Remove the leaf from the arena and from the parent's children.
                 arena.remove(head_idx);
                 let parent_branch = arena[parent_idx].branch_mut();
-                parent_branch.children.remove(child_idx.get());
-                parent_branch.unset_child_bit(child_nibble);
-                parent_branch.state = ArenaSparseNodeState::Dirty;
+                parent_branch.remove_child(child_nibble);
 
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
