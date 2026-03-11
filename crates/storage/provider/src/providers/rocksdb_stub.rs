@@ -57,9 +57,9 @@ pub(crate) struct RocksDBWriteCtx {
 
 /// A stub `RocksDB` provider.
 ///
-/// This type exists to allow code to compile when `RocksDB` is not available (either on non-Unix
-/// platforms or when the `rocksdb` feature is not enabled). All method calls on `RocksDBProvider`
-/// are cfg-guarded in the calling code, so this stub only provides type definitions.
+/// This type exists to allow code to compile when `RocksDB` is not available (on non-Unix
+/// platforms). All method calls on `RocksDBProvider` are cfg-guarded in the calling code,
+/// so this stub only provides type definitions.
 #[derive(Debug, Clone)]
 pub struct RocksDBProvider;
 

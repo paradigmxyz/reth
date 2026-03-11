@@ -1170,7 +1170,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
+    #[cfg(unix)]
     fn history_provider_get_storage_hashed_state() {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;

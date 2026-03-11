@@ -47,8 +47,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 
 [features]
-rocksdb = ["reth-db-api/rocksdb", "reth-provider/rocksdb"]
-edge = ["rocksdb"]
+edge = []
 
 [lints]
 workspace = true

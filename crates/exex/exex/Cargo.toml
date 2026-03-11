@@ -67,7 +67,7 @@ tempfile.workspace = true
 
 [features]
 default = []
-edge = ["reth-provider/edge"]
+edge = []
 serde = [
     "reth-exex-types/serde",
     "reth-revm/serde",

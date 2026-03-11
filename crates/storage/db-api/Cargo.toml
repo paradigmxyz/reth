@@ -93,5 +93,4 @@ op = [
     "reth-codecs/op",
     "reth-primitives-traits/op",
 ]
-rocksdb = []
-edge = ["rocksdb"]
+edge = []

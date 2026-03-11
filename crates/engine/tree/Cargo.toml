@@ -139,13 +139,7 @@ trie-debug = [
     "reth-engine-primitives/trie-debug",
     "dep:serde_json",
 ]
-rocksdb = [
-    "reth-provider/rocksdb",
-    "reth-prune/rocksdb",
-    "reth-stages?/rocksdb",
-    "reth-e2e-test-utils/rocksdb",
-]
-edge = ["rocksdb"]
+edge = []
 
 [[test]]
 name = "e2e_testsuite"

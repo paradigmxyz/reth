@@ -75,7 +75,7 @@ where
         let range_end = *range.end();
 
         // Check where storage history indices are stored
-        #[cfg(all(unix, feature = "rocksdb"))]
+        #[cfg(unix)]
         if provider.cached_storage_settings().storage_v2 {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
@@ -236,7 +236,7 @@ impl StorageHistory {
     ///
     /// Reads storage changesets from static files and prunes the corresponding
     /// `RocksDB` history shards.
-    #[cfg(all(unix, feature = "rocksdb"))]
+    #[cfg(unix)]
     fn prune_rocksdb<Provider>(
         &self,
         provider: &Provider,
@@ -522,7 +522,7 @@ mod tests {
     /// routes to `prune_rocksdb` instead, so this test only runs without rocksdb (the
     /// `prune_rocksdb_path` test covers that configuration).
     #[test]
-    #[cfg(not(all(unix, feature = "rocksdb")))]
+    #[cfg(not(unix))]
     fn prune_static_file() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
@@ -821,7 +821,7 @@ mod tests {
         assert!(final_changesets.is_empty(), "All changesets up to block 10 should be pruned");
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
+    #[cfg(unix)]
     #[test]
     fn prune_rocksdb() {
         use reth_db_api::models::storage_sharded_key::StorageShardedKey;
