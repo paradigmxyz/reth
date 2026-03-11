@@ -28,11 +28,8 @@ pub struct StorageSettings {
 
 impl StorageSettings {
     /// Returns the default base `StorageSettings`.
-    ///
-    /// Returns [`Self::v1()`] by default. The `--storage.v2` CLI flag can opt
-    /// into v2 at runtime.
     pub const fn base() -> Self {
-        Self::v1()
+        Self::v2()
     }
 
     /// Creates `StorageSettings` for v2 nodes with all storage features enabled:
