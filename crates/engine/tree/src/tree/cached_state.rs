@@ -360,47 +360,42 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
         let mut uncached_keys = Vec::new();
         let mut result = Vec::with_capacity(keys.len());
 
-        if PREWARM {
-            for &key in keys {
-                if let Some(value) = self.caches.get_storage(account, key) {
-                    if !value.is_zero() {
-                        result.push((key, value));
-                    }
-                } else {
-                    uncached_keys.push(key);
+        for &key in keys {
+            if let Some(value) = self.caches.get_storage(account, key) {
+                if !value.is_zero() {
+                    result.push((key, value));
                 }
+            } else {
+                uncached_keys.push(key);
             }
+        }
 
-            // Batch-fetch all uncached keys from the inner provider
-            if !uncached_keys.is_empty() {
-                let mut fetched = self.state_provider.storage_range(account, &uncached_keys)?;
-                // Sort by raw key to align with uncached_keys for the merge-join below.
-                // The inner provider may return results in a different order (e.g. hashed state
-                // iterates by hashed slot).
-                fetched.sort_unstable_by_key(|(k, _)| *k);
-                // Merge-join to find zero slots without allocating a HashSet.
-                let mut fetched_iter = fetched.iter();
-                let mut next = fetched_iter.next();
-                for &key in &uncached_keys {
-                    if let Some(&(fk, fv)) = next &&
-                        fk == key
-                    {
-                        let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
-                            Ok::<_, ProviderError>(fv)
-                        });
-                        result.push((key, fv));
-                        next = fetched_iter.next();
-                        continue;
-                    }
-                    // key not returned by inner provider → zero slot
+        // Batch-fetch all uncached keys from the inner provider
+        if !uncached_keys.is_empty() {
+            let mut fetched = self.state_provider.storage_range(account, &uncached_keys)?;
+            // Sort by raw key to align with uncached_keys for the merge-join below.
+            // The inner provider may return results in a different order (e.g. hashed state
+            // iterates by hashed slot).
+            fetched.sort_unstable_by_key(|(k, _)| *k);
+            // Merge-join to find zero slots without allocating a HashSet.
+            let mut fetched_iter = fetched.iter();
+            let mut next = fetched_iter.next();
+            for &key in &uncached_keys {
+                if let Some(&(fk, fv)) = next &&
+                    fk == key
+                {
                     let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
-                        Ok::<_, ProviderError>(StorageValue::ZERO)
+                        Ok::<_, ProviderError>(fv)
                     });
+                    result.push((key, fv));
+                    next = fetched_iter.next();
+                    continue;
                 }
+                // key not returned by inner provider → zero slot
+                let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                    Ok::<_, ProviderError>(StorageValue::ZERO)
+                });
             }
-        } else {
-            // Not called on the execution path; delegate directly.
-            return self.state_provider.storage_range(account, keys);
         }
 
         Ok(result)

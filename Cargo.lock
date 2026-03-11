@@ -8257,6 +8257,7 @@ dependencies = [
  "eyre",
  "fixed-cache",
  "futures",
+ "itertools 0.14.0",
  "metrics",
  "metrics-util",
  "moka",
