@@ -9,6 +9,9 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
+/// Maximum canonical lag allowed between execution and persistence before backpressure kicks in.
+pub const DEFAULT_PERSISTENCE_CREDIT_WINDOW: u64 = DEFAULT_PERSISTENCE_THRESHOLD + 1;
+
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
@@ -82,6 +85,9 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
+    /// Maximum canonical lag allowed between execution and persistence before
+    /// `reth_newPayload` waits for persistence.
+    persistence_credit_window: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
     block_buffer_limit: u32,
@@ -165,6 +171,7 @@ impl Default for TreeConfig {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            persistence_credit_window: DEFAULT_PERSISTENCE_CREDIT_WINDOW,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
@@ -227,6 +234,7 @@ impl TreeConfig {
         Self {
             persistence_threshold,
             memory_block_buffer_target,
+            persistence_credit_window: DEFAULT_PERSISTENCE_CREDIT_WINDOW,
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
@@ -264,6 +272,11 @@ impl TreeConfig {
     /// Return the memory block buffer target.
     pub const fn memory_block_buffer_target(&self) -> u64 {
         self.memory_block_buffer_target
+    }
+
+    /// Return the persistence credit window.
+    pub const fn persistence_credit_window(&self) -> u64 {
+        self.persistence_credit_window
     }
 
     /// Return the block buffer limit.
@@ -371,6 +384,12 @@ impl TreeConfig {
         memory_block_buffer_target: u64,
     ) -> Self {
         self.memory_block_buffer_target = memory_block_buffer_target;
+        self
+    }
+
+    /// Setter for persistence credit window.
+    pub const fn with_persistence_credit_window(mut self, persistence_credit_window: u64) -> Self {
+        self.persistence_credit_window = persistence_credit_window;
         self
     }
 

@@ -97,7 +97,7 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 /// Number of canonical blocks that may execute ahead of persistence before `reth_newPayload`
 /// starts waiting for persistence completion.
 const fn persistence_credit_cap(config: &TreeConfig) -> u64 {
-    config.persistence_threshold().saturating_add(1)
+    config.persistence_credit_window()
 }
 
 /// A builder for creating state providers that can be used across threads.
