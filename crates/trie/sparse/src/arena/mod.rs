@@ -854,7 +854,7 @@ impl ArenaParallelSparseTrie {
             dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
 
             // Source removals cancel destination insertions.
-            for path in src_updates.removed_nodes.iter() {
+            for path in &src_updates.removed_nodes {
                 dst_updates.updated_nodes.remove(path);
             }
             dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
