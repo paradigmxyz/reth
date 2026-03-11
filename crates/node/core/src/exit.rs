@@ -53,10 +53,9 @@ impl Future for NodeExitFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::future::poll_fn;
 
     #[tokio::test]
-    async fn test_node_exit_future_terminate_true() {
+    async fn test_node_exit_future() {
         let fut = async { Ok(()) };
 
         let node_exit_future = NodeExitFuture::new(fut);
@@ -64,17 +63,5 @@ mod tests {
         let res = node_exit_future.await;
 
         assert!(res.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_node_exit_future_terminate_false() {
-        let fut = async { Ok(()) };
-
-        let mut node_exit_future = NodeExitFuture::new(fut);
-        poll_fn(|cx| {
-            assert!(node_exit_future.poll_unpin(cx).is_pending());
-            Poll::Ready(())
-        })
-        .await;
     }
 }
