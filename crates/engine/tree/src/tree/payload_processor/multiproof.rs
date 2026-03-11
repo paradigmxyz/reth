@@ -47,16 +47,6 @@ pub enum MultiProofMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
     StateUpdate(Source, EvmState),
-    /// State update that can be applied to the sparse trie without any new proofs.
-    ///
-    /// It can be the case when all accounts and storage slots from the state update were already
-    /// fetched and revealed.
-    EmptyProof {
-        /// The index of this proof in the sequence of state updates
-        sequence_number: u64,
-        /// The state update that was used to calculate the proof
-        state: HashedPostState,
-    },
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
