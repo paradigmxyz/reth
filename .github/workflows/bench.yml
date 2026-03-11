@@ -39,7 +39,7 @@ on:
       quiet:
         description: "Suppress result posts (PR comment and Slack notification)"
         required: false
-        default: "false"
+        default: "true"
         type: boolean
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
@@ -146,7 +146,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
-              var quiet = '${{ github.event.inputs.quiet }}' === 'true' ? 'true' : 'false';
+              var quiet = '${{ github.event.inputs.quiet }}' !== 'false' ? 'true' : 'false';
               cores = '${{ github.event.inputs.cores }}' || '0';
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
