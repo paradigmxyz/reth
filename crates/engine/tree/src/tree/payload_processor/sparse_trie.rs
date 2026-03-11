@@ -100,6 +100,10 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     storage_cache_hits: u64,
     /// Accumulated storage leaf update cache misses.
     storage_cache_misses: u64,
+    /// Accumulated `min_len` values for account proof targets dispatched this block.
+    account_proof_min_lens: Vec<u8>,
+    /// Accumulated `min_len` values for storage proof targets dispatched this block.
+    storage_proof_min_lens: Vec<u8>,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
     /// Number of pending execution/prewarming updates received but not yet passed to
@@ -154,6 +158,8 @@ where
             account_cache_misses: 0,
             storage_cache_hits: 0,
             storage_cache_misses: 0,
+            account_proof_min_lens: Vec::new(),
+            storage_proof_min_lens: Vec::new(),
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             metrics,
@@ -346,6 +352,12 @@ where
         self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
         self.metrics.sparse_trie_storage_cache_hits.record(self.storage_cache_hits as f64);
         self.metrics.sparse_trie_storage_cache_misses.record(self.storage_cache_misses as f64);
+        for min_len in self.account_proof_min_lens.drain(..) {
+            self.metrics.sparse_trie_account_proof_min_len.record(min_len as f64);
+        }
+        for min_len in self.storage_proof_min_lens.drain(..) {
+            self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
+        }
         self.account_cache_hits = 0;
         self.account_cache_misses = 0;
         self.storage_cache_hits = 0;
@@ -538,13 +550,13 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
+                        self.storage_proof_min_lens.push(min_len);
                         targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
+                    self.storage_proof_min_lens.push(min_len);
                     targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
@@ -584,14 +596,14 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        self.metrics.sparse_trie_account_proof_min_len.record(min_len as f64);
+                        self.account_proof_min_lens.push(min_len);
                         self.pending_targets
                             .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    self.metrics.sparse_trie_account_proof_min_len.record(min_len as f64);
+                    self.account_proof_min_lens.push(min_len);
                     self.pending_targets
                         .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
                 }
