@@ -32,7 +32,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -154,12 +154,14 @@ pub struct NodeBuilder<DB, ChainSpec> {
     config: NodeConfig<ChainSpec>,
     /// The configured database for the node.
     database: DB,
+    /// An optional [`RocksDBProvider`] to use instead of creating one during launch.
+    rocksdb_provider: Option<RocksDBProvider>,
 }
 
 impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     /// Create a new [`NodeBuilder`].
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
-        Self { config, database: () }
+        Self { config, database: (), rocksdb_provider: None }
     }
 }
 
@@ -228,7 +230,13 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
 impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Configures the underlying database that the node will use.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
-        NodeBuilder { config: self.config, database }
+        NodeBuilder { config: self.config, database, rocksdb_provider: self.rocksdb_provider }
+    }
+
+    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
+    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
+        self.rocksdb_provider = Some(rocksdb_provider);
+        self
     }
 
     /// Preconfigure the builder with the context to launch the node.
@@ -297,7 +305,7 @@ where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
-        NodeBuilderWithTypes::new(self.config, self.database)
+        NodeBuilderWithTypes::new(self.config, self.database, self.rocksdb_provider)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -347,6 +355,12 @@ where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
+    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
+    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
+        self.builder.rocksdb_provider = Some(rocksdb_provider);
+        self
+    }
+
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
