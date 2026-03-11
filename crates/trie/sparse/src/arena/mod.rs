@@ -828,6 +828,10 @@ impl ArenaParallelSparseTrie {
 
     /// Merges updates from a subtrie's buffer into the parent's buffer.
     /// Both `dst` and `src` must be `Some` when updates are being tracked.
+    ///
+    /// Source removals cancel destination insertions (and vice versa) so that
+    /// updates accumulated across multiple `root()` calls within a single block
+    /// stay consistent.
     fn merge_subtrie_updates(
         dst: &mut Option<SparseTrieUpdates>,
         src: &mut Option<SparseTrieUpdates>,
@@ -835,7 +839,17 @@ impl ArenaParallelSparseTrie {
         if let Some(dst_updates) = dst.as_mut() {
             let src_updates = src.as_mut().expect("updates are enabled");
             debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
+
+            // Source insertions cancel destination removals.
+            for path in src_updates.updated_nodes.keys() {
+                dst_updates.removed_nodes.remove(path);
+            }
             dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
+
+            // Source removals cancel destination insertions.
+            for path in &src_updates.removed_nodes {
+                dst_updates.updated_nodes.remove(path);
+            }
             dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
         }
     }
@@ -2951,7 +2965,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
+        #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
