@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }} / ${{ matrix.storage }}
+    name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
@@ -30,7 +30,6 @@ jobs:
     strategy:
       matrix:
         network: ["ethereum"]
-        storage: ["stable"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6

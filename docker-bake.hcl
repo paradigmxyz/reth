@@ -113,7 +113,7 @@ variable "HIVE_OUTPUT_DIR" {
   default = "./artifacts"
 }
 
-target "hive-stable" {
+target "hive" {
   inherits = ["_base_hive"]
   args = {
     BINARY        = "reth"
