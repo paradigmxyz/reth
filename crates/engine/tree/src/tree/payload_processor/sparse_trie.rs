@@ -534,20 +534,18 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| {
-                match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
-                            targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
+            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
                         targets.push(ProofV2Target::new(path).with_min_len(min_len));
                     }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    self.metrics.sparse_trie_storage_proof_min_len.record(min_len as f64);
+                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
                 }
             })?;
             let updates_len_after = updates.len();
