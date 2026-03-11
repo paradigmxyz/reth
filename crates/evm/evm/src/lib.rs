@@ -191,7 +191,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Context required for configuring next block environment.
     ///
     /// Contains values that can't be derived from the parent block.
-    type NextBlockEnvCtx: Debug + Clone;
+    type NextBlockEnvCtx: Debug + Clone + ZeroParentBeaconBlockRoot;
 
     /// Configured [`BlockExecutorFactory`], contains [`EvmFactory`] internally.
     type BlockExecutorFactory: for<'a> BlockExecutorFactory<
@@ -505,6 +505,24 @@ pub struct NextBlockEnvAttributes {
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,
+}
+
+/// Trait for zeroing the parent beacon block root in simulation contexts.
+///
+/// In `eth_simulateV1`, consensus-layer fields like `parentBeaconBlockRoot` default to zero
+/// (matching `prevRandao`, `mixHash`, `nonce`). This trait allows the simulation code path
+/// to zero the beacon root on a generic `NextBlockEnvCtx` without knowing its concrete type.
+///
+/// The default implementation is a no-op for types that don't have this field.
+pub trait ZeroParentBeaconBlockRoot {
+    /// Sets `parent_beacon_block_root` to `Some(B256::ZERO)` if the field is present.
+    fn zero_parent_beacon_block_root(&mut self) {}
+}
+
+impl ZeroParentBeaconBlockRoot for NextBlockEnvAttributes {
+    fn zero_parent_beacon_block_root(&mut self) {
+        self.parent_beacon_block_root = self.parent_beacon_block_root.map(|_| B256::ZERO);
+    }
 }
 
 /// Abstraction over transaction environment.
