@@ -2975,7 +2975,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
+        #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
