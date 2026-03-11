@@ -198,6 +198,7 @@ impl ArenaSparseNode {
     }
 
     /// Returns a reference to the subtrie if this is a `Subtrie` node, or `None`.
+    #[cfg(debug_assertions)]
     pub(super) const fn as_subtrie(&self) -> Option<&ArenaSparseSubtrie> {
         match self {
             Self::Subtrie(s) => Some(s),
