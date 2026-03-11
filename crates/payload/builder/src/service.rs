@@ -456,14 +456,13 @@ where
                                     // Clear stale cached payload for this id so
                                     // resolve() never returns an outdated result
                                     // from a previous job with the same id.
-                                    if let Some((cached_id, _, _)) =
-                                        &*this.cached_payload_rx.borrow() &&
-                                        *cached_id == id
+                                    if this
+                                        .cached_payload_rx
+                                        .borrow()
+                                        .is_some_and(|(cached_id, _, _)| *cached_id == id)
                                     {
-                                        println!("HERE1");
                                         trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
                                         let _ = this.cached_payload_tx.send(None);
-                                        println!("HERE2");
                                     }
                                 }
                                 Err(err) => {
