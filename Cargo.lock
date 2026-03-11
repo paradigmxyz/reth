@@ -10284,6 +10284,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-db-api",
  "reth-db-models",

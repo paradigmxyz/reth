@@ -17,6 +17,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
+use reth_bal_store::BalStore;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
@@ -1069,6 +1070,34 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Primitives = T;
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BalStore
+    for MockEthProvider<T, ChainSpec>
+{
+    fn insert(
+        &self,
+        _block_hash: BlockHash,
+        _block_number: BlockNumber,
+        _bal: Bytes,
+    ) -> Result<(), reth_bal_store::BalStoreError> {
+        Ok(())
+    }
+
+    fn get_by_hashes(
+        &self,
+        _block_hashes: &[BlockHash],
+    ) -> Result<Vec<Option<Bytes>>, reth_bal_store::BalStoreError> {
+        Ok(Vec::new())
+    }
+
+    fn get_by_range(
+        &self,
+        _start: BlockNumber,
+        _count: u64,
+    ) -> Result<Vec<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]

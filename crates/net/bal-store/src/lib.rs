@@ -16,7 +16,7 @@ pub use noop::NoopBalStore;
 /// The store is keyed by block hash and maintains a block-number index for range queries.
 /// Implementations should preserve contiguous-range semantics:
 /// queries by range stop at the first missing block.
-pub trait BalStore: Debug + Send + Sync + 'static {
+pub trait BalStore: Send + Sync + 'static {
     /// Inserts a BAL for the given block hash and number.
     fn insert(
         &self,

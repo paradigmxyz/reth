@@ -165,12 +165,18 @@ impl BalStore for BalCache {
 ///
 /// Reads are cache-first with fallback to the store.
 /// Writes are store-first to ensure durability before cache visibility.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BalProvider {
     /// Persistent storage backend for BALs.
     store: Arc<dyn BalStore>,
     /// In-memory cache for recently accessed BALs.
     cache: BalCache,
+}
+
+impl std::fmt::Debug for BalProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BalProvider").field("cache", &self.cache).finish_non_exhaustive()
+    }
 }
 
 impl Default for BalProvider {

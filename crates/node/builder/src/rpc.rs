@@ -1406,7 +1406,6 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
-            ctx.bal_store.clone(),
         ))
     }
 }
