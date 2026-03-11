@@ -32,7 +32,6 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
-#[path = "rocksdb/mod.rs"]
 pub(crate) mod rocksdb;
 
 pub use rocksdb::{
