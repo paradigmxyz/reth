@@ -60,9 +60,6 @@ pub enum RecordedOp {
     UpdateLeaves {
         /// The leaf updates that were applied.
         updates: Vec<(B256, LeafUpdateRecord)>,
-        /// Keys remaining in the updates map after the call (i.e. those that could not be applied
-        /// due to blinded nodes).
-        remaining_keys: Vec<B256>,
         /// Proof targets returned via the callback as `(key, min_len)` pairs.
         proof_targets: Vec<(B256, u8)>,
     },
@@ -86,6 +83,11 @@ pub struct ProofTrieNodeRecord {
     pub node: TrieNodeRecord,
     /// The branch node masks `(hash_mask, tree_mask)` stored as raw `u16` values, if present.
     pub masks: Option<(u16, u16)>,
+    /// The short key (extension key) of a branch node. When present, the branch's logical path
+    /// is `path` extended by this key. The arena trie merges extension nodes into their child
+    /// branch, so this replaces separate `Extension` node records.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_key: Option<Nibbles>,
 }
 
 impl ProofTrieNodeRecord {
@@ -95,25 +97,30 @@ impl ProofTrieNodeRecord {
             path: node.path,
             node: TrieNodeRecord(node.node.clone()),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
+            short_key: None,
         }
     }
 
     /// Creates a record from a [`reth_trie_common::ProofTrieNodeV2`].
     pub fn from_proof_trie_node_v2(node: &reth_trie_common::ProofTrieNodeV2) -> Self {
         use reth_trie_common::TrieNodeV2;
-        let trie_node = match &node.node {
-            TrieNodeV2::EmptyRoot => TrieNode::EmptyRoot,
-            TrieNodeV2::Leaf(leaf) => TrieNode::Leaf(leaf.clone()),
-            TrieNodeV2::Extension(ext) => TrieNode::Extension(ext.clone()),
-            TrieNodeV2::Branch(branch) => TrieNode::Branch(alloy_trie::nodes::BranchNode::new(
-                branch.stack.clone(),
-                branch.state_mask,
-            )),
+        let (trie_node, short_key) = match &node.node {
+            TrieNodeV2::EmptyRoot => (TrieNode::EmptyRoot, None),
+            TrieNodeV2::Leaf(leaf) => (TrieNode::Leaf(leaf.clone()), None),
+            TrieNodeV2::Extension(ext) => (TrieNode::Extension(ext.clone()), None),
+            TrieNodeV2::Branch(branch) => (
+                TrieNode::Branch(alloy_trie::nodes::BranchNode::new(
+                    branch.stack.clone(),
+                    branch.state_mask,
+                )),
+                (!branch.key.is_empty()).then_some(branch.key),
+            ),
         };
         Self {
             path: node.path,
             node: TrieNodeRecord(trie_node),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
+            short_key,
         }
     }
 }
