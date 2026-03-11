@@ -207,6 +207,10 @@ impl TestHarness {
             reth_tasks::Runtime::test(),
         );
 
+        // always assume enough parallelism for tests
+        let tree_config =
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,
@@ -215,10 +219,9 @@ impl TestHarness {
             engine_api_tree_state,
             canonical_in_memory_state,
             persistence_handle,
-            PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
+            PersistenceState::new(BlockNumHash::default(), persistence_credit_cap(&tree_config)),
             payload_builder,
-            // always assume enough parallelism for tests
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
+            tree_config,
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,

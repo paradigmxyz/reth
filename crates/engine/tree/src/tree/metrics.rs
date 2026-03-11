@@ -171,6 +171,12 @@ pub struct EngineMetrics {
     pub(crate) executed_new_block_cache_miss: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
+    /// Number of canonical blocks executed ahead of persisted state.
+    pub(crate) persistence_credit_inflight: Gauge,
+    /// Configured cap for persistence credits.
+    pub(crate) persistence_credit_cap: Gauge,
+    /// Ratio of `inflight/cap` persistence credits.
+    pub(crate) persistence_credit_utilization: Histogram,
     /// Tracks the how often we failed to deliver a newPayload response.
     ///
     /// This effectively tracks how often the message sender dropped the channel and indicates a CL

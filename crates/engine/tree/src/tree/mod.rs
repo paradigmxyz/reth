@@ -94,6 +94,12 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
+/// Number of canonical blocks that may execute ahead of persistence before `reth_newPayload`
+/// starts waiting for persistence completion.
+const fn persistence_credit_cap(config: &TreeConfig) -> u64 {
+    config.persistence_threshold().saturating_add(1)
+}
+
 /// A builder for creating state providers that can be used across threads.
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
@@ -402,10 +408,10 @@ where
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
-        let persistence_state = PersistenceState {
-            last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
-            rx: None,
-        };
+        let persistence_state = PersistenceState::new(
+            BlockNumHash::new(best_block_number, header.hash()),
+            persistence_credit_cap(&config),
+        );
 
         let (tx, outgoing) = unbounded_channel();
         let state = EngineApiTreeState::new(
@@ -855,9 +861,11 @@ where
 
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+        self.update_persistence_canonical_tip(canonical_header.num_hash());
 
         // Handle the state update based on whether this is an unwind scenario
         if new_head_number < current_head_number {
+            self.request_durable_persistence_sync();
             debug!(
                 target: "engine::tree",
                 current_head = current_head_number,
@@ -1093,7 +1101,7 @@ where
     /// processing is complete. Returns `None` if the head is not canonical and processing
     /// should continue.
     fn handle_canonical_head(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
         version: EngineApiMessageVersion,
@@ -1269,6 +1277,7 @@ where
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
+            self.update_persistence_credit_metrics();
         }
     }
 
@@ -1292,6 +1301,7 @@ where
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
+        self.update_persistence_credit_metrics();
     }
 
     /// Triggers new persistence actions if no persistence task is currently in progress.
@@ -1302,6 +1312,10 @@ where
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
+            } else if self.persistence_state.should_force_durable_sync() {
+                let blocks_to_persist =
+                    self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+                self.persist_blocks(blocks_to_persist);
             } else if self.should_persist() {
                 let blocks_to_persist =
                     self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
@@ -1393,6 +1407,7 @@ where
 
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        self.update_persistence_credit_metrics();
 
         // Evict trie changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
@@ -1570,33 +1585,46 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                // Before processing the new payload, we wait for persistence and
-                                // cache updates to complete. We do it in parallel, spawning
-                                // persistence and cache update wait tasks with Tokio, so that we
-                                // can get an unbiased breakdown on how long did every step take.
-                                //
-                                // If we first wait for persistence, and only then for cache
-                                // updates, we will offset the cache update waits by the duration of
-                                // persistence, which is incorrect.
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
+                                self.update_persistence_credit_metrics();
 
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx = if let Some((rx, start_time, _action)) =
-                                    pending_persistence
-                                {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
-                                    self.runtime.spawn_blocking_named("wait-persist", move || {
-                                        let start = Instant::now();
-                                        let result =
-                                            rx.recv().expect("persistence state channel closed");
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                    Some(persistence_rx)
+                                // When persistence lag is still within the configured credit
+                                // window, we let payload execution proceed without blocking.
+                                let should_wait_for_persistence =
+                                    self.persistence_state.should_block_reth_new_payload();
+
+                                let persistence_rx = if should_wait_for_persistence {
+                                    debug!(
+                                        target: "engine::tree",
+                                        lag = self.persistence_state.persistence_lag(),
+                                        cap = self.persistence_state.persistence_credit_cap(),
+                                        "Persistence credit window exhausted, waiting before reth_newPayload"
+                                    );
+
+                                    if let Some((rx, start_time, _action)) =
+                                        self.persistence_state.rx.take()
+                                    {
+                                        // Wait for persistence and cache updates in parallel so
+                                        // timing metrics remain unbiased.
+                                        let (persistence_tx, persistence_rx) =
+                                            std::sync::mpsc::channel();
+                                        self.runtime.spawn_blocking_named(
+                                            "wait-persist",
+                                            move || {
+                                                let start = Instant::now();
+                                                let result = rx
+                                                    .recv()
+                                                    .expect("persistence state channel closed");
+                                                let _ = persistence_tx.send((
+                                                    result,
+                                                    start_time,
+                                                    start.elapsed(),
+                                                ));
+                                            },
+                                        );
+                                        Some(persistence_rx)
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 };
@@ -1608,7 +1636,11 @@ where
                                     let (result, start_time, wait_duration) = persistence_rx
                                         .recv()
                                         .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(result, start_time);
+                                    if let Err(err) =
+                                        self.on_persistence_complete(result, start_time)
+                                    {
+                                        error!(target: "engine::tree", %err, "Persistence complete handling failed while waiting for reth_newPayload");
+                                    }
                                     Some(wait_duration)
                                 } else {
                                     None
@@ -1746,7 +1778,9 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
+            self.update_persistence_canonical_tip(new_head.num_hash());
             self.persistence_state.finish(new_head.hash(), new_head.number());
+            self.update_persistence_credit_metrics();
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
@@ -1850,6 +1884,30 @@ where
         Ok(())
     }
 
+    /// Updates metrics that track how much canonical execution is ahead of persistence.
+    fn update_persistence_credit_metrics(&self) {
+        let lag = self.persistence_state.persistence_lag() as f64;
+        let cap = self.persistence_state.persistence_credit_cap() as f64;
+        self.metrics.engine.persistence_credit_inflight.set(lag);
+        self.metrics.engine.persistence_credit_cap.set(cap);
+
+        if cap > 0.0 {
+            self.metrics.engine.persistence_credit_utilization.record(lag / cap);
+        }
+    }
+
+    /// Updates the tracked canonical tip used for persistence-credit accounting.
+    fn update_persistence_canonical_tip(&mut self, canonical_tip: BlockNumHash) {
+        self.persistence_state.update_canonical_tip(canonical_tip);
+        self.update_persistence_credit_metrics();
+    }
+
+    /// Requests full persistence synchronization for a durable chain boundary (reorg/finality).
+    fn request_durable_persistence_sync(&mut self) {
+        self.persistence_state.request_durable_sync();
+        self.update_persistence_credit_metrics();
+    }
+
     /// Handles a tree event.
     ///
     /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
@@ -1936,8 +1994,7 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold and
+    /// Returns true if canonical lag is above the persistence threshold and
     /// backfill is not running.
     pub const fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
@@ -1945,9 +2002,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        self.persistence_state.persistence_lag() > self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
@@ -2526,12 +2581,14 @@ where
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
+        self.update_persistence_canonical_tip(chain_update.tip().num_hash());
 
         let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
 
         // reinsert any missing reorged blocks
         if let NewCanonicalChain::Reorg { new, old } = &chain_update {
+            self.request_durable_persistence_sync();
             let new_first = new.first().map(|first| first.recovered_block().num_hash());
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
@@ -2979,7 +3036,7 @@ where
 
     /// Updates the tracked finalized block if we have it.
     fn update_finalized_block(
-        &self,
+        &mut self,
         finalized_block_hash: B256,
     ) -> Result<(), OnForkChoiceUpdated> {
         if finalized_block_hash.is_zero() {
@@ -3000,6 +3057,7 @@ where
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_finalized_block_number(finalized.number());
                     self.canonical_in_memory_state.set_finalized(finalized.clone());
+                    self.request_durable_persistence_sync();
                     // Update finalized block height metric
                     self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
                 }
@@ -3013,7 +3071,7 @@ where
     }
 
     /// Updates the tracked safe block if we have it
-    fn update_safe_block(&self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
+    fn update_safe_block(&mut self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
         if safe_block_hash.is_zero() {
             return Ok(())
         }
@@ -3030,6 +3088,7 @@ where
                     // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_safe_block_number(safe.number());
                     self.canonical_in_memory_state.set_safe(safe.clone());
+                    self.request_durable_persistence_sync();
                     // Update safe block height metric
                     self.metrics.tree.safe_block_height.set(safe.number() as f64);
                 }
@@ -3051,7 +3110,7 @@ where
     /// This also updates the safe and finalized blocks in the [`CanonicalInMemoryState`], if they
     /// are consistent with the head block.
     fn ensure_consistent_forkchoice_state(
-        &self,
+        &mut self,
         state: ForkchoiceState,
     ) -> Result<(), OnForkChoiceUpdated> {
         // Ensure that the finalized block, if not zero, is known and in the canonical chain
