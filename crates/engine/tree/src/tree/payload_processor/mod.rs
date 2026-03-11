@@ -35,7 +35,7 @@ use reth_revm::{db::BundleState, state::EvmState};
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle, ProofWorkerReuseError},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -104,6 +104,15 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+/// Ensures pooled proof workers are marked reusable when a sparse trie task exits.
+struct ProofWorkerPayloadGuard(ProofWorkerHandle);
+
+impl Drop for ProofWorkerPayloadGuard {
+    fn drop(&mut self) {
+        self.0.finish_payload();
+    }
+}
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -142,6 +151,10 @@ where
     enable_arena_sparse_trie: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Reusable full-size proof worker pool for payloads above the small-block threshold.
+    proof_worker_pool: Option<ProofWorkerHandle>,
+    /// Reusable halved proof worker pool for small payloads.
+    small_proof_worker_pool: Option<ProofWorkerHandle>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -177,6 +190,8 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             enable_arena_sparse_trie: config.enable_arena_sparse_trie(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            proof_worker_pool: None,
+            small_proof_worker_pool: None,
         }
     }
 }
@@ -358,7 +373,7 @@ where
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle = self.acquire_proof_worker_handle(task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
 
@@ -371,6 +386,59 @@ where
         );
 
         StateRootHandle::new(to_multi_proof, state_root_rx)
+    }
+
+    /// Acquires a proof worker pool for this payload, reusing an existing pool when possible.
+    fn acquire_proof_worker_handle<F>(
+        &mut self,
+        task_ctx: ProofTaskCtx<F>,
+        halve_workers: bool,
+    ) -> ProofWorkerHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let slot = if halve_workers {
+            &mut self.small_proof_worker_pool
+        } else {
+            &mut self.proof_worker_pool
+        };
+
+        if let Some(handle) = slot.as_ref() {
+            match handle.try_reuse_for_payload(task_ctx.clone()) {
+                Ok(()) => {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        halve_workers,
+                        "Reusing proof worker pool"
+                    );
+                    return handle.clone();
+                }
+                Err(ProofWorkerReuseError::Busy) => {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        halve_workers,
+                        "Proof worker pool busy; spawning one-off pool"
+                    );
+                    return ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers)
+                }
+                Err(ProofWorkerReuseError::TaskContextTypeMismatch) => {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        halve_workers,
+                        "Replacing proof worker pool due to provider context mismatch"
+                    );
+                    *slot = None;
+                }
+            }
+        }
+
+        let handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        *slot = Some(handle.clone());
+        handle
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -573,6 +641,7 @@ where
         let parent_span = Span::current();
         self.executor.spawn_blocking_named("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
+            let _proof_worker_guard = ProofWorkerPayloadGuard(proof_worker_handle.clone());
 
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();

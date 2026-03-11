@@ -52,12 +52,13 @@ use reth_trie::{
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
+    any::Any,
     cell::RefCell,
     rc::Rc,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
-        Arc,
+        Arc, RwLock,
     },
     time::Duration,
 };
@@ -69,6 +70,35 @@ use crate::proof_task_metrics::{
 };
 
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
+
+trait TaskCtxUpdater: Send + Sync {
+    fn update(&self, task_ctx: &dyn Any) -> bool;
+}
+
+struct TypedTaskCtxUpdater<Factory> {
+    task_ctx: Arc<RwLock<ProofTaskCtx<Factory>>>,
+}
+
+impl<Factory> TaskCtxUpdater for TypedTaskCtxUpdater<Factory>
+where
+    Factory: Clone + Send + Sync + 'static,
+{
+    fn update(&self, task_ctx: &dyn Any) -> bool {
+        let Some(task_ctx) = task_ctx.downcast_ref::<ProofTaskCtx<Factory>>() else { return false };
+
+        *self.task_ctx.write().expect("proof task context lock poisoned") = task_ctx.clone();
+        true
+    }
+}
+
+/// Errors returned when attempting to recycle an existing proof worker pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofWorkerReuseError {
+    /// The handle is currently serving another payload and cannot be safely reused.
+    Busy,
+    /// The incoming task context type does not match the existing worker pool.
+    TaskContextTypeMismatch,
+}
 
 /// Type alias for the V2 account proof calculator.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
@@ -91,7 +121,7 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
 /// The handle stores direct senders to both storage and account worker pools,
 /// eliminating the need for a routing thread. All handles share reference-counted
 /// channels, and workers shut down gracefully when all handles are dropped.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProofWorkerHandle {
     /// Direct sender to storage worker pool
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
@@ -107,6 +137,30 @@ pub struct ProofWorkerHandle {
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
+    /// Shared storage root cache across workers.
+    cached_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Type-erased updater used to swap task context between payloads.
+    task_ctx_updater: Arc<dyn TaskCtxUpdater>,
+    /// Tracks how many payloads currently use this pool.
+    payloads_in_flight: Arc<AtomicUsize>,
+}
+
+impl std::fmt::Debug for ProofWorkerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProofWorkerHandle")
+            .field("storage_worker_count", &self.storage_worker_count)
+            .field("account_worker_count", &self.account_worker_count)
+            .field(
+                "storage_available_workers",
+                &self.storage_available_workers.load(Ordering::Relaxed),
+            )
+            .field(
+                "account_available_workers",
+                &self.account_available_workers.load(Ordering::Relaxed),
+            )
+            .field("payloads_in_flight", &self.payloads_in_flight.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl ProofWorkerHandle {
@@ -144,6 +198,10 @@ impl ProofWorkerHandle {
         let account_available_workers = Arc::<AtomicUsize>::default();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
+        let shared_task_ctx = Arc::new(RwLock::new(task_ctx));
+        let task_ctx_updater: Arc<dyn TaskCtxUpdater> =
+            Arc::new(TypedTaskCtxUpdater { task_ctx: shared_task_ctx.clone() });
+        let payloads_in_flight = Arc::new(AtomicUsize::new(1));
 
         let divisor = if halve_workers { 2 } else { 1 };
         let storage_worker_count =
@@ -162,7 +220,7 @@ impl ProofWorkerHandle {
         // broadcast blocks until all workers exit (channel close), so run on
         // tokio's blocking pool.
         let storage_rt = runtime.clone();
-        let storage_task_ctx = task_ctx.clone();
+        let storage_task_ctx = shared_task_ctx.clone();
         let storage_avail = storage_available_workers.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
@@ -203,6 +261,8 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
+        let account_task_ctx = shared_task_ctx;
+        let account_storage_roots = cached_storage_roots.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -217,12 +277,12 @@ impl ProofWorkerHandle {
                 let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let worker = AccountProofWorker::new(
-                    task_ctx.clone(),
+                    account_task_ctx.clone(),
                     account_work_rx.clone(),
                     worker_id,
                     account_tx.clone(),
                     account_avail.clone(),
-                    cached_storage_roots.clone(),
+                    account_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -246,7 +306,55 @@ impl ProofWorkerHandle {
             account_available_workers,
             storage_worker_count,
             account_worker_count,
+            cached_storage_roots,
+            task_ctx_updater,
+            payloads_in_flight,
         }
+    }
+
+    /// Attempts to reuse this worker pool for a new payload.
+    ///
+    /// Returns an error if the pool is currently in use by another payload or if the incoming
+    /// task context is incompatible with the existing worker type.
+    pub fn try_reuse_for_payload<Factory>(
+        &self,
+        task_ctx: ProofTaskCtx<Factory>,
+    ) -> Result<(), ProofWorkerReuseError>
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        if self
+            .payloads_in_flight
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(ProofWorkerReuseError::Busy)
+        }
+
+        if !self.task_ctx_updater.update(&task_ctx) {
+            self.payloads_in_flight.store(0, Ordering::Release);
+            return Err(ProofWorkerReuseError::TaskContextTypeMismatch)
+        }
+
+        self.cached_storage_roots.clear();
+
+        debug!(
+            target: "trie::proof_task",
+            storage_worker_count = self.storage_worker_count,
+            account_worker_count = self.account_worker_count,
+            "Reusing proof worker pools for next payload"
+        );
+
+        Ok(())
+    }
+
+    /// Marks the current payload as finished so this pool can be reused.
+    pub fn finish_payload(&self) {
+        self.payloads_in_flight.fetch_sub(1, Ordering::AcqRel);
     }
 
     /// Returns how many storage workers are currently available/idle.
@@ -629,7 +737,7 @@ pub(crate) enum StorageWorkerJob {
 /// storage proof requests and blinded node lookups.
 struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
-    task_ctx: ProofTaskCtx<Factory>,
+    task_ctx: Arc<RwLock<ProofTaskCtx<Factory>>>,
     /// Channel for receiving work
     work_rx: CrossbeamReceiver<StorageWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
@@ -648,11 +756,11 @@ struct StorageProofWorker<Factory> {
 
 impl<Factory> StorageProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory> + Clone,
 {
     /// Creates a new storage proof worker.
     const fn new(
-        task_ctx: ProofTaskCtx<Factory>,
+        task_ctx: Arc<RwLock<ProofTaskCtx<Factory>>>,
         work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
@@ -691,10 +799,6 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
-
         trace!(
             target: "trie::proof_task",
             worker_id = self.worker_id,
@@ -704,10 +808,6 @@ where
         let mut storage_proofs_processed = 0u64;
         let mut storage_nodes_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
-        let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
-        let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let mut v2_calculator =
-            proof_v2::StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Initially mark this worker as available.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
@@ -722,7 +822,9 @@ where
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             #[cfg(feature = "trie-debug")]
-            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+            if let Some(max_jitter) =
+                self.task_ctx.read().expect("proof task context lock poisoned").proof_jitter
+            {
                 let jitter =
                     Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
                 trace!(
@@ -734,8 +836,17 @@ where
                 std::thread::sleep(jitter);
             }
 
+            let task_ctx = self.task_ctx.read().expect("proof task context lock poisoned").clone();
+            let provider = task_ctx.factory.database_provider_ro()?;
+            let proof_tx = ProofTaskTx::new(provider, self.worker_id);
+
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                    let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
+                    let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
+                    let mut v2_calculator =
+                        proof_v2::StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
                     self.process_storage_proof(
                         &proof_tx,
                         &mut v2_calculator,
@@ -893,7 +1004,7 @@ where
 /// account multiproof requests and blinded node lookups.
 struct AccountProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
-    task_ctx: ProofTaskCtx<Factory>,
+    task_ctx: Arc<RwLock<ProofTaskCtx<Factory>>>,
     /// Channel for receiving work
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
@@ -914,12 +1025,12 @@ struct AccountProofWorker<Factory> {
 
 impl<Factory> AccountProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory> + Clone,
 {
     /// Creates a new account proof worker.
     #[allow(clippy::too_many_arguments)]
     const fn new(
-        task_ctx: ProofTaskCtx<Factory>,
+        task_ctx: Arc<RwLock<ProofTaskCtx<Factory>>>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
@@ -960,8 +1071,6 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-
         trace!(
             target: "trie::proof_task",
             worker_id=self.worker_id,
@@ -971,28 +1080,6 @@ where
         let mut account_proofs_processed = 0u64;
         let mut account_nodes_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
-
-        // Create both account and storage calculators for V2 proofs.
-        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
-        let account_trie_cursor = provider.account_trie_cursor()?;
-        let account_hashed_cursor = provider.hashed_account_cursor()?;
-
-        let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
-        let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
-
-        let mut v2_account_calculator = proof_v2::ProofCalculator::<
-            _,
-            _,
-            AsyncAccountValueEncoder<
-                <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-                <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
-            >,
-        >::new(account_trie_cursor, account_hashed_cursor);
-        let v2_storage_calculator =
-            Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
-                storage_trie_cursor,
-                storage_hashed_cursor,
-            )));
 
         // Count this worker as available only after successful initialization.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
@@ -1008,7 +1095,9 @@ where
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             #[cfg(feature = "trie-debug")]
-            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+            if let Some(max_jitter) =
+                self.task_ctx.read().expect("proof task context lock poisoned").proof_jitter
+            {
                 let jitter =
                     Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
                 trace!(
@@ -1020,8 +1109,35 @@ where
                 std::thread::sleep(jitter);
             }
 
+            let task_ctx = self.task_ctx.read().expect("proof task context lock poisoned").clone();
+            let provider = task_ctx.factory.database_provider_ro()?;
+
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
+                    // Create both account and storage calculators for V2 proofs.
+                    // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value
+                    // encoders.
+                    let account_trie_cursor = provider.account_trie_cursor()?;
+                    let account_hashed_cursor = provider.hashed_account_cursor()?;
+
+                    let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
+                    let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
+
+                    let mut v2_account_calculator =
+                        proof_v2::ProofCalculator::<
+                            _,
+                            _,
+                            AsyncAccountValueEncoder<
+                                <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
+                                <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
+                            >,
+                        >::new(account_trie_cursor, account_hashed_cursor);
+                    let v2_storage_calculator =
+                        Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
+                            storage_trie_cursor,
+                            storage_hashed_cursor,
+                        )));
+
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
