@@ -2525,11 +2525,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-                let parallel_pruned: Vec<usize> = taken
+                pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
-                    .collect();
-                pruned += parallel_pruned.into_iter().sum::<usize>();
+                    .sum::<usize>();
             }
 
             // Restore taken subtries into the upper arena.
