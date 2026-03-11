@@ -11,9 +11,11 @@ use crate::{
     },
     NetworkHandle, NetworkManager,
 };
+use reth_bal_store::{BalStore, NoopBalStore};
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_transaction_pool::TransactionPool;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// We set the max channel capacity of the `EthRequestHandler` to 256
@@ -64,11 +66,20 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         self,
         client: Client,
     ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N> {
+        self.request_handler_with_bal_store(client, Arc::new(NoopBalStore))
+    }
+
+    /// Creates a new [`EthRequestHandler`] with a custom BAL store and wires it to the network.
+    pub fn request_handler_with_bal_store<Client>(
+        self,
+        client: Client,
+        bal_store: Arc<dyn BalStore>,
+    ) -> NetworkBuilder<Tx, EthRequestHandler<Client, N>, N> {
         let Self { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::new(client, peers, rx);
+        let request_handler = EthRequestHandler::with_bal_store(client, peers, rx, bal_store);
         NetworkBuilder { network, request_handler, transactions }
     }
 
