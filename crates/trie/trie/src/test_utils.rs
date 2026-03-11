@@ -65,7 +65,6 @@ use reth_trie_common::{
     prefix_set::PrefixSetMut, updates::StorageTrieUpdates, BranchNodeCompact,
     HashedPostStateSorted, HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
 };
-use reth_trie_sparse::SparseTrieUpdates;
 use std::{collections::BTreeMap, iter::once};
 
 /// General-purpose test harness for storage trie tests.
@@ -288,18 +287,5 @@ impl TrieTestHarness {
             self.storage_trie_updates.storage_nodes.contains_key(path) &&
                 !paths_with_updates.contains(path)
         });
-    }
-
-    /// Removes all entries from `updates` that are redundant with the starting storage
-    /// trie updates. Same logic as [`Self::minimize_trie_updates`] but for
-    /// [`SparseTrieUpdates`].
-    pub fn minimize_sparse_updates(&self, updates: &mut SparseTrieUpdates) {
-        updates
-            .updated_nodes
-            .retain(|path, node| self.storage_trie_updates.storage_nodes.get(path) != Some(node));
-
-        updates
-            .removed_nodes
-            .retain(|path| self.storage_trie_updates.storage_nodes.contains_key(path));
     }
 }
