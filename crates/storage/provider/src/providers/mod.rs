@@ -26,6 +26,9 @@ pub use state::{
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
+mod bal_provider;
+pub use bal_provider::*;
+
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider;
 

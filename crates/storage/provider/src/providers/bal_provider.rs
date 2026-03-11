@@ -8,17 +8,14 @@
 //! weak subjectivity period (~3533 epochs) to support synchronization with re-execution.
 //! This initial implementation uses a simple in-memory cache with configurable capacity.
 
-use crate::bal_store::{BalStore, BalStoreError};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
-use reth_metrics::{
-    metrics::{Counter, Gauge},
-    Metrics,
-};
+use reth_bal_store::{BalStore, BalStoreError};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
+use tracing::warn;
 
 /// Default capacity for the BAL cache.
 ///
@@ -46,8 +43,6 @@ struct BalCacheInner {
     /// Index mapping block number to block hash for range queries.
     /// Uses `BTreeMap` for efficient range iteration and eviction of oldest blocks.
     block_index: RwLock<BTreeMap<BlockNumber, BlockHash>>,
-    /// Cache metrics.
-    metrics: BalCacheMetrics,
 }
 
 impl BalCache {
@@ -63,7 +58,6 @@ impl BalCache {
                 capacity,
                 entries: RwLock::new(HashMap::new()),
                 block_index: RwLock::new(BTreeMap::new()),
-                metrics: BalCacheMetrics::default(),
             }),
         }
     }
@@ -93,11 +87,7 @@ impl BalCache {
         }
 
         entries.insert(block_hash, bal);
-
         block_index.insert(block_number, block_hash);
-
-        self.inner.metrics.inserts.increment(1);
-        self.inner.metrics.count.set(entries.len() as f64);
     }
 
     /// Retrieves BALs for the given block hashes.
@@ -106,18 +96,7 @@ impl BalCache {
     /// is `Some(bal)` if found or `None` if not in cache.
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
         let entries = self.inner.entries.read();
-        block_hashes
-            .iter()
-            .map(|hash| {
-                let result = entries.get(hash).cloned();
-                if result.is_some() {
-                    self.inner.metrics.hits.increment(1);
-                } else {
-                    self.inner.metrics.misses.increment(1);
-                }
-                result
-            })
-            .collect()
+        block_hashes.iter().map(|hash| entries.get(hash).cloned()).collect()
     }
 
     /// Retrieves BALs for a range of blocks starting at `start` for `count` blocks.
@@ -178,18 +157,112 @@ impl BalStore for BalCache {
     }
 }
 
-/// Metrics for the BAL cache.
-#[derive(Metrics)]
-#[metrics(scope = "engine.bal_cache")]
-struct BalCacheMetrics {
-    /// The total number of BALs in the cache.
-    count: Gauge,
-    /// The number of cache inserts.
-    inserts: Counter,
-    /// The number of cache hits.
-    hits: Counter,
-    /// The number of cache misses.
-    misses: Counter,
+/// Provides access to Block Access Lists (BALs).
+///
+/// `BalProvider` acts as a thin abstraction over:
+/// - a **durable store** (`BalStore`) which is the source of truth
+/// - an **in-memory cache** (`BalCache`) for fast access.
+///
+/// Reads are cache-first with fallback to the store.
+/// Writes are store-first to ensure durability before cache visibility.
+#[derive(Clone, Debug)]
+pub struct BalProvider {
+    /// Persistent storage backend for BALs.
+    store: Arc<dyn BalStore>,
+    /// In-memory cache for recently accessed BALs.
+    cache: BalCache,
+}
+
+impl Default for BalProvider {
+    fn default() -> Self {
+        let cache = BalCache::new();
+        Self { store: Arc::new(BalCache::new()), cache }
+    }
+}
+
+impl BalProvider {
+    fn new(store: Arc<dyn BalStore>, cache: BalCache) -> Self {
+        Self { store, cache }
+    }
+
+    const fn cache(&self) -> &BalCache {
+        &self.cache
+    }
+
+    // Persist first: store is the source of truth. We only populate the in-memory cache if
+    // durability succeeds, so cache visibility cannot outlive failed persistence.
+    // `Bytes` is consumed by each insert call, so we clone once for store and move the original
+    // into cache.
+    fn cache_bal(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: Bytes,
+    ) -> Result<(), BalStoreError> {
+        self.store.insert(block_hash, block_number, bal.clone())?;
+        self.cache.insert(block_hash, block_number, bal);
+        Ok(())
+    }
+
+    // Cache-first lookup: keep request order and fill only cache misses from durable storage.
+    fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
+        let mut results = self.cache.get_by_hashes(block_hashes);
+
+        // Collect missing positions so store fallback can patch holes in-place.
+        let mut missing_hashes = Vec::new();
+        let mut missing_indices = Vec::new();
+        for (idx, result) in results.iter().enumerate() {
+            if result.is_none() {
+                missing_indices.push(idx);
+                missing_hashes.push(block_hashes[idx]);
+            }
+        }
+
+        if missing_hashes.is_empty() {
+            return results;
+        }
+
+        match self.store.get_by_hashes(&missing_hashes) {
+            Ok(store_results) => {
+                for (missing_idx, store_result) in
+                    missing_indices.into_iter().zip(store_results.into_iter())
+                {
+                    if let Some(value) = store_result {
+                        results[missing_idx] = Some(value);
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by hash from BAL store");
+            }
+        }
+
+        results
+    }
+
+    // Cache range reads are contiguous and stop at the first gap.
+    // Only the missing suffix is queried from store to avoid re-reading cached prefix.
+    fn get_by_range(&self, start: BlockNumber, count: u64) -> Vec<Bytes> {
+        let mut cache_results = self.cache.get_by_range(start, count);
+        if cache_results.len() as u64 == count {
+            return cache_results;
+        }
+
+        let cached_len = cache_results.len() as u64;
+        let missing_start = start.saturating_add(cached_len);
+        let missing_count = count - cached_len;
+
+        match self.store.get_by_range(missing_start, missing_count) {
+            Ok(mut store_results) => {
+                cache_results.append(&mut store_results);
+                cache_results
+            }
+            Err(err) => {
+                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by range from BAL store");
+                cache_results
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -234,18 +307,15 @@ mod tests {
     fn test_get_by_range_stops_at_gap() {
         let cache = BalCache::with_capacity(10);
 
-        // Insert blocks 1, 2, 4, 5 (missing block 3)
         for i in [1, 2, 4, 5] {
             let hash = B256::random();
             let bal = Bytes::from(format!("bal{i}").into_bytes());
             cache.insert(hash, i, bal);
         }
 
-        // Requesting range starting at 1 should stop at the gap (block 3)
         let results = cache.get_by_range(1, 5);
-        assert_eq!(results.len(), 2); // Only blocks 1 and 2
+        assert_eq!(results.len(), 2);
 
-        // Requesting range starting at 4 should return 4 and 5
         let results = cache.get_by_range(4, 3);
         assert_eq!(results.len(), 2);
     }
@@ -254,19 +324,16 @@ mod tests {
     fn test_eviction_oldest_first() {
         let cache = BalCache::with_capacity(3);
 
-        // Insert blocks 10, 20, 30
         for i in [10, 20, 30] {
             let hash = B256::random();
             cache.insert(hash, i, Bytes::from_static(b"bal"));
         }
         assert_eq!(cache.len(), 3);
 
-        // Insert block 40, should evict block 10 (oldest/lowest)
         let hash40 = B256::random();
         cache.insert(hash40, 40, Bytes::from_static(b"bal40"));
         assert_eq!(cache.len(), 3);
 
-        // Block 10 should be gone, block 20 should still be there
         let results = cache.get_by_range(10, 1);
         assert_eq!(results.len(), 0);
 
@@ -283,14 +350,11 @@ mod tests {
         let bal1 = Bytes::from_static(b"bal1");
         let bal2 = Bytes::from_static(b"bal2");
 
-        // Insert block 100 with hash1
         cache.insert(hash1, 100, bal1.clone());
         assert_eq!(cache.get_by_hashes(&[hash1])[0], Some(bal1));
 
-        // Reorg: insert block 100 with hash2
         cache.insert(hash2, 100, bal2.clone());
 
-        // hash1 should be gone, hash2 should be there
         assert_eq!(cache.get_by_hashes(&[hash1])[0], None);
         assert_eq!(cache.get_by_hashes(&[hash2])[0], Some(bal2));
         assert_eq!(cache.len(), 1);

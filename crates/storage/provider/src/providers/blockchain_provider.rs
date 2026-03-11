@@ -1,6 +1,6 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
+        BalProvider, ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
@@ -15,6 +15,7 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
+use reth_bal_store::BalStore;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
@@ -50,6 +51,8 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    ///
+    pub(crate) bal_provider: BalProvider,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
@@ -57,6 +60,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            bal_provider: self.bal_provider.clone(),
         }
     }
 }
@@ -64,13 +68,17 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Create a new [`BlockchainProvider`] using only the storage, fetching the latest
     /// header from the database to initialize the provider.
-    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+    pub fn new(storage: ProviderFactory<N>, bal_provider: BalProvider) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest(storage, SealedHeader::new(header, best.best_hash))?)
+                Ok(Self::with_latest(
+                    storage,
+                    SealedHeader::new(header, best.best_hash),
+                    bal_provider,
+                )?)
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
@@ -84,6 +92,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     pub fn with_latest(
         storage: ProviderFactory<N>,
         latest: SealedHeader<HeaderTy<N>>,
+        bal_provider: BalProvider,
     ) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let finalized_header = provider
@@ -108,6 +117,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
+            bal_provider,
         })
     }
 
@@ -796,7 +806,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::BlockchainProvider,
+        providers::{BalProvider, BlockchainProvider},
         test_utils::{
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
@@ -927,7 +937,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         // Insert the rest of the blocks and receipts into the in-memory state
         let chain = NewCanonicalChain::Commit {
@@ -1052,7 +1062,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1150,7 +1160,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1364,7 +1374,7 @@ mod tests {
         provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         // Subscribe twice for canonical state updates.
         let in_memory_state = provider.canonical_in_memory_state();
@@ -1716,7 +1726,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
