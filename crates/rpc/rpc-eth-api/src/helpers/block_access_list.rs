@@ -4,7 +4,7 @@ use alloy_eips::eip7928::BlockAccessList;
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm};
+use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
@@ -58,17 +58,19 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock {
                     .map_err(Self::Error::from_eth_err)?;
 
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                executor.evm_mut().db_mut().bump_bal_index();
 
                 // replay all transactions prior to the targeted transaction
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                    executor.evm_mut().db_mut().bump_bal_index();
                 }
 
-                let result = executor
+                executor
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = result.block_access_list;
+                let bal = db.take_built_alloy_bal();
                 Ok(bal)
             })
             .await
