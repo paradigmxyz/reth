@@ -551,19 +551,33 @@ fn parallel_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
     // HEAD request to get total size and check range support
     let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
 
-    let head_response = client.head(url).send()?.error_for_status()?;
-    let total_size = head_response
-        .content_length()
-        .ok_or_else(|| eyre::eyre!("Server did not return Content-Length on HEAD request"))?;
+    // Probe with a single-byte Range request to discover total size and range support.
+    // This is more reliable than checking Accept-Ranges on a HEAD response, since some
+    // servers support ranges but don't advertise it in HEAD.
+    let probe =
+        client.get(url).header(RANGE, "bytes=0-0").send().and_then(|r| r.error_for_status());
 
-    let accepts_ranges = head_response
-        .headers()
-        .get("Accept-Ranges")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.contains("bytes"))
-        .unwrap_or(false);
+    let (supports_ranges, total_size) = match probe {
+        Ok(resp) if resp.status() == StatusCode::PARTIAL_CONTENT => {
+            // Parse total size from Content-Range: bytes 0-0/<total>
+            let total = resp
+                .headers()
+                .get("Content-Range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split('/').next_back())
+                .and_then(|v| v.parse::<u64>().ok());
+            (true, total)
+        }
+        _ => {
+            // Probe failed or server returned 200 (no range support) — try HEAD for size
+            let head = client.head(url).send()?.error_for_status()?;
+            (false, head.content_length())
+        }
+    };
 
-    if !accepts_ranges || total_size == 0 {
+    let total_size = total_size.ok_or_else(|| eyre::eyre!("Server did not return file size"))?;
+
+    if !supports_ranges || total_size == 0 {
         info!(target: "reth::cli", "Server does not support Range requests, falling back to sequential download");
         return resumable_download(url, target_dir);
     }
