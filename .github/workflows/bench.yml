@@ -36,8 +36,8 @@ on:
         required: false
         default: "false"
         type: boolean
-      quiet:
-        description: "Suppress result posts (PR comment and Slack notification)"
+      no_slack:
+        description: "Suppress Slack notifications for benchmark results"
         required: false
         default: "true"
         type: boolean
@@ -102,7 +102,7 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
-      quiet: ${{ steps.args.outputs.quiet }}
+      no-slack: ${{ steps.args.outputs.no-slack }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       reth-new-payload: ${{ steps.args.outputs.reth-new-payload }}
@@ -146,7 +146,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
-              var quiet = '${{ github.event.inputs.quiet }}' !== 'false' ? 'true' : 'false';
+              var noSlack = '${{ github.event.inputs.no_slack }}' !== 'false' ? 'true' : 'false';
               cores = '${{ github.event.inputs.cores }}' || '0';
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
@@ -176,11 +176,11 @@ jobs:
               const intArgs = new Set(['warmup', 'cores']);
               const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'quiet']);
+              const boolArgs = new Set(['samply', 'no-slack']);
               const boolDefaultTrue = new Set(['reth_newPayload', 'abba']);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', quiet: 'false', cores: '0', reth_newPayload: 'true', abba: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -250,7 +250,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [quiet] [cores=N] [reth_newPayload=true|false] [abba=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -265,7 +265,7 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
-              var quiet = defaults.quiet;
+              var noSlack = defaults['no-slack'];
               cores = defaults.cores;
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = defaults.reth_newPayload;
@@ -300,7 +300,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
-            core.setOutput('quiet', quiet);
+            core.setOutput('no-slack', noSlack);
             core.setOutput('cores', cores);
             core.setOutput('big-blocks', bigBlocks);
             core.setOutput('reth-new-payload', rethNewPayload);
@@ -365,10 +365,10 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
-            const quietMode = '${{ steps.args.outputs.quiet }}' === 'true';
+            const noSlack = '${{ steps.args.outputs.no-slack }}' === 'true';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const quietNote = quietMode ? ', quiet: `enabled`' : '';
+            const noSlackNote = noSlack ? ', no-slack' : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const rethNP = '${{ steps.args.outputs.reth-new-payload }}' !== 'false';
@@ -382,7 +382,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${quietNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -407,10 +407,10 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
-            const quietMode = '${{ steps.args.outputs.quiet }}' === 'true';
+            const noSlack = '${{ steps.args.outputs.no-slack }}' === 'true';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const quietNote = quietMode ? ', quiet: `enabled`' : '';
+            const noSlackNote = noSlack ? ', no-slack' : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const rethNP = '${{ steps.args.outputs.reth-new-payload }}' !== 'false';
@@ -424,7 +424,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${quietNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -495,7 +495,7 @@ jobs:
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
-      BENCH_QUIET: ${{ needs.reth-bench-ack.outputs.quiet }}
+      BENCH_NO_SLACK: ${{ needs.reth-bench-ack.outputs.no-slack }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
     steps:
       - name: Clean up previous bench-work
@@ -547,10 +547,10 @@ jobs:
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
-            const quietMode = process.env.BENCH_QUIET === 'true';
+            const noSlack = process.env.BENCH_NO_SLACK === 'true';
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const samplyNote = samply ? ', samply: `enabled`' : '';
-            const quietNote = quietMode ? ', quiet: `enabled`' : '';
+            const noSlackNote = noSlack ? ', no-slack' : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const rethNP = (process.env.BENCH_RETH_NEW_PAYLOAD || 'true') !== 'false';
@@ -564,7 +564,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${quietNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -1193,7 +1193,7 @@ jobs:
             }
 
       - name: Send Slack notification (success)
-        if: success() && env.BENCH_QUIET != 'true'
+        if: success() && env.BENCH_NO_SLACK != 'true'
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
