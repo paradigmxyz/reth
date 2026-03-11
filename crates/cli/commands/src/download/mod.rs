@@ -1203,14 +1203,16 @@ fn resumable_download(
         let response = match request.send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
+                let err: eyre::Error = e.into();
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     info!(target: "reth::cli",
                         file = %file_name,
+                        %err,
                         "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
                     );
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 }
+                last_error = Some(err);
                 continue;
             }
         };
@@ -1282,14 +1284,16 @@ fn resumable_download(
         }
 
         if let Err(e) = copy_result.and(flush_result) {
-            last_error = Some(e.into());
+            let err: eyre::Error = e.into();
             if attempt < MAX_DOWNLOAD_RETRIES {
                 info!(target: "reth::cli",
                     file = %file_name,
+                    %err,
                     "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
                 );
                 std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
             }
+            last_error = Some(err);
             continue;
         }
 
@@ -1315,10 +1319,12 @@ fn streaming_download_and_extract(
 
     for attempt in 1..=MAX_DOWNLOAD_RETRIES {
         if attempt > 1 {
+            let err = last_error.as_ref().map(|e| e.to_string()).unwrap_or_default();
             info!(target: "reth::cli",
                 url = %url,
                 attempt,
                 max = MAX_DOWNLOAD_RETRIES,
+                %err,
                 "Retrying streaming download from scratch"
             );
         }
