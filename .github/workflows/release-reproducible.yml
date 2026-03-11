@@ -65,7 +65,7 @@ jobs:
           echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> $GITHUB_OUTPUT
 
       - name: Build reproducible artifacts
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         id: docker_build
         with:
           context: .
@@ -81,7 +81,7 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
 
       - name: Build and push final image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.reproducible
