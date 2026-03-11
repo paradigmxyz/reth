@@ -1448,7 +1448,7 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
-        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let provider_factory = BlockchainProvider::new(factory, BalProvider::default()).unwrap();
 
         let mut handle = payload_processor.spawn(
             ExecutionEnv::test_default(),

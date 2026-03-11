@@ -802,6 +802,31 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         StateReader::get_state(&self.consistent_provider()?, block)
     }
 }
+impl<N: NodeTypesWithDB> BalStore for BlockchainProvider<N> {
+    fn insert(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: alloy_primitives::Bytes,
+    ) -> Result<(), reth_bal_store::BalStoreError> {
+        Ok(self.bal_provider.cache().insert(block_hash, block_number, bal))
+    }
+
+    fn get_by_hashes(
+        &self,
+        block_hashes: &[BlockHash],
+    ) -> Result<Vec<Option<alloy_primitives::Bytes>>, reth_bal_store::BalStoreError> {
+        Ok(self.bal_provider.get_by_hashes(block_hashes))
+    }
+
+    fn get_by_range(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> Result<Vec<alloy_primitives::Bytes>, reth_bal_store::BalStoreError> {
+        Ok(self.bal_provider.get_by_range(start, count))
+    }
+}
 
 #[cfg(test)]
 mod tests {

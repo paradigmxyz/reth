@@ -1702,8 +1702,9 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::blockchain_provider::BlockchainProvider,
-        test_utils::create_test_provider_factory, BlockWriter,
+        providers::{blockchain_provider::BlockchainProvider, BalProvider},
+        test_utils::create_test_provider_factory,
+        BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::B256;
@@ -1783,7 +1784,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1894,7 +1895,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -2008,7 +2009,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -2132,7 +2133,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
         let consistent_provider = provider.consistent_provider()?;
 
         let outcome =
@@ -2299,7 +2300,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
         let consistent_provider = provider.consistent_provider()?;
 
         let outcome =
@@ -2364,7 +2365,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -2462,7 +2463,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -2564,7 +2565,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -2660,7 +2661,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory, BalProvider::default())?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");

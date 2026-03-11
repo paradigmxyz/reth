@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_provider::{
-        providers::BlockchainProvider,
+        providers::{BalProvider, BlockchainProvider},
         test_utils::{create_test_provider_factory, MockEthProvider},
         BlockWriter,
     };
@@ -291,7 +291,7 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory, BalProvider::default()).unwrap();
 
         // Since there are no transactions, expected None
         let range = input.get_next_tx_num_range(&provider).expect("Expected range");
@@ -329,7 +329,7 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory, BalProvider::default()).unwrap();
 
         // Get the next tx number range
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
@@ -375,7 +375,7 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory, BalProvider::default()).unwrap();
 
         // Fetch the range and check if it is correct
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
@@ -411,7 +411,7 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory, BalProvider::default()).unwrap();
 
         // Get the last tx number
         // Calculate the total number of transactions

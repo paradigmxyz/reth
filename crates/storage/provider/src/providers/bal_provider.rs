@@ -185,7 +185,7 @@ impl BalProvider {
         Self { store, cache }
     }
 
-    const fn cache(&self) -> &BalCache {
+    pub const fn cache(&self) -> &BalCache {
         &self.cache
     }
 
@@ -193,7 +193,7 @@ impl BalProvider {
     // durability succeeds, so cache visibility cannot outlive failed persistence.
     // `Bytes` is consumed by each insert call, so we clone once for store and move the original
     // into cache.
-    fn cache_bal(
+    pub fn cache_bal(
         &self,
         block_hash: BlockHash,
         block_number: BlockNumber,
@@ -205,7 +205,7 @@ impl BalProvider {
     }
 
     // Cache-first lookup: keep request order and fill only cache misses from durable storage.
-    fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
+    pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
         let mut results = self.cache.get_by_hashes(block_hashes);
 
         // Collect missing positions so store fallback can patch holes in-place.
@@ -242,7 +242,7 @@ impl BalProvider {
 
     // Cache range reads are contiguous and stop at the first gap.
     // Only the missing suffix is queried from store to avoid re-reading cached prefix.
-    fn get_by_range(&self, start: BlockNumber, count: u64) -> Vec<Bytes> {
+    pub fn get_by_range(&self, start: BlockNumber, count: u64) -> Vec<Bytes> {
         let mut cache_results = self.cache.get_by_range(start, count);
         if cache_results.len() as u64 == count {
             return cache_results;

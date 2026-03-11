@@ -259,7 +259,7 @@ mod tests {
         crypto::secp256k1::public_key_to_address, Block as _, NodePrimitives,
     };
     use reth_provider::{
-        providers::{BlockchainProvider, ProviderNodeTypes},
+        providers::{BalProvider, BlockchainProvider, ProviderNodeTypes},
         test_utils::create_test_provider_factory_with_chain_spec,
         ProviderFactory,
     };
@@ -281,7 +281,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
         // Create first 2 blocks
         let blocks_and_execution_outcomes =
@@ -318,7 +319,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
         // Create first 2 blocks
         let (blocks, execution_outcome) =
@@ -421,7 +423,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
         // Create and commit 4 blocks
         let blocks = create_blocks(&chain_spec, key_pair, 4)?;
