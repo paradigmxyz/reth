@@ -105,7 +105,7 @@ pub fn log_layer(
 /// Sets `timestamp` on every log record so backends receive a stable client-side
 /// event time. The `opentelemetry-appender-tracing` bridge only sets
 /// `observed_timestamp`, which means backends that don't fall back to it (e.g.
-/// VictoriaLogs receiving OTLP directly) use ingestion time instead. If the same
+/// `VictoriaLogs` receiving OTLP directly) use ingestion time instead. If the same
 /// log is delivered twice (retry, duplicate exporter), the two copies get
 /// different ingestion times, making deduplication impossible.
 #[cfg(feature = "otlp-logs")]
