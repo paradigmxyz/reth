@@ -6,6 +6,7 @@ extend-exclude = [
     "Cargo.toml",
     "Cargo.lock",
     "testing/ef-tests",
+    "arena.txt",
 ]
 
 [default]

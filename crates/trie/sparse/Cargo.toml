@@ -29,6 +29,7 @@ rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 smallvec.workspace = true
+slotmap = { workspace = true, optional = true }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -56,6 +57,7 @@ rand_08.workspace = true
 default = ["std", "metrics"]
 std = [
     "dep:rayon",
+    "dep:slotmap",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "alloy-trie/std",
