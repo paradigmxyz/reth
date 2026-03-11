@@ -474,6 +474,15 @@ impl Runtime {
         self.0.handle.spawn_blocking(func)
     }
 
+    /// Moves the given value to a dedicated background thread for deallocation.
+    ///
+    /// This is useful when dropping a value is expensive (e.g. large nested collections)
+    /// and should not block the current task. Uses a persistent named thread (`"drop"`)
+    /// to avoid thread creation overhead on hot paths.
+    pub fn spawn_drop<T: Send + 'static>(&self, value: T) {
+        self.spawn_blocking_named("drop", move || drop(value));
+    }
+
     /// Spawns a blocking closure on a dedicated, named OS thread.
     ///
     /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,

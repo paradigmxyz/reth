@@ -117,15 +117,6 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
-
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
-
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
-
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 

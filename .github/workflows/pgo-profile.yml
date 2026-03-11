@@ -1,0 +1,107 @@
+name: pgo-profile
+
+on:
+  workflow_call:
+    inputs:
+      pgo_blocks:
+        description: "Number of blocks to execute for PGO profiling"
+        required: false
+        type: string
+        default: "20"
+  workflow_dispatch:
+    inputs:
+      pgo_blocks:
+        description: "Number of blocks to execute for PGO profiling"
+        required: false
+        type: string
+        default: "20"
+
+jobs:
+  collect:
+    name: collect PGO profiles
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
+    env:
+      SCHELK_MOUNT: /reth-bench
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            dmsetup lsb-release wget linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+      - name: Download snapshot if needed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+        run: |
+          if ! .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "Snapshot outdated or missing, downloading..."
+            .github/scripts/bench-reth-snapshot.sh
+          fi
+
+      - name: Mount snapshot
+        run: |
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          sudo schelk mount -y
+          sync
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
+      - name: Collect PGO profile
+        run: |
+          DATADIR="$SCHELK_MOUNT/datadir" \
+          RPC_URL="$BENCH_RPC_URL" \
+          PGO_BLOCKS="${{ inputs.pgo_blocks || '20' }}" \
+          BOLT_BLOCKS="${{ inputs.pgo_blocks || '20' }}" \
+          COLLECT_PGO_ONLY=true \
+          SKIP_BOLT=true \
+          PROFILE=maxperf-symbols \
+          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
+          TARGET=x86_64-unknown-linux-gnu \
+          EXTRA_RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq" \
+            .github/scripts/build_pgo_bolt.sh
+
+      - name: Show PGO profile stats
+        run: |
+          LLVM_PROFDATA=$(find "$(rustc --print sysroot)" -name llvm-profdata -type f | head -1)
+          if [ -z "$LLVM_PROFDATA" ]; then
+            echo "::error::llvm-profdata not found in rust toolchain"
+            exit 1
+          fi
+          "$LLVM_PROFDATA" show --detailed-summary --topn=20 target/pgo-profiles/merged.profdata
+
+      - name: Upload PGO profile
+        uses: actions/upload-artifact@v7
+        with:
+          name: pgo-profdata
+          path: target/pgo-profiles/merged.profdata
+          retention-days: 1
+
+      - name: Recover snapshot
+        if: always()
+        run: |
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
