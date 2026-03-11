@@ -523,14 +523,6 @@ impl ArenaParallelSparseTrie {
         self
     }
 
-    /// Returns the arena indexes of all [`ArenaSparseNode::Subtrie`] nodes in the upper arena.
-    fn all_subtries(&self) -> SmallVec<[Index; 16]> {
-        self.upper_arena
-            .iter()
-            .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
-            .collect()
-    }
-
     /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
     /// pre-allocates a root slot with a placeholder. The caller must overwrite
     /// `subtrie.arena[subtrie.root]` before use.
@@ -2335,15 +2327,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn clear(&mut self) {
-        for idx in self.all_subtries() {
-            if let ArenaSparseNode::Subtrie(mut subtrie) =
-                self.upper_arena.remove(idx).expect("subtrie exists in arena")
-            {
+        for (_, node) in self.upper_arena.drain() {
+            if let ArenaSparseNode::Subtrie(mut subtrie) = node {
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
             }
         }
-        self.upper_arena.clear();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
