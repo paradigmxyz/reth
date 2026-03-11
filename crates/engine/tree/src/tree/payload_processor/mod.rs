@@ -646,9 +646,8 @@ where
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-                // Drop guard before deferred to release lock before expensive deallocations
                 drop(guard);
-                drop(deferred);
+                executor.spawn_drop(deferred);
                 return;
             }
 
@@ -689,9 +688,8 @@ where
                 guard.store(PreservedSparseTrie::cleared(trie));
                 deferred
             };
-            // Drop guard before deferred to release lock before expensive deallocations
             drop(guard);
-            drop(deferred);
+            executor.spawn_drop(deferred);
         });
     }
 

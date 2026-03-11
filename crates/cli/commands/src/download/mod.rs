@@ -43,7 +43,8 @@ use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
+const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
+const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
@@ -98,14 +99,14 @@ impl DownloadDefaults {
         DOWNLOAD_DEFAULTS.get_or_init(DownloadDefaults::default_download_defaults)
     }
 
-    /// Default download configuration with defaults from merkle.io and publicnode
+    /// Default download configuration with defaults from snapshots.reth.rs and publicnode
     pub fn default_download_defaults() -> Self {
         Self {
             available_snapshots: vec![
-                Cow::Borrowed("https://www.merkle.io/snapshots (default, mainnet archive)"),
+                Cow::Borrowed("https://snapshots.reth.rs (default)"),
                 Cow::Borrowed("https://publicnode.com/snapshots (full nodes & testnets)"),
             ],
-            default_base_url: Cow::Borrowed(MERKLE_BASE_URL),
+            default_base_url: Cow::Borrowed(RETH_SNAPSHOTS_BASE_URL),
             default_chain_aware_base_url: None,
             long_help: None,
         }
@@ -121,7 +122,9 @@ impl DownloadDefaults {
         }
 
         let mut help = String::from(
-            "Specify a snapshot URL or let the command propose a default one.\n\nAvailable snapshot sources:\n",
+            "Specify a snapshot URL or let the command propose a default one.\n\n\
+             Browse available snapshots at https://snapshots.reth.rs\n\
+             or use --list-snapshots to see them from the CLI.\n\nAvailable snapshot sources:\n",
         );
 
         for source in &self.available_snapshots {
@@ -188,6 +191,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Custom URL to download a single snapshot archive (legacy mode).
     ///
     /// When provided, downloads and extracts a single archive without component selection.
+    /// Browse available snapshots at <https://snapshots.reth.rs> or use --list-snapshots.
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
 
@@ -214,22 +218,30 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
     with_state_history: bool,
 
+    /// Include transaction sender static files. Requires `--with-txs`.
+    #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
+    with_senders: bool,
+
+    /// Include RocksDB index files.
+    #[arg(long, conflicts_with_all = ["minimal", "full", "archive", "without_rocksdb"])]
+    with_rocksdb: bool,
+
     /// Download all available components (archive node, no pruning).
-    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "minimal", "full"])]
+    #[arg(long, alias = "all", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "minimal", "full"])]
     archive: bool,
 
     /// Download the minimal component set (same default as --non-interactive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "archive", "full"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "full"])]
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
     ///
     /// This affects `--archive`/`--all` and TUI archive preset (`a`).
-    #[arg(long, conflicts_with = "url")]
+    #[arg(long, conflicts_with_all = ["url", "with_rocksdb"])]
     without_rocksdb: bool,
 
     /// Skip interactive component selection. Downloads the minimal set
@@ -248,6 +260,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Maximum number of concurrent modular archive workers.
     #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
     download_concurrency: usize,
+
+    /// List available snapshots from snapshots.reth.rs and exit.
+    ///
+    /// Queries the snapshots API and prints all available snapshots for the selected chain,
+    /// including block number, size, and manifest URL.
+    #[arg(long, alias = "list-snapshots", conflicts_with_all = ["url", "manifest_url", "manifest_path"])]
+    list: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -260,8 +279,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
 
+        // --list: print available snapshots and exit
+        if self.list {
+            let entries = fetch_snapshot_api_entries(chain_id).await?;
+            print_snapshot_listing(&entries, chain_id);
+            return Ok(());
+        }
+
         // Legacy single-URL mode: download one archive and extract it
-        if let Some(url) = self.url {
+        if let Some(ref url) = self.url {
             info!(target: "reth::cli",
                 dir = ?data_dir.data_dir(),
                 url = %url,
@@ -269,7 +295,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             );
 
             stream_and_extract(
-                &url,
+                url,
                 data_dir.data_dir(),
                 None,
                 self.resumable,
@@ -282,7 +308,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         // Modular download: fetch manifest and select components
-        let manifest_source = self.resolve_manifest_source(chain_id);
+        let manifest_source = self.resolve_manifest_source(chain_id).await?;
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
         let mut manifest = fetch_manifest_from_source(&manifest_source).await?;
@@ -486,7 +512,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             });
         }
 
-        let has_explicit_flags = self.with_txs || self.with_receipts || self.with_state_history;
+        let has_explicit_flags = self.with_txs ||
+            self.with_receipts ||
+            self.with_state_history ||
+            self.with_senders ||
+            self.with_rocksdb;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
@@ -512,6 +542,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     selections
                         .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
                 }
+            }
+            if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
+                selections
+                    .insert(SnapshotComponentType::TransactionSenders, ComponentSelection::All);
+            }
+            if self.with_rocksdb && available(SnapshotComponentType::RocksdbIndices) {
+                selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
             }
             return Ok(ResolvedComponents { selections, preset: None });
         }
@@ -621,17 +658,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
     }
 
-    fn resolve_manifest_source(&self, chain_id: u64) -> String {
+    async fn resolve_manifest_source(&self, chain_id: u64) -> Result<String> {
         if let Some(path) = &self.manifest_path {
-            return path.display().to_string();
+            return Ok(path.display().to_string());
         }
 
         match &self.manifest_url {
-            Some(url) => url.clone(),
-            None => {
-                let base_url = get_base_url(chain_id);
-                format!("{base_url}/manifest.json")
-            }
+            Some(url) => Ok(url.clone()),
+            None => discover_manifest_url(chain_id).await,
         }
     }
 }
@@ -1572,13 +1606,126 @@ fn file_blake3_hex(path: &Path) -> Result<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-/// Builds the base URL for the given chain ID using configured defaults.
-fn get_base_url(chain_id: u64) -> String {
-    let defaults = DownloadDefaults::get_global();
-    match &defaults.default_chain_aware_base_url {
-        Some(url) => format!("{url}/{chain_id}"),
-        None => defaults.default_base_url.to_string(),
+/// Discovers the latest snapshot manifest URL for the given chain from the snapshots API.
+///
+/// Queries `snapshots.reth.rs/api/snapshots` and returns the manifest URL for the most
+/// recent modular snapshot matching the requested chain.
+async fn discover_manifest_url(chain_id: u64) -> Result<String> {
+    let api_url = RETH_SNAPSHOTS_API_URL;
+
+    info!(target: "reth::cli", %api_url, %chain_id, "Discovering latest snapshot manifest");
+
+    let entries = fetch_snapshot_api_entries(chain_id).await?;
+
+    let entry =
+        entries.iter().filter(|s| s.is_modular()).max_by_key(|s| s.block).ok_or_else(|| {
+            eyre::eyre!(
+                "No modular snapshot manifest found for chain \
+                 {chain_id} at {api_url}\n\n\
+                 You can provide a manifest URL directly with --manifest-url, or\n\
+                 use a direct snapshot URL with -u from:\n\
+                 \t- https://snapshots.reth.rs\n\n\
+                 Use --list to see all available snapshots."
+            )
+        })?;
+
+    info!(target: "reth::cli",
+        block = entry.block,
+        url = %entry.metadata_url,
+        "Found latest snapshot manifest"
+    );
+
+    Ok(entry.metadata_url.clone())
+}
+
+/// Deserializes a JSON value that may be either a number or a string-encoded number.
+fn deserialize_string_or_u64<'de, D>(deserializer: D) -> std::result::Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match &value {
+        serde_json::Value::Number(n) => {
+            n.as_u64().ok_or_else(|| serde::de::Error::custom("expected u64"))
+        }
+        serde_json::Value::String(s) => {
+            s.parse::<u64>().map_err(|_| serde::de::Error::custom("expected numeric string"))
+        }
+        _ => Err(serde::de::Error::custom("expected number or string")),
     }
+}
+
+/// An entry from the `snapshots.reth.rs/api/snapshots` listing.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotApiEntry {
+    #[serde(deserialize_with = "deserialize_string_or_u64")]
+    chain_id: u64,
+    #[serde(deserialize_with = "deserialize_string_or_u64")]
+    block: u64,
+    #[serde(default)]
+    date: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
+    metadata_url: String,
+    #[serde(default)]
+    size: u64,
+}
+
+impl SnapshotApiEntry {
+    fn is_modular(&self) -> bool {
+        self.metadata_url.ends_with("manifest.json")
+    }
+}
+
+/// Fetches the full snapshot listing from the snapshots API, filtered by chain ID.
+async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<SnapshotApiEntry>> {
+    let api_url = RETH_SNAPSHOTS_API_URL;
+
+    let entries: Vec<SnapshotApiEntry> = Client::new()
+        .get(api_url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .wrap_err_with(|| format!("Failed to fetch snapshot listing from {api_url}"))?
+        .json()
+        .await?;
+
+    Ok(entries.into_iter().filter(|e| e.chain_id == chain_id).collect())
+}
+
+/// Prints a formatted table of available modular snapshots.
+fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64) {
+    let modular: Vec<_> = entries.iter().filter(|e| e.is_modular()).collect();
+
+    println!("Available snapshots for chain {chain_id} (https://snapshots.reth.rs):\n");
+    println!("{:<12}  {:>10}  {:<10}  {:>10}  MANIFEST URL", "DATE", "BLOCK", "PROFILE", "SIZE");
+    println!("{}", "-".repeat(100));
+
+    for entry in &modular {
+        let date = entry.date.as_deref().unwrap_or("-");
+        let profile = entry.profile.as_deref().unwrap_or("-");
+        let size = if entry.size > 0 {
+            DownloadProgress::format_size(entry.size)
+        } else {
+            "-".to_string()
+        };
+
+        println!(
+            "{date:<12}  {:>10}  {profile:<10}  {size:>10}  {}",
+            entry.block, entry.metadata_url
+        );
+    }
+
+    if modular.is_empty() {
+        println!("  (no modular snapshots found)");
+    }
+
+    println!(
+        "\nTo download a specific snapshot, copy its manifest URL and run:\n  \
+         reth download --manifest-url <URL>"
+    );
 }
 
 async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
@@ -1597,7 +1744,7 @@ async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
                              You can use a direct snapshot URL instead:\n\n\
                              \treth download -u <snapshot-url>\n\n\
                              Available snapshot sources:\n\
-                             \t- https://www.merkle.io/snapshots\n\
+                             \t- https://snapshots.reth.rs\n\
                              \t- https://publicnode.com/snapshots"
                         )
                     })?;
@@ -1666,26 +1813,6 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
     Ok(base)
 }
 
-/// Builds default URL for latest mainnet archive snapshot using configured defaults.
-///
-/// Used by the legacy single-archive download flow when no manifest is available.
-#[allow(dead_code)]
-async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
-    let base_url = get_base_url(chain_id);
-    let latest_url = format!("{base_url}/latest.txt");
-    let filename = Client::new()
-        .get(latest_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?
-        .trim()
-        .to_string();
-
-    Ok(format!("{base_url}/{filename}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1750,7 +1877,7 @@ mod tests {
         let help = defaults.long_help();
 
         assert!(help.contains("Available snapshot sources:"));
-        assert!(help.contains("merkle.io"));
+        assert!(help.contains("snapshots.reth.rs"));
         assert!(help.contains("publicnode.com"));
         assert!(help.contains("file://"));
     }

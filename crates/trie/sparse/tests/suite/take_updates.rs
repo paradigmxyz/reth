@@ -187,6 +187,84 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     }
 }
 
+/// Multiple `root()` calls without intermediate `take_updates()` → sets are mutually exclusive.
+///
+/// When a branch is created inside the trie (giving it non-empty `hash_mask` →
+/// `updated_nodes` entry) and then destroyed (clearing `hash_mask` → `removed_nodes`
+/// entry) across two `root()` cycles without `take_updates()` in between, the
+/// accumulated updates must cross-cancel so the same path does not appear in both.
+///
+/// Key structure (nibble paths):
+/// - Initial: `0xAA12...` `[A,A,1,2,...]`, `0xAA20...` `[A,A,2,0,...]`, `0xBB00...` `[B,B,...]`
+/// - Changeset 1 inserts `0xAA10_00...` and `0xAA10_10...`, which share `[A,A,1,0]` and diverge at
+///   nibble 4, creating branch `[A,A,1,0]` (no short key) as a child of branch `[A,A,1]`. This
+///   gives `[A,A,1]` non-empty `hash_mask`.
+/// - Changeset 2 removes both, collapsing `[A,A,1]` back to a leaf with empty masks.
+pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTrie + Default>() {
+    let val = U256::from(1u64);
+
+    let mut key_existing = B256::ZERO;
+    key_existing.0[0] = 0xAA;
+    key_existing.0[1] = 0x12;
+
+    let mut key_b = B256::ZERO;
+    key_b.0[0] = 0xAA;
+    key_b.0[1] = 0x20;
+
+    let mut key_other = B256::ZERO;
+    key_other.0[0] = 0xBB;
+
+    let mut key_new_a = B256::ZERO;
+    key_new_a.0[0] = 0xAA;
+    key_new_a.0[1] = 0x10;
+
+    let mut key_new_b = B256::ZERO;
+    key_new_b.0[0] = 0xAA;
+    key_new_b.0[1] = 0x10;
+    key_new_b.0[2] = 0x10;
+
+    let initial: BTreeMap<B256, U256> =
+        [(key_existing, val), (key_b, val), (key_other, val)].into_iter().collect();
+
+    let harness = SuiteTestHarness::new(initial);
+    let mut trie: T = harness.init_trie_fully_revealed(true);
+
+    // Cache initial branch hashes.
+    let _ = trie.root();
+
+    // Changeset 1: insert key_new_a and key_new_b.
+    let changeset1: BTreeMap<B256, U256> =
+        [(key_new_a, val), (key_new_b, val)].into_iter().collect();
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset1);
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+    let _ = trie.root();
+
+    // Do NOT call take_updates() — updates accumulate across root() calls.
+
+    // Changeset 2: remove key_new_a and key_new_b (undo changeset 1).
+    let changeset2: BTreeMap<B256, U256> =
+        [(key_new_a, U256::ZERO), (key_new_b, U256::ZERO)].into_iter().collect();
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset2);
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+    let root_after_remove = trie.root();
+
+    assert_eq!(
+        harness.original_root(),
+        root_after_remove,
+        "root should match original after insert+remove round-trip"
+    );
+
+    let updates = trie.take_updates();
+
+    for path in &updates.removed_nodes {
+        assert!(
+            !updates.updated_nodes.contains_key(path),
+            "path {path:?} appears in both updated_nodes and removed_nodes \
+             (cross-cancellation bug)"
+        );
+    }
+}
+
 /// Remove then re-insert at same path → sets are mutually exclusive.
 ///
 /// When a branch collapses (leaf removal) and then a new branch is created at the same path

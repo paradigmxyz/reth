@@ -382,13 +382,13 @@ where
         }
 
         for (address, slots) in targets.storage_targets {
-            for slot in slots {
-                // Only touch storages that are not yet present in the updates set.
-                self.new_storage_updates
-                    .entry(address)
-                    .or_default()
-                    .entry(slot.key())
-                    .or_insert(LeafUpdate::Touched);
+            if !slots.is_empty() {
+                // Look up outer map once per address instead of once per slot.
+                let new_updates = self.new_storage_updates.entry(address).or_default();
+                for slot in slots {
+                    // Only touch storages that are not yet present in the updates set.
+                    new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                }
             }
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
@@ -405,21 +405,26 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
-            for (slot, value) in storage.storage {
-                self.trie.record_slot_touch(address, slot);
+            if !storage.storage.is_empty() {
+                // Look up outer maps once per address instead of once per slot.
+                let new_updates = self.new_storage_updates.entry(address).or_default();
+                let mut existing_updates = self.storage_updates.get_mut(&address);
 
-                let encoded = if value.is_zero() {
-                    Vec::new()
-                } else {
-                    alloy_rlp::encode_fixed_size(&value).to_vec()
-                };
-                self.new_storage_updates
-                    .entry(address)
-                    .or_default()
-                    .insert(slot, LeafUpdate::Changed(encoded));
+                for (slot, value) in storage.storage {
+                    self.trie.record_slot_touch(address, slot);
 
-                // Remove an existing storage update if it exists.
-                self.storage_updates.get_mut(&address).and_then(|updates| updates.remove(&slot));
+                    let encoded = if value.is_zero() {
+                        Vec::new()
+                    } else {
+                        alloy_rlp::encode_fixed_size(&value).to_vec()
+                    };
+                    new_updates.insert(slot, LeafUpdate::Changed(encoded));
+
+                    // Remove an existing storage update if it exists.
+                    if let Some(ref mut existing) = existing_updates {
+                        existing.remove(&slot);
+                    }
+                }
             }
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
