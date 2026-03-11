@@ -1535,9 +1535,6 @@ impl ArenaParallelSparseTrie {
             }
             SeekResult::NoChild { child_nibble } => {
                 let head_idx = head.index;
-                let head_branch = arena[head_idx].branch_ref();
-                let state_mask = head_branch.state_mask;
-                let insert_pos = BranchChildIdx::insertion_point(state_mask, child_nibble);
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
@@ -1548,11 +1545,7 @@ impl ArenaParallelSparseTrie {
                 });
 
                 let branch = arena[head_idx].branch_mut();
-                branch.state_mask.set_bit(child_nibble);
-                branch
-                    .children
-                    .insert(insert_pos.get(), ArenaSparseNodeBranchChild::Revealed(new_leaf));
-                branch.state = ArenaSparseNodeState::Dirty;
+                branch.set_child(child_nibble, ArenaSparseNodeBranchChild::Revealed(new_leaf));
 
                 // Re-seek to position the cursor on the newly inserted leaf.
                 cursor.seek(arena, full_path);
@@ -1672,16 +1665,10 @@ impl ArenaParallelSparseTrie {
                 let parent_idx = parent_entry.index;
                 let child_nibble = head_path.last().expect("non-root leaf");
 
-                let parent_branch = arena[parent_idx].branch_ref();
-                let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                    .expect("leaf nibble not found in parent state_mask");
-
                 // Remove the leaf from the arena and from the parent's children.
                 arena.remove(head_idx);
                 let parent_branch = arena[parent_idx].branch_mut();
-                parent_branch.children.remove(child_idx.get());
-                parent_branch.unset_child_bit(child_nibble);
-                parent_branch.state = ArenaSparseNodeState::Dirty;
+                parent_branch.remove_child(child_nibble);
 
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
@@ -2539,7 +2526,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.cleared_subtries.push(*subtrie);
             }
         }
-        self.upper_arena.clear();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
@@ -2721,11 +2707,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-                let parallel_pruned: Vec<usize> = taken
+                pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
-                    .collect();
-                pruned += parallel_pruned.into_iter().sum::<usize>();
+                    .sum::<usize>();
             }
 
             // Restore taken subtries into the upper arena.
@@ -3052,173 +3037,39 @@ impl SparseTrie for ArenaParallelSparseTrie {
 mod tests {
     use super::TRACE_TARGET;
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
-    use alloy_primitives::{
-        map::{B256Map, HashSet},
-        B256, U256,
-    };
+    use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
-    use reth_trie::{
-        hashed_cursor::{
-            mock::MockHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
-        },
-        prefix_set::PrefixSet,
-        proof_v2::StorageProofCalculator,
-        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
-        StorageRoot,
-    };
-    use reth_trie_common::{
-        prefix_set::PrefixSetMut, updates::StorageTrieUpdates, HashedPostStateSorted,
-        HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
-    };
-    use std::{collections::BTreeMap, iter::once};
-    use tracing::{info, trace, trace_span};
+    use reth_trie::test_utils::TrieTestHarness;
+    use reth_trie_common::{Nibbles, ProofV2Target};
+    use std::collections::BTreeMap;
+    use tracing::{info, trace};
 
-    /// A fixed hashed address used by the harness for all storage trie operations.
-    const HASHED_ADDRESS: B256 = B256::ZERO;
-
-    /// Test harness for proptest-based arena sparse trie testing of a single storage trie.
+    /// Test harness for proptest-based arena sparse trie testing.
     ///
-    /// Accepts a `BTreeMap<B256, U256>` of hashed storage slots as the starting state,
-    /// computes the initial `StorageTrieUpdates` via `StorageRoot`, and stores both sorted
-    /// forms for later use. Exposes a `proof_v2` method that generates storage proofs using
-    /// mock cursors over the starting state.
+    /// Wraps [`TrieTestHarness`] and adds `ArenaParallelSparseTrie`-specific helpers for
+    /// the reveal-update loop and asserting that sparse trie updates match `StorageRoot`.
     struct ArenaTrieTestHarness {
-        /// The base storage dataset (hashed slot → value). Zero-valued entries are absent.
-        storage: BTreeMap<B256, U256>,
-        /// The expected storage root, calculated by `StorageRoot`.
-        original_root: B256,
-        /// The starting storage trie updates (unsorted), used for `minimize_trie_updates`.
-        storage_trie_updates: StorageTrieUpdates,
-        /// Mock factory for trie cursors.
-        trie_cursor_factory: MockTrieCursorFactory,
-        /// Mock factory for hashed cursors.
-        hashed_cursor_factory: MockHashedCursorFactory,
+        /// The inner general-purpose harness.
+        inner: TrieTestHarness,
+    }
+
+    impl std::ops::Deref for ArenaTrieTestHarness {
+        type Target = TrieTestHarness;
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl std::ops::DerefMut for ArenaTrieTestHarness {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.inner
+        }
     }
 
     impl ArenaTrieTestHarness {
         /// Creates a new test harness from a map of hashed storage slots to values.
-        ///
-        /// Computes the storage root and `StorageTrieUpdates` using `StorageRoot` with mock
-        /// cursors, then stores both sorted forms.
         fn new(storage: BTreeMap<B256, U256>) -> Self {
-            let mut harness = Self {
-                storage: BTreeMap::new(),
-                original_root: B256::ZERO,
-                storage_trie_updates: StorageTrieUpdates::default(),
-                trie_cursor_factory: MockTrieCursorFactory::new(
-                    BTreeMap::new(),
-                    Default::default(),
-                ),
-                hashed_cursor_factory: MockHashedCursorFactory::new(
-                    BTreeMap::new(),
-                    Default::default(),
-                ),
-            };
-            harness.apply_changeset(storage);
-            harness
-        }
-
-        /// Merges `changeset` into the base storage (zero values remove entries) and
-        /// recomputes the storage root, trie updates, and cursor factories.
-        fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
-            for (k, v) in changeset {
-                if v == U256::ZERO {
-                    self.storage.remove(&k);
-                } else {
-                    self.storage.insert(k, v);
-                }
-            }
-
-            self.hashed_cursor_factory = MockHashedCursorFactory::new(
-                BTreeMap::new(),
-                once((HASHED_ADDRESS, self.storage.clone())).collect(),
-            );
-
-            let empty_trie_cursor_factory = MockTrieCursorFactory::new(
-                BTreeMap::new(),
-                once((HASHED_ADDRESS, BTreeMap::new())).collect(),
-            );
-
-            // Compute storage root and trie updates.
-            let (original_root, _, storage_trie_updates) = {
-                let _span = trace_span!(target: TRACE_TARGET, "base_root_calc").entered();
-                trace!(target: TRACE_TARGET, "Calculating root and trie updates of base dataset");
-
-                StorageRoot::new_hashed(
-                    empty_trie_cursor_factory,
-                    self.hashed_cursor_factory.clone(),
-                    HASHED_ADDRESS,
-                    PrefixSet::default(),
-                    #[cfg(feature = "metrics")]
-                    reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-                )
-                .root_with_updates()
-                .expect("StorageRoot should succeed")
-            };
-
-            self.trie_cursor_factory = MockTrieCursorFactory::new(
-                BTreeMap::new(),
-                once((
-                    HASHED_ADDRESS,
-                    storage_trie_updates
-                        .storage_nodes
-                        .iter()
-                        .map(|(k, v)| (*k, v.clone()))
-                        .collect(),
-                ))
-                .collect(),
-            );
-
-            self.original_root = original_root;
-            self.storage_trie_updates = storage_trie_updates;
-        }
-
-        /// Removes all entries from `updates` that are redundant with the starting storage
-        /// trie updates.
-        ///
-        /// A storage node is redundant if it exists in the starting set with the same value.
-        /// A removed node is redundant if it was already absent from the starting set.
-        /// The `is_deleted` flag is cleared if it matches the starting value.
-        fn minimize_trie_updates(&self, updates: &mut StorageTrieUpdates) {
-            // Clear is_deleted if it matches the starting set.
-            if updates.is_deleted == self.storage_trie_updates.is_deleted {
-                updates.is_deleted = false;
-            }
-
-            // StorageTrieUpdates::finalize can leave the same path in both storage_nodes
-            // and removed_nodes. Per into_sorted, updated nodes take precedence over
-            // removed ones. Record which paths had an update before minimization so we
-            // can drop their corresponding removals.
-            let paths_with_updates: HashSet<Nibbles> =
-                updates.storage_nodes.keys().copied().collect();
-
-            // Remove storage nodes identical to the starting set.
-            updates.storage_nodes.retain(|path, node| {
-                self.storage_trie_updates.storage_nodes.get(path) != Some(node)
-            });
-
-            // Remove removed_nodes for paths absent from the starting set, and also
-            // for paths that had a storage_nodes entry (update takes precedence over
-            // removal).
-            updates.removed_nodes.retain(|path| {
-                self.storage_trie_updates.storage_nodes.contains_key(path) &&
-                    !paths_with_updates.contains(path)
-            });
-        }
-
-        /// Removes all entries from `updates` that are redundant with the starting storage
-        /// trie updates. Same logic as [`Self::minimize_trie_updates`] but for
-        /// [`SparseTrieUpdates`].
-        fn minimize_sparse_updates(&self, updates: &mut crate::SparseTrieUpdates) {
-            // Remove updated nodes identical to the starting set.
-            updates.updated_nodes.retain(|path, node| {
-                self.storage_trie_updates.storage_nodes.get(path) != Some(node)
-            });
-
-            // Remove removed_nodes for paths absent from the starting set.
-            updates
-                .removed_nodes
-                .retain(|path| self.storage_trie_updates.storage_nodes.contains_key(path));
+            Self { inner: TrieTestHarness::new(storage) }
         }
 
         /// Computes the new storage root and trie updates after applying the given changes
@@ -3229,50 +3080,11 @@ mod tests {
             apst: &mut ArenaParallelSparseTrie,
             changes: BTreeMap<B256, U256>,
         ) {
-            // Build prefix set from changed keys.
-            let mut prefix_set = PrefixSetMut::with_capacity(changes.len());
-            for hashed_slot in changes.keys() {
-                prefix_set.insert(Nibbles::unpack(hashed_slot));
-            }
-            let prefix_set = prefix_set.freeze();
-
             // Compute expected root and trie updates via StorageRoot.
             let (expected_root, mut expected_trie_updates) = if changes.is_empty() {
-                (self.original_root, Default::default())
+                (self.original_root(), Default::default())
             } else {
-                // Build sorted overlay from changes.
-                let hashed_storage =
-                    HashedStorage::from_iter(false, changes.iter().map(|(&k, &v)| (k, v)));
-
-                let overlay = HashedPostStateSorted::new(
-                    Vec::new(),
-                    once((HASHED_ADDRESS, hashed_storage.into_sorted())).collect(),
-                );
-
-                // Create overlay cursor factory on top of the existing base.
-                let overlay_cursor_factory =
-                    HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
-
-                let (root, _, trie_updates) = {
-                    let _span = trace_span!(target: TRACE_TARGET, "changeset_root_calc").entered();
-                    trace!(
-                        target: TRACE_TARGET,
-                        "Recalculating root and trie updates with changeset applied",
-                    );
-
-                    StorageRoot::new_hashed(
-                        self.trie_cursor_factory.clone(),
-                        overlay_cursor_factory,
-                        HASHED_ADDRESS,
-                        prefix_set,
-                        #[cfg(feature = "metrics")]
-                        reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-                    )
-                    .root_with_updates()
-                    .expect("StorageRoot should succeed")
-                };
-
-                (root, trie_updates)
+                self.get_root_with_updates(&changes)
             };
 
             self.minimize_trie_updates(&mut expected_trie_updates);
@@ -3304,14 +3116,22 @@ mod tests {
                     break;
                 }
 
-                let mut proof_nodes = self.proof_v2(&mut targets);
+                let (mut proof_nodes, _) = self.proof_v2(&mut targets);
                 apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
             }
 
             // Compute root and take updates from the APST.
             let actual_root = apst.root();
             let mut actual_updates = apst.take_updates();
-            self.minimize_sparse_updates(&mut actual_updates);
+
+            // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
+            // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
+            actual_updates.updated_nodes.retain(|path, node| {
+                self.storage_trie_updates().storage_nodes.get(path) != Some(node)
+            });
+            actual_updates
+                .removed_nodes
+                .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
 
             pretty_assertions::assert_eq!(
                 expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
@@ -3324,42 +3144,6 @@ mod tests {
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
-        }
-
-        /// Obtains the root node of the storage trie via `StorageProofCalculator`.
-        fn root_node(&self) -> ProofTrieNodeV2 {
-            let trie_cursor = self
-                .trie_cursor_factory
-                .storage_trie_cursor(HASHED_ADDRESS)
-                .expect("storage trie cursor should succeed");
-            let hashed_cursor = self
-                .hashed_cursor_factory
-                .hashed_storage_cursor(HASHED_ADDRESS)
-                .expect("hashed storage cursor should succeed");
-
-            let mut proof_calculator =
-                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-            proof_calculator
-                .storage_root_node(HASHED_ADDRESS)
-                .expect("storage_root_node should succeed")
-        }
-
-        /// Generates storage proofs for the given targets using `StorageProofCalculator`.
-        fn proof_v2(&self, targets: &mut [ProofV2Target]) -> Vec<ProofTrieNodeV2> {
-            let trie_cursor = self
-                .trie_cursor_factory
-                .storage_trie_cursor(HASHED_ADDRESS)
-                .expect("storage trie cursor should succeed");
-            let hashed_cursor = self
-                .hashed_cursor_factory
-                .hashed_storage_cursor(HASHED_ADDRESS)
-                .expect("hashed storage cursor should succeed");
-
-            let mut proof_calculator =
-                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-            proof_calculator
-                .storage_proof(HASHED_ADDRESS, targets)
-                .expect("proof_v2 should succeed")
         }
     }
 
@@ -3441,7 +3225,7 @@ mod tests {
             harness.apply_changeset(changeset1);
 
             // Pick N random keys from the current storage as retained leaves for pruning.
-            let mut all_storage_keys: Vec<Nibbles> = harness.storage.keys()
+            let mut all_storage_keys: Vec<Nibbles> = harness.storage().keys()
                 .map(|k| Nibbles::unpack(*k))
                 .collect();
             all_storage_keys.shuffle(&mut rng);
@@ -3451,7 +3235,7 @@ mod tests {
             let retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
             apst.prune(&retained);
 
-            let changeset2 = build_changeset(&harness.storage, changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
+            let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
             for (i, (k, v)) in changeset2.iter().enumerate() {
                 trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
             }
