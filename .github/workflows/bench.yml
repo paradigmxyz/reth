@@ -31,36 +31,11 @@ on:
         required: false
         default: ""
         type: string
-      samply:
-        description: "Enable samply profiling"
-        required: false
-        default: "false"
-        type: boolean
-      no_slack:
-        description: "Suppress Slack notifications for benchmark results"
-        required: false
-        default: "true"
-        type: boolean
-      cores:
-        description: "Limit reth to N CPU cores (0 = all available)"
-        required: false
-        default: "0"
-        type: string
-      reth_newPayload:
-        description: "Use reth_newPayload RPC (server-side timing)"
-        required: false
-        default: "true"
-        type: boolean
       wait_time:
         description: "Fixed wait time between blocks (e.g. 500ms, 1s)"
         required: false
         default: ""
         type: string
-      abba:
-        description: "Run ABBA (BFFB) interleaved order; false = single AB pass"
-        required: false
-        default: "true"
-        type: boolean
       baseline_args:
         description: "Extra CLI args for the baseline reth node"
         required: false
@@ -71,6 +46,31 @@ on:
         required: false
         default: ""
         type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: "false"
+        type: boolean
+      reth_newPayload:
+        description: "Use reth_newPayload RPC (server-side timing)"
+        required: false
+        default: "true"
+        type: boolean
+      cores:
+        description: "Limit reth to N CPU cores (0 = all available)"
+        required: false
+        default: "0"
+        type: string
+      no_slack:
+        description: "Suppress Slack notifications for benchmark results"
+        required: false
+        default: "true"
+        type: boolean
+      abba:
+        description: "Run ABBA (BFFB) interleaved order; false = single AB pass"
+        required: false
+        default: "true"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
