@@ -1624,9 +1624,7 @@ impl ArenaParallelSparseTrie {
                     let parent_branch = arena[parent_idx].branch_ref();
 
                     if parent_branch.state_mask.count_bits() == 2 {
-                        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                            .expect("leaf nibble not found in parent state_mask");
-                        if parent_branch.children[child_idx.sibling()].is_blinded() {
+                        if parent_branch.sibling_child(child_nibble).is_blinded() {
                             let sibling_nibble = parent_branch
                                 .state_mask
                                 .iter()
@@ -1736,9 +1734,7 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not in parent state_mask");
-        if !parent_branch.children[child_idx.sibling()].is_blinded() {
+        if !parent_branch.sibling_child(child_nibble).is_blinded() {
             return None;
         }
 

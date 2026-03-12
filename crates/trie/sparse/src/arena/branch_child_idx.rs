@@ -38,13 +38,6 @@ impl BranchChildIdx {
         self.0 as usize
     }
 
-    /// Returns the dense index of the other child in a branch with exactly 2 children.
-    /// With exactly 2 bits set the dense array has indices 0 and 1, so the sibling is
-    /// simply `1 - self`.
-    pub(super) const fn sibling(self) -> Self {
-        Self(1 - self.0)
-    }
-
     /// Counts the number of occupied child slots below `nibble` in the dense children array.
     const fn count_below(state_mask: TrieMask, nibble: u8) -> u8 {
         (state_mask.get() & ((1u16 << nibble) - 1)).count_ones() as u8

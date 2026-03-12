@@ -100,6 +100,23 @@ impl ArenaSparseNodeBranch {
         self.state = ArenaSparseNodeState::Dirty;
     }
 
+    /// Returns a reference to the sibling child in a branch with exactly 2 children.
+    ///
+    /// # Panics
+    ///
+    /// Panics (debug) if the branch does not have exactly 2 children, or if `nibble` is not set.
+    pub(super) fn sibling_child(&self, nibble: u8) -> &ArenaSparseNodeBranchChild {
+        debug_assert_eq!(
+            self.state_mask.count_bits(),
+            2,
+            "sibling_child requires exactly 2 children"
+        );
+        let child_idx =
+            BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
+        // With exactly 2 children the dense array has indices 0 and 1.
+        &self.children[1 - child_idx.get()]
+    }
+
     /// Iterates over `(nibble, &ArenaSparseNodeBranchChild)` pairs in nibble order.
     pub(super) fn child_iter(
         &self,
