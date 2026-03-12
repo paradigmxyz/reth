@@ -1,5 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
+use reth_bal_store::BalStore;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
@@ -37,6 +38,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
+        + BalStore
         + Send
         + Sync
         + Clone
@@ -130,6 +132,7 @@ where
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
+        + BalStore
         + Send
         + Sync
         + Unpin

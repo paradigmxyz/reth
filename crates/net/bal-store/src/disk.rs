@@ -447,6 +447,7 @@ impl DiskFileBalStoreInner {
             Err(err) => Err(err.into()),
         }
     }
+
     fn get_by_block_hash(&self, hash: BlockHash) -> Result<Option<Bytes>, BalStoreError> {
         let block_number = {
             let state = self.state.lock();

@@ -5,7 +5,7 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListResult, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
@@ -16,6 +16,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_bal_store::BalStore;
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError, FillTransaction};
@@ -918,7 +919,18 @@ where
     async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
         trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
 
-        let bal = self.get_block_access_list(block_hash).await?;
+        // Retrieve BAL either from cache or recompute
+        let bal: BlockAccessList = if let Some(cached_bal) =
+            self.provider().get_by_block_hash(block_hash.into()).map_err(T::Error::from_eth_err)?
+        {
+            // Decode cached bal and convert to JSON
+            alloy_rlp::decode_exact(&cached_bal)
+                .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?
+        } else {
+            // if cache is missed, we recompute
+            self.get_block_access_list(block_hash).await?.unwrap_or_default()
+        };
+
         let json = serde_json::to_value(&bal)
             .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
 
@@ -937,7 +949,18 @@ where
             .map_err(T::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(number.into()))?;
 
-        let bal = self.get_block_access_list(block_hash).await?;
+        // Retrieve BAL either from cache or recompute
+        let bal: BlockAccessList = if let Some(cached_bal) =
+            self.provider().get_by_block_hash(block_hash.into()).map_err(T::Error::from_eth_err)?
+        {
+            // Decode cached bal and convert to JSON
+            alloy_rlp::decode_exact(&cached_bal)
+                .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?
+        } else {
+            // if cache is missed, we recompute
+            self.get_block_access_list(block_hash).await?.unwrap_or_default()
+        };
+
         let json = serde_json::to_value(&bal)
             .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
 

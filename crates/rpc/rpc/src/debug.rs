@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
+use reth_bal_store::BalStore;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
@@ -167,9 +168,18 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let bal = self.eth_api().get_block_access_list(block_hash).await?;
+        let cached_bal = self
+            .eth_api()
+            .provider()
+            .get_by_block_hash(block_hash.into())
+            .map_err(Eth::Error::from_eth_err)?;
 
-        Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
+        if cached_bal.is_none() {
+            let bal = self.eth_api().get_block_access_list(block_hash).await?;
+            Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
+        } else {
+            Ok(cached_bal.unwrap())
+        }
     }
 
     /// Replays the given block and returns the trace of each transaction.

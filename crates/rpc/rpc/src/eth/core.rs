@@ -569,6 +569,7 @@ mod tests {
     use alloy_rpc_types_eth::{Bundle, TransactionRequest};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
+    use reth_bal_store::BalStore;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
@@ -599,6 +600,7 @@ mod tests {
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + StageCheckpointReader
+            + BalStore
             + Unpin
             + Clone
             + 'static,

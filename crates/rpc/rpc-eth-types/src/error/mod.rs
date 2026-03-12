@@ -9,6 +9,7 @@ use alloy_sol_types::{ContractError, RevertReason};
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
+use reth_bal_store::BalStoreError;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_revm::db::bal::EvmDatabaseError;
@@ -210,6 +211,9 @@ pub enum EthApiError {
     /// Error thrown when trying to access block access list for blocks before Amsterdam
     #[error("Block access list not available for pre-Amsterdam blocks")]
     BlockAccessListNotAvailablePreAmsterdam,
+    /// Error thrown when bal cache doesnt work
+    #[error("Error fetching from  bal cache")]
+    BalCacheError,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -350,6 +354,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
                 rpc_error_with_code(4445, error.to_string())
+            }
+            EthApiError::BalCacheError => {
+                internal_rpc_err("Error fetching from bal cache".to_string())
             }
         }
     }
@@ -560,6 +567,12 @@ where
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
         }
+    }
+}
+
+impl From<BalStoreError> for EthApiError {
+    fn from(_: BalStoreError) -> Self {
+        Self::BalCacheError
     }
 }
 
