@@ -649,14 +649,13 @@ impl ArenaParallelSparseTrie {
         }
 
         let mut nodes = Vec::new();
-        let mut cursor = ArenaCursor::default();
 
         // Collect from the upper arena.
         collect_records(
             &mut self.upper_arena,
             self.root,
             Nibbles::default(),
-            &mut cursor,
+            &mut self.buffers.cursor,
             &mut nodes,
         );
 
@@ -667,7 +666,7 @@ impl ArenaParallelSparseTrie {
                     &mut subtrie.arena,
                     subtrie.root,
                     subtrie.path,
-                    &mut cursor,
+                    &mut self.buffers.cursor,
                     &mut nodes,
                 );
             }
