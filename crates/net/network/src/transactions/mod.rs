@@ -758,7 +758,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         trace!(target: "net::tx::propagation",
             peer_id=format!("{peer_id:#}"),
             hashes_len=valid_announcement_data.len(),
-            hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
             msg_version=%valid_announcement_data.msg_version(),
             client_version=%client,
             "received previously unseen and pending hashes in announcement from peer"
@@ -1436,6 +1435,7 @@ where
         has_bad_transactions |= new_txs.len() != txs_len;
 
         // Record the transactions as seen by the peer
+        self.transactions_by_peers.reserve(new_txs.len());
         for tx in &new_txs {
             self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
         }
