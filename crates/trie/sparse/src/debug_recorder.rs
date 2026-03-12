@@ -1,7 +1,7 @@
 //! Debug recorder for tracking mutating operations on sparse tries.
 //!
 //! This module is only available with the `trie-debug` feature and provides
-//! infrastructure for recording all mutations to a [`crate::ParallelSparseTrie`]
+//! infrastructure for recording all mutations to a [`crate::ArenaParallelSparseTrie`]
 //! for post-hoc debugging of state root mismatches.
 
 use alloc::{string::String, vec::Vec};

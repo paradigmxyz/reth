@@ -649,9 +649,9 @@ impl ArenaParallelSparseTrie {
         }
 
         let mut nodes = Vec::new();
+        let mut cursor = ArenaCursor::default();
 
         // Collect from the upper arena.
-        let mut cursor = mem::take(&mut self.buffers.cursor);
         collect_records(
             &mut self.upper_arena,
             self.root,
@@ -659,12 +659,10 @@ impl ArenaParallelSparseTrie {
             &mut cursor,
             &mut nodes,
         );
-        self.buffers.cursor = cursor;
 
         // Collect from all subtries.
         for (_, node) in &mut self.upper_arena {
             if let ArenaSparseNode::Subtrie(subtrie) = node {
-                let mut cursor = mem::take(&mut subtrie.buffers.cursor);
                 collect_records(
                     &mut subtrie.arena,
                     subtrie.root,
@@ -672,7 +670,6 @@ impl ArenaParallelSparseTrie {
                     &mut cursor,
                     &mut nodes,
                 );
-                subtrie.buffers.cursor = cursor;
             }
         }
 
