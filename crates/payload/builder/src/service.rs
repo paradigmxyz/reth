@@ -84,12 +84,7 @@ where
     ) -> Option<Result<u64, PayloadBuilderError>> {
         self.inner.payload_timestamp(id).await
     }
-}
 
-impl<T> PayloadStore<T>
-where
-    T: PayloadTypes,
-{
     /// Create a new instance
     pub fn new(inner: PayloadBuilderHandle<T>) -> Self {
         Self { inner: Arc::new(inner) }
@@ -348,15 +343,7 @@ where
 
         Some(Box::pin(fut))
     }
-}
 
-impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
-where
-    T: PayloadTypes,
-    Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
-{
     /// Returns the payload timestamp for the given payload.
     fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
         if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow() &&
