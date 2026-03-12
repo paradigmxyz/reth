@@ -747,12 +747,12 @@ where
             })
             .await?;
         let bals = self.inner.provider.get_by_range(start, count)?;
-        for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
+        for (body_opt, bal) in bodies.iter_mut().zip(bals) {
             if let Some(body) = body_opt.as_mut() {
                 body.block_access_list = Some(bal);
             }
         }
-        return Ok(bodies)
+        Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_range_v2`
@@ -844,12 +844,12 @@ where
             .await?;
 
         let bals = self.get_bals_by_hash(hashes)?;
-        for (body_opt, bal) in bodies.iter_mut().zip(bals.into_iter()) {
+        for (body_opt, bal) in bodies.iter_mut().zip(bals) {
             if let Some(body) = body_opt.as_mut() {
                 body.block_access_list = Some(bal);
             }
         }
-        return Ok(bodies)
+        Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_hash_v2`
