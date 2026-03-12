@@ -9,6 +9,10 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
+/// Default maximum number of entries the persistence pruner may delete per run.
+/// Caps MDBX dirty page accumulation to ~400 MB (100k entries × ~4 KB pages).
+pub const DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT: usize = 100_000;
+
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
@@ -153,6 +157,13 @@ pub struct TreeConfig {
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
+    /// Maximum number of entries the persistence pruner may delete in a single run.
+    /// Limits MDBX dirty page accumulation to prevent OOM during the first prune after startup.
+    persistence_pruner_delete_limit: usize,
+    /// Timeout for the persistence pruner per run. Prevents a single prune from blocking
+    /// block persistence for too long. Account and Storage History segments treat this as
+    /// a soft limit.
+    persistence_pruner_timeout: Option<Duration>,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -189,6 +200,8 @@ impl Default for TreeConfig {
             disable_sparse_trie_cache_pruning: false,
             enable_arena_sparse_trie: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            persistence_pruner_delete_limit: DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT,
+            persistence_pruner_timeout: None,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -251,6 +264,8 @@ impl TreeConfig {
             disable_sparse_trie_cache_pruning: false,
             enable_arena_sparse_trie: false,
             state_root_task_timeout,
+            persistence_pruner_delete_limit: DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT,
+            persistence_pruner_timeout: None,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -571,6 +586,28 @@ impl TreeConfig {
     /// Setter for state root task timeout.
     pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.state_root_task_timeout = timeout;
+        self
+    }
+
+    /// Returns the persistence pruner delete limit.
+    pub const fn persistence_pruner_delete_limit(&self) -> usize {
+        self.persistence_pruner_delete_limit
+    }
+
+    /// Setter for persistence pruner delete limit.
+    pub const fn with_persistence_pruner_delete_limit(mut self, limit: usize) -> Self {
+        self.persistence_pruner_delete_limit = limit;
+        self
+    }
+
+    /// Returns the persistence pruner timeout.
+    pub const fn persistence_pruner_timeout(&self) -> Option<Duration> {
+        self.persistence_pruner_timeout
+    }
+
+    /// Setter for persistence pruner timeout.
+    pub const fn with_persistence_pruner_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.persistence_pruner_timeout = timeout;
         self
     }
 

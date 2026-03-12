@@ -1305,6 +1305,15 @@ where
             } else if self.should_persist() {
                 let blocks_to_persist =
                     self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
+                if blocks_to_persist.is_empty() {
+                    warn!(
+                        target: "engine::tree",
+                        canonical_head = ?self.state.tree_state.canonical_head(),
+                        last_persisted = ?self.persistence_state.last_persisted_block,
+                        "should_persist=true but no blocks found to persist; \
+                         canonical head may not be in memory"
+                    );
+                }
                 self.persist_blocks(blocks_to_persist);
             }
         }

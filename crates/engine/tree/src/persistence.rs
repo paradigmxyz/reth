@@ -161,6 +161,11 @@ where
         let start_time = Instant::now();
 
         if let Some(last) = last_block {
+            // Commit block data immediately so persistence is not blocked by pruning.
+            // The pruner can take hours on the first run after startup (its
+            // previous_tip_block_number starts at None, triggering a full segment scan
+            // even when the pipeline already pruned). Running it in a separate transaction
+            // ensures blocks become durable on disk without waiting for pruning to finish.
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
@@ -177,14 +182,16 @@ where
                 }
             }
 
+            provider_rw.commit()?;
+
             if self.pruner.is_pruning_needed(last.number) {
                 debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
                 let prune_start = Instant::now();
+                let provider_rw = self.provider.database_provider_rw()?;
                 let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
+                provider_rw.commit()?;
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
-
-            provider_rw.commit()?;
         }
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
