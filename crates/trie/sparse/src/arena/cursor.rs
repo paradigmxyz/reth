@@ -143,9 +143,16 @@ impl ArenaCursor {
                 ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Subtrie(s) => {
-                    let root = &s.arena[s.root];
-                    matches!(root, ArenaSparseNode::EmptyRoot) ||
-                        matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
+                    // Fast-path leaf updates dirty leaves and increment num_dirty_leaves, but
+                    // may defer branch/root dirtying until subtrie hashing. Treat any pending
+                    // dirty leaves as dirty here so upper-branch dirty propagation is correct.
+                    if s.num_dirty_leaves != 0 {
+                        true
+                    } else {
+                        let root = &s.arena[s.root];
+                        matches!(root, ArenaSparseNode::EmptyRoot) ||
+                            matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
+                    }
                 }
                 _ => false,
             });
