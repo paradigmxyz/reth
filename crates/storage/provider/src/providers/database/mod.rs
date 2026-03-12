@@ -28,8 +28,8 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, NodePrimitivesProvider,
+    StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -40,7 +40,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 mod provider;
 pub use provider::{
@@ -367,7 +367,64 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             },
         );
 
+        drop(provider_ro);
+
+        // Step 4: Heal finalized/safe block numbers if they are ahead of the
+        // highest header. This can happen on 1.10.x when the node shuts down
+        // after flushing the finalized block number but before persisting the
+        // corresponding blocks/state.
+        self.heal_chain_state_block_numbers()?;
+
         Ok((rocksdb_unwind, static_file_unwind))
+    }
+
+    /// Checks if the stored finalized or safe block numbers exceed the highest
+    /// known header and corrects them if so.
+    ///
+    /// On 1.10.x, the finalized block number is always flushed but blocks and
+    /// state are batched, so a shutdown can leave the finalized number ahead of
+    /// the actual tip. This also handles the analogous case for the safe block.
+    fn heal_chain_state_block_numbers(&self) -> ProviderResult<()> {
+        let highest_header = self.last_block_number()?;
+
+        // Read with a RO provider first to avoid opening a write tx unnecessarily.
+        let provider_ro = self.database_provider_ro()?;
+        let finalized = provider_ro.last_finalized_block_number()?;
+        let safe = provider_ro.last_safe_block_number()?;
+        drop(provider_ro);
+
+        let heal_finalized = finalized.is_some_and(|f| f > highest_header);
+        let heal_safe = safe.is_some_and(|s| s > highest_header);
+
+        if !heal_finalized && !heal_safe {
+            return Ok(());
+        }
+
+        let provider_rw = self.provider_rw()?;
+
+        if heal_finalized {
+            info!(
+                target: "providers::db",
+                finalized = finalized.expect("checked above"),
+                highest_header,
+                "Healing finalized block number",
+            );
+            provider_rw.save_finalized_block_number(highest_header)?;
+        }
+
+        if heal_safe {
+            info!(
+                target: "providers::db",
+                safe = safe.expect("checked above"),
+                highest_header,
+                "Healing safe block number",
+            );
+            provider_rw.save_safe_block_number(highest_header)?;
+        }
+
+        provider_rw.commit()?;
+
+        Ok(())
     }
 }
 
