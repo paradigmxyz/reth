@@ -14,7 +14,7 @@ use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use std::{
     fmt,
     future::Future,
@@ -301,11 +301,13 @@ where
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
+        let start = Instant::now();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
         if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
             *cached == id
         {
+            self.metrics.resolve_duration_seconds.record(start.elapsed());
             return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
         }
 
@@ -326,6 +328,7 @@ where
 
         let fut = async move {
             let res = fut.await;
+            resolved_metrics.resolve_duration_seconds.record(start.elapsed());
             if let Ok(payload) = &res {
                 if payload_events.receiver_count() > 0 {
                     payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
@@ -427,6 +430,7 @@ where
                             debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
                         } else {
                             let parent = attr.parent();
+                            let start = Instant::now();
                             let job_result = {
                                 let _entered = job_span.enter();
                                 this.generator.new_payload_job(attr.clone())
@@ -434,6 +438,7 @@ where
 
                             match job_result {
                                 Ok(job) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
                                     info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
@@ -454,6 +459,7 @@ where
                                     }
                                 }
                                 Err(err) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
                                     this.metrics.inc_failed_jobs();
                                     warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
                                     res = Err(err);
