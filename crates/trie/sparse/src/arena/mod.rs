@@ -529,6 +529,14 @@ impl ArenaParallelSparseTrie {
         self
     }
 
+    /// Returns the arena indexes of all [`ArenaSparseNode::Subtrie`] nodes in the upper arena.
+    fn all_subtries(&self) -> SmallVec<[Index; 16]> {
+        self.upper_arena
+            .iter()
+            .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
+            .collect()
+    }
+
     /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
     /// ops, representing the initial state at the beginning of a block (after pruning).
     ///
@@ -2510,8 +2518,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
 
-        for (_, node) in self.upper_arena.drain() {
-            if let ArenaSparseNode::Subtrie(mut subtrie) = node {
+        for idx in self.all_subtries() {
+            if let ArenaSparseNode::Subtrie(mut subtrie) =
+                self.upper_arena.remove(idx).expect("subtrie exists in arena")
+            {
                 subtrie.clear();
                 self.cleared_subtries.push(*subtrie);
             }
