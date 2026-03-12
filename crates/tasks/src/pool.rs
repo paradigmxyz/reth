@@ -185,18 +185,7 @@ impl WorkerPool {
     pub fn from_builder(
         builder: rayon::ThreadPoolBuilder,
     ) -> Result<Self, rayon::ThreadPoolBuildError> {
-        Ok(Self {
-            pool: builder
-                .panic_handler(|payload| {
-                    let msg = payload
-                        .downcast_ref::<&str>()
-                        .copied()
-                        .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
-                        .unwrap_or("(no message)");
-                    tracing::error!(target: "reth::tasks", %msg, "panic in worker pool thread");
-                })
-                .build()?,
-        })
+        Ok(Self { pool: build_pool_with_panic_handler(builder)? })
     }
 
     /// Returns the total number of threads in the underlying rayon pool.
@@ -294,6 +283,23 @@ impl WorkerPool {
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
     }
+}
+
+/// Builds a rayon thread pool with a panic handler that logs panics via `tracing::error` instead of
+/// aborting the process.
+pub fn build_pool_with_panic_handler(
+    builder: rayon::ThreadPoolBuilder,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    builder
+        .panic_handler(|payload| {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("(no message)");
+            tracing::error!(target: "reth::tasks", %msg, "panic in rayon thread pool thread");
+        })
+        .build()
 }
 
 /// Per-thread state container for a [`WorkerPool`].
