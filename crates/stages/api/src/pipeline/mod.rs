@@ -378,7 +378,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             });
                         }
 
-                        // update finalized block if needed
+                        // update finalized and safe block if needed
                         let last_saved_finalized_block_number =
                             provider_rw.last_finalized_block_number()?;
 
@@ -388,6 +388,16 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             Some(checkpoint.block_number) < last_saved_finalized_block_number
                         {
                             provider_rw.save_finalized_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
+
+                        let last_saved_safe_block_number = provider_rw.last_safe_block_number()?;
+
+                        if last_saved_safe_block_number.is_none() ||
+                            Some(checkpoint.block_number) < last_saved_safe_block_number
+                        {
+                            provider_rw.save_safe_block_number(BlockNumber::from(
                                 checkpoint.block_number,
                             ))?;
                         }
