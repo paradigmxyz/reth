@@ -369,6 +369,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
         // Step 4: Heal finalized/safe block numbers that may be ahead of the
         // highest header on nodes coming from <=1.10.2.
+        //
+        // Unwinds already set it to the target block.
         if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
             self.heal_chain_state_block_numbers(&provider_ro)?;
         }
