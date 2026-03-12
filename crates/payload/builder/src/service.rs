@@ -204,10 +204,10 @@ where
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
-    /// All active payload jobs, each accompanied by its id and the caller's tracing span
+    /// All active payload jobs, each accompanied by its id, the caller's tracing span
     /// propagated across the channel so that poll and resolve work appears as children of the
-    /// original Engine API request.
-    payload_jobs: Vec<(Gen::Job, PayloadId, Span)>,
+    /// original Engine API request, and the instant the job was created.
+    payload_jobs: Vec<(Gen::Job, PayloadId, Span, Instant)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.
@@ -277,7 +277,7 @@ where
 
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
-        self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id)
+        self.payload_jobs.iter().any(|(_, job_id, _, _)| *job_id == id)
     }
 
     /// Returns the best payload for the given identifier that has been built so far.
@@ -285,8 +285,8 @@ where
         let res = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id, _)| *job_id == id)
-            .map(|(j, _, _)| j.best_payload().map(|p| p.into()));
+            .find(|(_, job_id, _, _)| *job_id == id)
+            .map(|(j, _, _, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
             self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
@@ -311,12 +311,12 @@ where
             return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
         }
 
-        let job = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id)?;
+        let job = self.payload_jobs.iter().position(|(_, job_id, _, _)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
         let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
 
         if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id, _) = self.payload_jobs.swap_remove(job);
+            let (_, id, _, _) = self.payload_jobs.swap_remove(job);
             debug!(target: "payload_builder", %id, "terminated resolved job");
         }
 
@@ -358,8 +358,8 @@ where
         let timestamp = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id, _)| *job_id == id)
-            .map(|(j, _, _)| j.payload_timestamp());
+            .find(|(_, job_id, _, _)| *job_id == id)
+            .map(|(j, _, _, _)| j.payload_timestamp());
 
         if timestamp.is_none() {
             trace!(target: "payload_builder", %id, "no matching payload job found to get timestamp for");
@@ -393,7 +393,7 @@ where
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
             for idx in (0..this.payload_jobs.len()).rev() {
-                let (mut job, id, job_span) = this.payload_jobs.swap_remove(idx);
+                let (mut job, id, job_span, created_at) = this.payload_jobs.swap_remove(idx);
 
                 let poll_result = {
                     let _entered = job_span.enter();
@@ -411,10 +411,14 @@ where
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
                     Poll::Pending => {
-                        this.payload_jobs.push((job, id, job_span));
+                        this.payload_jobs.push((job, id, job_span, created_at));
                     }
                 }
             }
+
+            // Report the age of the oldest in-flight job so operators can
+            // alert on stuck builds (e.g. deadlocked finalization).
+            this.metrics.set_oldest_job_age(&this.payload_jobs);
 
             // marker for exit condition
             let mut new_job = false;
@@ -442,7 +446,7 @@ where
                                     info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
-                                    this.payload_jobs.push((job, id, job_span));
+                                    this.payload_jobs.push((job, id, job_span, Instant::now()));
                                     this.payload_events.send(Events::Attributes(attr)).ok();
 
                                     // Clear stale cached payload for this id so
