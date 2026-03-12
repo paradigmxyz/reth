@@ -431,7 +431,7 @@ impl Default for ArenaParallelismThresholds {
         Self {
             min_dirty_leaves: 64,
             min_revealed_nodes: 16,
-            min_updates: 128,
+            min_updates: 16,
             min_leaves_for_prune: 128,
         }
     }
