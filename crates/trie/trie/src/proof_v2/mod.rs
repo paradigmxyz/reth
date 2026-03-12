@@ -1206,12 +1206,10 @@ where
                 self.commit_last_child(targets)?;
 
                 if !self.should_retain(targets, &child_path, false) {
-                    // Pull this child's hash out of the cached branch node. To get the hash's index
-                    // we first need to calculate the mask of which cached hashes have already been
-                    // used by this branch (if any). The number of set bits in that mask will be the
-                    // index of the next hash in the array to use.
-                    let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
-                    let hash_idx = curr_hashed_used_mask.count_ones() as usize;
+                    // Pull this child's hash out of the cached branch node. The hash index
+                    // is the number of hash_mask bits set below this child's nibble.
+                    let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
+                    let hash_idx = (cached_branch.hash_mask & lower_bits).count_ones() as usize;
                     let hash = cached_branch.hashes[hash_idx];
 
                     trace!(
@@ -2803,5 +2801,112 @@ mod tests {
             .expect("root hash should succeed")
             .expect("root should get hashed");
         pretty_assertions::assert_eq!(expected_root, got_root);
+    }
+
+    /// Reproduces a bug in the cached hash index computation at `next_uncached_key_range`.
+    ///
+    /// The hash index for a cached child is computed as:
+    /// ```ignore
+    /// let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
+    /// let hash_idx = curr_hashed_used_mask.count_ones() as usize;
+    /// ```
+    ///
+    /// `curr_state_mask` tracks which children have been built so far. When a child has its
+    /// `hash_mask` bit set but `should_retain` returns true (proof target), the cached hash is
+    /// skipped and the child's range is recalculated from leaves. If that range is **empty**
+    /// (absence proof — no leaves exist for the target), the child's bit is never set in
+    /// `curr_state_mask`. Subsequent siblings then compute a `hash_idx` that is too low,
+    /// pulling the wrong hash from the `hashes` array.
+    ///
+    /// Setup:
+    /// - Cached branch at path `[6]` with children at nibbles 3, 5, 8, all with `hash_mask` set.
+    ///   The hashes are computed from the correct leaf nodes.
+    ///   - hashes\[0\] = hash for nibble 3 (leaf at 0x63...)
+    ///   - hashes\[1\] = hash for nibble 5 (leaf at 0x65...)
+    ///   - hashes\[2\] = hash for nibble 8 (leaf at 0x68...)
+    /// - Hashed cursor has leaves at 0x65... and 0x68... (NOT 0x63...).
+    /// - Proof target at key 0x63... (absence proof — leaf was deleted).
+    ///
+    /// Expected behavior: nibble 5 should use `hashes[1]` and nibble 8 should use `hashes[2]`.
+    /// Buggy behavior: nibble 5 uses `hashes[0]` (nibble 3's hash) because `curr_state_mask`
+    /// never got bit 3 set (no leaf was pushed), so the count is off by one.
+    #[test]
+    fn test_cached_hash_index_bug_with_deleted_leaf() {
+        reth_tracing::init_test_tracing();
+
+        // Use different values to ensure distinct leaf hashes.
+        let val_3 = U256::from(111u64);
+        let val_5 = U256::from(222u64);
+        let val_8 = U256::from(333u64);
+
+        // Keys under a common prefix `0x6_` to create a branch at path [6].
+        // Use second byte to distinguish short keys (so they differ after position 2).
+        let key_63 = B256::right_padding_from(&[0x63, 0xaa]); // nibble path: 6,3,a,a,...
+        let key_65 = B256::right_padding_from(&[0x65, 0xbb]); // nibble path: 6,5,b,b,...
+        let key_68 = B256::right_padding_from(&[0x68, 0xcc]); // nibble path: 6,8,c,c,...
+
+        // Compute leaf hashes. The branch at [6] consumes 2 nibbles (the branch path [6]
+        // plus the child nibble), so each leaf's short key starts at position 2.
+        let leaf_hash_3 = storage_leaf_hash(&Nibbles::unpack(key_63).slice(2..), &val_3);
+        let leaf_hash_5 = storage_leaf_hash(&Nibbles::unpack(key_65).slice(2..), &val_5);
+        let leaf_hash_8 = storage_leaf_hash(&Nibbles::unpack(key_68).slice(2..), &val_8);
+
+        // Build cached branch at [6] with state_mask and hash_mask bits for nibbles 3, 5, 8.
+        let state_mask = TrieMask::new((1 << 3) | (1 << 5) | (1 << 8));
+        let cached_branch = BranchNodeCompact::new(
+            state_mask,
+            TrieMask::new(0),
+            state_mask, // hash_mask = state_mask (all children have cached hashes)
+            vec![leaf_hash_3, leaf_hash_5, leaf_hash_8],
+            None,
+        );
+
+        let storage_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
+            std::iter::once((Nibbles::from_nibbles([0x6]), cached_branch)).collect();
+
+        // Compute the expected root from a fresh trie with just key_65 and key_68.
+        let mut harness =
+            TrieTestHarness::new([(key_65, val_5), (key_68, val_8)].into_iter().collect());
+        let expected_root = harness.original_root();
+
+        // Update the harness with a cached trie node which will reference key_63 by hash.
+        harness.set_trie_nodes(storage_nodes);
+
+        // Mark key_63 as dirty in the prefix set — in the real scenario the leaf was
+        // deleted and the HashedPostState overlay masks it out.
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(key_63));
+
+        // Request a proof for key_63 (absence proof — no leaf exists).
+        // Because the prefix set marks nibble 3's child path as dirty, the cached hash for
+        // nibble 3 is skipped.
+        let mut targets = vec![ProofV2Target::new(key_63)];
+
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(prefix_set.freeze());
+
+        let proofs = calculator
+            .storage_proof(harness.hashed_address(), &mut targets)
+            .expect("storage_proof should succeed");
+        assert_eq!(1, proofs.len());
+        let got_root = calculator
+            .compute_root_hash(&proofs)
+            .expect("compute_root_hash should succeed")
+            .expect("should produce a root hash (proof contains root node)");
+
+        // With the bug, nibble 5 gets hashes[0] (nibble 3's hash) and nibble 8 gets
+        // hashes[1] (nibble 5's hash), producing a wrong root.
+        pretty_assertions::assert_eq!(
+            expected_root,
+            got_root,
+            "Root hash should match trie without key_63; cached hash index is off when \
+             an earlier hashed child has no leaves (absence proof target)"
+        );
     }
 }
