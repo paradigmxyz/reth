@@ -258,6 +258,7 @@ sparse_trie_tests! {
     test_take_updates_resets_after_take,
     test_take_updates_contains_updated_and_removed_nodes,
     test_take_updates_no_duplicate_updated_and_removed_nodes,
+    test_take_updates_cross_cancellation_across_root_calls,
 
     // commit_updates
     test_commit_updates_syncs_branch_masks,

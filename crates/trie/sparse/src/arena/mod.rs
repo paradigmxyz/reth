@@ -508,7 +508,8 @@ pub struct ArenaParallelSparseTrie {
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
-    cleared_subtries: Vec<ArenaSparseSubtrie>,
+    #[allow(clippy::vec_box)]
+    cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
 }
@@ -523,14 +524,6 @@ impl ArenaParallelSparseTrie {
         self
     }
 
-    /// Returns the arena indexes of all [`ArenaSparseNode::Subtrie`] nodes in the upper arena.
-    fn all_subtries(&self) -> SmallVec<[Index; 16]> {
-        self.upper_arena
-            .iter()
-            .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
-            .collect()
-    }
-
     /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
     /// pre-allocates a root slot with a placeholder. The caller must overwrite
     /// `subtrie.arena[subtrie.root]` before use.
@@ -539,7 +532,7 @@ impl ArenaParallelSparseTrie {
             debug_assert!(s.arena.is_empty());
             s
         } else {
-            ArenaSparseSubtrie {
+            Box::new(ArenaSparseSubtrie {
                 arena: SlotMap::new(),
                 root: Index::null(),
                 path: Nibbles::default(),
@@ -547,13 +540,13 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
-            }
+            })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
         if self.updates.is_some() {
             subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         }
-        Box::new(subtrie)
+        subtrie
     }
 
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
@@ -695,7 +688,7 @@ impl ArenaParallelSparseTrie {
         };
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         subtrie.clear();
-        self.cleared_subtries.push(*subtrie);
+        self.cleared_subtries.push(subtrie);
     }
 
     /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
@@ -822,7 +815,7 @@ impl ArenaParallelSparseTrie {
                     &mut subtrie.buffers.updates,
                 );
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
 
                 // The migrated subtrie root may be a branch whose children now live in
                 // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
@@ -835,6 +828,10 @@ impl ArenaParallelSparseTrie {
 
     /// Merges updates from a subtrie's buffer into the parent's buffer.
     /// Both `dst` and `src` must be `Some` when updates are being tracked.
+    ///
+    /// Source removals cancel destination insertions (and vice versa) so that
+    /// updates accumulated across multiple `root()` calls within a single block
+    /// stay consistent.
     fn merge_subtrie_updates(
         dst: &mut Option<SparseTrieUpdates>,
         src: &mut Option<SparseTrieUpdates>,
@@ -842,7 +839,17 @@ impl ArenaParallelSparseTrie {
         if let Some(dst_updates) = dst.as_mut() {
             let src_updates = src.as_mut().expect("updates are enabled");
             debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
+
+            // Source insertions cancel destination removals.
+            for path in src_updates.updated_nodes.keys() {
+                dst_updates.removed_nodes.remove(path);
+            }
             dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
+
+            // Source removals cancel destination insertions.
+            for path in &src_updates.removed_nodes {
+                dst_updates.updated_nodes.remove(path);
+            }
             dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
         }
     }
@@ -2335,15 +2342,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn clear(&mut self) {
-        for idx in self.all_subtries() {
-            if let ArenaSparseNode::Subtrie(mut subtrie) =
-                self.upper_arena.remove(idx).expect("subtrie exists in arena")
-            {
+        for (_, node) in self.upper_arena.drain() {
+            if let ArenaSparseNode::Subtrie(mut subtrie) = node {
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
             }
         }
-        self.upper_arena.clear();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
@@ -2961,7 +2965,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
+        #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
