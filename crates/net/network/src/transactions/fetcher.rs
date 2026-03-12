@@ -36,6 +36,7 @@ use crate::{
     metrics::TransactionFetcherMetrics,
 };
 use alloy_consensus::transaction::PooledTransaction;
+use alloy_eips::eip2718::{Decodable2718, Encodable2718, Typed2718};
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -45,6 +46,7 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
@@ -510,23 +512,40 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
-                // update size metadata if available
-                if let Some((_ty, size)) = metadata {
-                    if let Some(prev_size) = previously_seen_size {
-                        // check if this peer is announcing a different size than a previous peer
-                        if size != prev_size {
-                            trace!(target: "net::tx",
-                                peer_id=format!("{peer_id:#}"),
-                                %hash,
-                                size,
-                                previously_seen_size,
-                                %client_version,
-                                "peer announced a different size for tx, this is especially worrying if one size is much bigger..."
-                            );
-                        }
+            if let Some(TxFetchMetadata {
+                fallback_peers,
+                tx_type: previously_seen_type,
+                tx_encoded_length: previously_seen_size,
+                ..
+            }) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash)
+            {
+                fallback_peers.insert(*peer_id);
+
+                // update announcement metadata if available
+                if let Some((ty, size)) = metadata {
+                    if let Some(prev_ty) = previously_seen_type && ty != prev_ty {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            %hash,
+                            ty,
+                            previously_seen_type=prev_ty,
+                            %client_version,
+                            "peer announced a different type for tx"
+                        );
+                    }
+                    // check if this peer is announcing a different size than a previous peer
+                    if let Some(prev_size) = previously_seen_size && size != prev_size {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            %hash,
+                            size,
+                            previously_seen_size,
+                            %client_version,
+                            "peer announced a different size for tx, this is especially worrying if one size is much bigger..."
+                        );
                     }
                     // believe the most recent peer to announce tx
+                    *previously_seen_type = Some(*ty);
                     *previously_seen_size = Some(*size);
                 }
 
@@ -547,7 +566,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             previously_unseen_hashes_count += 1;
 
             if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
+                TxFetchMetadata{
+                    retries: 0,
+                    fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+                    tx_type: None,
+                    tx_encoded_length: None,
+                }
             ).is_none() {
 
                 trace!(target: "net::tx",
@@ -559,6 +583,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 );
 
                 return false
+            }
+
+            if let Some((ty, size)) = metadata &&
+                let Some(TxFetchMetadata { tx_type, tx_encoded_length, .. }) =
+                    self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash)
+            {
+                *tx_type = Some(*ty);
+                *tx_encoded_length = Some(*size);
             }
             true
         });
@@ -869,8 +901,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let payload = UnverifiedPooledTransactions::new(transactions);
 
                 let unverified_len = payload.len();
-                let (verification_outcome, verified_payload) =
-                    payload.verify(&requested_hashes, &peer_id);
+                let (verification_outcome, verified_payload) = payload.verify(
+                    &requested_hashes,
+                    |hash| self.hashes_fetch_inflight_and_pending_fetch.peek(hash).is_some(),
+                    &peer_id,
+                );
 
                 let unsolicited = unverified_len - verified_payload.len();
                 if unsolicited > 0 {
@@ -882,7 +917,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         peer_id=format!("{peer_id:#}"),
                         unverified_len,
                         verified_payload_len=verified_payload.len(),
-                        "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
+                        "received `PooledTransactions` response from peer with entries that didn't verify against request"
                     );
                     true
                 } else {
@@ -899,7 +934,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 let unvalidated_payload_len = verified_payload.len();
 
-                let valid_payload = verified_payload.dedup();
+                let mut valid_payload = verified_payload.dedup();
 
                 // todo: validate based on announced tx size/type and report peer for sending
                 // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
@@ -914,9 +949,88 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
                 }
-                // valid payload will have at least one transaction at this point. even if the tx
-                // size/type announced by the peer is different to the actual tx size/type, pass on
-                // to pending pool imports pipeline for validation.
+                let mut has_invalid_announcement_metadata = false;
+                valid_payload.retain(|hash, tx| {
+                    let Some(metadata) = self.hashes_fetch_inflight_and_pending_fetch.peek(hash)
+                    else {
+                        return true
+                    };
+
+                    if tx.is_eip4844() {
+                        let encoded = tx.encoded_2718();
+                        let Ok(decoded) = PooledTransactionVariant::decode_2718_exact(&encoded) else {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                %hash,
+                                "received malformed pooled blob transaction response"
+                            );
+                            has_invalid_announcement_metadata = true;
+                            return false
+                        };
+                        let Some(blob_tx) = decoded.as_eip4844() else {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                %hash,
+                                "received malformed pooled blob transaction response"
+                            );
+                            has_invalid_announcement_metadata = true;
+                            return false
+                        };
+                        if !blob_tx.tx().sidecar.is_eip4844() && !blob_tx.tx().sidecar.is_eip7594()
+                        {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                %hash,
+                                "received pooled blob transaction response without sidecar"
+                            );
+                            has_invalid_announcement_metadata = true;
+                            return false
+                        }
+                    }
+
+                    if let Some(expected_ty) = metadata.tx_type() {
+                        let actual_ty = tx.ty();
+                        if actual_ty != expected_ty {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                %hash,
+                                expected_ty,
+                                actual_ty,
+                                "received transaction with a type different from the eth68 announcement"
+                            );
+                            has_invalid_announcement_metadata = true;
+                            return false
+                        }
+                    }
+
+                    if let Some(expected_size) = metadata.tx_encoded_len() {
+                        let actual_size = tx.encoded_2718().len();
+                        if actual_size != expected_size {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                %hash,
+                                expected_size,
+                                actual_size,
+                                "received transaction with a size different from the eth68 announcement"
+                            );
+                            has_invalid_announcement_metadata = true;
+                            return false
+                        }
+                    }
+
+                    true
+                });
+
+                if has_invalid_announcement_metadata {
+                    self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
+                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                }
+
+                let report_peer = report_peer || has_invalid_announcement_metadata;
+
+                if valid_payload.is_empty() {
+                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                }
 
                 //
                 // 4. clear received hashes
@@ -1006,10 +1120,9 @@ pub struct TxFetchMetadata {
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
     fallback_peers: LruCache<PeerId>,
+    /// Type metadata of the transaction if it has been seen in an eth68 announcement.
+    tx_type: Option<u8>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
-    // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
-    // another size tx than they announced. alt enter in request (won't catch peers announcing
-    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
     tx_encoded_length: Option<usize>,
 }
 
@@ -1025,6 +1138,11 @@ impl TxFetchMetadata {
     /// return `None`.
     pub const fn tx_encoded_len(&self) -> Option<usize> {
         self.tx_encoded_length
+    }
+
+    /// Returns the announced transaction type, if available.
+    pub const fn tx_type(&self) -> Option<u8> {
+        self.tx_type
     }
 }
 
@@ -1149,21 +1267,28 @@ impl<T: SignedTransaction> DedupPayload for VerifiedPooledTransactions<T> {
 trait VerifyPooledTransactionsResponse {
     type Transaction: SignedTransaction;
 
-    fn verify(
+    fn verify<F>(
         self,
         requested_hashes: &RequestTxHashes,
+        keep_unrequested: F,
         peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>);
+    ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>)
+    where
+        F: FnMut(&TxHash) -> bool;
 }
 
 impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooledTransactions<T> {
     type Transaction = T;
 
-    fn verify(
+    fn verify<F>(
         self,
         requested_hashes: &RequestTxHashes,
+        mut keep_unrequested: F,
         _peer_id: &PeerId,
-    ) -> (VerificationOutcome, VerifiedPooledTransactions<T>) {
+    ) -> (VerificationOutcome, VerifiedPooledTransactions<T>)
+    where
+        F: FnMut(&TxHash) -> bool,
+    {
         let mut verification_outcome = VerificationOutcome::Ok;
 
         let Self { mut txns } = self;
@@ -1184,7 +1309,7 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
                     tx_hashes_not_requested_count += 1;
                 }
 
-                return false
+                return keep_unrequested(tx.tx_hash())
             }
             true
         });
@@ -1483,10 +1608,74 @@ mod test {
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
-        let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
+        let (outcome, verified_payload) = payload.verify(&request_hashes, |_| false, &PeerId::ZERO);
 
         assert_eq!(VerificationOutcome::ReportPeer, outcome);
         assert_eq!(1, verified_payload.len());
         assert!(verified_payload.contains(&signed_tx_1));
+    }
+
+    #[test]
+    fn verify_response_hashes_keeps_tracked_unsolicited_hashes() {
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
+        );
+        let signed_tx_1: PooledTransaction =
+            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
+        );
+        let signed_tx_2: PooledTransaction =
+            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+
+        let request_hashes = RequestTxHashes::new([*signed_tx_1.hash()].into_iter().collect());
+        let payload = UnverifiedPooledTransactions::new(PooledTransactions(vec![
+            signed_tx_1.clone(),
+            signed_tx_2.clone(),
+        ]));
+
+        let (outcome, verified_payload) =
+            payload.verify(&request_hashes, |hash| hash == signed_tx_2.hash(), &PeerId::ZERO);
+
+        assert_eq!(VerificationOutcome::ReportPeer, outcome);
+        assert_eq!(2, verified_payload.len());
+        assert!(verified_payload.contains(&signed_tx_1));
+        assert!(verified_payload.contains(&signed_tx_2));
+    }
+
+    #[test]
+    fn response_with_mismatched_eth68_type_is_bad_response() {
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
+        );
+        let signed_tx: PooledTransaction =
+            TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+
+        let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
+        let peer_id = PeerId::new([3; 64]);
+        let requested_hashes = RequestTxHashes::new([*signed_tx.hash()].into_iter().collect());
+
+        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(
+            *signed_tx.hash(),
+            TxFetchMetadata::new(
+                0,
+                LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+                Some(signed_tx.ty() + 1),
+                Some(signed_tx.encoded_2718().len()),
+            ),
+        );
+
+        let event =
+            tx_fetcher.on_resolved_get_pooled_transactions_request_fut(GetPooledTxResponse {
+                peer_id,
+                requested_hashes,
+                result: Ok(Ok(PooledTransactions(vec![signed_tx.clone()]))),
+            });
+
+        assert!(matches!(
+            event,
+            FetchEvent::FetchError { peer_id: got, error: RequestError::BadResponse } if got == peer_id
+        ));
+        assert!(tx_fetcher.hashes_pending_fetch.contains(signed_tx.hash()));
     }
 }
