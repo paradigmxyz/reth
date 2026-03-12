@@ -210,7 +210,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 
 impl From<BalStoreError> for EngineApiError {
     fn from(err: BalStoreError) -> Self {
-        EngineApiError::Internal(Box::new(err))
+        Self::Internal(Box::new(err))
     }
 }
 
