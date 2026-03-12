@@ -49,14 +49,14 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                     // If the stack is empty then we push this node onto it, as it may have child
                     // nodes which need to be yielded first.
                     self.stack.push((path, node));
-                    break
+                    break;
                 }
                 Some((top_path, _)) if path.starts_with(top_path) => {
                     // If the top of the stack is a prefix of this node, it means this node is a
                     // child of the top of the stack (and all other nodes on the stack). Push this
                     // node onto the stack, as future nodes may be children of it.
                     self.stack.push((path, node));
-                    break
+                    break;
                 }
                 Some((_, _)) => {
                     // The top of the stack is not a prefix of this node, therefore it is not a
@@ -87,7 +87,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 // reverse it.
                 self.complete = true;
                 self.next = core::mem::take(&mut self.stack);
-                return Ok(())
+                return Ok(());
             };
 
             trace!(
@@ -98,7 +98,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
 
             self.push(path, node);
             if !self.next.is_empty() {
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -110,15 +110,15 @@ impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(next) = self.next.pop() {
-                return Some(Ok(next))
+                return Some(Ok(next));
             }
 
             if self.complete {
-                return None
+                return None;
             }
 
             if let Err(err) = self.fill_next() {
-                return Some(Err(err))
+                return Some(Err(err));
             }
         }
     }

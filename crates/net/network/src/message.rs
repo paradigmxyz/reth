@@ -87,10 +87,10 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::ReceivedTransaction(msg) => msg.len(),
             Self::SendTransactions(msg) => msg.len(),
             Self::PooledTransactions(msg) => msg.len(),
-            Self::NewBlock(_) |
-            Self::EthRequest(_) |
-            Self::BlockRangeUpdated(_) |
-            Self::Other(_) => 1,
+            Self::NewBlock(_)
+            | Self::EthRequest(_)
+            | Self::BlockRangeUpdated(_)
+            | Self::Other(_) => 1,
         }
     }
 }

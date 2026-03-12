@@ -43,7 +43,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
         if chain_info.best_number.saturating_sub(block_number) > self.max_proof_window() {
-            return Err(EthApiError::ExceedsMaxProofWindow.into())
+            return Err(EthApiError::ExceedsMaxProofWindow.into());
         }
         Ok(())
     }
@@ -270,10 +270,10 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         async move {
-            if at.is_pending() &&
-                let Ok(Some(state)) = self.local_pending_state().await
+            if at.is_pending()
+                && let Ok(Some(state)) = self.local_pending_state().await
             {
-                return Ok(state)
+                return Ok(state);
             }
 
             self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)

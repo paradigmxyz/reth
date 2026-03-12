@@ -82,7 +82,7 @@ where
                     "Failed to subscribe to blocks",
                 );
             }) else {
-                return
+                return;
             };
 
             while let Some(res) = stream.next().await {

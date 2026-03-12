@@ -222,9 +222,9 @@ pub(crate) fn dispatch_with_chunking<T, I>(
 where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
+    let should_chunk = chunking_len > max_targets_for_chunking
+        || available_account_workers > 1
+        || available_storage_workers > 1;
 
     if should_chunk && chunking_len > chunk_size {
         let mut num_chunks = 0usize;

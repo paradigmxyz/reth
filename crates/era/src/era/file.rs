@@ -276,9 +276,9 @@ impl<W: Write> EraWriter<W> {
         self.ensure_version_written()?;
 
         // Ensure blocks are written before state/indices
-        if self.has_written_state ||
-            self.has_written_block_slot_index ||
-            self.has_written_state_slot_index
+        if self.has_written_state
+            || self.has_written_block_slot_index
+            || self.has_written_state_slot_index
         {
             return Err(E2sError::Ssz("Cannot write blocks after state or indices".to_string()));
         }

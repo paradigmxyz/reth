@@ -81,7 +81,7 @@ where
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                     "invalid range: no canonical state found for parent of requested block",
-                ))
+                ));
             }
             status =
                 self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
@@ -120,7 +120,7 @@ where
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                     "invalid range: no canonical state found for parent of requested block",
-                ))
+                ));
             }
             status =
                 self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
@@ -387,10 +387,10 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
 ) -> TransportResult<ForkchoiceUpdated> {
     // FCU V3 is used for Cancun, Prague, and Amsterdam (there is no FCU V4-V6)
     match message_version {
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V3
+        | EngineApiMessageVersion::V4
+        | EngineApiMessageVersion::V5
+        | EngineApiMessageVersion::V6 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {
@@ -428,19 +428,19 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
             let resp: ForkchoiceUpdated = provider.client().request(method, &reth_params).await?;
 
             if resp.is_valid() {
-                break Ok(resp)
+                break Ok(resp);
             }
 
             if resp.is_invalid() {
                 error!(target: "reth-bench", ?resp, "Invalid {method}");
                 return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
                     std::io::Error::other(format!("Invalid {method}: {resp:?}")),
-                )))
+                )));
             }
             if resp.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                     "invalid range: no canonical state found for parent of requested block",
-                ))
+                ));
             }
         }
     }

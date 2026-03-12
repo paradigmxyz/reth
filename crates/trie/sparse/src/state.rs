@@ -629,7 +629,7 @@ where
                 EMPTY_ROOT_HASH
             }
         } else {
-            return Err(SparseTrieErrorKind::Blind.into())
+            return Err(SparseTrieErrorKind::Blind.into());
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -658,7 +658,7 @@ where
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<bool> {
         if !self.is_account_revealed(address) {
-            return Err(SparseTrieErrorKind::Blind.into())
+            return Err(SparseTrieErrorKind::Blind.into());
         }
 
         // Nothing to update if the account doesn't exist in the trie.
@@ -668,7 +668,7 @@ where
             .transpose()?
         else {
             trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
-            return Ok(true)
+            return Ok(true);
         };
 
         // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
@@ -685,7 +685,7 @@ where
 
         // If the account is empty, indicate that it should be removed.
         if trie_account == TrieAccount::default() {
-            return Ok(false)
+            return Ok(false);
         }
 
         // Otherwise, update the account leaf.

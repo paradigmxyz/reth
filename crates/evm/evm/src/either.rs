@@ -73,6 +73,13 @@ where
         }
     }
 
+    fn take_bal(&mut self) -> Option<alloy_eips::eip7928::BlockAccessList> {
+        match self {
+            Self::Left(a) => a.take_bal(),
+            Self::Right(b) => b.take_bal(),
+        }
+    }
+
     fn size_hint(&self) -> usize {
         match self {
             Self::Left(a) => a.size_hint(),

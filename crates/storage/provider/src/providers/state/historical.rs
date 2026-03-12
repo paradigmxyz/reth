@@ -91,10 +91,10 @@ impl HistoryInfo {
             if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
                 // The key may have been written, but due to pruning we may not have changesets
                 // and history, so we need to make a changeset lookup.
-                return Self::InChangeset(block_number)
+                return Self::InChangeset(block_number);
             }
             // The key is written to, but only after our block.
-            return Self::NotYetWritten
+            return Self::NotYetWritten;
         }
 
         if let Some(block_number) = found_block {
@@ -153,7 +153,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
@@ -178,7 +178,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
@@ -252,10 +252,10 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     where
         Provider: StorageSettingsCache,
     {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number)
+            || !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
@@ -275,7 +275,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
@@ -727,8 +727,8 @@ where
         // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
         // short-circuit) and when it passes we save a full seek into the changeset/plain state
         // table.
-        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
-            !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number)
+            && !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
 
         Ok(HistoryInfo::from_lookup(
             found_block,

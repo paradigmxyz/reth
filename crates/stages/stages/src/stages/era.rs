@@ -149,13 +149,13 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        if self.stream.is_none() &&
-            let Some(source) = self.source.clone()
+        if self.stream.is_none()
+            && let Some(source) = self.source.clone()
         {
             self.stream.replace(source.create(input)?);
         }
-        if let Some(stream) = &mut self.stream &&
-            let Some(next) = ready!(stream.poll_next_unpin(cx))
+        if let Some(stream) = &mut self.stream
+            && let Some(next) = ready!(stream.poll_next_unpin(cx))
                 .transpose()
                 .map_err(|e| StageError::Fatal(e.into()))?
         {
@@ -452,8 +452,8 @@ mod tests {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
 
-                        for block_num in initial_checkpoint..
-                            output
+                        for block_num in initial_checkpoint
+                            ..output
                                 .checkpoint
                                 .block_number
                                 .min(self.responses.as_ref().map(|v| v.len()).unwrap_or_default()

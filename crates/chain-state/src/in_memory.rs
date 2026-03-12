@@ -328,7 +328,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return
+                return;
             }
         }
 
@@ -567,7 +567,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) =
                 block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
             {
-                return Some(tx.clone())
+                return Some(tx.clone());
             }
         }
         None
@@ -772,7 +772,6 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
-                    block_access_list: Default::default(),
                 },
                 state: Default::default(),
             }),
@@ -784,8 +783,8 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
         // Trie data is computed asynchronously and doesn't define block identity.
-        self.recovered_block == other.recovered_block &&
-            self.execution_output == other.execution_output
+        self.recovered_block == other.recovered_block
+            && self.execution_output == other.execution_output
     }
 }
 

@@ -61,9 +61,9 @@ impl ProofTrieNodeV2 {
                     let expected_branch_path = path.join(&ext.key);
 
                     // Check if the last item in result is the child branch
-                    if let Some(last) = result.last_mut() &&
-                        last.path == expected_branch_path &&
-                        let TrieNodeV2::Branch(branch_v2) = &mut last.node
+                    if let Some(last) = result.last_mut()
+                        && last.path == expected_branch_path
+                        && let TrieNodeV2::Branch(branch_v2) = &mut last.node
                     {
                         debug_assert!(
                             branch_v2.key.is_empty(),

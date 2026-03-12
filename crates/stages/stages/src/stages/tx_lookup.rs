@@ -91,8 +91,8 @@ where
                 )
             })
             .transpose()?
-            .flatten() &&
-            target_prunable_block > input.checkpoint().block_number
+            .flatten()
+            && target_prunable_block > input.checkpoint().block_number
         {
             input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
@@ -267,8 +267,8 @@ where
         // If `TransactionHashNumbers` table was pruned, we will have a number of entries in it not
         // matching the actual number of processed transactions. To fix that, we add the
         // number of pruned `TransactionHashNumbers` entries.
-        processed: provider.count_entries::<tables::TransactionHashNumbers>()? as u64 +
-            pruned_entries,
+        processed: provider.count_entries::<tables::TransactionHashNumbers>()? as u64
+            + pruned_entries,
         // Count only static files entries. If we count the database entries too, we may have
         // duplicates. We're sure that the static files have all entries that database has,
         // because we run the `StaticFileProducer` before starting the pipeline.
@@ -562,8 +562,8 @@ mod tests {
                         })
                         .transpose()
                         .expect("prune target block for transaction lookup")
-                        .flatten() &&
-                        target_prunable_block > input.checkpoint().block_number
+                        .flatten()
+                        && target_prunable_block > input.checkpoint().block_number
                     {
                         input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
                     }
@@ -571,7 +571,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let mut body_cursor =

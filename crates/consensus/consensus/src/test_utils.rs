@@ -52,6 +52,8 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
         _receipt_root_bloom: Option<ReceiptRootBloom>,
+        _block_access_list: Option<alloy_eip7928::BlockAccessList>,
+        _allow_bal_check: bool,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)

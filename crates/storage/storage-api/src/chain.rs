@@ -118,8 +118,8 @@ where
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals.clone() &&
-                !withdrawals.is_empty()
+            if let Some(withdrawals) = body.withdrawals.clone()
+                && !withdrawals.is_empty()
             {
                 withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
             }

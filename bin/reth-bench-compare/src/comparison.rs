@@ -690,8 +690,8 @@ fn calculate_std_dev(values: &[f64], mean: f64) -> f64 {
             let diff = x - mean;
             diff * diff
         })
-        .sum::<f64>() /
-        values.len() as f64;
+        .sum::<f64>()
+        / values.len() as f64;
 
     variance.sqrt()
 }

@@ -331,9 +331,9 @@ mod tests {
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
                     match segment {
-                        StaticFileSegment::Headers |
-                        StaticFileSegment::AccountChangeSets |
-                        StaticFileSegment::StorageChangeSets => {
+                        StaticFileSegment::Headers
+                        | StaticFileSegment::AccountChangeSets
+                        | StaticFileSegment::StorageChangeSets => {
                             panic!("non tx based segment")
                         }
                         StaticFileSegment::Transactions => {
@@ -450,9 +450,9 @@ mod tests {
 
             // Prune transactions or receipts based on the segment type
             match segment {
-                StaticFileSegment::Headers |
-                StaticFileSegment::AccountChangeSets |
-                StaticFileSegment::StorageChangeSets => {
+                StaticFileSegment::Headers
+                | StaticFileSegment::AccountChangeSets
+                | StaticFileSegment::StorageChangeSets => {
                     panic!("non tx based segment")
                 }
                 StaticFileSegment::Transactions => {
@@ -477,9 +477,9 @@ mod tests {
             // cumulative_gas_used & nonce as ids.
             if let Some(id) = expected_tx_tip {
                 match segment {
-                    StaticFileSegment::Headers |
-                    StaticFileSegment::AccountChangeSets |
-                    StaticFileSegment::StorageChangeSets => {
+                    StaticFileSegment::Headers
+                    | StaticFileSegment::AccountChangeSets
+                    | StaticFileSegment::StorageChangeSets => {
                         panic!("non tx based segment")
                     }
                     StaticFileSegment::Transactions => assert_eyre(

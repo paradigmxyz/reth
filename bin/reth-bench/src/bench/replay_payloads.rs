@@ -403,8 +403,8 @@ impl Command {
             let progress = format!("{}/{}", i + 1, payloads.len());
             info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(scraper) = metrics_scraper.as_mut() &&
-                let Err(err) = scraper.scrape_after_block(block_number).await
+            if let Some(scraper) = metrics_scraper.as_mut()
+                && let Err(err) = scraper.scrape_after_block(block_number).await
             {
                 tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
@@ -460,8 +460,8 @@ impl Command {
             .wrap_err_with(|| format!("Failed to read directory {:?}", self.payload_dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    && e.file_name().to_string_lossy().starts_with("payload_block_")
             })
             .collect();
 
@@ -519,8 +519,8 @@ impl Command {
             .wrap_err_with(|| format!("Failed to read directory {:?}", dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    && e.file_name().to_string_lossy().starts_with("payload_block_")
             })
             .collect();
 

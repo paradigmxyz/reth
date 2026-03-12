@@ -13,6 +13,7 @@ extern crate alloc;
 
 use alloc::{boxed::Box, fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::error::Error;
 
@@ -54,12 +55,17 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// If `receipt_root_bloom` is provided, the implementation should use the pre-computed
     /// receipt root and logs bloom instead of computing them from the receipts.
     ///
+    /// If `allow_bal_check` is enabled, we calculate the bal hash and match with the header bal
+    /// hash. We don't do by default because for payload validation, we do the same bal check
+    ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list: Option<BlockAccessList>,
+        allow_bal_check: bool,
     ) -> Result<(), ConsensusError>;
 }
 
@@ -338,6 +344,10 @@ pub enum ConsensusError {
     /// Error when an unexpected block access list hash is encountered.
     #[error("unexpected block access list hash")]
     BlockAccessListHashUnexpected,
+
+    /// Error when an unexpected block access list cost is encountered.
+    #[error("block access list cost exceeds gas limit")]
+    BlockAccessListCostMoreThanGasLimit,
 
     /// Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]

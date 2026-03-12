@@ -68,23 +68,23 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         // Validate gas limit against the configured call gas limit before any DB calls
         let call_gas_limit = self.inner.eth_api.call_gas_limit();
-        if let Some(gas_limit) = gas_limit &&
-            gas_limit > call_gas_limit
+        if let Some(gas_limit) = gas_limit
+            && gas_limit > call_gas_limit
         {
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+            );
         }
 
         let transactions = txs
@@ -126,7 +126,7 @@ where
                     EthBundleError::Eip4844BlobGasExceeded(blob_params.max_blob_gas_per_block())
                         .to_string(),
                 )
-                .into())
+                .into());
             }
         }
 

@@ -110,8 +110,8 @@ impl Layers {
         // When reloadable, always show target since the user may switch to DEBUG/TRACE
         // at runtime via RPC — freezing target=false at init would hide module paths.
         // Otherwise, only show target when initial level is higher than INFO.
-        let show_target = reloadable ||
-            filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO);
+        let show_target = reloadable
+            || filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO);
 
         if reloadable {
             let (reloadable_filter, handle) = reload::Layer::new(filter);

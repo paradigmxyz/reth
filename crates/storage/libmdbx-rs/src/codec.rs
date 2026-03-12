@@ -41,8 +41,8 @@ impl TableObject for Cow<'_, [u8]> {
 
         #[cfg(not(feature = "return-borrowed"))]
         {
-            let is_dirty = (!K::IS_READ_ONLY) &&
-                crate::error::mdbx_result(unsafe {
+            let is_dirty = (!K::IS_READ_ONLY)
+                && crate::error::mdbx_result(unsafe {
                     ffi::mdbx_is_dirty(_txn, data_val.iov_base)
                 })?;
 
@@ -83,7 +83,7 @@ impl TableObject for ObjectLength {
 impl<const LEN: usize> TableObject for [u8; LEN] {
     fn decode(data_val: &[u8]) -> Result<Self, Error> {
         if data_val.len() != LEN {
-            return Err(Error::DecodeErrorLenDiff)
+            return Err(Error::DecodeErrorLenDiff);
         }
         let mut a = [0; LEN];
         a[..].copy_from_slice(data_val);

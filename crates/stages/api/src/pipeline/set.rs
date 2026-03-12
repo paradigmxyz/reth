@@ -73,8 +73,8 @@ impl<Provider> StageSetBuilder<Provider> {
 
     fn upsert_stage_state(&mut self, stage: Box<dyn Stage<Provider>>, added_at_index: usize) {
         let stage_id = stage.id();
-        if self.stages.insert(stage.id(), StageEntry { stage, enabled: true }).is_some() &&
-            let Some(to_remove) = self
+        if self.stages.insert(stage.id(), StageEntry { stage, enabled: true }).is_some()
+            && let Some(to_remove) = self
                 .order
                 .iter()
                 .enumerate()
@@ -240,7 +240,7 @@ impl<Provider> StageSetBuilder<Provider> {
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable(stage_id)
+            return self.disable(stage_id);
         }
         self
     }
@@ -254,7 +254,7 @@ impl<Provider> StageSetBuilder<Provider> {
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable_all(stages)
+            return self.disable_all(stages);
         }
         self
     }
@@ -263,8 +263,8 @@ impl<Provider> StageSetBuilder<Provider> {
     pub fn build(mut self) -> Vec<Box<dyn Stage<Provider>>> {
         let mut stages = Vec::new();
         for id in &self.order {
-            if let Some(entry) = self.stages.remove(id) &&
-                entry.enabled
+            if let Some(entry) = self.stages.remove(id)
+                && entry.enabled
             {
                 stages.push(entry.stage);
             }

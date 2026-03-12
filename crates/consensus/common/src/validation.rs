@@ -24,11 +24,11 @@ pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusEr
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used(),
             gas_limit: header.gas_limit(),
-        })
+        });
     }
     // Check that the gas limit is below the maximum allowed gas limit
     if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
-        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() })
+        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() });
     }
     Ok(())
 }
@@ -41,7 +41,7 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 ) -> Result<(), ConsensusError> {
     if chain_spec.is_london_active_at_block(header.number()) && header.base_fee_per_gas().is_none()
     {
-        return Err(ConsensusError::BaseFeeMissing)
+        return Err(ConsensusError::BaseFeeMissing);
     }
     Ok(())
 }
@@ -127,14 +127,14 @@ where
                 expected: header.ommers_hash(),
             }
             .into(),
-        ))
+        ));
     }
 
     let tx_root = body.calculate_tx_root();
     if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
-        ))
+        ));
     }
 
     match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
@@ -142,7 +142,7 @@ where
             if withdrawals_root != header_withdrawals_root {
                 return Err(ConsensusError::BodyWithdrawalsRootDiff(
                     GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
-                ))
+                ));
             }
         }
         (None, None) => {
@@ -198,7 +198,7 @@ where
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: calculated_transaction_root, expected: expected_transaction_root }
                 .into(),
-        ))
+        ));
     }
 
     Ok(())
@@ -229,7 +229,7 @@ where
                 expected: block.ommers_hash(),
             }
             .into(),
-        ))
+        ));
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -241,13 +241,13 @@ where
         validate_cancun_gas(block)?;
     }
 
-    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
-        block.rlp_length() > MAX_RLP_BLOCK_SIZE
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp())
+        && block.rlp_length() > MAX_RLP_BLOCK_SIZE
     {
         return Err(ConsensusError::BlockTooLarge {
             rlp_length: block.rlp_length(),
             max_rlp_length: MAX_RLP_BLOCK_SIZE,
-        })
+        });
     }
 
     Ok(())
@@ -266,21 +266,21 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
 
     if header.parent_beacon_block_root().is_none() {
-        return Err(ConsensusError::ParentBeaconBlockRootMissing)
+        return Err(ConsensusError::ParentBeaconBlockRootMissing);
     }
 
     if !blob_gas_used.is_multiple_of(DATA_GAS_PER_BLOB) {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
-        })
+        });
     }
 
     if blob_gas_used > blob_params.max_blob_gas_per_block() {
         return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
             blob_gas_used,
             max_blob_gas_per_block: blob_params.max_blob_gas_per_block(),
-        })
+        });
     }
 
     Ok(())
@@ -315,7 +315,7 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
-        ))
+        ));
     }
 
     let Some(parent_number) = parent.number().checked_add(1) else {
@@ -323,7 +323,7 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
         return Err(ConsensusError::ParentBlockNumberMismatch {
             parent_block_number: parent.number(),
             block_number: u64::MAX,
-        })
+        });
     };
 
     // Parent number is consistent.
@@ -331,7 +331,7 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
         return Err(ConsensusError::ParentBlockNumberMismatch {
             parent_block_number: parent.number(),
             block_number: header.number(),
-        })
+        });
     }
 
     Ok(())
@@ -361,7 +361,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
                 expected: expected_base_fee,
                 got: base_fee,
-            }))
+            }));
         }
     }
 
@@ -378,7 +378,7 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp(),
             timestamp: header.timestamp(),
-        })
+        });
     }
     Ok(())
 }
@@ -397,11 +397,11 @@ pub fn validate_against_parent_gas_limit<
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-    let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number()) &&
-        chain_spec.is_london_active_at_block(header.number())
+    let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number())
+        && chain_spec.is_london_active_at_block(header.number())
     {
-        parent.gas_limit() *
-            chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
+        parent.gas_limit()
+            * chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
                 as u64
     } else {
         parent.gas_limit()
@@ -413,7 +413,7 @@ pub fn validate_against_parent_gas_limit<
             return Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit,
                 child_gas_limit: header.gas_limit(),
-            })
+            });
         }
     }
     // Check for a decrease in gas limit beyond the allowed threshold.
@@ -421,11 +421,11 @@ pub fn validate_against_parent_gas_limit<
         return Err(ConsensusError::GasLimitInvalidDecrease {
             parent_gas_limit,
             child_gas_limit: header.gas_limit(),
-        })
+        });
     }
     // Check if the self gas limit is below the minimum required limit.
     else if header.gas_limit() < MINIMUM_GAS_LIMIT {
-        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() });
     }
 
     Ok(())
@@ -450,7 +450,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let parent_excess_blob_gas = parent.excess_blob_gas().unwrap_or(0);
 
     if header.blob_gas_used().is_none() {
-        return Err(ConsensusError::BlobGasUsedMissing)
+        return Err(ConsensusError::BlobGasUsedMissing);
     }
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
@@ -465,7 +465,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
             parent_excess_blob_gas,
             parent_blob_gas_used,
-        })
+        });
     }
 
     Ok(())
