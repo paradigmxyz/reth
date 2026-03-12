@@ -112,15 +112,6 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
-
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
-
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
-
       --path <IMPORT_ERA_PATH>
           The path to a directory for import.
 
@@ -146,7 +137,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

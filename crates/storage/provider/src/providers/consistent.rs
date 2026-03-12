@@ -1312,7 +1312,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1366,7 +1365,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1419,7 +1417,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .storage
                     .into_iter()
@@ -1471,12 +1468,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .storage
-                    .into_iter()
+                    .iter()
                     .flatten()
-                    .map(|revert: PlainStorageRevert| revert.storage_revert.len())
+                    .map(|(_, revert)| revert.storage.len())
                     .sum::<usize>();
             }
         }
@@ -1500,7 +1494,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1546,7 +1539,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1599,7 +1591,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .accounts
                     .into_iter()
@@ -1642,15 +1633,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         let mut count = 0;
         if let Some(head_block) = &self.head_block {
             for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .accounts
-                    .len();
+                count += state.block_ref().execution_output.state.reverts.len();
             }
         }
 

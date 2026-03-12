@@ -18,9 +18,19 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
+    time::Duration,
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
+
+/// Unified result of any persistence operation.
+#[derive(Debug)]
+pub struct PersistenceResult {
+    /// The last block that was persisted, if any.
+    pub last_block: Option<BlockNumHash>,
+    /// The commit duration, only available for save-blocks operations.
+    pub commit_duration: Option<Duration>,
+}
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -86,18 +96,16 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
+                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
+                    let result_number = result.last_block.map(|b| b.number);
 
-                    // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
 
                     if let Some(block_number) = result_number {
@@ -140,7 +148,7 @@ where
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<PersistenceResult, PersistenceError> {
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
@@ -157,8 +165,6 @@ where
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
-                // Clamp to the highest persisted block so that on restart
-                // `last_finalized_block_number` never points past available state.
                 provider_rw.save_finalized_block_number(finalized.min(last.number))?;
                 if finalized > last.number {
                     self.pending_finalized_block = Some(finalized);
@@ -183,10 +189,11 @@ where
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
+        let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(last_block)
+        Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
     }
 }
 
@@ -210,13 +217,13 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<Option<BlockNumHash>>),
+    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -295,7 +302,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<T>>,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
@@ -330,7 +337,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
@@ -390,8 +397,8 @@ mod tests {
 
         handle.save_blocks(blocks, tx).unwrap();
 
-        let hash = rx.recv().unwrap();
-        assert_eq!(hash, None);
+        let result = rx.recv().unwrap();
+        assert!(result.last_block.is_none());
     }
 
     #[test]
@@ -409,12 +416,9 @@ mod tests {
 
         handle.save_blocks(blocks, tx).unwrap();
 
-        let BlockNumHash { hash: actual_hash, number: _ } = rx
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("test timed out")
-            .expect("no hash returned");
+        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        assert_eq!(block_hash, actual_hash);
+        assert_eq!(block_hash, result.last_block.unwrap().hash);
     }
 
     #[test]
@@ -428,8 +432,8 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-        assert_eq!(last_hash, actual_hash);
+        let result = rx.recv().unwrap();
+        assert_eq!(last_hash, result.last_block.unwrap().hash);
     }
 
     #[test]
@@ -446,8 +450,8 @@ mod tests {
 
             handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-            assert_eq!(last_hash, actual_hash);
+            let result = rx.recv().unwrap();
+            assert_eq!(last_hash, result.last_block.unwrap().hash);
         }
     }
 }

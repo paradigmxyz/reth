@@ -47,16 +47,6 @@ pub enum MultiProofMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
     StateUpdate(Source, EvmState),
-    /// State update that can be applied to the sparse trie without any new proofs.
-    ///
-    /// It can be the case when all accounts and storage slots from the state update were already
-    /// fetched and revealed.
-    EmptyProof {
-        /// The index of this proof in the sequence of state updates
-        sequence_number: u64,
-        /// The state update that was used to calculate the proof
-        state: HashedPostState,
-    },
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
@@ -128,41 +118,6 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of active storage workers processing proofs.
-    pub active_storage_workers_histogram: Histogram,
-    /// Histogram of active account workers processing proofs.
-    pub active_account_workers_histogram: Histogram,
-    /// Gauge for the maximum number of storage workers in the pool.
-    pub max_storage_workers: Gauge,
-    /// Gauge for the maximum number of account workers in the pool.
-    pub max_account_workers: Gauge,
-    /// Histogram of pending storage multiproofs in the queue.
-    pub pending_storage_multiproofs_histogram: Histogram,
-    /// Histogram of pending account multiproofs in the queue.
-    pub pending_account_multiproofs_histogram: Histogram,
-
-    /// Histogram of the number of prefetch proof target accounts.
-    pub prefetch_proof_targets_accounts_histogram: Histogram,
-    /// Histogram of the number of prefetch proof target storages.
-    pub prefetch_proof_targets_storages_histogram: Histogram,
-    /// Histogram of the number of prefetch proof target chunks.
-    pub prefetch_proof_chunks_histogram: Histogram,
-
-    /// Histogram of the number of state update proof target accounts.
-    pub state_update_proof_targets_accounts_histogram: Histogram,
-    /// Histogram of the number of state update proof target storages.
-    pub state_update_proof_targets_storages_histogram: Histogram,
-    /// Histogram of the number of state update proof target chunks.
-    pub state_update_proof_chunks_histogram: Histogram,
-
-    /// Histogram of prefetch proof batch sizes (number of messages merged).
-    pub prefetch_batch_size_histogram: Histogram,
-
-    /// Histogram of proof calculation durations.
-    pub proof_calculation_duration_histogram: Histogram,
-
-    /// Histogram of sparse trie update durations.
-    pub sparse_trie_update_duration_histogram: Histogram,
     /// Histogram of durations spent revealing multiproof results into the sparse trie.
     pub sparse_trie_reveal_multiproof_duration_histogram: Histogram,
     /// Histogram of durations spent coalescing multiple proof results from the channel.
@@ -175,17 +130,6 @@ pub(crate) struct MultiProofTaskMetrics {
     pub sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
     pub sparse_trie_total_duration_histogram: Histogram,
-
-    /// Histogram of state updates received.
-    pub state_updates_received_histogram: Histogram,
-    /// Histogram of proofs processed.
-    pub proofs_processed_histogram: Histogram,
-    /// Histogram of total time spent in the multiproof task.
-    pub multiproof_task_total_duration_histogram: Histogram,
-    /// Total time spent waiting for the first state update or prefetch request.
-    pub first_update_wait_time_histogram: Histogram,
-    /// Total time spent waiting for the last proof result.
-    pub last_proof_wait_time_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.

@@ -25,6 +25,7 @@ use reth_primitives_traits::{Block, SignedTransaction};
     RlpDecodableWrapper,
     Default,
     Deref,
+    DerefMut,
     IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -238,7 +239,7 @@ impl NewPooledTransactionHashes {
     /// the rest. If `len` is greater than the number of hashes, this has no effect.
     pub fn truncate(&mut self, len: usize) {
         match self {
-            Self::Eth66(msg) => msg.0.truncate(len),
+            Self::Eth66(msg) => msg.truncate(len),
             Self::Eth68(msg) => {
                 msg.types.truncate(len);
                 msg.sizes.truncate(len);
@@ -263,7 +264,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an immutable reference to the inner type if this an eth68 announcement.
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -271,7 +272,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -279,7 +280,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth66 announcement.
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
@@ -287,7 +288,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth68 announcement.
+    /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -295,7 +296,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth66 announcement.
+    /// Returns the inner type if this is an eth66 announcement.
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
@@ -336,6 +337,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     RlpDecodableWrapper,
     Default,
     Deref,
+    DerefMut,
     IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -865,8 +867,8 @@ mod tests {
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 0);
 
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 100 });
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 2 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 100 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
     }
