@@ -1,18 +1,12 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
+    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
-use slotmap::{DefaultKey, SlotMap};
 use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
-
-/// Alias for the slotmap key type used as node references throughout the arena trie.
-type Index = DefaultKey;
-/// Alias for the slotmap used as the node arena throughout the arena trie.
-type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 /// An entry on the cursor's traversal stack, tracking an ancestor node during trie walks.
 #[derive(Debug, Clone)]
@@ -93,9 +87,18 @@ impl ArenaCursor {
         self.stack.len() - 1
     }
 
-    /// Returns `true` if the stack is empty.
-    pub(super) const fn is_empty(&self) -> bool {
-        self.stack.is_empty()
+    /// Removes the root entry from the stack without dirty-state propagation.
+    ///
+    /// Use when discarding the root node (e.g. replacing it with `EmptyRoot`). Since the root
+    /// has no parent, there is nothing to propagate to.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stack does not contain exactly one entry (the root).
+    pub(super) fn drop_root(&mut self) {
+        debug_assert_eq!(self.stack.len(), 1, "drop_root requires exactly the root on the stack");
+        self.stack.clear();
+        self.needs_pop = false;
     }
 
     /// Clears the traversal stack and pushes the given root entry.
@@ -150,10 +153,7 @@ impl ArenaCursor {
                 _ => false,
             });
             if child_is_dirty {
-                let parent_state = arena[parent.index].state_mut();
-                if !matches!(parent_state, ArenaSparseNodeState::Dirty) {
-                    *parent_state = ArenaSparseNodeState::Dirty;
-                }
+                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
             }
         }
 
