@@ -26,6 +26,9 @@ use slotmap::{DefaultKey, Key as _, SlotMap};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
+#[cfg(feature = "metrics")]
+use reth_primitives_traits::FastInstant as Instant;
+
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 
@@ -105,6 +108,9 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Metrics for subtrie-level `update_leaves` breakdown.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ArenaUpdateLeavesMetrics,
 }
 
 impl ArenaSparseSubtrie {
@@ -241,8 +247,24 @@ impl ArenaSparseSubtrie {
 
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
+        #[cfg(feature = "metrics")]
+        let mut seek_elapsed = core::time::Duration::ZERO;
+        #[cfg(feature = "metrics")]
+        let mut upsert_elapsed = core::time::Duration::ZERO;
+        #[cfg(feature = "metrics")]
+        let mut remove_elapsed = core::time::Duration::ZERO;
+        #[cfg(feature = "metrics")]
+        let mut seek_count = 0u64;
+
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
+            #[cfg(feature = "metrics")]
+            let seek_start = Instant::now();
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+            #[cfg(feature = "metrics")]
+            {
+                seek_elapsed += seek_start.elapsed();
+                seek_count += 1;
+            }
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
@@ -257,6 +279,8 @@ impl ArenaSparseSubtrie {
             match update {
                 LeafUpdate::Changed(value) if !value.is_empty() => {
                     // Upsert: insert or update a leaf with the given value.
+                    #[cfg(feature = "metrics")]
+                    let upsert_start = Instant::now();
                     let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
@@ -265,11 +289,17 @@ impl ArenaSparseSubtrie {
                         value,
                         find_result,
                     );
+                    #[cfg(feature = "metrics")]
+                    {
+                        upsert_elapsed += upsert_start.elapsed();
+                    }
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
                 }
                 LeafUpdate::Changed(_) => {
+                    #[cfg(feature = "metrics")]
+                    let remove_start = Instant::now();
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
@@ -279,6 +309,10 @@ impl ArenaSparseSubtrie {
                         find_result,
                         &mut self.buffers.updates,
                     );
+                    #[cfg(feature = "metrics")]
+                    {
+                        remove_elapsed += remove_start.elapsed();
+                    }
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
@@ -294,7 +328,17 @@ impl ArenaSparseSubtrie {
         }
 
         // Drain remaining cursor entries, propagating dirty state.
+        #[cfg(feature = "metrics")]
+        let drain_start = Instant::now();
         self.buffers.cursor.drain(&mut self.arena);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.subtrie_update_leaves_seek_latency.record(seek_elapsed);
+            self.metrics.subtrie_update_leaves_upsert_latency.record(upsert_elapsed);
+            self.metrics.subtrie_update_leaves_remove_latency.record(remove_elapsed);
+            self.metrics.subtrie_update_leaves_drain_latency.record(drain_start.elapsed());
+            self.metrics.subtrie_update_leaves_seek_count.record(seek_count as f64);
+        }
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -515,6 +559,9 @@ pub struct ArenaParallelSparseTrie {
     cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Metrics for `update_leaves` breakdown.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ArenaUpdateLeavesMetrics,
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
     debug_recorder: TrieDebugRecorder,
@@ -702,6 +749,8 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
+                #[cfg(feature = "metrics")]
+                metrics: Default::default(),
             })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
@@ -2108,6 +2157,8 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
         }
@@ -2745,6 +2796,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
+        #[cfg(feature = "metrics")]
+        let total_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_updates = updates.len();
+
         #[cfg(feature = "trie-debug")]
         let recorded_updates: Vec<_> =
             updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
@@ -2752,9 +2808,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         // Drain and sort updates lexicographically by nibbles path.
+        #[cfg(feature = "metrics")]
+        let drain_sort_start = Instant::now();
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_drain_sort_latency.record(drain_sort_start.elapsed());
 
         let threshold = self.parallelism_thresholds.min_updates;
 
@@ -2764,11 +2824,24 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Subtries taken for parallel processing: (arena_index, subtrie, update_range).
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
 
+        #[cfg(feature = "metrics")]
+        let upper_walk_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let mut inline_subtrie_elapsed = core::time::Duration::ZERO;
+        #[cfg(feature = "metrics")]
+        let mut inline_subtrie_count = 0u64;
+        #[cfg(feature = "metrics")]
+        let mut upper_seek_count = 0u64;
+
         let mut update_idx = 0;
         while update_idx < sorted.len() {
             let (key, ref full_path, ref update) = sorted[update_idx];
 
             let find_result = cursor.seek(&mut self.upper_arena, full_path);
+            #[cfg(feature = "metrics")]
+            {
+                upper_seek_count += 1;
+            }
 
             match find_result {
                 // Blinded — request a proof regardless of update type.
@@ -2835,7 +2908,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             unreachable!()
                         };
 
+                        #[cfg(feature = "metrics")]
+                        let inline_start = Instant::now();
                         subtrie.update_leaves(subtrie_updates);
+                        #[cfg(feature = "metrics")]
+                        {
+                            inline_subtrie_elapsed += inline_start.elapsed();
+                            inline_subtrie_count += 1;
+                        }
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                             proof_required_fn(proof.key, proof.min_len);
@@ -2935,7 +3015,23 @@ impl SparseTrie for ArenaParallelSparseTrie {
         cursor.drain(&mut self.upper_arena);
         self.buffers.cursor = cursor;
 
+        #[cfg(feature = "metrics")]
+        {
+            let upper_walk_elapsed = upper_walk_start.elapsed() - inline_subtrie_elapsed;
+            self.metrics.update_leaves_upper_walk_latency.record(upper_walk_elapsed);
+            self.metrics.update_leaves_inline_subtrie_latency.record(inline_subtrie_elapsed);
+            self.metrics.update_leaves_inline_subtrie_count.record(inline_subtrie_count as f64);
+            self.metrics.update_leaves_upper_seek_count.record(upper_seek_count as f64);
+        }
+
         if taken.is_empty() {
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.update_leaves_num_updates.record(num_updates as f64);
+                self.metrics.update_leaves_parallel_subtrie_count.record(0.0);
+                self.metrics.update_leaves_total_latency.record(total_start.elapsed());
+            }
+
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
 
@@ -2949,6 +3045,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Apply updates to taken subtries, in parallel if more than one.
+        #[cfg(feature = "metrics")]
+        let parallel_start = Instant::now();
         if taken.len() == 1 {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
@@ -2958,6 +3056,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
+        }
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.update_leaves_parallel_subtrie_latency.record(parallel_start.elapsed());
+            self.metrics.update_leaves_parallel_subtrie_count.record(taken.len() as f64);
         }
 
         // Collect subtrie paths before consuming `taken`, then restore subtries and
@@ -2979,6 +3082,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Navigate to each taken subtrie via seek to propagate dirty state
         // through intermediate branches, and collapse any EmptyRoot subtries.
+        #[cfg(feature = "metrics")]
+        let post_parallel_start = Instant::now();
         {
             let mut cursor = mem::take(&mut self.buffers.cursor);
             cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -3010,6 +3115,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             cursor.drain(&mut self.upper_arena);
             self.buffers.cursor = cursor;
+        }
+        #[cfg(feature = "metrics")]
+        self.metrics.update_leaves_post_parallel_latency.record(post_parallel_start.elapsed());
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.update_leaves_num_updates.record(num_updates as f64);
+            self.metrics.update_leaves_total_latency.record(total_start.elapsed());
         }
 
         #[cfg(debug_assertions)]
