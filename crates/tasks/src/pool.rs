@@ -285,21 +285,14 @@ impl WorkerPool {
     }
 }
 
-/// Builds a rayon thread pool with a panic handler that logs panics via `tracing::error` instead of
-/// aborting the process.
+/// Builds a rayon thread pool with a panic handler that prevents aborting the process.
+///
+/// Rust's default panic hook already logs the panic message and backtrace to stderr, so the handler
+/// itself is intentionally a no-op.
 pub fn build_pool_with_panic_handler(
     builder: rayon::ThreadPoolBuilder,
 ) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
-    builder
-        .panic_handler(|payload| {
-            let msg = payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
-                .unwrap_or("(no message)");
-            tracing::error!(target: "reth::tasks", %msg, "panic in rayon thread pool thread");
-        })
-        .build()
+    builder.panic_handler(|_| {}).build()
 }
 
 /// Per-thread state container for a [`WorkerPool`].
