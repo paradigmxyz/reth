@@ -232,9 +232,7 @@ impl BalProvider {
 
         match self.store.get_by_hashes(&missing_hashes) {
             Ok(store_results) => {
-                for (missing_idx, store_result) in
-                    missing_indices.into_iter().zip(store_results.into_iter())
-                {
+                for (missing_idx, store_result) in missing_indices.into_iter().zip(store_results) {
                     if let Some(value) = store_result {
                         results[missing_idx] = Some(value);
                     }

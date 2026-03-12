@@ -51,7 +51,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
-    ///
+    /// Bal Provider used to access the the Bal Cache
     pub(crate) bal_provider: BalProvider,
 }
 
@@ -809,7 +809,8 @@ impl<N: NodeTypesWithDB> BalStore for BlockchainProvider<N> {
         block_number: BlockNumber,
         bal: alloy_primitives::Bytes,
     ) -> Result<(), reth_bal_store::BalStoreError> {
-        Ok(self.bal_provider.cache().insert(block_hash, block_number, bal))
+        self.bal_provider.cache().insert(block_hash, block_number, bal);
+        Ok(())
     }
 
     fn get_by_hashes(
