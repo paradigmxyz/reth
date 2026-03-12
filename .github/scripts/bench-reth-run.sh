@@ -146,7 +146,7 @@ if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
   RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
 fi
 if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}")
+  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
 fi
 
 # Tracy profiling: add --log.tracy flags and set environment
