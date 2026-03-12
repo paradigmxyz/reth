@@ -1628,7 +1628,7 @@ mod test {
         let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
 
-        let request_hashes = RequestTxHashes::new([*signed_tx_1.hash()].into_iter().collect());
+        let request_hashes = RequestTxHashes::new(std::iter::once(*signed_tx_1.hash()).collect());
         let payload = UnverifiedPooledTransactions::new(PooledTransactions(vec![
             signed_tx_1.clone(),
             signed_tx_2.clone(),
@@ -1653,7 +1653,7 @@ mod test {
 
         let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
         let peer_id = PeerId::new([3; 64]);
-        let requested_hashes = RequestTxHashes::new([*signed_tx.hash()].into_iter().collect());
+        let requested_hashes = RequestTxHashes::new(std::iter::once(*signed_tx.hash()).collect());
 
         tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(
             *signed_tx.hash(),
