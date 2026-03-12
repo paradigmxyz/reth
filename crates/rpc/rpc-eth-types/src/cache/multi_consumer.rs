@@ -100,8 +100,8 @@ where
     {
         let size = value.size();
 
-        if self.cache.limiter().is_over_the_limit(self.cache.len() + 1) &&
-            let Some((_, evicted)) = self.cache.pop_oldest()
+        if self.cache.limiter().is_over_the_limit(self.cache.len() + 1)
+            && let Some((_, evicted)) = self.cache.pop_oldest()
         {
             // update tracked memory with the evicted value
             self.memory_usage = self.memory_usage.saturating_sub(evicted.size());

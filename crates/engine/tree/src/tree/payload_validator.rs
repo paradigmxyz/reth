@@ -11,7 +11,7 @@ use crate::tree::{
     StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{total_bal_items, BlockAccessList, ITEM_COST};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -314,7 +314,7 @@ where
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block, None) {
             // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // Also validate against the parent
@@ -322,7 +322,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // No header validation errors, return the original execution error
@@ -397,7 +397,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = convert_to_block(input)?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -430,7 +430,7 @@ where
                 convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
@@ -443,7 +443,7 @@ where
                 convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
@@ -763,7 +763,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         let timing_stats = state_provider_stats.map(|stats| {
@@ -825,14 +825,14 @@ where
     ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) =
             self.consensus.validate_block_pre_execution_with_tx_root(block, transaction_root)
         {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -874,11 +874,27 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = input.block_access_list().is_some();
+        if has_bal {
+            let bal = input
+                .block_access_list()
+                .transpose()
+                .map_err(BlockExecutionError::other)?
+                .unwrap_or_default();
+
+            let bal_items = total_bal_items(&bal);
+
+            if bal_items > input.gas_limit() / ITEM_COST as u64 {
+                debug!(target: "engine::tree::payload_validator", bal_items, "{} {}", input.gas_limit(), "BAL is invalid since it contains more items than the gas limit allows");
+                return Err(InsertBlockErrorKind::Consensus(
+                    ConsensusError::BlockAccessListCostMoreThanGasLimit,
+                ));
+            }
+        }
+
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .with_bal_builder_if(has_bal)
                 .build()
         });
@@ -896,19 +912,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -936,6 +954,7 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
+            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -956,7 +975,7 @@ where
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
 
-            let built_bal = &result.block_access_list;
+            let built_bal = db.take_built_alloy_bal();
 
             // Compute hashes and compare
             let expected_hash = expected_bal
@@ -967,8 +986,8 @@ where
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
 
-            if let (Some(expected), Some(got)) = (expected_hash, built_hash) &&
-                expected != got
+            if let (Some(expected), Some(got)) = (expected_hash, built_hash)
+                && expected != got
             {
                 return Err(InsertBlockErrorKind::Consensus(
                     ConsensusError::BlockAccessListHashMismatch((got, expected).into()),
@@ -1003,6 +1022,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
+        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -1018,6 +1038,11 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        if has_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1061,6 +1086,10 @@ where
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
+            }
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
         drop(exec_span);
@@ -1355,7 +1384,7 @@ where
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         if let Err(e) = self.validate_block_inner(block, transaction_root) {
-            return Err(e.into())
+            return Err(e.into());
         }
 
         // now validate against the parent
@@ -1364,7 +1393,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err(e.into());
         }
         drop(_enter);
 
@@ -1372,12 +1401,16 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
-        {
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            block,
+            output,
+            receipt_root_bloom,
+            None,
+            false,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1393,7 +1426,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
 
         // record post-execution validation duration
@@ -1501,7 +1534,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1509,7 +1542,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1541,7 +1574,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -1793,9 +1826,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
@@ -2102,6 +2135,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_used(),
             Self::Block(block) => block.gas_used(),
+        }
+    }
+
+    /// Returns the gas limit used by the block.
+    pub fn gas_limit(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_limit(),
+            Self::Block(block) => block.gas_limit(),
         }
     }
 }

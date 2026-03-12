@@ -404,9 +404,9 @@ impl SparseNode {
     pub fn cached_rlp_node(&self) -> Option<Cow<'_, RlpNode>> {
         match &self {
             Self::Empty => None,
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
         }
     }
 
@@ -414,9 +414,9 @@ impl SparseNode {
     pub fn cached_hash(&self) -> Option<B256> {
         match &self {
             Self::Empty => None,
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => state.cached_hash(),
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => state.cached_hash(),
         }
     }
 
@@ -429,9 +429,9 @@ impl SparseNode {
             Self::Empty => {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => {
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => {
                 *state = new_state;
             }
         }

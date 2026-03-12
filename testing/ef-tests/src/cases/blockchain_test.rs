@@ -64,12 +64,12 @@ impl BlockchainTestCase {
     const fn excluded_fork(network: ForkSpec) -> bool {
         matches!(
             network,
-            ForkSpec::ByzantiumToConstantinopleAt5 |
-                ForkSpec::Constantinople |
-                ForkSpec::ConstantinopleFix |
-                ForkSpec::MergeEOF |
-                ForkSpec::MergeMeterInitCode |
-                ForkSpec::MergePush0
+            ForkSpec::ByzantiumToConstantinopleAt5
+                | ForkSpec::Constantinople
+                | ForkSpec::ConstantinopleFix
+                | ForkSpec::MergeEOF
+                | ForkSpec::MergeMeterInitCode
+                | ForkSpec::MergePush0
         )
     }
 
@@ -258,7 +258,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             &output.receipts,
             &output.requests,
             None,
-            &output.block_access_list,
+            &None,
+            false,
             Some(output.gas_used),
         )
         .map_err(|err| Error::block_failed(block_number, err))?;

@@ -77,8 +77,8 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
         }
 
         // Advance min_freq to the next non-empty bucket.
-        while (self.min_freq as usize) < self.buckets.len() &&
-            self.buckets[self.min_freq as usize].is_empty()
+        while (self.min_freq as usize) < self.buckets.len()
+            && self.buckets[self.min_freq as usize].is_empty()
         {
             self.min_freq += 1;
         }
@@ -91,8 +91,8 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
         if let Some(key) = self.buckets[self.min_freq as usize].pop() {
             self.entries.remove(&key);
 
-            while (self.min_freq as usize) < self.buckets.len() &&
-                self.buckets[self.min_freq as usize].is_empty()
+            while (self.min_freq as usize) < self.buckets.len()
+                && self.buckets[self.min_freq as usize].is_empty()
             {
                 self.min_freq += 1;
             }

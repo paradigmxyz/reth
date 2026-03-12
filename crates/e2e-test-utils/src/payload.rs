@@ -69,7 +69,7 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
                      check that the chain spec supports all generated tx types"
                 );
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                continue
+                continue;
             }
             // Resolve payload once its built
             self.payload_builder

@@ -123,8 +123,8 @@ impl EngineCapabilities {
 /// Returns `true` if the method is critical for block production and chain synchronization.
 fn is_critical_method(method: &str) -> bool {
     CRITICAL_METHOD_PREFIXES.iter().any(|prefix| {
-        method.starts_with(prefix) &&
-            method[prefix.len()..]
+        method.starts_with(prefix)
+            && method[prefix.len()..]
                 .strip_prefix('V')
                 .is_some_and(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
     })

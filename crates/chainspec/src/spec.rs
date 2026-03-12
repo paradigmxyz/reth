@@ -356,8 +356,8 @@ pub fn blob_params_to_schedule(
     let bpo_forks = EthereumHardfork::bpo_variants();
     for (timestamp, blob_params) in &params.scheduled {
         for bpo_fork in bpo_forks {
-            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
-                fork_ts == *timestamp
+            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork)
+                && fork_ts == *timestamp
             {
                 schedule.insert(bpo_fork.name().to_lowercase(), *blob_params);
                 break;
@@ -549,7 +549,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -642,8 +642,8 @@ impl<H: BlockHeader> ChainSpec<H> {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in
             // the fork filter.
             Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block)
+                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -677,8 +677,8 @@ impl<H: BlockHeader> ChainSpec<H> {
         for (_, cond) in self.hardforks.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block
@@ -689,7 +689,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -711,7 +711,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 

@@ -147,6 +147,9 @@ pub trait Executor<DB: Database>: Sized {
     /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
 
+    /// Take built [`BlockAccessList`] from executor
+    fn take_bal(&mut self) -> Option<BlockAccessList>;
+
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -464,6 +467,8 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()?;
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -480,6 +485,8 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
+            // Bump BAL index after each committed transaction (EIP-7928)
+            self.executor.evm_mut().db_mut().bump_bal_index();
 
             Ok(Some(gas_used))
         } else {
@@ -498,7 +505,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
-        let block_access_list = result.block_access_list.clone();
+        let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
@@ -563,7 +570,6 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
-            .without_state_clear()
             .with_bal_builder_if(true)
             .build();
         Self { strategy_factory, db }
@@ -616,6 +622,10 @@ where
 
     fn into_state(self) -> State<DB> {
         self.db
+    }
+
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
+        self.db.take_built_alloy_bal()
     }
 
     fn size_hint(&self) -> usize {
@@ -721,6 +731,10 @@ mod tests {
 
         fn into_state(self) -> State<DB> {
             unreachable!()
+        }
+
+        fn take_bal(&mut self) -> Option<BlockAccessList> {
+            None
         }
 
         fn size_hint(&self) -> usize {

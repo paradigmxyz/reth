@@ -73,8 +73,8 @@ where
         // Spawn a task caching bad blocks
         executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
-                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                    let Ok(recovered) =
+                if let ConsensusEngineEvent::InvalidBlock(block) = event
+                    && let Ok(recovered) =
                         RecoveredBlock::try_recover_sealed(block.as_ref().clone())
                 {
                     bad_block_store.insert(recovered);
@@ -350,7 +350,7 @@ where
                 tx_index,
                 block.transaction_count()
             ))
-            .into())
+            .into());
         }
 
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
@@ -398,7 +398,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();

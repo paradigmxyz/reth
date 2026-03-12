@@ -24,6 +24,7 @@ use reth_primitives_traits::{
 /// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
 /// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
 /// against the execution result's `gas_used` rather than the receipt value.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
@@ -31,6 +32,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list: &Option<BlockAccessList>,
+    allow_bal_check: bool,
     gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
@@ -51,10 +53,10 @@ where
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: block.header().gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        })
+        });
     }
     // Validate that the block access list hash matches the calculated block access list hash
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) && allow_bal_check {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
         let default_bal = BlockAccessList::default();
         let block_access_list_hash =
@@ -62,7 +64,7 @@ where
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 (block_access_list_hash, block_bal_hash).into(),
-            ))
+            ));
         }
     }
 
@@ -88,20 +90,20 @@ where
                 .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
                 .collect::<Vec<_>>();
             tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
+            return Err(error);
         }
     }
 
     // Validate that the header requests hash matches the calculated requests hash
     if chain_spec.is_prague_active_at_timestamp(block.header().timestamp()) {
         let Some(header_requests_hash) = block.header().requests_hash() else {
-            return Err(ConsensusError::RequestsHashMissing)
+            return Err(ConsensusError::RequestsHashMissing);
         };
         let requests_hash = requests.requests_hash();
         if requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
-            ))
+            ));
         }
     }
 
@@ -141,13 +143,13 @@ fn compare_receipts_root_and_logs_bloom(
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ))
+        ));
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ))
+        ));
     }
 
     Ok(())

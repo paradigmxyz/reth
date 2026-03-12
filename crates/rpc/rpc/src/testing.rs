@@ -141,10 +141,10 @@ where
                     let tx_rlp_len = tx.tx().length();
                     if is_osaka {
                         // 1KB overhead for block header
-                        let estimated_block_size = block_transactions_rlp_length +
-                            tx_rlp_len +
-                            withdrawals_rlp_length +
-                            1024;
+                        let estimated_block_size = block_transactions_rlp_length
+                            + tx_rlp_len
+                            + withdrawals_rlp_length
+                            + 1024;
                         if estimated_block_size > MAX_RLP_BLOCK_SIZE {
                             if skip_invalid_transactions {
                                 debug!(

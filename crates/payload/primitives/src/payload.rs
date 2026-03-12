@@ -61,6 +61,9 @@ pub trait ExecutionPayload:
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 
+    /// Returns the gas limit of this block.
+    fn gas_limit(&self) -> u64;
+
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
 }
@@ -100,6 +103,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.payload.as_v1().gas_limit
     }
 
     fn transaction_count(&self) -> usize {
@@ -231,6 +238,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.payload.as_v1().gas_limit
     }
 
     fn transaction_count(&self) -> usize {

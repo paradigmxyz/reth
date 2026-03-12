@@ -101,8 +101,8 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// [`Self::RlpNode`].
     pub(crate) fn short_key(&self) -> &Nibbles {
         match self {
-            Self::Leaf { short_key, .. } |
-            Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } => short_key,
+            Self::Leaf { short_key, .. }
+            | Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } => short_key,
             Self::RlpNode(_) => {
                 static EMPTY_NIBBLES: Nibbles = Nibbles::new();
                 &EMPTY_NIBBLES

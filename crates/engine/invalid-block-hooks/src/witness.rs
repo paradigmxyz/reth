@@ -731,8 +731,8 @@ mod tests {
 
         // Modify the state to create a mismatch
         let addr = Address::from([1u8; 20]);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(ref mut info) = account.info
+        if let Some(account) = modified_state.state.get_mut(&addr)
+            && let Some(ref mut info) = account.info
         {
             info.balance = U256::from(999);
         }
@@ -840,7 +840,6 @@ mod tests {
                 requests: Requests::default(),
                 gas_used: 0,
                 blob_gas_used: 0,
-                block_access_list: Default::default(),
             },
         };
 

@@ -18,6 +18,7 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 
 # misc
 auto_impl.workspace = true

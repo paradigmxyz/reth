@@ -62,8 +62,8 @@ pub struct ImportResult {
 impl ImportResult {
     /// Returns true if all blocks and transactions were imported successfully.
     pub fn is_complete(&self) -> bool {
-        self.total_decoded_blocks == self.total_imported_blocks &&
-            self.total_decoded_txns == self.total_imported_txns
+        self.total_decoded_blocks == self.total_imported_blocks
+            && self.total_decoded_txns == self.total_imported_txns
     }
 
     /// Returns true if the import was successful, considering stop-on-invalid-block mode.

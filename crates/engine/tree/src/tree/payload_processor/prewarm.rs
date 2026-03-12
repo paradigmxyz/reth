@@ -181,9 +181,9 @@ where
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_multi_proof) = to_multi_proof &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
+                if let Some(to_multi_proof) = to_multi_proof
+                    && let Some(withdrawals) = &ctx.env.withdrawals
+                    && !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
@@ -463,7 +463,7 @@ where
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
@@ -475,7 +475,7 @@ where
 
                     if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
             }
@@ -541,7 +541,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 
@@ -571,7 +571,7 @@ where
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
+            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
@@ -656,7 +656,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         //
         // See: https://eips.ethereum.org/EIPS/eip-6780
         if !account.is_touched() || account.is_selfdestructed() {
-            continue
+            continue;
         }
 
         let hashed_address = keccak256(addr);
@@ -666,7 +666,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
-                continue
+                continue;
             }
 
             let hashed_slot = keccak256(B256::new(key.to_be_bytes()));

@@ -698,7 +698,7 @@ impl Drop for PendingChangesetGuard {
     fn drop(&mut self) {
         let Some(pending) = self.pending.take() else {
             // Guard was resolved successfully already, no-op
-            return
+            return;
         };
 
         let removed = self.cache.inner.write().pending.remove(&self.block_hash);

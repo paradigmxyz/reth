@@ -309,9 +309,9 @@ fn event_loop(
         let timeout =
             tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)? &&
-            let Event::Key(key) = event::read()? &&
-            key.kind == event::KeyEventKind::Press
+        if crossterm::event::poll(timeout)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == event::KeyEventKind::Press
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => {

@@ -77,7 +77,7 @@ where
         if batch.len() == 1 {
             Self::process_request(pool, batch.into_iter().next().expect("batch is not empty"))
                 .await;
-            return
+            return;
         }
 
         let (transactions, response_txs): (Vec<_>, Vec<_>) =

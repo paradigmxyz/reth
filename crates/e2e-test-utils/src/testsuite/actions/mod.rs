@@ -174,8 +174,8 @@ where
                 ];
 
                 // if we're on a fork, validate it now that it's canonical
-                if let Ok(active_state) = env.active_node_state() &&
-                    let Some(fork_base) = active_state.current_fork_base
+                if let Ok(active_state) = env.active_node_state()
+                    && let Some(fork_base) = active_state.current_fork_base
                 {
                     debug!("MakeCanonical: Adding fork validation from base block {}", fork_base);
                     actions.push(Box::new(ValidateFork::new(fork_base)));

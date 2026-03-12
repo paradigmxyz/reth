@@ -23,8 +23,8 @@ pub enum StateRootError {
 impl From<StateRootError> for ProviderError {
     fn from(value: StateRootError) -> Self {
         match value {
-            StateRootError::Database(err) |
-            StateRootError::StorageRootError(StorageRootError::Database(err)) => {
+            StateRootError::Database(err)
+            | StateRootError::StorageRootError(StorageRootError::Database(err)) => {
                 Self::Database(err)
             }
             StateRootError::PrefixSetLoadError(err) => err,
