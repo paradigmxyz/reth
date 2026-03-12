@@ -955,6 +955,11 @@ Engine:
 
           [default: 5]
 
+      --engine.multiproof-max-targets-for-chunking <MULTIPROOF_MAX_TARGETS_FOR_CHUNKING>
+          Max targets threshold for forcing multiproof chunking regardless of worker availability. If the number of proof targets exceeds this value, chunking is forced even when no additional workers are available
+
+          [default: 300]
+
       --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
           Configure the number of reserved CPU cores for non-reth processes
 
