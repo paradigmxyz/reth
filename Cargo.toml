@@ -650,6 +650,7 @@ ethereum_ssz_derive = "0.10.1"
 
 # allocators
 jemalloc_pprof = { version = "0.8", default-features = false }
+mimalloc = { version = "0.1.48", default-features = false }
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = { version = "0.18.0", features = ["demangle"] }

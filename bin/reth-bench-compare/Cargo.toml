@@ -56,12 +56,14 @@ shlex.workspace = true
 nix = { version = "0.31", features = ["signal", "process"] }
 
 [features]
-default = ["jemalloc"]
+default = ["mimalloc"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+
+mimalloc = ["reth-cli-util/mimalloc"]
 
 jemalloc = [
     "reth-cli-util/jemalloc",

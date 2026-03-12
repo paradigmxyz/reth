@@ -46,6 +46,8 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
 ]
 
+mimalloc = []
+
 jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",

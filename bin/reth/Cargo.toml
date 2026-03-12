@@ -81,7 +81,7 @@ toml.workspace = true
 
 [features]
 default = [
-    "jemalloc",
+    "mimalloc",
     "otlp",
     "otlp-logs",
     "reth-revm/portable",
@@ -118,6 +118,10 @@ keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
     "alloy-primitives/keccak-cache-global",
+]
+mimalloc = [
+    "reth-cli-util/mimalloc",
+    "reth-ethereum-cli/mimalloc",
 ]
 jemalloc = [
     "reth-cli-util/jemalloc",

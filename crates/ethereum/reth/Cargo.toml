@@ -148,6 +148,10 @@ rpc = [
     "dep:alloy-rpc-types-engine",
 ]
 tasks = ["dep:reth-tasks"]
+mimalloc = [
+    "reth-cli-util?/mimalloc",
+    "reth-ethereum-cli?/mimalloc",
+]
 jemalloc = [
     "reth-cli-util?/jemalloc",
     "reth-ethereum-cli?/jemalloc",

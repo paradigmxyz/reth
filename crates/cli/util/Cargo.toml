@@ -37,7 +37,13 @@ tikv-jemallocator = { workspace = true, optional = true }
 snmalloc-rs = { workspace = true, optional = true }
 libc = "0.2"
 
+[dependencies.mimalloc]
+workspace = true
+optional = true
+
 [features]
+mimalloc = ["dep:mimalloc"]
+
 jemalloc = ["dep:tikv-jemallocator"]
 
 # Enables jemalloc profiling features
