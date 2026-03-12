@@ -169,11 +169,11 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) {
-            if input.gas >= entry.gas_used() {
-                self.increment_by_one_precompile_cache_hits();
-                return entry.to_precompile_result()
-            }
+        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone())
+            && input.gas >= entry.gas_used()
+        {
+            self.increment_by_one_precompile_cache_hits();
+            return entry.to_precompile_result()
         }
 
         let calldata = input.data;
