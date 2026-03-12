@@ -106,6 +106,34 @@ impl ArenaSparseNodeBranch {
         self.state = ArenaSparseNodeState::Dirty;
     }
 
+    /// Looks up a child by nibble for seek traversal.
+    ///
+    /// Combines the bit-test, dense-index computation, and child discriminant check into a
+    /// single inlined fast path, avoiding the abstraction overhead of
+    /// `BranchChildIdx::new` + `SmallVec::index` in the hottest loop.
+    ///
+    /// Returns `Ok(child_idx)` for a revealed child, or `Err(true)` if blinded,
+    /// `Err(false)` if the nibble is absent from `state_mask`.
+    #[inline(always)]
+    pub(super) fn lookup_child_for_seek(&self, nibble: u8) -> Result<Index, bool> {
+        let mask = self.state_mask.get();
+        let bit = 1u16 << nibble;
+
+        if mask & bit == 0 {
+            return Err(false); // no child
+        }
+
+        let dense = (mask & (bit - 1)).count_ones() as usize;
+        debug_assert!(dense < self.children.len());
+
+        // SAFETY: `dense` is the popcount of bits below `nibble` in `state_mask`, and
+        // `nibble`'s bit is set, so `dense < state_mask.count_ones() == children.len()`.
+        match unsafe { self.children.as_slice().get_unchecked(dense) } {
+            ArenaSparseNodeBranchChild::Blinded(_) => Err(true), // blinded
+            ArenaSparseNodeBranchChild::Revealed(idx) => Ok(*idx),
+        }
+    }
+
     /// Iterates over `(nibble, &ArenaSparseNodeBranchChild)` pairs in nibble order.
     pub(super) fn child_iter(
         &self,

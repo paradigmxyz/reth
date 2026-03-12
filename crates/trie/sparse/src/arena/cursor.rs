@@ -321,55 +321,80 @@ impl ArenaCursor {
         loop {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
+            let head_path = &head.path;
 
-            let head_branch = match &arena[head_idx] {
+            match &arena[head_idx] {
                 ArenaSparseNode::EmptyRoot => {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {
-                    let mut leaf_full_path = head.path;
-                    leaf_full_path.extend(key);
-                    return if &leaf_full_path == full_path {
+                    return if suffix_matches(head_path, key, full_path) {
                         SeekResult::RevealedLeaf
                     } else {
                         SeekResult::Diverged
                     };
                 }
-                ArenaSparseNode::Branch(b) => b,
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }
-                _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
-            };
+                ArenaSparseNode::Branch(b) => {
+                    let base_len = head_path.len();
+                    let short_key = &b.short_key;
+                    let logical_len = base_len + short_key.len();
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
+                    // If full_path doesn't extend past the branch's logical path, or the
+                    // short_key portion diverges, treat as diverged. The backtrack loop above
+                    // guarantees head_path is a prefix of full_path, so we only need to check
+                    // the short_key suffix.
+                    if full_path.len() <= logical_len ||
+                        !suffix_matches_prefix(full_path, base_len, short_key)
+                    {
+                        return SeekResult::Diverged;
+                    }
 
-            // If full_path doesn't extend past the branch's logical path, the target is at or
-            // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
-            {
-                return SeekResult::Diverged;
-            }
+                    let child_nibble = full_path.get_unchecked(logical_len);
+                    let child_idx = match b.lookup_child_for_seek(child_nibble) {
+                        Ok(idx) => idx,
+                        Err(false) => return SeekResult::NoChild { child_nibble },
+                        Err(true) => return SeekResult::Blinded,
+                    };
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
-            let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
-            else {
-                return SeekResult::NoChild { child_nibble };
-            };
-
-            match &head_branch.children[branch_child_idx] {
-                ArenaSparseNodeBranchChild::Blinded(_) => {
-                    return SeekResult::Blinded;
-                }
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let path = full_path.slice(..logical_len + 1);
                     self.push(arena, child_idx, path);
                 }
-            }
+                _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
+            };
         }
     }
+}
+
+/// Checks whether `full_path` equals `entry_path` concatenated with `suffix`, without
+/// allocating a new `Nibbles`.
+#[inline]
+fn suffix_matches(entry_path: &Nibbles, suffix: &Nibbles, full_path: &Nibbles) -> bool {
+    let base_len = entry_path.len();
+    if full_path.len() != base_len + suffix.len() {
+        return false;
+    }
+    debug_assert!(full_path.starts_with(entry_path));
+    for i in 0..suffix.len() {
+        if full_path.get_unchecked(base_len + i) != suffix.get_unchecked(i) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Checks whether `full_path[offset..]` starts with `prefix`, without allocating.
+#[inline]
+fn suffix_matches_prefix(full_path: &Nibbles, offset: usize, prefix: &Nibbles) -> bool {
+    debug_assert!(full_path.len() >= offset + prefix.len());
+    for i in 0..prefix.len() {
+        if full_path.get_unchecked(offset + i) != prefix.get_unchecked(i) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Returns the logical path of a branch stack entry. The logical path is
