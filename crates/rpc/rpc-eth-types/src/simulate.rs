@@ -47,6 +47,9 @@ pub enum EthSimulateError {
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Number of simulated blocks exceeds the configured client limit.
+    #[error("too many blocks")]
+    TooManyBlocks,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
@@ -116,7 +119,7 @@ impl EthSimulateError {
             Self::BlockTimestampInvalid { .. } => -38021,
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
-            Self::GasLimitReached => -38026,
+            Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::NotAPrecompile(_) => -32000,
         }
     }
