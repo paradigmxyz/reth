@@ -367,55 +367,47 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             },
         );
 
-        drop(provider_ro);
-
-        // Step 4: Heal finalized/safe block numbers if they are ahead of the
-        // highest header. This can happen on 1.10.x when the node shuts down
-        // after flushing the finalized block number but before persisting the
-        // corresponding blocks/state.
-        self.heal_chain_state_block_numbers()?;
+        // Step 4: Heal finalized/safe block numbers that may be ahead of the
+        // highest header on nodes coming from <=1.10.2.
+        if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
+            self.heal_chain_state_block_numbers(&provider_ro)?;
+        }
 
         Ok((rocksdb_unwind, static_file_unwind))
     }
 
     /// Checks if the stored finalized or safe block numbers exceed the highest
     /// known header and corrects them if so.
-    ///
-    /// On 1.10.x, the finalized block number is always flushed but blocks and
-    /// state are batched, so a shutdown can leave the finalized number ahead of
-    /// the actual tip. This also handles the analogous case for the safe block.
-    fn heal_chain_state_block_numbers(&self) -> ProviderResult<()> {
+    fn heal_chain_state_block_numbers(
+        &self,
+        provider_ro: &DatabaseProvider<<N::DB as Database>::TX, N>,
+    ) -> ProviderResult<()> {
         let highest_header = self.last_block_number()?;
 
-        // Read with a RO provider first to avoid opening a write tx unnecessarily.
-        let provider_ro = self.database_provider_ro()?;
         let finalized = provider_ro.last_finalized_block_number()?;
         let safe = provider_ro.last_safe_block_number()?;
-        drop(provider_ro);
 
-        let heal_finalized = finalized.is_some_and(|f| f > highest_header);
-        let heal_safe = safe.is_some_and(|s| s > highest_header);
-
-        if !heal_finalized && !heal_safe {
+        if finalized.is_none_or(|f| f <= highest_header) && safe.is_none_or(|s| s <= highest_header)
+        {
             return Ok(());
         }
 
         let provider_rw = self.provider_rw()?;
 
-        if heal_finalized {
+        if let Some(finalized) = finalized.filter(|&f| f > highest_header) {
             info!(
                 target: "providers::db",
-                finalized = finalized.expect("checked above"),
+                finalized,
                 highest_header,
                 "Healing finalized block number",
             );
             provider_rw.save_finalized_block_number(highest_header)?;
         }
 
-        if heal_safe {
+        if let Some(safe) = safe.filter(|&s| s > highest_header) {
             info!(
                 target: "providers::db",
-                safe = safe.expect("checked above"),
+                safe,
                 highest_header,
                 "Healing safe block number",
             );
