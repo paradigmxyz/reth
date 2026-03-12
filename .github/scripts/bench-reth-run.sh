@@ -11,6 +11,8 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
+#               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 set -euo pipefail
 
 LABEL="$1"
@@ -139,6 +141,14 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
   RETH_ARGS+=(--metrics "$BENCH_METRICS_ADDR")
 fi
 
+# OTLP traces and logs export
+if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+fi
+if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}")
+fi
+
 # Tracy profiling: add --log.tracy flags and set environment
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   RETH_ARGS+=(--log.tracy --log.tracy.filter "${BENCH_TRACY_FILTER:-debug}")
@@ -149,16 +159,21 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+SUDO_ENV=()
+if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
+  SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
+fi
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 
