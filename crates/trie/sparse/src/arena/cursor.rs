@@ -87,26 +87,14 @@ impl ArenaCursor {
         self.stack.len() - 1
     }
 
-    /// Removes the root entry from the stack without dirty-state propagation.
+    /// Replaces the root entry on the stack with a new one.
     ///
-    /// Use when discarding the root node (e.g. replacing it with `EmptyRoot`). Since the root
-    /// has no parent, there is nothing to propagate to.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the stack does not contain exactly one entry (the root).
-    pub(super) fn drop_root(&mut self) {
-        debug_assert_eq!(self.stack.len(), 1, "drop_root requires exactly the root on the stack");
-        self.stack.clear();
-        self.needs_pop = false;
-    }
-
-    /// Clears the traversal stack and pushes the given root entry.
+    /// The stack must contain exactly the root (depth 0) or be empty (freshly constructed).
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(
-            self.stack.is_empty() && !self.needs_pop,
-            "cursor must be fully drained before reset; stack has {} entries, needs_pop={}",
+            self.stack.len() <= 1 && !self.needs_pop,
+            "cursor must be drained before reset; stack has {} entries, needs_pop={}",
             self.stack.len(),
             self.needs_pop,
         );
@@ -160,8 +148,8 @@ impl ArenaCursor {
         entry
     }
 
-    /// Drains the stack, propagating dirty state from each entry to its parent,
-    /// then removes the final (root) entry.
+    /// Drains the stack down to the root, propagating dirty state from each popped entry
+    /// to its parent. The root entry remains on the stack (there is no parent to propagate to).
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     pub(super) fn drain(&mut self, arena: &mut NodeArena) {
         trace!(target: TRACE_TARGET, "Draining stack");
@@ -169,7 +157,6 @@ impl ArenaCursor {
         while self.stack.len() > 1 {
             self.pop(arena);
         }
-        self.stack.clear();
     }
 
     /// Returns the logical path of the branch at the top of the stack.

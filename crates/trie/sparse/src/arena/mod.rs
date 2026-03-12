@@ -1654,7 +1654,6 @@ impl ArenaParallelSparseTrie {
                 if cursor.depth() == 0 {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
-                    cursor.drop_root();
                     arena.remove(head_idx);
                     *root = arena.insert(ArenaSparseNode::EmptyRoot);
                     cursor.reset(arena, *root, head_path);
