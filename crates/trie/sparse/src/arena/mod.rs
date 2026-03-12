@@ -1623,25 +1623,25 @@ impl ArenaParallelSparseTrie {
                     let child_nibble = head_path.last().expect("non-root leaf");
                     let parent_branch = arena[parent_idx].branch_ref();
 
-                    if parent_branch.state_mask.count_bits() == 2 {
-                        if parent_branch.sibling_child(child_nibble).is_blinded() {
-                            let sibling_nibble = parent_branch
-                                .state_mask
-                                .iter()
-                                .find(|&n| n != child_nibble)
-                                .expect("branch has two children");
-                            let mut sibling_path = cursor.parent_logical_branch_path(arena);
-                            sibling_path.push_unchecked(sibling_nibble);
-                            trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
-                            return (
-                                RemoveLeafResult::NeedsProof {
-                                    key,
-                                    proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                    min_len: (sibling_path.len() as u8).min(64),
-                                },
-                                SubtrieCounterDeltas::default(),
-                            );
-                        }
+                    if parent_branch.state_mask.count_bits() == 2 &&
+                        parent_branch.sibling_child(child_nibble).is_blinded()
+                    {
+                        let sibling_nibble = parent_branch
+                            .state_mask
+                            .iter()
+                            .find(|&n| n != child_nibble)
+                            .expect("branch has two children");
+                        let mut sibling_path = cursor.parent_logical_branch_path(arena);
+                        sibling_path.push_unchecked(sibling_nibble);
+                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
+                        return (
+                            RemoveLeafResult::NeedsProof {
+                                key,
+                                proof_key: Self::nibbles_to_padded_b256(&sibling_path),
+                                min_len: (sibling_path.len() as u8).min(64),
+                            },
+                            SubtrieCounterDeltas::default(),
+                        );
                     }
                 }
 
