@@ -38,7 +38,8 @@ pub(super) fn test_update_leaves_insert_new_leaf<T: SparseTrie + Default>() {
     ]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie with 4 leaves"
     );
 }
@@ -72,7 +73,8 @@ pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie + Default>()
         BTreeMap::from([(key1, U256::from(1)), (key2, new_value), (key3, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie with modified leaf value"
     );
 }
@@ -100,7 +102,8 @@ pub(super) fn test_insert_single_leaf_into_empty_trie<T: SparseTrie + Default>()
 
     let expected_harness = SuiteTestHarness::new(BTreeMap::from([(key, value)]));
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference single-leaf trie"
     );
 }
@@ -134,7 +137,7 @@ pub(super) fn test_insert_multiple_leaves_into_empty_trie<T: SparseTrie + Defaul
     assert!(leaf_updates.is_empty(), "leaf_updates should be drained");
 
     let root = trie.root();
-    assert_eq!(root, expected_harness.original_root, "root should match reference 256-leaf trie");
+    assert_eq!(root, expected_harness.original_root(), "root should match reference 256-leaf trie");
 
     let updates = trie.take_updates();
     assert!(
@@ -172,7 +175,7 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie + Default>() 
     .expect("update_leaves should succeed");
 
     let hash1 = trie.root();
-    assert_eq!(hash1, expected_old.original_root, "hash1 should match reference with old values");
+    assert_eq!(hash1, expected_old.original_root(), "hash1 should match reference with old values");
 
     // Update all 256 keys with new values.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&new_storage);
@@ -182,7 +185,7 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie + Default>() 
     .expect("update_leaves should succeed");
 
     let hash2 = trie.root();
-    assert_eq!(hash2, expected_new.original_root, "hash2 should match reference with new values");
+    assert_eq!(hash2, expected_new.original_root(), "hash2 should match reference with new values");
     assert_ne!(hash1, hash2, "roots should differ after updating all values");
 }
 
@@ -218,7 +221,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie + 
     let root = trie.root();
 
     let expected = SuiteTestHarness::new(BTreeMap::from([(key_50, value), (key_51, value)]));
-    assert_eq!(root, expected.original_root, "root should match reference two-leaf trie");
+    assert_eq!(root, expected.original_root(), "root should match reference two-leaf trie");
 
     let updates = trie.take_updates();
     assert!(
@@ -254,7 +257,8 @@ pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie + Default>() {
     let expected_storage = BTreeMap::from([(key1, U256::from(1)), (key3, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie with removed leaf"
     );
 }
@@ -299,7 +303,8 @@ pub(super) fn test_remove_leaf_branch_collapses_to_extension<T: SparseTrie + Def
     let expected_storage = BTreeMap::from([(key_50231, U256::from(1)), (key_50233, U256::from(2))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie after branch-to-extension collapse"
     );
 }
@@ -333,7 +338,8 @@ pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie + Default>
     let expected_storage = BTreeMap::from([(key_b, U256::from(200))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie after branch-to-leaf collapse"
     );
 
@@ -401,7 +407,7 @@ pub(super) fn test_insert_then_remove_sequence<T: SparseTrie + Default>() {
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     let root_after_insert = trie.root();
-    assert_eq!(root_after_insert, harness.original_root, "root after inserting all 6 leaves");
+    assert_eq!(root_after_insert, harness.original_root(), "root after inserting all 6 leaves");
 
     // Remove leaves one at a time in the same order as the original test: k3, k1, k4, k6, k2, k5.
     let removal_order = [k3, k1, k4, k6, k2, k5];
@@ -414,7 +420,7 @@ pub(super) fn test_insert_then_remove_sequence<T: SparseTrie + Default>() {
         let root = trie.root();
         assert_eq!(
             root,
-            harness.original_root,
+            harness.original_root(),
             "root mismatch after removal step {} (removed key {:?})",
             i + 1,
             key
@@ -443,7 +449,7 @@ pub(super) fn test_remove_nonexistent_leaf_preserves_hashes<T: SparseTrie + Defa
 
     // Compute root to cache hashes on all nodes.
     let root_before = trie.root();
-    assert_eq!(root_before, harness.original_root);
+    assert_eq!(root_before, harness.original_root());
 
     // Try to remove a key that doesn't exist in the trie.
     let nonexistent_key = B256::with_last_byte(0x50);
@@ -554,7 +560,7 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie + Default>() {
     assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
 
     // Reveal the proof for the requested targets.
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Second update_leaves: now the path is revealed, key should be drained.
@@ -572,7 +578,11 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie + Default>() {
     let expected_harness = SuiteTestHarness::new(expected_storage);
 
     let root = trie.root();
-    assert_eq!(root, expected_harness.original_root, "root should match expected trie after retry");
+    assert_eq!(
+        root,
+        expected_harness.original_root(),
+        "root should match expected trie after retry"
+    );
 }
 
 pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + Default>() {
@@ -613,7 +623,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + D
     assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
 
     // Reveal the blinded sibling subtrie.
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Retry removal — now the sibling is revealed, branch can collapse.
@@ -628,7 +638,8 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie + D
 
     let root = trie.root();
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match trie without the removed leaf"
     );
 }
@@ -1004,7 +1015,8 @@ pub(super) fn test_update_leaves_multiple_mixed_updates<T: SparseTrie + Default>
 
     let root = trie.root();
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference trie with mixed updates applied"
     );
 }
@@ -1034,7 +1046,7 @@ pub(super) fn test_remove_leaf_marks_ancestors_dirty_unconditionally<T: SparseTr
     trie.set_root(root_node.node, root_node.masks, false).expect("set_root should succeed");
 
     let mut targets: Vec<ProofV2Target> = keys.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Insert all leaves via update_leaves — do NOT call root() so no hashes are cached.
@@ -1058,7 +1070,8 @@ pub(super) fn test_remove_leaf_marks_ancestors_dirty_unconditionally<T: SparseTr
     expected_storage.remove(&keys[2]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference after removal without prior root() call"
     );
 }
@@ -1121,7 +1134,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     let mut insert_updates = SuiteTestHarness::leaf_updates(&initial_storage);
     harness.reveal_and_update(&mut trie, &mut insert_updates);
     let root1 = trie.root();
-    assert_eq!(root1, harness.original_root, "initial root should match");
+    assert_eq!(root1, harness.original_root(), "initial root should match");
 
     // Step 1: Remove key_c to collapse the branch at 0x10..
     let removal: BTreeMap<B256, U256> = once((key_c, U256::ZERO)).collect();
@@ -1129,7 +1142,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     let mut removal_updates = SuiteTestHarness::leaf_updates(&removal);
     harness.reveal_and_update(&mut trie, &mut removal_updates);
     let root2 = trie.root();
-    assert_eq!(root2, harness.original_root, "root after removal should match");
+    assert_eq!(root2, harness.original_root(), "root after removal should match");
 
     // Step 2: Re-insert key_c with a new value — this re-creates the branch.
     let reinsert: BTreeMap<B256, U256> = once((key_c, U256::from(33))).collect();
@@ -1137,7 +1150,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     let mut reinsert_updates = SuiteTestHarness::leaf_updates(&reinsert);
     harness.reveal_and_update(&mut trie, &mut reinsert_updates);
     let root3 = trie.root();
-    assert_eq!(root3, harness.original_root, "root after re-insert should match");
+    assert_eq!(root3, harness.original_root(), "root after re-insert should match");
 
     // Step 3: Update key_a — previously could be orphaned if branch collapse
     // didn't maintain structural tracking properly.
@@ -1146,7 +1159,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<
     let mut update_updates = SuiteTestHarness::leaf_updates(&update);
     harness.reveal_and_update(&mut trie, &mut update_updates);
     let root4 = trie.root();
-    assert_eq!(root4, harness.original_root, "root after updating key_a should match");
+    assert_eq!(root4, harness.original_root(), "root after updating key_a should match");
 
     // Verify the invariant: every key with a value must be findable via find_leaf.
     let final_keys = [key_a, key_b, key_c, key_d, key_e];
@@ -1193,7 +1206,8 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
 
     let root_after_removal = trie.root();
     assert_eq!(
-        root_after_removal, harness.original_root,
+        root_after_removal,
+        harness.original_root(),
         "root after branch collapse should match reference"
     );
 
@@ -1214,7 +1228,8 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
 
     let root_after_update = trie.root();
     assert_eq!(
-        root_after_update, harness.original_root,
+        root_after_update,
+        harness.original_root(),
         "root after updating remaining leaf should match reference"
     );
 }
@@ -1252,7 +1267,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
 
     // Verify root is unchanged after prune.
     let root_after_prune = trie.root();
-    assert_eq!(root_after_prune, harness.original_root, "root should be unchanged after prune");
+    assert_eq!(root_after_prune, harness.original_root(), "root should be unchanged after prune");
 
     // Now remove keys[0] — this leaves keys[1] and all the blinded subtries.
     // The branch at the root still has multiple children (keys[1] + blinded children),
@@ -1264,7 +1279,8 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
 
     let root_after_removal = trie.root();
     assert_eq!(
-        root_after_removal, harness.original_root,
+        root_after_removal,
+        harness.original_root(),
         "root after removing a revealed leaf with blinded sibling subtries should match reference"
     );
 
@@ -1286,7 +1302,8 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie + De
 
     let root_after_mod = trie.root();
     assert_eq!(
-        root_after_mod, harness.original_root,
+        root_after_mod,
+        harness.original_root(),
         "root after modifying retained leaf should match reference"
     );
 }

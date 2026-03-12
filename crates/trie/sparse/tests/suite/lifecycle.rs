@@ -47,7 +47,7 @@ pub(super) fn test_full_lifecycle_update_root_take_commit<T: SparseTrie + Defaul
     expected_storage.insert(new_key, U256::from(999));
     expected_storage.insert(modify_key, U256::from(500));
     let expected_harness = SuiteTestHarness::new(expected_storage);
-    assert_eq!(hash1, expected_harness.original_root, "root should match reference trie");
+    assert_eq!(hash1, expected_harness.original_root(), "root should match reference trie");
 
     // Take updates — should be non-empty with hashed branch children.
     let updates = trie.take_updates();
@@ -93,7 +93,7 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie + Default
 
     // Verify root1 matches reference.
     harness.apply_changeset(changeset1);
-    assert_eq!(root1, harness.original_root, "round 1 root should match reference");
+    assert_eq!(root1, harness.original_root(), "round 1 root should match reference");
 
     let updates1 = trie.take_updates();
     trie.commit_updates(&updates1.updated_nodes, &updates1.removed_nodes);
@@ -108,7 +108,7 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie + Default
 
     // Verify root2 matches reference.
     harness.apply_changeset(changeset2);
-    assert_eq!(root2, harness.original_root, "round 2 root should match reference");
+    assert_eq!(root2, harness.original_root(), "round 2 root should match reference");
 
     let updates2 = trie.take_updates();
     trie.commit_updates(&updates2.updated_nodes, &updates2.removed_nodes);
@@ -124,7 +124,7 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie + Default
 
     // Root should still be correct after prune.
     let root_after_prune = trie.root();
-    assert_eq!(root_after_prune, harness.original_root, "root should be unchanged after prune");
+    assert_eq!(root_after_prune, harness.original_root(), "root should be unchanged after prune");
 
     // --- Round 3: Update leaf E (keys[4]) — needs re-reveal since it was pruned ---
     let mut changeset3: BTreeMap<B256, U256> = BTreeMap::new();
@@ -135,7 +135,11 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie + Default
 
     // Verify root3 matches reference.
     harness.apply_changeset(changeset3);
-    assert_eq!(root3, harness.original_root, "round 3 root should match reference after re-reveal");
+    assert_eq!(
+        root3,
+        harness.original_root(),
+        "round 3 root should match reference after re-reveal"
+    );
 }
 
 /// Core production loop: reveal → update → root.
@@ -173,7 +177,8 @@ pub(super) fn test_reveal_update_root_basic_lifecycle<T: SparseTrie + Default>()
     expected_storage.remove(&keys[2]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference after modifications and removal"
     );
 }
@@ -229,7 +234,7 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie + Defa
     assert!(!leaf_updates.is_empty(), "blinded keys should remain in updates map");
 
     // Reveal the proof for the requested targets.
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
     // Second update_leaves: now all paths are revealed, remaining keys should be drained.
@@ -253,7 +258,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie + Defa
 
     let root = trie.root();
     assert_eq!(
-        root, expected_harness.original_root,
+        root,
+        expected_harness.original_root(),
         "root should match reference after incremental reveal and retry"
     );
 }
@@ -276,7 +282,7 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie + Default>() {
         a1_storage.insert(key, U256::from(i as u64 + 1));
     }
     let mut a1_harness = SuiteTestHarness::new(a1_storage.clone());
-    let a1_initial_root = a1_harness.original_root;
+    let a1_initial_root = a1_harness.original_root();
 
     // A2 storage trie: 3 slots
     let mut a2_storage: BTreeMap<B256, U256> = BTreeMap::new();
@@ -286,7 +292,7 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie + Default>() {
         a2_storage.insert(key, U256::from(i as u64 + 10));
     }
     let mut a2_harness = SuiteTestHarness::new(a2_storage.clone());
-    let a2_initial_root = a2_harness.original_root;
+    let a2_initial_root = a2_harness.original_root();
 
     // Account trie keys.
     let mut acct_keys = Vec::new();
@@ -351,10 +357,10 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie + Default>() {
 
     // Verify storage roots match references.
     a1_harness.apply_changeset(a1_changeset);
-    assert_eq!(sr1, a1_harness.original_root, "A1 storage root should match reference");
+    assert_eq!(sr1, a1_harness.original_root(), "A1 storage root should match reference");
 
     a2_harness.apply_changeset(a2_changeset);
-    assert_eq!(sr2, a2_harness.original_root, "A2 storage root should match reference");
+    assert_eq!(sr2, a2_harness.original_root(), "A2 storage root should match reference");
 
     // --- Account promotion phase ---
     // Encode A1 with sr1, A2 with sr2, modify A3 (balance change = different value).
@@ -370,7 +376,7 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie + Default>() {
 
     // Verify state root matches reference.
     acct_harness.apply_changeset(acct_changeset);
-    assert_eq!(state_root, acct_harness.original_root, "state root should match reference");
+    assert_eq!(state_root, acct_harness.original_root(), "state root should match reference");
 
     // --- Finalize: take_updates ---
     let acct_updates = acct_trie.take_updates();
@@ -449,7 +455,11 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie + Default>(
     let root = trie.root();
 
     harness.apply_changeset(changeset);
-    assert_eq!(root, harness.original_root, "root should match reference after Touched + Changed");
+    assert_eq!(
+        root,
+        harness.original_root(),
+        "root should match reference after Touched + Changed"
+    );
 }
 
 /// Touched on blinded path triggers proof callback, then Changed
@@ -499,7 +509,7 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
     assert!(!leaf_updates.is_empty(), "Touched key should remain in map when blinded");
 
     // Step 2: Reveal the proof for the requested targets.
-    let mut proof_nodes = harness.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal should succeed");
 
     // Step 3: Replace Touched with Changed(new_value) in the map.
@@ -519,7 +529,8 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<
     changeset.insert(target_key, new_value);
     harness.apply_changeset(changeset);
     assert_eq!(
-        root, harness.original_root,
+        root,
+        harness.original_root(),
         "root should match reference after Touched-miss → reveal → Changed"
     );
 }
@@ -570,7 +581,8 @@ pub(super) fn test_get_leaf_value_for_storage_root_lookup<T: SparseTrie + Defaul
     changeset.insert(key1, new_value);
     harness.apply_changeset(changeset);
     assert_eq!(
-        root, harness.original_root,
+        root,
+        harness.original_root(),
         "root should match reference after get→decode→re-encode→update"
     );
 }
@@ -624,7 +636,7 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie + De
     changeset.insert(key2, new_key2_value);
     changeset.insert(nonexistent_key, new_insert_value);
     harness.apply_changeset(changeset);
-    assert_eq!(root, harness.original_root, "root should match reference after find→update");
+    assert_eq!(root, harness.original_root(), "root should match reference after find→update");
 
     // Step 5: find_leaf(nonexistent_key, None) → now Exists
     assert_eq!(
@@ -665,7 +677,7 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie + Default>() {
     let root1 = trie.root();
 
     harness.apply_changeset(changeset1);
-    assert_eq!(root1, harness.original_root, "block 1 root should match reference");
+    assert_eq!(root1, harness.original_root(), "block 1 root should match reference");
 
     let updates1 = trie.take_updates();
     trie.commit_updates(&updates1.updated_nodes, &updates1.removed_nodes);
@@ -683,7 +695,8 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie + Default>() {
 
     harness.apply_changeset(changeset_hot);
     assert_eq!(
-        root_hot, harness.original_root,
+        root_hot,
+        harness.original_root(),
         "hot path root should match reference (K1 updated)"
     );
 
@@ -696,7 +709,8 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie + Default>() {
 
     harness.apply_changeset(changeset_cold);
     assert_eq!(
-        root_cold, harness.original_root,
+        root_cold,
+        harness.original_root(),
         "cold path root should match reference (K1 and K5 updated)"
     );
 }
