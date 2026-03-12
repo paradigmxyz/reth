@@ -9,9 +9,12 @@ use reth_fs_util as fs;
 use std::{
     borrow::Cow,
     fs::OpenOptions,
-    io::{self, BufWriter, Read, Write},
+    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::{Duration, Instant},
 };
 use tar::Archive;
@@ -330,6 +333,8 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
 
 const MAX_DOWNLOAD_RETRIES: u32 = 10;
 const RETRY_BACKOFF_SECS: u64 = 5;
+const DEFAULT_SEGMENTS: usize = 16;
+const SEGMENT_RETRY_ATTEMPTS: u32 = 3;
 
 /// Wrapper that tracks download progress while writing data.
 /// Used with [`io::copy`] to display progress during downloads.
@@ -468,9 +473,211 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
         .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
 }
 
+/// Downloads a single segment of a file using an HTTP Range request.
+/// Writes data at the correct offset in the `.part` file and updates the shared
+/// progress counter.
+fn download_segment(
+    url: &str,
+    part_path: &Path,
+    start: u64,
+    end: u64,
+    downloaded: &AtomicU64,
+) -> Result<()> {
+    let client = BlockingClient::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(3600))
+        .build()?;
+
+    for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
+        let response = match client
+            .get(url)
+            .header(RANGE, format!("bytes={start}-{end}"))
+            .send()
+            .and_then(|r| r.error_for_status())
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if attempt == SEGMENT_RETRY_ATTEMPTS {
+                    return Err(e.into());
+                }
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                continue;
+            }
+        };
+
+        let mut file = OpenOptions::new().write(true).open(part_path)?;
+        file.seek(SeekFrom::Start(start))?;
+
+        let mut buf = [0u8; 64 * 1024];
+        let mut reader = response;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    file.write_all(&buf[..n])?;
+                    downloaded.fetch_add(n as u64, Ordering::Relaxed);
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    if attempt == SEGMENT_RETRY_ATTEMPTS {
+                        return Err(e.into());
+                    }
+                    break;
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    Err(eyre::eyre!("Segment download failed after {SEGMENT_RETRY_ATTEMPTS} attempts"))
+}
+
+/// Downloads a file using parallel HTTP Range requests. The file is split into
+/// multiple segments that are fetched concurrently via [`rayon::scope`].
+///
+/// Falls back to [`resumable_download`] when the server does not advertise
+/// `Accept-Ranges: bytes` support or the file is too small to benefit from
+/// parallelism.
+fn parallel_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
+    let file_name = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .unwrap_or_else(|| "snapshot.tar".to_string());
+
+    let final_path = target_dir.join(&file_name);
+    let part_path = target_dir.join(format!("{file_name}.part"));
+
+    // HEAD request to get total size and check range support
+    let client = BlockingClient::builder().connect_timeout(Duration::from_secs(30)).build()?;
+
+    // Probe with a single-byte Range request to discover total size and range support.
+    // This is more reliable than checking Accept-Ranges on a HEAD response, since some
+    // servers support ranges but don't advertise it in HEAD.
+    let probe =
+        client.get(url).header(RANGE, "bytes=0-0").send().and_then(|r| r.error_for_status());
+
+    let (supports_ranges, total_size) = match probe {
+        Ok(resp) if resp.status() == StatusCode::PARTIAL_CONTENT => {
+            // Parse total size from Content-Range: bytes 0-0/<total>
+            let total = resp
+                .headers()
+                .get("Content-Range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split('/').next_back())
+                .and_then(|v| v.parse::<u64>().ok());
+            (true, total)
+        }
+        _ => {
+            // Probe failed or server returned 200 (no range support) — try HEAD for size
+            let head = client.head(url).send()?.error_for_status()?;
+            (false, head.content_length())
+        }
+    };
+
+    let total_size = total_size.ok_or_else(|| eyre::eyre!("Server did not return file size"))?;
+
+    if !supports_ranges || total_size == 0 {
+        info!(target: "reth::cli", "Server does not support Range requests, falling back to sequential download");
+        return resumable_download(url, target_dir);
+    }
+
+    // At least 1 MB per segment to avoid excessive overhead
+    let num_segments = DEFAULT_SEGMENTS.min(total_size as usize / (1024 * 1024)).max(1);
+    let segment_size = total_size / num_segments as u64;
+
+    info!(target: "reth::cli",
+        total_size = %DownloadProgress::format_size(total_size),
+        segments = num_segments,
+        "Starting parallel download"
+    );
+
+    // Pre-allocate the .part file
+    {
+        let file = fs::create_file(&part_path)?;
+        file.set_len(total_size)?;
+    }
+
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let url = url.to_string();
+    let errors: Arc<Mutex<Vec<eyre::Error>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Progress reporter thread
+    let progress_downloaded = Arc::clone(&downloaded);
+    let progress_done = Arc::new(AtomicBool::new(false));
+    let progress_done_clone = Arc::clone(&progress_done);
+    let progress_handle = std::thread::spawn(move || {
+        let started_at = Instant::now();
+        while !progress_done_clone.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(500));
+            let current = progress_downloaded.load(Ordering::Relaxed);
+            let progress_pct = (current as f64 / total_size as f64) * 100.0;
+            let elapsed = started_at.elapsed();
+            let speed = if elapsed.as_secs_f64() > 0.0 {
+                current as f64 / elapsed.as_secs_f64()
+            } else {
+                0.0
+            };
+            let eta = if speed > 0.0 {
+                Duration::from_secs_f64((total_size - current) as f64 / speed)
+            } else {
+                Duration::ZERO
+            };
+            print!(
+                "\rDownloading... {:.2}% ({} / {}) ETA: {}     ",
+                progress_pct,
+                DownloadProgress::format_size(current),
+                DownloadProgress::format_size(total_size),
+                DownloadProgress::format_duration(eta),
+            );
+            let _ = io::stdout().flush();
+        }
+    });
+
+    // Download segments in parallel
+    rayon::scope(|s| {
+        for i in 0..num_segments {
+            let start = i as u64 * segment_size;
+            let end = if i == num_segments - 1 {
+                total_size - 1
+            } else {
+                (i as u64 + 1) * segment_size - 1
+            };
+
+            let url = &url;
+            let part_path = &part_path;
+            let downloaded = Arc::clone(&downloaded);
+            let errors = Arc::clone(&errors);
+
+            s.spawn(move |_| {
+                if let Err(e) = download_segment(url, part_path, start, end, &downloaded) {
+                    errors.lock().unwrap().push(e);
+                }
+            });
+        }
+    });
+
+    progress_done.store(true, Ordering::Relaxed);
+    let _ = progress_handle.join();
+    println!();
+
+    let errs = errors.lock().unwrap();
+    if !errs.is_empty() {
+        let msg = format!("Parallel download failed: {}", errs[0]);
+        drop(errs);
+        let _ = std::fs::remove_file(&part_path);
+        return Err(eyre::eyre!(msg));
+    }
+    drop(errs);
+
+    fs::rename(&part_path, &final_path)?;
+    info!(target: "reth::cli", "Download complete: {}", final_path.display());
+    Ok((final_path, total_size))
+}
+
 /// Fetches the snapshot from a remote URL with resume support, then extracts it.
 fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
-    let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
+    let (downloaded_path, total_size) = parallel_download(url, target_dir)?;
 
     info!(target: "reth::cli", "Extracting snapshot...");
     let file = fs::open(&downloaded_path)?;
