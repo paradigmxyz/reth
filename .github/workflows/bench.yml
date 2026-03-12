@@ -895,6 +895,7 @@ jobs:
           taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
+        if: env.BENCH_ABBA != 'false'
         id: run-feature-2
         env:
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
@@ -905,6 +906,7 @@ jobs:
           taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
+        if: env.BENCH_ABBA != 'false'
         id: run-baseline-2
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
