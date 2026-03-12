@@ -24,7 +24,7 @@ use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
-    errors::{EthHandshakeError, EthStreamError},
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
@@ -490,6 +490,25 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         self.poll_terminate_message(cx).expect("message is set")
     }
 
+    /// Returns whether a receive-side stream error should be treated as a protocol breach.
+    fn is_protocol_breach_receive_error(error: &EthStreamError) -> bool {
+        matches!(
+            error,
+            EthStreamError::InvalidMessage(_) |
+                EthStreamError::MessageTooBig(_) |
+                EthStreamError::TransactionHashesInvalidLenOfFields { .. } |
+                EthStreamError::UnsupportedMessage { .. } |
+                EthStreamError::P2PStreamError(
+                    P2PStreamError::Rlp(_) |
+                        P2PStreamError::Snap(_) |
+                        P2PStreamError::MessageTooBig { .. } |
+                        P2PStreamError::UnknownReservedMessageId(_) |
+                        P2PStreamError::EmptyProtocolMessage |
+                        P2PStreamError::UnknownDisconnectReason(_)
+                )
+        )
+    }
+
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
         Ok(self.conn.inner_mut().start_disconnect(reason)?)
@@ -742,7 +761,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
                                         debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
-                                        return this.close_on_error(error, cx)
+                                        this.on_bad_message();
+                                        return this
+                                            .try_disconnect(DisconnectReason::ProtocolBreach, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
                                         // failed to send due to lack of capacity
@@ -752,6 +773,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             }
                             Err(err) => {
                                 debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
+                                if Self::is_protocol_breach_receive_error(&err) {
+                                    this.on_bad_message();
+                                    return this.try_disconnect(DisconnectReason::ProtocolBreach, cx)
+                                }
                                 return this.close_on_error(err, cx)
                             }
                         }
