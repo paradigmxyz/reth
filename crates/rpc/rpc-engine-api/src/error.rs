@@ -6,6 +6,7 @@ use alloy_rpc_types_engine::{
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
+use reth_bal_store::BalStoreError;
 use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{EngineObjectValidationError, VersionSpecificValidationError};
@@ -204,6 +205,12 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             EngineApiError::Other(err) => err,
         }
+    }
+}
+
+impl From<BalStoreError> for EngineApiError {
+    fn from(err: BalStoreError) -> Self {
+        Self::Internal(Box::new(err))
     }
 }
 

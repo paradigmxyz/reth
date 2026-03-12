@@ -16,6 +16,7 @@ use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::Decodable;
+use reth_bal_store::BalStore;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
@@ -178,6 +179,7 @@ where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + BalStore
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -993,6 +995,9 @@ where
                     ConsensusError::BlockAccessListHashMismatch((got, expected).into()),
                 ));
             }
+            let bal_bytes: alloy_primitives::Bytes =
+                alloy_rlp::encode(built_bal.unwrap_or_default()).into();
+            let _ = self.provider.insert(input.hash(), input.num_hash().number, bal_bytes);
         }
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
@@ -1986,6 +1991,7 @@ where
         + ChangeSetReader
         + BlockNumReader
         + HashedPostStateProvider
+        + BalStore
         + Clone
         + 'static,
     N: NodePrimitives,

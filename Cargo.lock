@@ -7588,6 +7588,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bal-store"
+version = "1.11.0"
+dependencies = [
+ "alloy-primitives",
+ "parking_lot",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "reth-basic-payload-builder"
 version = "1.11.0"
 dependencies = [
@@ -8356,6 +8367,7 @@ dependencies = [
  "rand 0.8.5",
  "rand 0.9.2",
  "rayon",
+ "reth-bal-store",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
@@ -9052,6 +9064,7 @@ dependencies = [
  "rand 0.8.5",
  "rand 0.9.2",
  "rayon",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-consensus",
  "reth-discv4",
@@ -9225,6 +9238,7 @@ dependencies = [
  "jsonrpsee",
  "parking_lot",
  "rayon",
+ "reth-bal-store",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -9612,6 +9626,7 @@ dependencies = [
  "parking_lot",
  "rand 0.9.2",
  "rayon",
+ "reth-bal-store",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -9957,6 +9972,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
@@ -9975,6 +9991,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-transaction-pool",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -10266,6 +10283,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-db-api",
  "reth-db-models",
@@ -11171,9 +11189,9 @@ dependencies = [
 
 [[package]]
 name = "schannel"
-version = "0.1.28"
+version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
+checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -11893,9 +11911,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.26.0"
+version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand 2.3.0",
  "getrandom 0.4.2",

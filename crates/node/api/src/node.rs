@@ -15,7 +15,7 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{fmt::Debug, future::Future, marker::PhantomData};
+use std::{fmt, fmt::Debug, future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
@@ -103,7 +103,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 }
 
 /// Context passed to [`NodeAddOns::launch_add_ons`],
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node with all configured components.
     pub node: N,
@@ -115,6 +115,12 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
+}
+
+impl<N: FullNodeComponents> fmt::Debug for AddOnsContext<'_, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AddOnsContext").finish_non_exhaustive()
+    }
 }
 
 /// Customizable node add-on types.

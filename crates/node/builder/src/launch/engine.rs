@@ -31,7 +31,7 @@ use reth_node_core::{
 };
 use reth_node_events::node;
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
+    providers::{BalProvider, BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
 use reth_tasks::TaskExecutor;
@@ -90,6 +90,9 @@ impl EngineNodeLauncher {
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
 
+        // Create the bal cache
+        let bal_provider = BalProvider::default();
+
         // setup the launch context
         let ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
@@ -120,7 +123,7 @@ impl EngineNodeLauncher {
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider::new(provider_factory)?)
+                Ok(BlockchainProvider::new(provider_factory,bal_provider)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
