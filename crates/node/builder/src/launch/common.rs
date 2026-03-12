@@ -66,8 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    BlockHashReader, BlockNumReader, ChainStateBlockReader, ChainStateBlockWriter,
+    DatabaseProviderFactory, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -528,6 +529,45 @@ where
                 PipelineTarget::Unwind(block) => block,
                 PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
             });
+
+        // Step 4: Heal finalized/safe block numbers that may be ahead of the
+        // highest header on nodes coming from <=1.10.2.
+        //
+        // Unwinds already set it to the target block, so only heal when no
+        // unwind is required.
+        if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
+            let highest_header = factory.last_block_number()?;
+            let finalized = provider_ro.last_finalized_block_number()?;
+            let safe = provider_ro.last_safe_block_number()?;
+
+            if finalized.is_some_and(|f| f > highest_header) ||
+                safe.is_some_and(|s| s > highest_header)
+            {
+                let provider_rw = factory.provider_rw()?;
+
+                if let Some(finalized) = finalized.filter(|&f| f > highest_header) {
+                    info!(
+                        target: "reth::cli",
+                        finalized,
+                        highest_header,
+                        "Healing finalized block number",
+                    );
+                    provider_rw.save_finalized_block_number(highest_header)?;
+                }
+
+                if let Some(safe) = safe.filter(|&s| s > highest_header) {
+                    info!(
+                        target: "reth::cli",
+                        safe,
+                        highest_header,
+                        "Healing safe block number",
+                    );
+                    provider_rw.save_safe_block_number(highest_header)?;
+                }
+
+                provider_rw.commit()?;
+            }
+        }
 
         // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
