@@ -394,8 +394,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         let last_saved_safe_block_number = provider_rw.last_safe_block_number()?;
 
-                        if last_saved_safe_block_number.is_none()
-                            || Some(checkpoint.block_number) < last_saved_safe_block_number
+                        if last_saved_safe_block_number.is_none() ||
+                            Some(checkpoint.block_number) < last_saved_safe_block_number
                         {
                             provider_rw.save_safe_block_number(BlockNumber::from(
                                 checkpoint.block_number,
