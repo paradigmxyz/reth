@@ -1020,6 +1020,22 @@ Engine:
 
           [default: 1s]
 
+      --engine.persistence-pruner-delete-limit <PERSISTENCE_PRUNER_DELETE_LIMIT>
+          Maximum number of entries the persistence pruner may delete in a single run. Limits MDBX dirty page accumulation to prevent OOM when the pruner runs for the first time after startup on a large database.
+
+          Set to 0 to disable the limit (unlimited).
+
+          [default: 100000]
+
+      --engine.persistence-pruner-timeout <PERSISTENCE_PRUNER_TIMEOUT>
+          Timeout for the persistence pruner per run. Prevents a single prune from blocking block persistence for too long.
+
+          CAUTION: Account and Storage History segments treat this as a soft limit.
+
+          Set to 0s to disable.
+
+          --engine.persistence-pruner-timeout 30s
+
 ERA:
       --era.enable
           Enable import from ERA1 files
