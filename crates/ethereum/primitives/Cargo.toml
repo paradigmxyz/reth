@@ -87,5 +87,5 @@ serde = [
 ]
 rpc = [
     "dep:alloy-rpc-types-eth",
-    "alloy-rpc-types-eth?/serde"
+    "alloy-rpc-types-eth?/serde",
 ]
