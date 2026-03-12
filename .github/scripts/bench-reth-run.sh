@@ -165,16 +165,23 @@ if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
 fi
 
+# Limit reth memory to 95% of available RAM to prevent OOM kills
+TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+MEM_LIMIT=$(( TOTAL_MEM_KB * 95 / 100 * 1024 ))
+echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 1024 ))MB)"
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" \
+    env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" \
+    env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 
