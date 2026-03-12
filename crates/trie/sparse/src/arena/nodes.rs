@@ -1,18 +1,12 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseSubtrie,
+    ArenaSparseSubtrie, Index, NodeArena,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
-use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
-
-/// Alias for the slotmap key type used as node references throughout the arena trie.
-type Index = DefaultKey;
-/// Alias for the slotmap used as the node arena throughout the arena trie.
-type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +98,23 @@ impl ArenaSparseNodeBranch {
         self.children.remove(child_idx.get());
         self.unset_child_bit(nibble);
         self.state = ArenaSparseNodeState::Dirty;
+    }
+
+    /// Returns a reference to the sibling child in a branch with exactly 2 children.
+    ///
+    /// # Panics
+    ///
+    /// Panics (debug) if the branch does not have exactly 2 children, or if `nibble` is not set.
+    pub(super) fn sibling_child(&self, nibble: u8) -> &ArenaSparseNodeBranchChild {
+        debug_assert_eq!(
+            self.state_mask.count_bits(),
+            2,
+            "sibling_child requires exactly 2 children"
+        );
+        let child_idx =
+            BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
+        // With exactly 2 children the dense array has indices 0 and 1.
+        &self.children[1 - child_idx.get()]
     }
 
     /// Iterates over `(nibble, &ArenaSparseNodeBranchChild)` pairs in nibble order.
