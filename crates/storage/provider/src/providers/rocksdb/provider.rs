@@ -634,9 +634,32 @@ impl Drop for RocksDBProviderInner {
     }
 }
 
+fn short_backtrace() -> String {
+    let bt = std::backtrace::Backtrace::force_capture().to_string();
+    bt.lines()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl Drop for RocksDBProvider {
+    fn drop(&mut self) {
+        let strong_count = Arc::strong_count(&self.0);
+        if strong_count > 2 {
+            return;
+        }
+        tracing::warn!(
+            target: "providers::rocksdb",
+            strong_count = strong_count,
+            thread = std::thread::current().name().unwrap_or("unnamed"),
+            bt = %short_backtrace(),
+            "RocksDBProvider dropped"
+        );
     }
 }
 
