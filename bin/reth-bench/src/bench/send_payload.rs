@@ -1,4 +1,4 @@
-use super::helpers::{load_jwt_secret, read_input};
+use super::helpers::{load_jwt_secret, read_input, warn_v4_requests_hash_only};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
@@ -31,6 +31,11 @@ pub struct Command {
     #[arg(short, long)]
     jwt_secret: Option<String>,
 
+    /// The newPayload version to print in `cast` mode.
+    ///
+    /// For Prague/Osaka (`engine_newPayloadV4`), this command can only encode `requests_hash`
+    /// from the RPC block, so the target node must allow
+    /// `--engine.accept-execution-requests-hash`.
     #[arg(long, default_value_t = 3)]
     new_payload_version: u8,
 
@@ -81,6 +86,9 @@ impl Command {
         let execution_payload = ExecutionPayload::from_block_slow(&block).0;
 
         let use_v4 = block.header.requests_hash.is_some();
+        if use_v4 {
+            warn_v4_requests_hash_only();
+        }
 
         // Create JSON request data
         let json_request = if use_v4 {
