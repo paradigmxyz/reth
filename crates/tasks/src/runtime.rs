@@ -817,6 +817,17 @@ impl RuntimeBuilder {
             TaskManager::new_parts(handle.clone());
 
         #[cfg(feature = "rayon")]
+        #[allow(clippy::needless_pass_by_value)]
+        fn rayon_panic_handler(payload: Box<dyn std::any::Any + Send>) {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("(no message)");
+            error!(target: "reth::tasks", %msg, "panic in worker pool thread");
+        }
+
+        #[cfg(feature = "rayon")]
         let (
             cpu_pool,
             rpc_pool,
@@ -853,6 +864,7 @@ impl RuntimeBuilder {
             let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(proof_storage_worker_threads)
                 .thread_name(|i| format!("proof-strg-{i:02}"))
+                .panic_handler(rayon_panic_handler)
                 .build()?;
 
             let proof_account_worker_threads =
@@ -860,6 +872,7 @@ impl RuntimeBuilder {
             let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(proof_account_worker_threads)
                 .thread_name(|i| format!("proof-acct-{i:02}"))
+                .panic_handler(rayon_panic_handler)
                 .build()?;
 
             debug!(
