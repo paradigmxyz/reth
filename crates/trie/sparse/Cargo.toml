@@ -50,6 +50,7 @@ itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
+criterion.workspace = true
 rand.workspace = true
 rand_08.workspace = true
 
@@ -88,3 +89,8 @@ arbitrary = [
     "reth-trie-common/arbitrary",
     "smallvec/arbitrary",
 ]
+
+[[bench]]
+name = "apst_thresholds"
+required-features = ["test-utils"]
+harness = false
