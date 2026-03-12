@@ -165,6 +165,17 @@ impl BalStore for DiskFileBalStore {
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
         self.inner.get_by_range(start, count)
     }
+
+    fn get_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, BalStoreError> {
+        self.inner.get_by_block_number(block_number)
+    }
+
+    fn get_by_block_hash(&self, block_hash: BlockHash) -> Result<Option<Bytes>, BalStoreError> {
+        self.inner.get_by_block_hash(block_hash)
+    }
 }
 
 impl DiskFileBalStoreInner {
@@ -410,6 +421,58 @@ impl DiskFileBalStoreInner {
         Ok(result)
     }
 
+    fn get_by_block_number(&self, number: BlockNumber) -> Result<Option<Bytes>, BalStoreError> {
+        let hash = {
+            let state = self.state.lock();
+            state.block_to_hash.get(&number).copied()
+        };
+
+        let Some(hash) = hash else {
+            return Ok(None);
+        };
+
+        if let Some(bal) = self.recent_cache.read().get(number, hash) {
+            return Ok(Some(bal));
+        }
+
+        match fs::read(self.entry_file(hash)) {
+            Ok(bytes) => {
+                let bal = Bytes::from(bytes);
+
+                self.recent_cache.write().insert(hash, number, bal.clone());
+
+                Ok(Some(bal))
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+    fn get_by_block_hash(&self, hash: BlockHash) -> Result<Option<Bytes>, BalStoreError> {
+        let block_number = {
+            let state = self.state.lock();
+            state.hash_to_block.get(&hash).copied()
+        };
+
+        if let Some(block_number) = block_number {
+            if let Some(bal) = self.recent_cache.read().get(block_number, hash) {
+                return Ok(Some(bal));
+            }
+        }
+        match fs::read(self.entry_file(hash)) {
+            Ok(bytes) => {
+                let bal = Bytes::from(bytes);
+
+                if let Some(block_number) = block_number {
+                    self.recent_cache.write().insert(hash, block_number, bal.clone());
+                }
+
+                Ok(Some(bal))
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     /// Evicts oldest block-number entries until the configured capacity is satisfied.
     ///
     /// Eviction removes both entry payload files and index files to keep disk and memory in sync.
@@ -487,6 +550,17 @@ impl<T: BalStore + ?Sized> BalStore for Arc<T> {
 
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
         (**self).get_by_range(start, count)
+    }
+
+    fn get_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, BalStoreError> {
+        (**self).get_by_block_number(block_number)
+    }
+
+    fn get_by_block_hash(&self, block_hash: BlockHash) -> Result<Option<Bytes>, BalStoreError> {
+        (**self).get_by_block_hash(block_hash)
     }
 }
 

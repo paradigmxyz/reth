@@ -33,6 +33,15 @@ pub trait BalStore: Send + Sync + 'static {
 
     /// Returns contiguous BALs in `[start, start + count)` until the first gap.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError>;
+
+    /// Returns the BAL for the given block number, if it exists.
+    fn get_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, BalStoreError>;
+
+    /// Returns the BAL for the given block hash, if it exists.
+    fn get_by_block_hash(&self, block_hash: BlockHash) -> Result<Option<Bytes>, BalStoreError>;
 }
 
 /// Error variants that can occur when interacting with a BAL store.

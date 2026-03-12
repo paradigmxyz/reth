@@ -827,6 +827,20 @@ impl<N: NodeTypesWithDB> BalStore for BlockchainProvider<N> {
     ) -> Result<Vec<alloy_primitives::Bytes>, reth_bal_store::BalStoreError> {
         Ok(self.bal_provider.get_by_range(start, count))
     }
+
+    fn get_by_block_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Option<alloy_primitives::Bytes>, reth_bal_store::BalStoreError> {
+        Ok(self.bal_provider.get_by_block_hash(block_hash))
+    }
+
+    fn get_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<Option<alloy_primitives::Bytes>, reth_bal_store::BalStoreError> {
+        Ok(self.bal_provider.get_by_block_number(block_number))
+    }
 }
 
 #[cfg(test)]

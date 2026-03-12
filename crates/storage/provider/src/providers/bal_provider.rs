@@ -121,6 +121,23 @@ impl BalCache {
         result
     }
 
+    /// Retrieves the BAL for a specific block hash, if it exists.
+    pub fn get_by_block_hash(&self, hash: BlockHash) -> Option<Bytes> {
+        let entries = self.inner.entries.read();
+        entries.get(&hash).cloned()
+    }
+
+    /// Retrieves the BAL for a specific block number, if it exists.
+    pub fn get_by_block_number(&self, number: BlockNumber) -> Option<Bytes> {
+        let hash = {
+            let block_index = self.inner.block_index.read();
+            block_index.get(&number).copied()
+        }?;
+
+        let entries = self.inner.entries.read();
+        entries.get(&hash).cloned()
+    }
+
     /// Returns the number of entries in the cache.
     #[cfg(test)]
     fn len(&self) -> usize {
@@ -154,6 +171,17 @@ impl BalStore for BalCache {
 
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
         Ok(Self::get_by_range(self, start, count))
+    }
+
+    fn get_by_block_hash(&self, block_hash: BlockHash) -> Result<Option<Bytes>, BalStoreError> {
+        Ok(Self::get_by_block_hash(&self, block_hash))
+    }
+
+    fn get_by_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, BalStoreError> {
+        Ok(Self::get_by_block_number(&self, block_number))
     }
 }
 
@@ -239,7 +267,7 @@ impl BalProvider {
                 }
             }
             Err(err) => {
-                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by hash from BAL store");
+                warn!(target: "provider::bal_provider", ?err, "Failed to retrieve BALs by hash from BAL store");
             }
         }
 
@@ -264,8 +292,40 @@ impl BalProvider {
                 cache_results
             }
             Err(err) => {
-                warn!(target: "rpc::engine", ?err, "Failed to retrieve BALs by range from BAL store");
+                warn!(target: "provider::bal_provider", ?err, "Failed to retrieve BALs by range from BAL store");
                 cache_results
+            }
+        }
+    }
+
+    /// Cache-first lookup by block hash with store fallback on miss.
+    pub fn get_by_block_hash(&self, hash: BlockHash) -> Option<Bytes> {
+        if let Some(bal) = self.cache.get_by_block_hash(hash) {
+            return Some(bal);
+        }
+
+        match self.store.get_by_block_hash(hash) {
+            Ok(Some(bal)) => Some(bal),
+            Ok(None) => None,
+            Err(err) => {
+                warn!(target: "provider::bal_provider", ?err, "Failed to retrieve BAL by hash from BAL store");
+                None
+            }
+        }
+    }
+
+    /// Cache-first lookup by block number with store fallback on miss.
+    pub fn get_by_block_number(&self, number: BlockNumber) -> Option<Bytes> {
+        if let Some(bal) = self.cache.get_by_block_number(number) {
+            return Some(bal);
+        }
+
+        match self.store.get_by_block_number(number) {
+            Ok(Some(bal)) => Some(bal),
+            Ok(None) => None,
+            Err(err) => {
+                warn!(target: "rpc::engine", ?err, "Failed to retrieve BAL by number from BAL store");
+                None
             }
         }
     }

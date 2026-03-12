@@ -730,4 +730,18 @@ impl BalStore for NoopProvider {
     ) -> Result<Vec<Bytes>, reth_bal_store::BalStoreError> {
         Ok(Vec::new())
     }
+
+    fn get_by_block_number(
+        &self,
+        _block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(None)
+    }
+
+    fn get_by_block_hash(
+        &self,
+        _block_hash: BlockHash,
+    ) -> Result<Option<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(None)
+    }
 }
