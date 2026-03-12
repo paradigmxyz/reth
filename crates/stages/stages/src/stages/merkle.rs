@@ -253,7 +253,13 @@ where
                     .root_with_progress()
             })
             .map_err(|e| {
-                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                error!(
+                    target: "sync::stages::merkle",
+                    %e,
+                    ?current_block_number,
+                    ?to_block,
+                    "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+                );
                 StageError::Fatal(Box::new(e))
             })?;
             match progress {
@@ -326,7 +332,13 @@ where
                     DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
                 })
                 .map_err(|e| {
-                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    error!(
+                        target: "sync::stages::merkle",
+                        %e,
+                        ?current_block_number,
+                        ?to_block,
+                        "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+                    );
                     StageError::Fatal(Box::new(e))
                 })?;
                 provider.write_trie_updates(updates)?;
@@ -442,7 +454,13 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     if got == expected.state_root() {
         Ok(())
     } else {
-        error!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+        error!(
+            target: "sync::stages::merkle",
+            ?target_block,
+            ?got,
+            ?expected,
+            "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}"
+        );
         Err(StageError::Block {
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
                 GotExpected { got, expected: expected.state_root() }.into(),

@@ -1263,7 +1263,12 @@ where
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+        debug!(
+            target: "engine::tree",
+            ?new_tip_num,
+            last_persisted_block_number=?self.persistence_state.last_persisted_block.number,
+            "Removing blocks using persistence task"
+        );
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             let (tx, rx) = crossbeam_channel::bounded(1);
@@ -1287,7 +1292,12 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(
+            target: "engine::tree",
+            count=blocks_to_persist.len(),
+            blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
+            "Persisting blocks"
+        );
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
@@ -1391,7 +1401,13 @@ where
             return Ok(())
         };
 
-        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        debug!(
+            target: "engine::tree",
+            ?last_persisted_block_hash,
+            ?last_persisted_block_number,
+            elapsed=?start_time.elapsed(),
+            "Finished persisting, calling finish"
+        );
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
         // Evict trie changesets for blocks below the eviction threshold.
@@ -1535,7 +1551,12 @@ where
                                         .engine
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
-                                    warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
+                                    warn!(
+                                        target: "engine::tree",
+                                        ?state,
+                                        elapsed=?start.elapsed(),
+                                        "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}"
+                                    );
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
@@ -1559,7 +1580,12 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
+                                    warn!(
+                                        target: "engine::tree",
+                                        payload=?num_hash,
+                                        elapsed=?start.elapsed(),
+                                        "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}"
+                                    );
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -2521,7 +2547,12 @@ where
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain<N>) {
-        trace!(target: "engine::tree", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
+        trace!(
+            target: "engine::tree",
+            new_blocks = %chain_update.new_block_count(),
+            reorged_blocks =  %chain_update.reorged_block_count(),
+            "applying new chain update"
+        );
         let start = Instant::now();
 
         // update the tracked canonical head
@@ -2592,7 +2623,12 @@ where
                 .executed_block_by_hash(block.recovered_block().hash())
                 .is_none()
             {
-                trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
+                trace!(
+                    target: "engine::tree",
+                    num=?block.recovered_block().number(),
+                    hash=?block.recovered_block().hash(),
+                    "Reinserting block into tree state"
+                );
                 self.state.tree_state.insert_executed(block);
             }
         }
@@ -3171,7 +3207,12 @@ where
 
         // Check if the block is persisted
         if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
+            debug!(
+                target: "engine::tree",
+                %hash,
+                number = %header.number(),
+                "found canonical state for block in database, creating provider builder"
+            );
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
             return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))

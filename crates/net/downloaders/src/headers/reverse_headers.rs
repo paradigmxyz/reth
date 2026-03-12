@@ -308,7 +308,13 @@ where
             if let Err(error) = self.consensus.validate_header_against_parent(&*last_header, head) {
                 let local_head = head.clone();
                 // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", %error, number = last_header.number(), hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
+                error!(
+                    target: "downloaders::headers",
+                    %error,
+                    number = last_header.number(),
+                    hash = ?last_header.hash(),
+                    "Header cannot be attached to known canonical chain"
+                );
 
                 // Reset trackers so that we can start over the next time the sync target is
                 // updated.
@@ -428,7 +434,13 @@ where
                     }
                 }
 
-                trace!(target: "downloaders::headers", head=?self.local_block_number(), hash=?target.hash(), number=%target.number(), "Received sync target");
+                trace!(
+                    target: "downloaders::headers",
+                    head=?self.local_block_number(),
+                    hash=?target.hash(),
+                    number=%target.number(),
+                    "Received sync target"
+                );
 
                 // This is the next block we need to start issuing requests from
                 let parent_block_number = target.number().saturating_sub(1);

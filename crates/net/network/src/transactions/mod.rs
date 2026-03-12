@@ -1290,7 +1290,12 @@ where
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 if !self.accepts_incoming_from(&peer_id) {
-                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
+                    trace!(
+                        target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        policy=?self.config.ingress_policy,
+                        "Ignoring full transactions from peer blocked by ingress policy"
+                    );
                     return;
                 }
 
@@ -1314,7 +1319,12 @@ where
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
                 if !self.accepts_incoming_from(&peer_id) {
-                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring transaction hashes from peer blocked by ingress policy");
+                    trace!(
+                        target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        policy=?self.config.ingress_policy,
+                        "Ignoring transaction hashes from peer blocked by ingress policy"
+                    );
                     return;
                 }
                 self.on_new_pooled_transaction_hashes(peer_id, msg)

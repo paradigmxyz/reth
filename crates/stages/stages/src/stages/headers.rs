@@ -124,7 +124,11 @@ where
             let (_, header_buf) = header?;
 
             if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
+                info!(
+                    target: "sync::stages::headers",
+                    progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0),
+                    "Writing headers"
+                );
             }
 
             let sealed_header: SealedHeader<Downloader::Header> =
@@ -165,7 +169,11 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+                info!(
+                    target: "sync::stages::headers",
+                    progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0),
+                    "Writing headers hash index"
+                );
             }
 
             if first_sync {
@@ -241,7 +249,13 @@ where
         loop {
             match ready!(self.downloader.poll_next_unpin(cx)) {
                 Some(Ok(headers)) => {
-                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number()), to_block = headers.last().map(|h| h.number()), "Received headers");
+                    info!(
+                        target: "sync::stages::headers",
+                        total = headers.len(),
+                        from_block = headers.first().map(|h| h.number()),
+                        to_block = headers.last().map(|h| h.number()),
+                        "Received headers"
+                    );
                     for header in headers {
                         let header_number = header.number();
 

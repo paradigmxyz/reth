@@ -622,7 +622,13 @@ impl PeersManager {
                         peer_id,
                         std::time::Instant::now() + self.incoming_ip_throttle_duration,
                     );
-                    trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
+                    trace!(
+                        target: "net::peers",
+                        ?peer_id,
+                        kind=?peer.kind,
+                        duration=?self.incoming_ip_throttle_duration,
+                        "backing off on gracefully closed session"
+                    );
                 }
             }
             Entry::Vacant(_) => return,

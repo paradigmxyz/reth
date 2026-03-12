@@ -47,7 +47,14 @@ impl TrieUpdatesDiff {
                 },
             ) in &self.removed_nodes
             {
-                warn!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
+                warn!(
+                    target: "engine::tree",
+                    ?path,
+                    ?task_removed,
+                    ?regular_removed,
+                    ?database_not_exists,
+                    "Difference in removed account trie nodes"
+                );
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -94,7 +101,15 @@ impl StorageTrieUpdatesDiff {
             },
         ) in &self.removed_nodes
         {
-            warn!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
+            warn!(
+                target: "engine::tree",
+                ?address,
+                ?path,
+                ?task_removed,
+                ?regular_removed,
+                ?database_not_exists,
+                "Difference in removed storage trie nodes"
+            );
         }
     }
 }

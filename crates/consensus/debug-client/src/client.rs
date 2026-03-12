@@ -114,18 +114,21 @@ where
             );
             let (safe_block_hash, finalized_block_hash) =
                 tokio::join!(safe_block_hash, finalized_block_hash);
-            let (safe_block_hash, finalized_block_hash) = match (
-                safe_block_hash,
-                finalized_block_hash,
-            ) {
-                (Ok(safe_block_hash), Ok(finalized_block_hash)) => {
-                    (safe_block_hash, finalized_block_hash)
-                }
-                (safe_block_hash, finalized_block_hash) => {
-                    warn!(target: "consensus::debug-client", ?safe_block_hash, ?finalized_block_hash, "failed to fetch safe or finalized hash from etherscan");
-                    continue;
-                }
-            };
+            let (safe_block_hash, finalized_block_hash) =
+                match (safe_block_hash, finalized_block_hash) {
+                    (Ok(safe_block_hash), Ok(finalized_block_hash)) => {
+                        (safe_block_hash, finalized_block_hash)
+                    }
+                    (safe_block_hash, finalized_block_hash) => {
+                        warn!(
+                            target: "consensus::debug-client",
+                            ?safe_block_hash,
+                            ?finalized_block_hash,
+                            "failed to fetch safe or finalized hash from etherscan"
+                        );
+                        continue;
+                    }
+                };
             let state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash,

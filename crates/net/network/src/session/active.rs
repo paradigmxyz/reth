@@ -741,7 +741,13 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(
+                                            target: "net::session",
+                                            %error,
+                                            msg=?message,
+                                            remote_peer_id=?this.remote_peer_id,
+                                            "received invalid protocol message"
+                                        );
                                         return this.close_on_error(error, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
