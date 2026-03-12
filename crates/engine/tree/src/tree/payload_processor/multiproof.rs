@@ -8,9 +8,6 @@ pub use reth_trie_parallel::state_root_task::{
     StateRootHandle, StateRootMessage,
 };
 
-/// The default max targets, for limiting the number of account and storage proof targets to be
-/// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
-pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]

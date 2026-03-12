@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        StateRootMessage,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -121,6 +121,7 @@ where
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
         chunk_size: usize,
+        max_targets_for_chunking: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
@@ -139,7 +140,7 @@ where
             proof_worker_handle,
             trie,
             chunk_size,
-            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            max_targets_for_chunking,
             account_updates: Default::default(),
             storage_updates: Default::default(),
             new_account_updates: Default::default(),

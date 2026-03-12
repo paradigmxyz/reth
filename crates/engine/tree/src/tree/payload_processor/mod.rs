@@ -349,6 +349,7 @@ where
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
+            config.multiproof_max_targets_for_chunking(),
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
@@ -542,6 +543,7 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
+        max_targets_for_chunking: usize,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -591,6 +593,7 @@ where
                 trie_metrics.clone(),
                 sparse_state_trie,
                 chunk_size,
+                max_targets_for_chunking,
             );
 
             let result = task.run();

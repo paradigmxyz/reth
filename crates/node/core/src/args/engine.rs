@@ -4,7 +4,8 @@ use clap::{builder::Resettable, Args};
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    TreeConfig, DEFAULT_MULTIPROOF_MAX_TARGETS_FOR_CHUNKING, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
     DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
@@ -33,6 +34,7 @@ pub struct DefaultEngineValues {
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunk_size: usize,
+    multiproof_max_targets_for_chunking: usize,
     reserved_cpu_cores: usize,
     precompile_cache_disabled: bool,
     state_root_fallback: bool,
@@ -125,6 +127,12 @@ impl DefaultEngineValues {
     /// Set the default multiproof chunk size
     pub const fn with_multiproof_chunk_size(mut self, v: usize) -> Self {
         self.multiproof_chunk_size = v;
+        self
+    }
+
+    /// Set the default max targets threshold for forcing multiproof chunking
+    pub const fn with_multiproof_max_targets_for_chunking(mut self, v: usize) -> Self {
+        self.multiproof_max_targets_for_chunking = v;
         self
     }
 
@@ -242,6 +250,7 @@ impl Default for DefaultEngineValues {
             state_root_task_compare_updates: false,
             accept_execution_requests_hash: false,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+            multiproof_max_targets_for_chunking: DEFAULT_MULTIPROOF_MAX_TARGETS_FOR_CHUNKING,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
@@ -335,6 +344,12 @@ pub struct EngineArgs {
     /// Multiproof task chunk size for proof targets.
     #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
     pub multiproof_chunk_size: usize,
+
+    /// Max targets threshold for forcing multiproof chunking regardless of worker availability.
+    /// If the number of proof targets exceeds this value, chunking is forced even when no
+    /// additional workers are available.
+    #[arg(long = "engine.multiproof-max-targets-for-chunking", default_value_t = DefaultEngineValues::get_global().multiproof_max_targets_for_chunking)]
+    pub multiproof_max_targets_for_chunking: usize,
 
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
@@ -488,6 +503,7 @@ impl Default for EngineArgs {
             state_root_task_compare_updates,
             accept_execution_requests_hash,
             multiproof_chunk_size,
+            multiproof_max_targets_for_chunking,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
@@ -520,6 +536,7 @@ impl Default for EngineArgs {
             cross_block_cache_size,
             accept_execution_requests_hash,
             multiproof_chunk_size,
+            multiproof_max_targets_for_chunking,
             reserved_cpu_cores,
             precompile_cache_enabled: true,
             precompile_cache_disabled,
@@ -570,6 +587,7 @@ impl EngineArgs {
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
+            .with_multiproof_max_targets_for_chunking(self.multiproof_max_targets_for_chunking)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)
@@ -632,6 +650,7 @@ mod tests {
             state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
+            multiproof_max_targets_for_chunking: 600,
             reserved_cpu_cores: 4,
             precompile_cache_enabled: true,
             precompile_cache_disabled: true,
@@ -671,6 +690,8 @@ mod tests {
             "--engine.accept-execution-requests-hash",
             "--engine.multiproof-chunk-size",
             "512",
+            "--engine.multiproof-max-targets-for-chunking",
+            "600",
             "--engine.reserved-cpu-cores",
             "4",
             "--engine.disable-precompile-cache",
