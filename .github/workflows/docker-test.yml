@@ -6,7 +6,7 @@ on:
       hive_target:
         required: true
         type: string
-        description: "Docker bake target to build (e.g. hive-stable, hive-edge)"
+        description: "Docker bake target to build (e.g. hive)"
       artifact_name:
         required: false
         type: string

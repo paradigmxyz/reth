@@ -75,8 +75,3 @@ path = "tests/e2e-testsuite/main.rs"
 [[test]]
 name = "rocksdb"
 path = "tests/rocksdb/main.rs"
-required-features = ["rocksdb"]
-
-[features]
-rocksdb = ["reth-node-core/rocksdb", "reth-provider/rocksdb", "reth-cli-commands/rocksdb"]
-edge = ["rocksdb"]
