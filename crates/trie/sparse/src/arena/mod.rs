@@ -2,7 +2,7 @@ mod branch_child_idx;
 mod cursor;
 mod nodes;
 
-use branch_child_idx::{BranchChildIdx, BranchChildIter};
+use branch_child_idx::BranchChildIdx;
 use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
@@ -577,13 +577,12 @@ impl ArenaParallelSparseTrie {
                 }),
                 ArenaSparseNode::Branch(b) => {
                     let stack = b
-                        .children
-                        .iter()
-                        .map(|child| match child {
-                            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
+                        .child_iter()
+                        .map(|(_nibble, child)| match child {
+                            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp,
                             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                                 // After pruning / root(), all nodes have cached RLP.
-                                arena[*child_idx]
+                                arena[child_idx]
                                     .state_ref()
                                     .and_then(|s| s.cached_rlp_node())
                                     .cloned()
@@ -742,11 +741,9 @@ impl ArenaParallelSparseTrie {
 
         // Migrate any revealed children from the upper arena into the subtrie arena.
         if let ArenaSparseNode::Branch(b) = &mut root_node {
-            for child in &mut b.children {
-                if let ArenaSparseNodeBranchChild::Revealed(idx) = child {
-                    *idx =
-                        Self::migrate_nodes(&mut subtrie.arena, &mut self.upper_arena, *idx, None);
-                }
+            for nibble in b.revealed_mask.iter() {
+                let idx = &mut b.children[nibble as usize];
+                *idx = Self::migrate_nodes(&mut subtrie.arena, &mut self.upper_arena, *idx, None);
             }
         }
 
@@ -770,13 +767,8 @@ impl ArenaParallelSparseTrie {
 
         let ArenaSparseNode::Branch(b) = &self.upper_arena[head_idx] else { return };
         let short_key = b.short_key;
-        let children: SmallVec<[_; 4]> = b
-            .child_iter()
-            .filter_map(|(nibble, child)| match child {
-                ArenaSparseNodeBranchChild::Revealed(idx) => Some((nibble, *idx)),
-                ArenaSparseNodeBranchChild::Blinded(_) => None,
-            })
-            .collect();
+        let children: SmallVec<[_; 4]> =
+            b.revealed_mask.iter().map(|nibble| (nibble, b.children[nibble as usize])).collect();
 
         for (nibble, child_idx) in children {
             let mut child_path = head_path;
@@ -827,13 +819,7 @@ impl ArenaParallelSparseTrie {
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
         let parent_branch = self.upper_arena[parent_idx].branch_mut();
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not found in parent state_mask");
-
-        parent_branch.children.remove(child_idx.get());
-        parent_branch.unset_child_bit(child_nibble);
-        // The branch structure changed (child removed), so any cached RLP is stale.
-        parent_branch.state = parent_branch.state.to_dirty();
+        parent_branch.remove_child(child_nibble);
 
         self.maybe_collapse_or_remove_branch(cursor);
     }
@@ -902,11 +888,7 @@ impl ArenaParallelSparseTrie {
                 self.upper_arena.remove(branch_idx);
                 let parent_idx = cursor.head().expect("cursor is non-empty").index;
                 let parent_branch = self.upper_arena[parent_idx].branch_mut();
-                let child_idx = BranchChildIdx::new(parent_branch.state_mask, branch_nibble)
-                    .expect("child nibble not found in parent state_mask");
-                parent_branch.children.remove(child_idx.get());
-                parent_branch.unset_child_bit(branch_nibble);
-                parent_branch.state = parent_branch.state.to_dirty();
+                parent_branch.remove_child(branch_nibble);
                 continue; // re-check the parent
             }
 
@@ -914,10 +896,7 @@ impl ArenaParallelSparseTrie {
             let (remaining_nibble, remaining_child_idx) = {
                 let b = self.upper_arena[branch_idx].branch_ref();
                 let nibble = b.state_mask.iter().next().expect("branch has at least one child");
-                let child_idx = match &b.children[0] {
-                    ArenaSparseNodeBranchChild::Revealed(idx) => Some(*idx),
-                    ArenaSparseNodeBranchChild::Blinded(_) => None,
-                };
+                let child_idx = b.revealed_child(nibble);
                 (nibble, child_idx)
             };
 
@@ -941,9 +920,7 @@ impl ArenaParallelSparseTrie {
             if is_empty_subtrie {
                 self.recycle_subtrie_from_idx(child_idx);
                 let branch = self.upper_arena[branch_idx].branch_mut();
-                branch.children.remove(0);
-                branch.unset_child_bit(remaining_nibble);
-                branch.state = branch.state.to_dirty();
+                branch.remove_child(remaining_nibble);
                 continue; // now count == 0, will be handled next iteration
             }
 
@@ -1028,7 +1005,7 @@ impl ArenaParallelSparseTrie {
         let mut masks = BranchNodeMasks::default();
 
         for (nibble, child) in branch.child_iter() {
-            let (hash_bit, tree_bit) = match child {
+            let (hash_bit, tree_bit) = match &child {
                 ArenaSparseNodeBranchChild::Blinded(_) => (
                     branch.branch_masks.hash_mask.is_bit_set(nibble),
                     branch.branch_masks.tree_mask.is_bit_set(nibble),
@@ -1125,46 +1102,50 @@ impl ArenaParallelSparseTrie {
             );
 
             rlp_node_buf.clear();
-            let state_mask = arena[head_idx].branch_ref().state_mask;
-            for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
-                match &arena[head_idx].branch_ref().children[child_idx] {
-                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                        rlp_node_buf.push(rlp_node.clone());
-                    }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        let child_idx = *child_idx;
-                        match &arena[child_idx] {
-                            ArenaSparseNode::Leaf { .. } => {
-                                Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
-                            }
-                            ArenaSparseNode::Branch(child_b) => {
-                                let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
-                                else {
-                                    panic!("child branch must be cached after DFS");
-                                };
-                                rlp_node_buf.push(rlp_node.clone());
-                            }
-                            ArenaSparseNode::Subtrie(subtrie) => {
-                                let subtrie_root = &subtrie.arena[subtrie.root];
-                                match subtrie_root {
-                                    ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                                        state: ArenaSparseNodeState::Cached { rlp_node, .. },
-                                        ..
-                                    }) |
-                                    ArenaSparseNode::Leaf {
-                                        state: ArenaSparseNodeState::Cached { rlp_node, .. },
-                                        ..
-                                    } => {
-                                        rlp_node_buf.push(rlp_node.clone());
-                                    }
-                                    _ => panic!("subtrie root must be a cached Branch or Leaf"),
+            let branch = arena[head_idx].branch_ref();
+            let state_mask = branch.state_mask;
+            let revealed_mask = branch.revealed_mask;
+            // Collect blinded RLP nodes upfront to avoid borrow conflicts with arena.
+            let blinded_children: SmallVec<[RlpNode; 4]> =
+                branch.blinded_children.iter().cloned().collect();
+            let mut blinded_idx = 0usize;
+            for nibble in state_mask.iter() {
+                if revealed_mask.is_bit_set(nibble) {
+                    let child_idx = arena[head_idx].branch_ref().children[nibble as usize];
+                    match &arena[child_idx] {
+                        ArenaSparseNode::Leaf { .. } => {
+                            Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                        }
+                        ArenaSparseNode::Branch(child_b) => {
+                            let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
+                            else {
+                                panic!("child branch must be cached after DFS");
+                            };
+                            rlp_node_buf.push(rlp_node.clone());
+                        }
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            let subtrie_root = &subtrie.arena[subtrie.root];
+                            match subtrie_root {
+                                ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                                    state: ArenaSparseNodeState::Cached { rlp_node, .. },
+                                    ..
+                                }) |
+                                ArenaSparseNode::Leaf {
+                                    state: ArenaSparseNodeState::Cached { rlp_node, .. },
+                                    ..
+                                } => {
+                                    rlp_node_buf.push(rlp_node.clone());
                                 }
-                            }
-                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot => {
-                                unreachable!("Unexpected child {:?}", arena[child_idx]);
+                                _ => panic!("subtrie root must be a cached Branch or Leaf"),
                             }
                         }
+                        ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot => {
+                            unreachable!("Unexpected child {:?}", arena[child_idx]);
+                        }
                     }
+                } else {
+                    rlp_node_buf.push(blinded_children[blinded_idx].clone());
+                    blinded_idx += 1;
                 }
             }
 
@@ -1249,14 +1230,14 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let child_idx = BranchChildIdx::new(b.state_mask, child_nibble)?;
-                    match &b.children[child_idx] {
-                        ArenaSparseNodeBranchChild::Blinded(_) => return None,
-                        ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                            current = *child_idx;
-                            path_offset = logical_end + 1;
-                        }
+                    if !b.state_mask.is_bit_set(child_nibble) {
+                        return None;
                     }
+                    if !b.revealed_mask.is_bit_set(child_nibble) {
+                        return None;
+                    }
+                    current = b.children[child_nibble as usize];
+                    path_offset = logical_end + 1;
                 }
                 ArenaSparseNode::Subtrie(subtrie) => {
                     return Self::get_leaf_value_in_arena(
@@ -1314,24 +1295,25 @@ impl ArenaParallelSparseTrie {
                     }
 
                     let child_nibble = full_path.get_unchecked(logical_end);
-                    let Some(child_idx) = BranchChildIdx::new(b.state_mask, child_nibble) else {
+                    if !b.state_mask.is_bit_set(child_nibble) {
                         return Ok(LeafLookup::NonExistent);
-                    };
-
-                    match &b.children[child_idx] {
-                        ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                            let hash = rlp_node
-                                .as_hash()
-                                .unwrap_or_else(|| keccak256(rlp_node.as_slice()));
-                            let mut blinded_path = full_path.slice(..logical_end);
-                            blinded_path.push_unchecked(child_nibble);
-                            return Err(LeafLookupError::BlindedNode { path: blinded_path, hash });
-                        }
-                        ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                            current = *child_idx;
-                            path_offset = logical_end + 1;
-                        }
                     }
+
+                    if b.is_child_blinded(child_nibble) {
+                        let blinded_rlp = match b.get_child(child_nibble) {
+                            ArenaSparseNodeBranchChild::Blinded(rlp_node) => rlp_node,
+                            _ => unreachable!(),
+                        };
+                        let hash = blinded_rlp
+                            .as_hash()
+                            .unwrap_or_else(|| keccak256(blinded_rlp.as_slice()));
+                        let mut blinded_path = full_path.slice(..logical_end);
+                        blinded_path.push_unchecked(child_nibble);
+                        return Err(LeafLookupError::BlindedNode { path: blinded_path, hash });
+                    }
+
+                    current = b.children[child_nibble as usize];
+                    path_offset = logical_end + 1;
                 }
                 ArenaSparseNode::Subtrie(subtrie) => {
                     return Self::find_leaf_in_arena(
@@ -1444,14 +1426,17 @@ impl ArenaParallelSparseTrie {
             };
 
         let state_mask = TrieMask::from(1u16 << first_nibble | 1u16 << second_nibble);
-        let mut children = SmallVec::with_capacity(2);
-        children.push(ArenaSparseNodeBranchChild::Revealed(first_child));
-        children.push(ArenaSparseNodeBranchChild::Revealed(second_child));
+        let revealed_mask = state_mask;
+        let mut children = [Index::null(); 16];
+        children[first_nibble as usize] = first_child;
+        children[second_nibble as usize] = second_child;
 
         let new_branch_idx = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
             state: ArenaSparseNodeState::Dirty,
-            children,
             state_mask,
+            revealed_mask,
+            children,
+            blinded_children: Vec::new(),
             short_key,
             branch_masks: BranchNodeMasks::default(),
         }));
@@ -1624,16 +1609,12 @@ impl ArenaParallelSparseTrie {
                     let parent_branch = arena[parent_idx].branch_ref();
 
                     if parent_branch.state_mask.count_bits() == 2 {
-                        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                            .expect("leaf nibble not found in parent state_mask");
-                        // With exactly 2 bits set the dense array has indices 0 and 1.
-                        let sibling_dense_idx = 1 - child_idx.get();
-                        if parent_branch.children[sibling_dense_idx].is_blinded() {
-                            let sibling_nibble = parent_branch
-                                .state_mask
-                                .iter()
-                                .find(|&n| n != child_nibble)
-                                .expect("branch has two children");
+                        let sibling_nibble = parent_branch
+                            .state_mask
+                            .iter()
+                            .find(|&n| n != child_nibble)
+                            .expect("branch has two children");
+                        if parent_branch.is_child_blinded(sibling_nibble) {
                             let mut sibling_path = cursor.parent_logical_branch_path(arena);
                             sibling_path.push_unchecked(sibling_nibble);
                             trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
@@ -1738,18 +1719,14 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not in parent state_mask");
-        let sibling_dense_idx = 1 - child_idx.get();
-        if !parent_branch.children[sibling_dense_idx].is_blinded() {
-            return None;
-        }
-
         let sibling_nibble = parent_branch
             .state_mask
             .iter()
             .find(|&n| n != child_nibble)
             .expect("branch has two children");
+        if !parent_branch.is_child_blinded(sibling_nibble) {
+            return None;
+        }
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
         sibling_path.push_unchecked(sibling_nibble);
 
@@ -1788,7 +1765,7 @@ impl ArenaParallelSparseTrie {
             "collapse_branch requires exactly 1 child"
         );
         debug_assert!(
-            !branch.children[0].is_blinded(),
+            !branch.is_child_blinded(remaining_nibble),
             "collapse_branch called with a blinded remaining child"
         );
 
@@ -1817,9 +1794,8 @@ impl ArenaParallelSparseTrie {
         let mut prefix = branch_short_key;
         prefix.push_unchecked(remaining_nibble);
 
-        let ArenaSparseNodeBranchChild::Revealed(child_idx) = branch.children[0] else {
-            unreachable!()
-        };
+        let child_idx =
+            branch.revealed_child(remaining_nibble).expect("remaining child must be revealed");
 
         // Prepend the prefix to the child's key/short_key and mark dirty.
         // Track whether a leaf was newly dirtied by this collapse.
@@ -1885,12 +1861,11 @@ impl ArenaParallelSparseTrie {
             ArenaSparseNode::Branch(b) => {
                 let mut leaves = 0u64;
                 let mut dirty = 0u64;
-                for c in &b.children {
-                    if let ArenaSparseNodeBranchChild::Revealed(child_idx) = c {
-                        let (l, d) = Self::count_leaves_and_dirty(arena, *child_idx);
-                        leaves += l;
-                        dirty += d;
-                    }
+                for nibble in b.revealed_mask.iter() {
+                    let child_idx = b.children[nibble as usize];
+                    let (l, d) = Self::count_leaves_and_dirty(arena, child_idx);
+                    leaves += l;
+                    dirty += d;
                 }
                 (leaves, dirty)
             }
@@ -1956,10 +1931,9 @@ impl ArenaParallelSparseTrie {
 
         // Recursively migrate children first so their new indices are known.
         if let ArenaSparseNode::Branch(b) = &mut node {
-            for child in &mut b.children {
-                if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
-                    *child_idx = Self::migrate_nodes(dst, src, *child_idx, None);
-                }
+            for nibble in b.revealed_mask.iter() {
+                let idx = &mut b.children[nibble as usize];
+                *idx = Self::migrate_nodes(dst, src, *idx, None);
             }
         }
 
@@ -1988,9 +1962,7 @@ impl ArenaParallelSparseTrie {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
             let child_nibble = nibble.expect("non-root child");
             let parent_branch = arena[parent_idx].branch_mut();
-            let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                .expect("child nibble not found in parent state_mask");
-            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            parent_branch.blind_child(child_nibble, rlp_node);
         }
 
         node
@@ -2031,12 +2003,21 @@ impl ArenaParallelSparseTrie {
 
         let child_nibble = node.path.get_unchecked(head_branch_logical_path.len());
         let head_branch = arena[head_idx].branch_ref();
-        let dense_child_idx = BranchChildIdx::new(head_branch.state_mask, child_nibble)
-            .expect("Blinded result but child nibble not in state_mask");
 
-        let cached_rlp = match &head_branch.children[dense_child_idx] {
-            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
-            ArenaSparseNodeBranchChild::Revealed(_) => return None,
+        if !head_branch.state_mask.is_bit_set(child_nibble) {
+            return None;
+        }
+
+        if head_branch.revealed_mask.is_bit_set(child_nibble) {
+            return None;
+        }
+
+        // Get the blinded RLP before mutation
+        let cached_rlp = {
+            let blinded_mask = head_branch.blinded_mask();
+            let blinded_idx = BranchChildIdx::new(blinded_mask, child_nibble)
+                .expect("Blinded result but child nibble not in blinded mask");
+            head_branch.blinded_children[blinded_idx.get()].clone()
         };
 
         trace!(
@@ -2053,8 +2034,7 @@ impl ArenaParallelSparseTrie {
         *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
 
         let child_idx = arena.insert(arena_node);
-        arena[head_idx].branch_mut().children[dense_child_idx] =
-            ArenaSparseNodeBranchChild::Revealed(child_idx);
+        arena[head_idx].branch_mut().reveal_child(child_nibble, child_idx);
 
         Some(child_idx)
     }
@@ -2065,10 +2045,8 @@ impl ArenaParallelSparseTrie {
             return;
         }
         if let ArenaSparseNode::Branch(b) = &arena[idx] {
-            for child in &b.children {
-                if let ArenaSparseNodeBranchChild::Revealed(child_idx) = child {
-                    Self::collect_reachable_nodes(arena, *child_idx, reachable);
-                }
+            for nibble in b.revealed_mask.iter() {
+                Self::collect_reachable_nodes(arena, b.children[nibble as usize], reachable);
             }
         }
     }
@@ -2174,16 +2152,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
             TrieNodeV2::Branch(branch) => {
                 trace!(target: TRACE_TARGET, state_mask = ?branch.state_mask, num_children = branch.state_mask.count_bits(), "Setting branch root");
-                let mut children = SmallVec::with_capacity(branch.state_mask.count_bits() as usize);
-                for (stack_ptr, _nibble) in branch.state_mask.iter().enumerate() {
-                    children
-                        .push(ArenaSparseNodeBranchChild::Blinded(branch.stack[stack_ptr].clone()));
-                }
+                let blinded_children =
+                    branch.stack[..branch.state_mask.count_bits() as usize].to_vec();
 
                 self.upper_arena[self.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
                     state: ArenaSparseNodeState::Revealed,
-                    children,
                     state_mask: branch.state_mask,
+                    revealed_mask: TrieMask::default(),
+                    children: [Index::null(); 16],
+                    blinded_children,
                     short_key: branch.key,
                     branch_masks: masks.unwrap_or_default(),
                 });
