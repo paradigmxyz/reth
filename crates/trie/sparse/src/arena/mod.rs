@@ -2523,6 +2523,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.cleared_subtries.push(*subtrie);
             }
         }
+        self.upper_arena.clear();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
