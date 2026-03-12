@@ -223,10 +223,21 @@ where
     chain_events: St,
     /// Payload events handler, used to broadcast and subscribe to payload events.
     payload_events: broadcast::Sender<Events<T>>,
-    /// We retain latest resolved payload just to make sure that we can handle repeating
-    /// requests for it gracefully.
+    /// Cached most-recently resolved payload so that repeated resolve requests for the same
+    /// payload id can be served without rebuilding.
+    ///
+    /// # Watch channel lock safety
+    ///
+    /// `watch::Receiver::borrow()` holds a read lock on the channel value. Calling
+    /// `watch::Sender::send()` requires the write lock. Holding a `borrow()` guard while
+    /// calling `send()` on the same channel **will deadlock**.
+    ///
+    /// **Do not use `cached_payload_rx.borrow()` or `cached_payload_tx` directly.**
+    /// Use the accessor methods ([`Self::cached_payload`], [`Self::cached_payload_timestamp`],
+    /// [`Self::clear_cached_payload_if`]) which return owned values and never hold the lock
+    /// across a `send()`.
     cached_payload_rx: watch::Receiver<Option<(PayloadId, BlockTimestamp, T::BuiltPayload)>>,
-    /// Sender half of the cached payload channel.
+    /// Sender half of the cached payload channel. See lock-safety note on `cached_payload_rx`.
     cached_payload_tx: watch::Sender<Option<(PayloadId, BlockTimestamp, T::BuiltPayload)>>,
 }
 
@@ -285,6 +296,37 @@ where
         self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id)
     }
 
+    /// Returns a clone of the cached payload matching `id`, if any.
+    ///
+    /// The returned value is owned so no `watch` read-lock is held after this returns.
+    fn cached_payload(&self, id: PayloadId) -> Option<T::BuiltPayload> {
+        let r = self.cached_payload_rx.borrow();
+        r.as_ref().and_then(|(cached_id, _, payload)| (*cached_id == id).then(|| payload.clone()))
+    }
+
+    /// Returns the cached timestamp for payload `id`, if any.
+    ///
+    /// The returned value is owned so no `watch` read-lock is held after this returns.
+    fn cached_payload_timestamp(&self, id: PayloadId) -> Option<BlockTimestamp> {
+        let r = self.cached_payload_rx.borrow();
+        r.as_ref().and_then(|(cached_id, ts, _)| (*cached_id == id).then_some(*ts))
+    }
+
+    /// Atomically clears the cached payload if its id matches `id`.
+    ///
+    /// Uses [`watch::Sender::send_if_modified`] so the check and mutation happen under the
+    /// sender's write lock without ever borrowing the receiver — this avoids the deadlock that
+    /// would occur if a `borrow()` read-lock were held while calling `send()`.
+    fn clear_cached_payload_if(&self, id: PayloadId) -> bool {
+        self.cached_payload_tx.send_if_modified(|slot| {
+            let matches = slot.as_ref().is_some_and(|(cached_id, _, _)| *cached_id == id);
+            if matches {
+                *slot = None;
+            }
+            matches
+        })
+    }
+
     /// Returns the best payload for the given identifier that has been built so far.
     fn best_payload(&self, id: PayloadId) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
         let res = self
@@ -308,10 +350,8 @@ where
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
         debug!(target: "payload_builder", %id, "resolving payload job");
 
-        if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
-            *cached == id
-        {
-            return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
+        if let Some(payload) = self.cached_payload(id) {
+            return Some(Box::pin(core::future::ready(Ok(payload))));
         }
 
         let job = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id)?;
@@ -359,9 +399,7 @@ where
 {
     /// Returns the payload timestamp for the given payload.
     fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
-        if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow() &&
-            cached_id == id
-        {
+        if let Some(timestamp) = self.cached_payload_timestamp(id) {
             return Some(Ok(timestamp));
         }
 
@@ -456,14 +494,8 @@ where
                                     // Clear stale cached payload for this id so
                                     // resolve() never returns an outdated result
                                     // from a previous job with the same id.
-                                    if this
-                                        .cached_payload_rx
-                                        .borrow()
-                                        .as_ref()
-                                        .is_some_and(|(cached_id, _, _)| *cached_id == id)
-                                    {
+                                    if this.clear_cached_payload_if(id) {
                                         trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
-                                        let _ = this.cached_payload_tx.send(None);
                                     }
                                 }
                                 Err(err) => {
