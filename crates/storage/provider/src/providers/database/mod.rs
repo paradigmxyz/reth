@@ -378,8 +378,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         Ok((rocksdb_unwind, static_file_unwind))
     }
 
-    /// Checks if the stored finalized or safe block numbers exceed the highest
-    /// known header and corrects them if so.
+    /// If the stored finalized or safe block number is ahead of the highest
+    /// header, resets it to the highest header.
     fn heal_chain_state_block_numbers(
         &self,
         provider_ro: &DatabaseProvider<<N::DB as Database>::TX, N>,
