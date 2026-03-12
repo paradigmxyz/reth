@@ -173,15 +173,15 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" \
-    env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" \
-    env "${SUDO_ENV[@]}" taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 
