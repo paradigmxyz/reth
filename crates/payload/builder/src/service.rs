@@ -312,7 +312,6 @@ where
         if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
             *cached == id
         {
-            self.metrics.resolve_cache_hits.increment(1);
             self.metrics.resolve_duration_seconds.record(start.elapsed());
             return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
         }
@@ -470,7 +469,6 @@ where
                                     {
                                         trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
                                         let _ = this.cached_payload_tx.send(None);
-                                        this.metrics.stale_cache_clears.increment(1);
                                     }
                                 }
                                 Err(err) => {

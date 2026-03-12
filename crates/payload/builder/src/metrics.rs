@@ -27,10 +27,6 @@ pub(crate) struct PayloadBuilderServiceMetrics {
     pub(crate) resolve_duration_seconds: Histogram,
     /// Histogram of new payload job creation latency in seconds
     pub(crate) new_job_duration_seconds: Histogram,
-    /// Total number of times a stale cached payload was cleared for a reused payload id
-    pub(crate) stale_cache_clears: Counter,
-    /// Total number of resolve calls that returned a cached payload
-    pub(crate) resolve_cache_hits: Counter,
 }
 
 impl PayloadBuilderServiceMetrics {
