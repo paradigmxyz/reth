@@ -628,31 +628,60 @@ where
 
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
+        let mut has_large_storage_trie = false;
         for address in addresses_to_compute_roots {
             if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
                 !trie.is_root_cached()
             {
+                if trie.prefix_set_len() > 60 {
+                    has_large_storage_trie = true;
+                }
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
         }
 
         let parent_span = tracing::Span::current();
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let _enter = debug_span!(
-                target: "engine::tree::payload_processor::sparse_trie",
-                parent: &parent_span,
-                "storage_root",
-                ?address
-            )
-            .entered();
-            // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
-            // - we do not insert/remove entries between pointer collection and use, so pointers
-            //   stay valid and map reallocation cannot occur;
-            // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
-        });
+        let compute_storage_roots =
+            |tries: Vec<(B256, SendStorageTriePtr<S>)>, parent_span: &tracing::Span| {
+                tries.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
+                    let _enter = debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: parent_span,
+                        "storage_root",
+                        ?address
+                    )
+                    .entered();
+                    // SAFETY:
+                    // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+                    // - `addresses_to_compute_roots` comes from map iteration, so addresses are
+                    //   unique;
+                    // - we do not insert/remove entries between pointer collection and use, so
+                    //   pointers stay valid and map reallocation cannot occur;
+                    // - each pointer is consumed by at most one rayon task, so no aliasing mutable
+                    //   access.
+                    unsafe {
+                        (*trie).root().expect("updates are drained, trie should be revealed by now")
+                    };
+                });
+            };
+
+        if has_large_storage_trie {
+            let accounts_trie = self.trie.trie_mut();
+            rayon::join(
+                || compute_storage_roots(tries_to_compute_roots, &parent_span),
+                || {
+                    let _enter = debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "account_subtrie_hashes",
+                    )
+                    .entered();
+                    accounts_trie.update_subtrie_hashes();
+                },
+            );
+        } else {
+            compute_storage_roots(tries_to_compute_roots, &parent_span);
+        }
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their

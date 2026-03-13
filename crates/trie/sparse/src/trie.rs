@@ -169,6 +169,21 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
     }
 
+    /// Returns the number of entries in the prefix set, or 0 if the trie is blinded.
+    pub fn prefix_set_len(&self) -> usize {
+        self.as_revealed_ref().map_or(0, |trie| trie.prefix_set_len())
+    }
+
+    /// Pre-computes lower subtrie hashes without computing the final root.
+    ///
+    /// This is useful for overlapping subtrie hash computation with other work.
+    /// Does nothing if the trie is blinded.
+    pub fn update_subtrie_hashes(&mut self) {
+        if let Some(revealed) = self.as_revealed_mut() {
+            revealed.update_subtrie_hashes();
+        }
+    }
+
     /// Returns the root hash along with any accumulated update information.
     ///
     /// This is useful for when you need both the root hash and information about
