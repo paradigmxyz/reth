@@ -87,6 +87,11 @@ impl ArenaCursor {
         self.stack.len() - 1
     }
 
+    /// Returns an iterator over `(node_depth, arena_index)` for all entries on the stack.
+    pub(super) fn stack_indices(&self) -> impl Iterator<Item = (usize, Index)> + '_ {
+        self.stack.iter().enumerate().map(|(depth, entry)| (depth, entry.index))
+    }
+
     /// Replaces the root entry on the stack with a new one.
     ///
     /// The stack must contain exactly the root (depth 0) or be empty (freshly constructed).

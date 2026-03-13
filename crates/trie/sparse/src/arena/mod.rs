@@ -29,6 +29,9 @@ use tracing::{instrument, trace};
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 
+#[cfg(feature = "metrics")]
+use alloy_primitives::map::HashMap as MetricsHashMap;
+
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
 /// Alias for the slotmap used as the node arena throughout the arena trie.
@@ -105,6 +108,10 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Touch counts collected during `update_leaves`, keyed by (node_depth, arena_index).
+    /// Populated only when the `metrics` feature is enabled.
+    #[cfg(feature = "metrics")]
+    churn_touch_counts: MetricsHashMap<Index, (usize, u64)>,
 }
 
 impl ArenaSparseSubtrie {
@@ -131,6 +138,8 @@ impl ArenaSparseSubtrie {
         self.required_proofs.clear();
         self.num_leaves = 0;
         self.num_dirty_leaves = 0;
+        #[cfg(feature = "metrics")]
+        self.churn_touch_counts.clear();
     }
 
     /// Prunes revealed subtrees that are not ancestors of any retained leaf.
@@ -239,6 +248,9 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
+        #[cfg(feature = "metrics")]
+        self.churn_touch_counts.clear();
+
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
@@ -252,6 +264,15 @@ impl ArenaSparseSubtrie {
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
                 ));
                 continue;
+            }
+
+            // Record touch counts for churn measurement.
+            #[cfg(feature = "metrics")]
+            for (node_depth, index) in self.buffers.cursor.stack_indices() {
+                self.churn_touch_counts
+                    .entry(index)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((node_depth, 1));
             }
 
             match update {
@@ -515,6 +536,12 @@ pub struct ArenaParallelSparseTrie {
     cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Label for churn metrics: "account" or "storage".
+    #[cfg(feature = "metrics")]
+    trie_type: &'static str,
+    /// Churn metrics for this trie.
+    #[cfg(feature = "metrics")]
+    churn_metrics: crate::metrics::ArenaChurnMetrics,
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
     debug_recorder: TrieDebugRecorder,
@@ -702,6 +729,8 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
+                #[cfg(feature = "metrics")]
+                churn_touch_counts: MetricsHashMap::default(),
             })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
@@ -2108,8 +2137,102 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            #[cfg(feature = "metrics")]
+            trie_type: "account",
+            #[cfg(feature = "metrics")]
+            churn_metrics: Default::default(),
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
+        }
+    }
+}
+
+impl ArenaParallelSparseTrie {
+    /// Sets the trie type label used for churn metrics ("account" or "storage").
+    pub fn set_trie_type(&mut self, trie_type: &'static str) {
+        #[cfg(feature = "metrics")]
+        {
+            self.trie_type = trie_type;
+        }
+        #[cfg(not(feature = "metrics"))]
+        let _ = trie_type;
+    }
+
+    /// Emit churn metrics from upper trie touch counts and all subtrie touch counts.
+    ///
+    /// For subtrie nodes, the depth is offset by the subtrie's position in the upper trie
+    /// (which is at node depth = number of upper trie nodes on the path to the subtrie).
+    #[cfg(feature = "metrics")]
+    fn emit_churn_metrics(&self, upper_touch_counts: &MetricsHashMap<Index, (usize, u64)>) {
+        // Merge upper trie + all subtrie touch counts into a single depth histogram.
+        // Max realistic depth for account trie: ~64 nibbles / avg ~4 nibbles per node ≈ 16 nodes.
+        // Use 32 as a safe upper bound.
+        const MAX_DEPTH: usize = 32;
+        let mut nodes_with_churn = [0u64; MAX_DEPTH];
+        let mut total_extra_touches = [0u64; MAX_DEPTH];
+        let mut total_nodes_touched = [0u64; MAX_DEPTH];
+
+        // Process upper trie touch counts.
+        for &(depth, count) in upper_touch_counts.values() {
+            if depth < MAX_DEPTH {
+                total_nodes_touched[depth] += 1;
+                if count > 1 {
+                    nodes_with_churn[depth] += 1;
+                    total_extra_touches[depth] += count - 1;
+                }
+            }
+        }
+
+        // Process subtrie touch counts. Subtrie nodes are children of upper trie nodes,
+        // so we need to figure out the upper trie depth offset for each subtrie.
+        // The subtrie root sits at upper trie depth = len of path to it in upper nodes.
+        // Since UPPER_TRIE_MAX_DEPTH = 2 nibbles and the upper trie structure is typically
+        // root -> branch (depth 0) -> subtrie children (depth 1), the subtrie root is at
+        // absolute node depth = depth of the Subtrie node in the upper arena.
+        // We find this from the upper_touch_counts: the subtrie's parent index in the upper
+        // arena has a recorded depth there. The subtrie root is depth+1 from that parent.
+        //
+        // Simpler approach: look at each subtrie, find the Index in the upper arena that
+        // holds it, look up that index's depth in upper_touch_counts, and offset =
+        // depth_of_subtrie_in_upper + 1. But actually subtrie entries in upper_touch_counts
+        // ARE the subtrie nodes themselves. When the cursor hits a Subtrie node during
+        // seek, it pushes it on the stack with SeekResult::RevealedSubtrie. So the subtrie
+        // Index IS in the upper arena and its depth IS recorded in upper_touch_counts.
+        //
+        // The subtrie's internal nodes start at depth 0 (subtrie root), which corresponds
+        // to upper node depth = whatever depth the Subtrie node is at in upper_touch_counts.
+        for (upper_idx, node) in self.upper_arena.iter() {
+            let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
+            if subtrie.churn_touch_counts.is_empty() {
+                continue;
+            }
+
+            // Find the absolute depth of this subtrie in the upper trie.
+            let upper_depth = upper_touch_counts.get(&upper_idx).map(|&(d, _)| d).unwrap_or(1); // fallback: subtries are typically at depth 1
+
+            for &(subtrie_depth, count) in subtrie.churn_touch_counts.values() {
+                let abs_depth = upper_depth + subtrie_depth;
+                if abs_depth < MAX_DEPTH {
+                    total_nodes_touched[abs_depth] += 1;
+                    if count > 1 {
+                        nodes_with_churn[abs_depth] += 1;
+                        total_extra_touches[abs_depth] += count - 1;
+                    }
+                }
+            }
+        }
+
+        // Emit metrics for each depth that had any activity.
+        for depth in 0..MAX_DEPTH {
+            if total_nodes_touched[depth] > 0 {
+                self.churn_metrics.record(
+                    depth,
+                    nodes_with_churn[depth],
+                    total_extra_touches[depth],
+                    total_nodes_touched[depth],
+                    self.trie_type,
+                );
+            }
         }
     }
 }
@@ -2764,11 +2887,24 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Subtries taken for parallel processing: (arena_index, subtrie, update_range).
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
 
+        // Touch counts for upper trie nodes (node_depth, touch_count).
+        #[cfg(feature = "metrics")]
+        let mut upper_touch_counts: MetricsHashMap<Index, (usize, u64)> = MetricsHashMap::default();
+
         let mut update_idx = 0;
         while update_idx < sorted.len() {
             let (key, ref full_path, ref update) = sorted[update_idx];
 
             let find_result = cursor.seek(&mut self.upper_arena, full_path);
+
+            // Record upper trie touch counts for churn measurement.
+            #[cfg(feature = "metrics")]
+            for (node_depth, index) in cursor.stack_indices() {
+                upper_touch_counts
+                    .entry(index)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((node_depth, 1));
+            }
 
             match find_result {
                 // Blinded — request a proof regardless of update type.
@@ -2936,6 +3072,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            #[cfg(feature = "metrics")]
+            self.emit_churn_metrics(&upper_touch_counts);
+
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
 
@@ -3011,6 +3150,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             cursor.drain(&mut self.upper_arena);
             self.buffers.cursor = cursor;
         }
+
+        #[cfg(feature = "metrics")]
+        self.emit_churn_metrics(&upper_touch_counts);
 
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
