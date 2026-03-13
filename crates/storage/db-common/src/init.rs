@@ -633,7 +633,7 @@ where
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let header = provider_rw
         .header_by_number(block)?
-        .map(SealedHeader::seal_slow)
+        .map(|h| SealedHeader::new(h, hash))
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
 
     let expected_state_root = header.state_root();
