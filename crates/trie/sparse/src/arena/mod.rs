@@ -1,6 +1,7 @@
 mod branch_child_idx;
 mod cursor;
 mod nodes;
+mod worker_pool;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
@@ -38,6 +39,20 @@ type Index = DefaultKey;
 type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 const TRACE_TARGET: &str = "trie::arena";
+
+/// Wrapper to send raw pointers across threads.
+///
+/// # Safety
+/// The caller must guarantee exclusive access to the pointee for the duration
+/// of the send, and that the pointee outlives the receiving thread's use.
+struct SendPtr<T>(*mut T);
+unsafe impl<T> Send for SendPtr<T> {}
+
+impl<T> SendPtr<T> {
+    fn get(self) -> *mut T {
+        self.0
+    }
+}
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
@@ -493,6 +508,16 @@ struct ArenaRequiredProof {
     min_len: u8,
 }
 
+/// Info about a taken subtrie, used during post-parallel processing.
+struct TakenInfo {
+    /// The absolute path of the subtrie root.
+    path: Nibbles,
+    /// The range into the sorted updates array for this subtrie.
+    range: core::ops::Range<usize>,
+    /// Whether the subtrie became empty after processing.
+    is_empty: bool,
+}
+
 /// An arena-based parallel sparse trie.
 ///
 /// Configuration for controlling when parallelism is enabled in [`ArenaParallelSparseTrie`]
@@ -522,7 +547,7 @@ impl Default for ArenaParallelismThresholds {
         Self {
             min_dirty_leaves: 64,
             min_revealed_nodes: 16,
-            min_updates: 128,
+            min_updates: 50,
             min_leaves_for_prune: 128,
         }
     }
@@ -591,7 +616,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// Cleared subtries are pooled in `cleared_subtries` and reused by
 /// `take_or_create_cleared_subtrie` to avoid repeated arena allocations.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
     upper_arena: NodeArena,
@@ -606,6 +631,8 @@ pub struct ArenaParallelSparseTrie {
     cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Persistent thread pool for parallel subtrie updates (2 workers).
+    worker_pool: worker_pool::SubtrieWorkerPool,
     /// Metrics for `update_leaves` breakdown.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ArenaUpdateLeavesMetrics,
@@ -1024,7 +1051,7 @@ impl ArenaParallelSparseTrie {
             };
 
             let Some(child_idx) = remaining_child_idx else {
-                debug_assert!(false, "single remaining child is blinded — should have been caught by check_subtrie_collapse_needs_proof");
+                debug_assert!(false, "single remaining child is blinded — should have been caught by check_subtrie_collapse_needs_proof or post-parallel pre-scan");
                 return;
             };
 
@@ -1853,6 +1880,259 @@ impl ArenaParallelSparseTrie {
         })
     }
 
+    /// Identifies empty taken subtries whose unwrapping would cascade into a blinded sibling
+    /// at any level of the upper trie.
+    ///
+    /// Returns the set of indices into `taken_info` that should NOT be unwrapped. For those
+    /// subtries, their updates are re-inserted into `updates` and a proof is requested.
+    ///
+    /// This handles the multi-subtrie-emptying case that `check_subtrie_collapse_needs_proof`
+    /// cannot catch: when subtries are evaluated independently, each parent appears to have
+    /// enough children, but after ALL empty subtries are removed, cascading collapses may
+    /// reach a branch whose sole remaining child is blinded.
+    #[allow(clippy::too_many_arguments)]
+    fn find_unsafe_empty_subtries(
+        &mut self,
+        taken_info: &[TakenInfo],
+        cursor: &mut ArenaCursor,
+        sorted: &[(B256, Nibbles, LeafUpdate)],
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: &mut impl FnMut(B256, u8),
+        #[cfg(feature = "trie-debug")] recorded_proof_targets: &mut Vec<(B256, u8)>,
+    ) -> HashSet<usize> {
+        let mut skip_indices: HashSet<usize> = HashSet::default();
+
+        // Group empty taken subtrie indices by the direct parent branch's arena index.
+        let mut parent_groups: HashMap<Index, SmallVec<[usize; 4]>> = HashMap::default();
+        // Map parent_idx → parent path (from cursor) for path reconstruction.
+        let mut parent_paths: HashMap<Index, Nibbles> = HashMap::default();
+
+        for (i, info) in taken_info.iter().enumerate() {
+            if !info.is_empty {
+                continue;
+            }
+
+            let find_result = cursor.seek(&mut self.upper_arena, &info.path);
+            if matches!(find_result, SeekResult::RevealedSubtrie) {
+                if let Some(parent) = cursor.parent() {
+                    parent_groups.entry(parent.index).or_default().push(i);
+                    parent_paths.entry(parent.index).or_insert(parent.path);
+                }
+            }
+        }
+
+        // Drain and reset cursor so subsequent operations start fresh.
+        cursor.drain(&mut self.upper_arena);
+        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
+
+        if parent_groups.is_empty() {
+            return skip_indices;
+        }
+
+        // For each parent group, simulate the cascade and check if it would hit
+        // a blinded child at any level.
+        for (parent_idx, empty_indices) in &parent_groups {
+            if let Some(proof) =
+                self.simulate_cascade(*parent_idx, &parent_paths, taken_info, empty_indices)
+            {
+                proof_required_fn(proof.key, proof.min_len);
+                #[cfg(feature = "trie-debug")]
+                recorded_proof_targets.push((proof.key, proof.min_len));
+
+                for &idx in empty_indices {
+                    skip_indices.insert(idx);
+                    for &(key, _, ref update) in &sorted[taken_info[idx].range.clone()] {
+                        updates.insert(key, update.clone());
+                    }
+                }
+            }
+        }
+
+        skip_indices
+    }
+
+    /// Simulates the cascade that would occur if all `empty_indices` subtries were
+    /// unwrapped from `start_parent_idx`. Walks up the upper trie checking if any
+    /// ancestor branch would be left with only blinded children.
+    ///
+    /// Returns `Some(proof)` for the first blinded sibling found, or `None` if safe.
+    fn simulate_cascade(
+        &self,
+        start_parent_idx: Index,
+        parent_paths: &HashMap<Index, Nibbles>,
+        taken_info: &[TakenInfo],
+        empty_indices: &SmallVec<[usize; 4]>,
+    ) -> Option<ArenaRequiredProof> {
+        let ArenaSparseNode::Branch(parent_branch) = &self.upper_arena[start_parent_idx] else {
+            return None;
+        };
+
+        // Collect nibbles of the empty subtries being removed.
+        let empty_nibbles: HashSet<u8> = empty_indices
+            .iter()
+            .filter_map(|&i| taken_info[i].path.last())
+            .collect();
+
+        // Count non-empty, non-blinded children that would remain.
+        let mut remaining_revealed = 0usize;
+        let mut remaining_blinded = 0usize;
+        let mut first_blinded_nibble = None;
+
+        for (nibble, child) in parent_branch.child_iter() {
+            if empty_nibbles.contains(&nibble) {
+                continue; // this child would be removed
+            }
+            if child.is_blinded() {
+                remaining_blinded += 1;
+                if first_blinded_nibble.is_none() {
+                    first_blinded_nibble = Some(nibble);
+                }
+            } else {
+                // Check if this revealed child is also an empty subtrie being unwrapped
+                // (from a different parent group — shouldn't happen, but be safe).
+                remaining_revealed += 1;
+            }
+        }
+
+        let total_remaining = remaining_revealed + remaining_blinded;
+
+        if total_remaining >= 2 {
+            // Enough children remain — no collapse cascade.
+            return None;
+        }
+
+        if total_remaining == 1 && remaining_blinded == 1 {
+            // Only one blinded child remains — would cascade into it.
+            let blinded_nibble = first_blinded_nibble.expect("counted 1 blinded");
+            let short_key = parent_branch.short_key;
+            let parent_path = parent_paths.get(&start_parent_idx).copied()
+                .unwrap_or_default();
+
+            let mut sibling_path = parent_path;
+            sibling_path.extend(&short_key);
+            sibling_path.push_unchecked(blinded_nibble);
+
+            return Some(ArenaRequiredProof {
+                key: Self::nibbles_to_padded_b256(&sibling_path),
+                min_len: (sibling_path.len() as u8).min(64),
+            });
+        }
+
+        if total_remaining == 0 {
+            // Parent would become empty. If it's the root, that's fine (EmptyRoot).
+            // If not root, it would be removed from grandparent. We need to check
+            // the grandparent cascade. Walk up via the arena structure.
+            if start_parent_idx == self.root {
+                return None; // Root becoming empty is fine.
+            }
+
+            // Find grandparent by scanning the upper arena for a branch whose child
+            // points to start_parent_idx.
+            let grandparent = self.find_parent_of(start_parent_idx);
+            if let Some((gp_idx, child_nibble)) = grandparent {
+                return self.simulate_ancestor_cascade(gp_idx, child_nibble, parent_paths);
+            }
+        }
+
+        if total_remaining == 1 && remaining_revealed == 1 {
+            // One revealed child remains — it would be collapsed into the parent.
+            // The parent gets removed from grandparent. Check grandparent cascade.
+            if start_parent_idx == self.root {
+                return None; // Collapsing at root level is fine.
+            }
+
+            let grandparent = self.find_parent_of(start_parent_idx);
+            if let Some((gp_idx, _child_nibble)) = grandparent {
+                // After collapse, the grandparent loses the child slot for start_parent_idx
+                // and gains nothing new (the collapsed child replaces the branch in-place).
+                // Actually, collapse_branch replaces the branch's slot in the grandparent
+                // with the remaining child. So grandparent's child count doesn't change.
+                // No cascade needed.
+                let _ = gp_idx;
+            }
+            return None;
+        }
+
+        None
+    }
+
+    /// Simulates cascade upward from a branch that just lost a child at `removed_nibble`.
+    fn simulate_ancestor_cascade(
+        &self,
+        branch_idx: Index,
+        removed_nibble: u8,
+        parent_paths: &HashMap<Index, Nibbles>,
+    ) -> Option<ArenaRequiredProof> {
+        let ArenaSparseNode::Branch(branch) = &self.upper_arena[branch_idx] else {
+            return None;
+        };
+
+        let mut remaining_revealed = 0usize;
+        let mut remaining_blinded = 0usize;
+        let mut first_blinded_nibble = None;
+
+        for (nibble, child) in branch.child_iter() {
+            if nibble == removed_nibble {
+                continue;
+            }
+            if child.is_blinded() {
+                remaining_blinded += 1;
+                if first_blinded_nibble.is_none() {
+                    first_blinded_nibble = Some(nibble);
+                }
+            } else {
+                remaining_revealed += 1;
+            }
+        }
+
+        let total_remaining = remaining_revealed + remaining_blinded;
+
+        if total_remaining >= 2 {
+            return None;
+        }
+
+        if total_remaining == 1 && remaining_blinded == 1 {
+            let blinded_nibble = first_blinded_nibble.expect("counted 1 blinded");
+            let short_key = branch.short_key;
+            let branch_path = parent_paths.get(&branch_idx).copied()
+                .unwrap_or_default();
+
+            let mut sibling_path = branch_path;
+            sibling_path.extend(&short_key);
+            sibling_path.push_unchecked(blinded_nibble);
+
+            return Some(ArenaRequiredProof {
+                key: Self::nibbles_to_padded_b256(&sibling_path),
+                min_len: (sibling_path.len() as u8).min(64),
+            });
+        }
+
+        if total_remaining == 0 && branch_idx != self.root {
+            if let Some((gp_idx, child_nibble)) = self.find_parent_of(branch_idx) {
+                return self.simulate_ancestor_cascade(gp_idx, child_nibble, parent_paths);
+            }
+        }
+
+        None
+    }
+
+    /// Finds the parent branch of a node at `child_idx` in the upper arena.
+    /// Returns `(parent_idx, child_nibble)`.
+    fn find_parent_of(&self, child_idx: Index) -> Option<(Index, u8)> {
+        for (idx, node) in &self.upper_arena {
+            if let ArenaSparseNode::Branch(b) = node {
+                for (nibble, child) in b.child_iter() {
+                    if let ArenaSparseNodeBranchChild::Revealed(ci) = child {
+                        if *ci == child_idx {
+                            return Some((idx, nibble));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Collapses a branch node that has exactly one remaining revealed child. The branch's
     /// `short_key`, the remaining child's nibble, and the child's own key/`short_key` are
     /// concatenated to form the child's new key/`short_key`. The child then replaces the branch
@@ -2209,10 +2489,29 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            worker_pool: worker_pool::SubtrieWorkerPool::new(2),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
+        }
+    }
+}
+
+impl Clone for ArenaParallelSparseTrie {
+    fn clone(&self) -> Self {
+        Self {
+            upper_arena: self.upper_arena.clone(),
+            root: self.root,
+            updates: self.updates.clone(),
+            buffers: self.buffers.clone(),
+            cleared_subtries: self.cleared_subtries.clone(),
+            parallelism_thresholds: self.parallelism_thresholds,
+            worker_pool: worker_pool::SubtrieWorkerPool::new(2),
+            #[cfg(feature = "metrics")]
+            metrics: self.metrics.clone(),
+            #[cfg(feature = "trie-debug")]
+            debug_recorder: self.debug_recorder.clone(),
         }
     }
 }
@@ -2947,8 +3246,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "metrics")]
         self.metrics.update_leaves_drain_sort_latency.record(drain_sort_start.elapsed());
 
-        let threshold = self.parallelism_thresholds.min_updates;
-
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
@@ -2958,9 +3255,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "metrics")]
         let upper_walk_start = Instant::now();
         #[cfg(feature = "metrics")]
-        let mut inline_subtrie_elapsed = core::time::Duration::ZERO;
+        let inline_subtrie_elapsed = core::time::Duration::ZERO;
         #[cfg(feature = "metrics")]
-        let mut inline_subtrie_count = 0u64;
+        let inline_subtrie_count = 0u64;
         #[cfg(feature = "metrics")]
         let mut upper_seek_count = 0u64;
 
@@ -3019,46 +3316,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let num_subtrie_updates = update_idx - subtrie_start;
-
-                    if num_subtrie_updates >= threshold {
-                        // Take subtrie for parallel update.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
-                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                            &mut self.upper_arena[child_idx],
-                            ArenaSparseNode::TakenSubtrie,
-                        ) else {
-                            unreachable!()
-                        };
-                        taken.push((child_idx, subtrie, subtrie_start..update_idx));
-                    } else {
-                        // Update inline.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Updating subtrie inline");
-                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[child_idx]
-                        else {
-                            unreachable!()
-                        };
-
-                        #[cfg(feature = "metrics")]
-                        let inline_start = Instant::now();
-                        subtrie.update_leaves(subtrie_updates);
-                        #[cfg(feature = "metrics")]
-                        {
-                            inline_subtrie_elapsed += inline_start.elapsed();
-                            inline_subtrie_count += 1;
-                        }
-
-                        for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
-                            #[cfg(feature = "trie-debug")]
-                            recorded_proof_targets.push((proof.key, proof.min_len));
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
-                        }
-
-                        // Check if the subtrie's root became empty after updates.
-                        self.maybe_unwrap_subtrie(&mut cursor);
-                    }
+                    // Take subtrie for batched processing.
+                    trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates = update_idx - subtrie_start, "Taking subtrie");
+                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                        &mut self.upper_arena[child_idx],
+                        ArenaSparseNode::TakenSubtrie,
+                    ) else {
+                        unreachable!()
+                    };
+                    taken.push((child_idx, subtrie, subtrie_start..update_idx));
 
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
@@ -3175,59 +3441,102 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Apply updates to taken subtries, in parallel if more than one.
+        // Decide parallel vs serial based on total updates across all taken subtries.
+        let total_taken_updates: usize =
+            taken.iter().map(|(_, _, range)| range.len()).sum();
+        let use_parallel = taken.len() > 1
+            && total_taken_updates >= self.parallelism_thresholds.min_updates;
+
         #[cfg(feature = "metrics")]
         let parallel_start = Instant::now();
-        #[cfg(feature = "metrics")]
-        {
-            let now = Instant::now();
-            for (_, subtrie, _) in &mut taken {
-                subtrie.dispatch_timestamp = now;
+
+        if use_parallel {
+            // Dispatch to persistent worker pool.
+            #[cfg(feature = "metrics")]
+            {
+                let now = Instant::now();
+                for (_, subtrie, _) in &mut taken {
+                    subtrie.dispatch_timestamp = now;
+                }
+            }
+
+            // Split taken into chunks for the worker pool. We process items
+            // in pairs: one per worker thread plus remainder on the main thread.
+            let num_workers = self.worker_pool.num_workers();
+
+            // Dispatch up to `num_workers` subtries to the pool, process
+            // the rest on the main thread.
+            let pool_count = taken.len().min(num_workers);
+
+            // SAFETY: we use SendPtr to move raw pointers into Send closures.
+            // Each worker gets exclusive access to its own subtrie (disjoint).
+            // `sorted` is not modified during execution. Both `taken` and
+            // `sorted` outlive the pool.execute call because we block until
+            // all workers complete.
+            for entry in taken[..pool_count].iter_mut() {
+                let subtrie_ptr = SendPtr(&mut *entry.1 as *mut ArenaSparseSubtrie);
+                let sorted_ptr = SendPtr(sorted.as_ptr() as *mut (B256, Nibbles, LeafUpdate));
+                let sorted_len = sorted.len();
+                let range = entry.2.clone();
+                self.worker_pool.execute(move || {
+                    let subtrie = unsafe { &mut *subtrie_ptr.get() };
+                    let sorted =
+                        unsafe { core::slice::from_raw_parts(sorted_ptr.get(), sorted_len) };
+                    subtrie.update_leaves(&sorted[range]);
+                });
+            }
+
+            // Process remaining entries on the main thread while workers run.
+            for entry in taken[pool_count..].iter_mut() {
+                entry.1.update_leaves(&sorted[entry.2.clone()]);
+            }
+
+            // Wait for all pool workers to finish.
+            self.worker_pool.join();
+        } else {
+            // Process all taken subtries serially on the main thread.
+            for entry in &mut taken {
+                entry.1.update_leaves(&sorted[entry.2.clone()]);
             }
         }
-        if taken.len() == 1 {
-            let (_, ref mut subtrie, ref range) = taken[0];
-            subtrie.update_leaves(&sorted[range.clone()]);
-        } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-            taken.par_iter_mut().for_each(|(_, subtrie, range)| {
-                subtrie.update_leaves(&sorted[range.clone()]);
-            });
-        }
         #[cfg(feature = "metrics")]
         {
             self.metrics.update_leaves_parallel_subtrie_latency.record(parallel_start.elapsed());
-            self.metrics.update_leaves_parallel_subtrie_count.record(taken.len() as f64);
+            self.metrics
+                .update_leaves_parallel_subtrie_count
+                .record(if use_parallel { taken.len() as f64 } else { 0.0 });
 
-            // Record per-subtrie elapsed times for straggler analysis.
-            // Each subtrie already recorded its own total latency via its metrics field;
-            // here we read the subtrie-level timings that were just captured.
-            let mut max_dur = core::time::Duration::ZERO;
-            let mut min_dur = core::time::Duration::MAX;
-            for (_, subtrie, _) in &taken {
-                let dur = subtrie.last_update_leaves_elapsed;
-                if dur > max_dur {
-                    max_dur = dur;
+            if use_parallel {
+                // Record per-subtrie elapsed times for straggler analysis.
+                let mut max_dur = core::time::Duration::ZERO;
+                let mut min_dur = core::time::Duration::MAX;
+                for (_, subtrie, _) in &taken {
+                    let dur = subtrie.last_update_leaves_elapsed;
+                    if dur > max_dur {
+                        max_dur = dur;
+                    }
+                    if dur < min_dur {
+                        min_dur = dur;
+                    }
+                    self.metrics
+                        .subtrie_update_leaves_schedule_delay
+                        .record(subtrie.last_schedule_delay);
                 }
-                if dur < min_dur {
-                    min_dur = dur;
-                }
-                self.metrics
-                    .subtrie_update_leaves_schedule_delay
-                    .record(subtrie.last_schedule_delay);
-            }
-            if !taken.is_empty() {
                 self.metrics.update_leaves_parallel_max_subtrie_latency.record(max_dur);
                 self.metrics.update_leaves_parallel_min_subtrie_latency.record(min_dur);
                 self.metrics.update_leaves_parallel_straggler_delta.record(max_dur - min_dur);
             }
         }
 
-        // Collect subtrie paths before consuming `taken`, then restore subtries and
+        // Collect subtrie info before consuming `taken`, then restore subtries and
         // process required proofs.
-        let taken_paths: Vec<Nibbles> = taken.iter().map(|(_, s, _)| s.path).collect();
+        let mut taken_info: Vec<TakenInfo> = Vec::with_capacity(taken.len());
+
         for (child_idx, mut subtrie, range) in taken {
+            let is_empty = matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot);
+            taken_info.push(TakenInfo { path: subtrie.path, range: range.clone(), is_empty });
+
             let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                 proof_required_fn(proof.key, proof.min_len);
@@ -3243,29 +3552,48 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Navigate to each taken subtrie via seek to propagate dirty state
         // through intermediate branches, and collapse any EmptyRoot subtries.
+        //
+        // Before unwrapping, we pre-scan for the multi-subtrie-emptying case:
+        // if removing all empty subtries from a parent branch would leave only
+        // blinded children, we must request proofs for those blinded children
+        // and skip the unwraps (re-inserting affected updates for retry).
         #[cfg(feature = "metrics")]
         let post_parallel_start = Instant::now();
         {
             let mut cursor = mem::take(&mut self.buffers.cursor);
             cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
-            for path in &taken_paths {
-                let find_result = cursor.seek(&mut self.upper_arena, path);
+            // Pre-scan: identify parents where unwrapping all empty subtries
+            // would cascade onto a blinded sibling. For such parents, collect
+            // a proof request for the blinded sibling and skip unwrapping.
+            //
+            // We group empty subtries by their parent nibble prefix. A subtrie
+            // path is 2 nibbles (UPPER_TRIE_MAX_DEPTH); its parent path is
+            // the branch's logical path (everything before the child nibble).
+            // For each parent, we count how many children would remain after
+            // removing all empty subtries, and whether those remaining children
+            // include any blinded nodes.
+            let skip_unwrap_indices = self.find_unsafe_empty_subtries(
+                &taken_info,
+                &mut cursor,
+                &sorted,
+                updates,
+                &mut proof_required_fn,
+                #[cfg(feature = "trie-debug")]
+                &mut recorded_proof_targets,
+            );
+
+            // Now walk taken subtries: unwrap empty ones (unless skipped) and
+            // propagate dirty state for non-empty ones.
+            for (i, info) in taken_info.iter().enumerate() {
+                let find_result = cursor.seek(&mut self.upper_arena, &info.path);
                 match find_result {
                     SeekResult::RevealedSubtrie => {
-                        let head_idx = cursor.head().expect("cursor is non-empty").index;
-                        if let ArenaSparseNode::Subtrie(s) = &self.upper_arena[head_idx]
-                            && matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
-                        {
+                        if info.is_empty && !skip_unwrap_indices.contains(&i) {
                             self.maybe_unwrap_subtrie(&mut cursor);
                             continue;
                         }
                         cursor.pop(&mut self.upper_arena);
-
-                        // The parent branch (now at cursor top) may have had a sibling
-                        // removed during inline processing while this subtrie was taken.
-                        // Handle any necessary collapse or removal.
-                        self.maybe_collapse_or_remove_branch(&mut cursor);
                     }
                     _ => {
                         // Subtrie was already unwrapped by a prior collapse; dirty state

@@ -10661,6 +10661,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "smallvec",
+ "threadpool",
  "tracing",
 ]
 
