@@ -105,6 +105,9 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Minimum cursor stack depth for eager RLP caching during `update_leaves`.
+    /// Copied from [`ArenaParallelSparseTrie::update_leaves_cache_depth`].
+    update_leaves_cache_depth: Option<usize>,
 }
 
 impl ArenaSparseSubtrie {
@@ -239,14 +242,35 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        // Destructure buffers so that cursor, rlp_buf, and rlp_node_buf can be borrowed
+        // independently — required when eager caching passes rlp buffers into seek/drain
+        // callbacks while the cursor drives the traversal.
+        let ArenaTrieBuffers { cursor, updates, rlp_buf, rlp_node_buf } = &mut self.buffers;
+        cursor.reset(&self.arena, self.root, self.path);
+
+        let cache_depth = self.update_leaves_cache_depth;
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
-            let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+            let find_result = if let Some(min_depth) = cache_depth {
+                cursor.seek_with(&mut self.arena, full_path, |arena, entry, depth| {
+                    if depth >= min_depth {
+                        ArenaParallelSparseTrie::cache_branch_rlp(
+                            arena,
+                            entry.index,
+                            entry.path,
+                            rlp_buf,
+                            rlp_node_buf,
+                            updates,
+                        );
+                    }
+                })
+            } else {
+                cursor.seek(&mut self.arena, full_path)
+            };
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
-                let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
+                let logical_len = cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
@@ -259,7 +283,7 @@ impl ArenaSparseSubtrie {
                     // Upsert: insert or update a leaf with the given value.
                     let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
-                        &mut self.buffers.cursor,
+                        cursor,
                         &mut self.root,
                         full_path,
                         value,
@@ -272,12 +296,12 @@ impl ArenaSparseSubtrie {
                 LeafUpdate::Changed(_) => {
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
-                        &mut self.buffers.cursor,
+                        cursor,
                         &mut self.root,
                         key,
                         full_path,
                         find_result,
-                        &mut self.buffers.updates,
+                        updates,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -293,8 +317,23 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        // Drain remaining cursor entries, propagating dirty state.
-        self.buffers.cursor.drain(&mut self.arena);
+        // Drain remaining cursor entries, propagating dirty state and eager caching.
+        if let Some(min_depth) = cache_depth {
+            cursor.drain_with(&mut self.arena, |arena, entry, depth| {
+                if depth >= min_depth {
+                    ArenaParallelSparseTrie::cache_branch_rlp(
+                        arena,
+                        entry.index,
+                        entry.path,
+                        rlp_buf,
+                        rlp_node_buf,
+                        updates,
+                    );
+                }
+            });
+        } else {
+            cursor.drain(&mut self.arena);
+        }
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -515,6 +554,13 @@ pub struct ArenaParallelSparseTrie {
     cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Minimum cursor stack depth at which nodes have their cached RLP eagerly computed
+    /// during `update_leaves`. When `Some(d)`, dirty branch nodes at cursor depth >= `d` in
+    /// subtries will be RLP-encoded as they are popped from the cursor stack, avoiding
+    /// redundant re-encoding during the subsequent `update_cached_rlp` pass.
+    ///
+    /// Only applies within subtries, never in the upper trie. `None` disables eager caching.
+    update_leaves_cache_depth: Option<usize>,
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
     debug_recorder: TrieDebugRecorder,
@@ -527,6 +573,16 @@ impl ArenaParallelSparseTrie {
         thresholds: ArenaParallelismThresholds,
     ) -> Self {
         self.parallelism_thresholds = thresholds;
+        self
+    }
+
+    /// Sets the minimum cursor stack depth for eager RLP caching during `update_leaves`.
+    ///
+    /// When set, dirty branch nodes at cursor depth >= `depth` in subtries will have their
+    /// RLP eagerly computed as they are popped from the cursor stack, so that the subsequent
+    /// `update_cached_rlp` pass can skip them.
+    pub const fn with_update_leaves_cache_depth(mut self, depth: usize) -> Self {
+        self.update_leaves_cache_depth = Some(depth);
         self
     }
 
@@ -702,9 +758,11 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
+                update_leaves_cache_depth: None,
             })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
+        subtrie.update_leaves_cache_depth = self.update_leaves_cache_depth;
         if self.updates.is_some() {
             subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         }
@@ -1043,6 +1101,102 @@ impl ArenaParallelSparseTrie {
         }
 
         masks
+    }
+
+    /// Computes and caches the `RlpNode` for a single dirty branch node.
+    ///
+    /// All revealed children must already have cached RLP (leaves are encoded on the fly).
+    /// This is the single-node version of `update_cached_rlp`, used for eager caching
+    /// during `update_leaves` when nodes are popped from the cursor stack.
+    fn cache_branch_rlp(
+        arena: &mut NodeArena,
+        idx: Index,
+        entry_path: Nibbles,
+        rlp_buf: &mut Vec<u8>,
+        rlp_node_buf: &mut Vec<RlpNode>,
+        updates: &mut Option<SparseTrieUpdates>,
+    ) {
+        let Some(ArenaSparseNode::Branch(b)) = arena.get(idx) else { return };
+        if !matches!(b.state, ArenaSparseNodeState::Dirty) {
+            return;
+        }
+
+        // Check that all revealed branch children are cached. If any are still dirty,
+        // we can't encode this node yet — it will be handled by update_cached_rlp.
+        let all_children_ready = b.children.iter().all(|child| match child {
+            ArenaSparseNodeBranchChild::Blinded(_) => true,
+            ArenaSparseNodeBranchChild::Revealed(child_idx) => match &arena[*child_idx] {
+                ArenaSparseNode::Branch(cb) => !matches!(cb.state, ArenaSparseNodeState::Dirty),
+                _ => true,
+            },
+        });
+        if !all_children_ready {
+            return;
+        }
+
+        // Collect children RLP nodes.
+        rlp_node_buf.clear();
+        let state_mask = arena[idx].branch_ref().state_mask;
+        for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
+            match &arena[idx].branch_ref().children[child_idx] {
+                ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                    rlp_node_buf.push(rlp_node.clone());
+                }
+                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                    let child_idx = *child_idx;
+                    match &arena[child_idx] {
+                        ArenaSparseNode::Leaf { .. } => {
+                            Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                        }
+                        ArenaSparseNode::Branch(child_b) => {
+                            let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
+                            else {
+                                unreachable!("all children verified cached above");
+                            };
+                            rlp_node_buf.push(rlp_node.clone());
+                        }
+                        _ => unreachable!("unexpected child in subtrie branch"),
+                    }
+                }
+            }
+        }
+
+        // Encode the branch, optionally wrapping in an extension if it has a short_key.
+        let b = arena[idx].branch_ref();
+        let short_key = b.short_key;
+        let prev_branch_masks = b.branch_masks;
+        let new_branch_masks = Self::get_branch_masks(arena, b);
+
+        rlp_buf.clear();
+        let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+
+        let rlp_node = if short_key.is_empty() {
+            rlp_node
+        } else {
+            rlp_buf.clear();
+            ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
+        };
+
+        let branch = arena[idx].branch_mut();
+        branch.state = ArenaSparseNodeState::Cached { rlp_node };
+        branch.branch_masks = new_branch_masks;
+
+        // Record trie updates for this branch.
+        if let Some(trie_updates) = updates.as_mut() {
+            let mut logical_path = entry_path;
+            logical_path.extend(&short_key);
+
+            if !logical_path.is_empty() {
+                if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
+                    trie_updates.updated_nodes.remove(&logical_path);
+                    trie_updates.removed_nodes.insert(logical_path);
+                } else if !new_branch_masks.is_empty() {
+                    let compact = arena[idx].branch_ref().branch_node_compact(arena);
+                    trie_updates.updated_nodes.insert(logical_path, compact);
+                    trie_updates.removed_nodes.remove(&logical_path);
+                }
+            }
+        }
     }
 
     /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
@@ -2108,6 +2262,7 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            update_leaves_cache_depth: None,
             #[cfg(feature = "trie-debug")]
             debug_recorder: Default::default(),
         }

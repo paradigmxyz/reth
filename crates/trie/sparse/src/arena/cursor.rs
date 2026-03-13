@@ -159,6 +159,20 @@ impl ArenaCursor {
         }
     }
 
+    /// Like [`Self::drain`], but calls `on_pop` for each popped entry after dirty propagation.
+    pub(super) fn drain_with(
+        &mut self,
+        arena: &mut NodeArena,
+        mut on_pop: impl FnMut(&mut NodeArena, &ArenaCursorStackEntry, usize),
+    ) {
+        self.needs_pop = false;
+        while self.stack.len() > 1 {
+            let depth = self.stack.len() - 1;
+            let entry = self.pop(arena);
+            on_pop(arena, &entry, depth);
+        }
+    }
+
     /// Returns the logical path of the branch at the top of the stack.
     /// The logical path is `entry.path + branch.short_key`.
     pub(super) fn head_logical_branch_path(&self, arena: &NodeArena) -> Nibbles {
@@ -305,6 +319,30 @@ impl ArenaCursor {
             self.pop(arena);
         }
 
+        self.seek_inner(arena, full_path)
+    }
+
+    /// Like [`Self::seek`], but calls `on_pop` for each entry popped during backtracking.
+    pub(super) fn seek_with(
+        &mut self,
+        arena: &mut NodeArena,
+        full_path: &Nibbles,
+        mut on_pop: impl FnMut(&mut NodeArena, &ArenaCursorStackEntry, usize),
+    ) -> SeekResult {
+        // Pop stack until head is ancestor of full_path.
+        while self.stack.len() > 1 &&
+            !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
+        {
+            let depth = self.stack.len() - 1;
+            let entry = self.pop(arena);
+            on_pop(arena, &entry, depth);
+        }
+
+        self.seek_inner(arena, full_path)
+    }
+
+    /// Shared seek logic after backtracking is complete.
+    fn seek_inner(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         loop {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
