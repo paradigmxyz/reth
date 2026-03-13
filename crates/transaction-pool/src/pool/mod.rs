@@ -1061,6 +1061,7 @@ where
         }
         let removed = self.pool.write().remove_transactions(hashes);
 
+        self.delete_discarded_blobs(removed.iter());
         self.with_event_listener(|listener| listener.discarded_many(&removed));
 
         removed
