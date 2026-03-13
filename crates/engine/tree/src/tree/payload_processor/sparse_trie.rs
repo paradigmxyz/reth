@@ -725,12 +725,15 @@ where
             if let Some(trie) = self.trie.storage_tries_mut().get(address) &&
                 !trie.is_root_cached()
             {
+                if trie.prefix_set_len() > 50 {
+                    has_large_storage_trie = true;
+                }
+
                 tries_to_compute_roots.push((
                     *address,
                     self.trie.take_storage_trie(address).expect("trie was created above"),
                 ));
                 self.pending_storage_roots.insert(*address);
-                has_large_storage_trie = true;
             }
         }
 
