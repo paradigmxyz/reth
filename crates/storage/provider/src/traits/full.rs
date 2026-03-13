@@ -6,6 +6,7 @@ use crate::{
     RocksDBProviderFactory, StageCheckpointReader, StateProviderFactory, StateReader,
     StaticFileProviderFactory,
 };
+use reth_bal_store::BalStore;
 use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
 };
@@ -42,6 +43,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
+    + BalStore
     + Clone
     + Debug
     + Unpin
@@ -77,6 +79,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader
+        + BalStore
         + Clone
         + Debug
         + Unpin

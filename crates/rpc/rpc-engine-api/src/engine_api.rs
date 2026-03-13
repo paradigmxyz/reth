@@ -10,16 +10,15 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, PraguePayloadFields,
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    PraguePayloadFields,
 };
 
-// TODO: Replace with alloy types once available in alloy bal-devnet2 branch
-type ExecutionPayloadBodiesV2 = ExecutionPayloadBodiesV1;
-type ExecutionPayloadBodyV2 = ExecutionPayloadBodyV1;
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
+use reth_bal_store::{BalStore, BalStoreError};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_network_api::NetworkInfo;
@@ -156,7 +155,8 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v1`.
@@ -184,7 +184,9 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v2`.
@@ -213,7 +215,8 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v3`
@@ -243,7 +246,8 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v4`
@@ -328,7 +332,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -735,12 +739,20 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        // TODO: add block_access_list field once ExecutionPayloadBodyV2 is in alloy bal-devnet2
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-        })
-        .await
+        let mut bodies = self
+            .get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: None,
+            })
+            .await?;
+        let bals = self.inner.provider.get_by_range(start, count)?;
+        for (body_opt, bal) in bodies.iter_mut().zip(bals) {
+            if let Some(body) = body_opt.as_mut() {
+                body.block_access_list = Some(bal);
+            }
+        }
+        Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_range_v2`
@@ -823,12 +835,21 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        // TODO: add block_access_list field once ExecutionPayloadBodyV2 is in alloy bal-devnet2
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-        })
-        .await
+        let mut bodies = self
+            .get_payload_bodies_by_hash_with(hashes.clone(), |block| ExecutionPayloadBodyV2 {
+                transactions: block.body().encoded_2718_transactions(),
+                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+                block_access_list: None,
+            })
+            .await?;
+
+        let bals = self.get_bals_by_hash(hashes)?;
+        for (body_opt, bal) in bodies.iter_mut().zip(bals) {
+            if let Some(body) = body_opt.as_mut() {
+                body.block_access_list = Some(bal);
+            }
+        }
+        Ok(bodies)
     }
 
     /// Metrics version of `get_payload_bodies_by_hash_v2`
@@ -1044,6 +1065,34 @@ where
 
         res
     }
+
+    /// Retrieves BALs for the given block hashes from the cache.
+    ///
+    /// Returns the RLP-encoded BALs for blocks found in the cache or BAL store.
+    /// Missing blocks are returned as empty bytes.
+    pub fn get_bals_by_hash(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> Result<Vec<alloy_primitives::Bytes>, BalStoreError> {
+        Ok(self
+            .inner
+            .provider
+            .get_by_hashes(&block_hashes)?
+            .into_iter()
+            .map(|opt| opt.unwrap_or_default())
+            .collect())
+    }
+
+    /// Retrieves BALs for a range of blocks from the cache or BAL store.
+    ///
+    /// Returns the RLP-encoded BALs for blocks in the range `[start, start + count)`.
+    pub fn get_bals_by_range(
+        &self,
+        start: u64,
+        count: u64,
+    ) -> Result<Vec<alloy_primitives::Bytes>, BalStoreError> {
+        self.inner.provider.get_by_range(start, count)
+    }
 }
 
 // This is the concrete ethereum engine API implementation.
@@ -1051,7 +1100,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -1420,7 +1469,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer<ExecutionData>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalStore + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,

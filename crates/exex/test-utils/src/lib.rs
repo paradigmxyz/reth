@@ -52,7 +52,7 @@ use reth_node_ethereum::{
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
+    providers::{BalProvider, BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::Runtime;
@@ -256,7 +256,7 @@ pub async fn test_exex_context_with_chain_spec(
     )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let provider = BlockchainProvider::new(provider_factory.clone())?;
+    let provider = BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
     let runtime = Runtime::test();
     let network_manager = NetworkManager::new(

@@ -529,8 +529,9 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DBProvider, DatabaseProviderFactory,
+        providers::{BalProvider, BlockchainProvider},
+        test_utils::create_test_provider_factory,
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use std::collections::BTreeMap;
@@ -549,7 +550,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let provider = BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -623,7 +624,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory, BalProvider::default())?;
 
         let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead { block: node_head };
@@ -677,7 +678,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory, BalProvider::default())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -768,7 +769,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory, BalProvider::default())?;
 
         let exex_head_block = random_block(
             &mut rng,
@@ -853,7 +854,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let provider = BlockchainProvider::new(provider_factory.clone(), BalProvider::default())?;
 
         // Insert block 1 into the DB so there's something to backfill
         let node_head_block = random_block(

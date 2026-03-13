@@ -22,6 +22,7 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
+use reth_bal_store::BalStore;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
@@ -703,4 +704,44 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvid
     }
 
     fn set_storage_settings_cache(&self, _settings: reth_db_api::models::StorageSettings) {}
+}
+
+impl BalStore for NoopProvider {
+    fn insert(
+        &self,
+        _block_hash: BlockHash,
+        _block_number: BlockNumber,
+        _bal: Bytes,
+    ) -> Result<(), reth_bal_store::BalStoreError> {
+        Ok(())
+    }
+
+    fn get_by_hashes(
+        &self,
+        _block_hashes: &[BlockHash],
+    ) -> Result<Vec<Option<Bytes>>, reth_bal_store::BalStoreError> {
+        Ok(Vec::new())
+    }
+
+    fn get_by_range(
+        &self,
+        _start: BlockNumber,
+        _count: u64,
+    ) -> Result<Vec<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(Vec::new())
+    }
+
+    fn get_by_block_number(
+        &self,
+        _block_number: BlockNumber,
+    ) -> Result<Option<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(None)
+    }
+
+    fn get_by_block_hash(
+        &self,
+        _block_hash: BlockHash,
+    ) -> Result<Option<Bytes>, reth_bal_store::BalStoreError> {
+        Ok(None)
+    }
 }

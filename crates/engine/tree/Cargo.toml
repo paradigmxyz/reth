@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-bal-store.workspace = true
 reth-chain-state = { workspace = true, features = ["rayon"] }
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true

@@ -21,10 +21,10 @@ engine-withdrawals: []
 engine-api: []
 
 engine-cancun:
-  - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
+  # - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
   # the test fails with older versions of the code for which it passed before, probably related to changes
   # in hive or its dependencies
-  - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
+  # - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
 
 sync: []
 
