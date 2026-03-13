@@ -169,6 +169,18 @@ where
     }
 }
 
+fn evm_to_precompiles_map(
+    evm: impl Evm<Precompiles = PrecompilesMap>,
+) -> BTreeMap<String, Address> {
+    let precompiles = evm.precompiles();
+    precompiles
+        .addresses()
+        .filter_map(|address| {
+            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,16 +228,4 @@ mod tests {
         let result = handler.config();
         assert!(result.is_ok(), "expected ok when Shanghai is active at genesis");
     }
-}
-
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
-) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
-    precompiles
-        .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
-        .collect()
 }
