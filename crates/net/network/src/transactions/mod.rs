@@ -460,16 +460,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
     }
 
-    /// Removes a peer from transaction-local tracking state.
-    fn remove_peer_from_transaction_state(&mut self, peer_id: &PeerId) {
+    /// Handles a closed peer session, removing the peer from transaction-local tracking state.
+    fn on_peer_session_closed(&mut self, peer_id: &PeerId) {
         if let Some(mut peer) = self.peers.remove(peer_id) {
             self.policies.propagation_policy_mut().on_session_closed(&mut peer);
         }
         self.transaction_fetcher.remove_peer(peer_id);
-        self.transactions_by_peers.retain(|_, peers| {
-            peers.remove(peer_id);
-            !peers.is_empty()
-        });
     }
 
     /// Clear the transaction
@@ -1258,7 +1254,7 @@ where
     fn on_network_event(&mut self, event_result: NetworkEvent<PeerRequest<N>>) {
         match event_result {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
-                self.remove_peer_from_transaction_state(&peer_id);
+                self.on_peer_session_closed(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
                 // process active peer session and broadcast available transaction from the pool
@@ -2525,13 +2521,8 @@ mod tests {
         let fallback_peer = PeerId::new([2; 64]);
         let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
         let hash_shared = B256::from_slice(&[1; 32]);
-        let hash_unique = B256::from_slice(&[2; 32]);
 
         tx_manager.peers.insert(peer_id, peer);
-        tx_manager
-            .transactions_by_peers
-            .insert(hash_shared, HashSet::from([peer_id, fallback_peer]));
-        tx_manager.transactions_by_peers.insert(hash_unique, HashSet::from([peer_id]));
         buffer_hash_to_tx_fetcher(
             &mut tx_manager.transaction_fetcher,
             hash_shared,
@@ -2554,11 +2545,6 @@ mod tests {
         }));
 
         assert!(!tx_manager.peers.contains_key(&peer_id));
-        assert_eq!(
-            tx_manager.transactions_by_peers.get(&hash_shared),
-            Some(&HashSet::from([fallback_peer]))
-        );
-        assert!(!tx_manager.transactions_by_peers.contains_key(&hash_unique));
         assert!(tx_manager.transaction_fetcher.active_peers.peek(&peer_id).is_none());
         assert_eq!(
             tx_manager.transaction_fetcher.get_idle_peer_for(hash_shared),
