@@ -215,9 +215,22 @@ where
         self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
     }
 
-    /// Returns the internal [`SenderId`] for this address
+    /// Returns the internal [`SenderId`] for this address, allocating a new mapping when the
+    /// address is first observed.
+    ///
+    /// This must only be used on paths that intentionally begin tracking a sender, such as
+    /// transaction insertion. Read-only lookups should prefer [`Self::sender_id`] to avoid
+    /// growing the sender-id map for unknown addresses.
     pub fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
+    }
+
+    /// Returns the internal [`SenderId`] for this address if it is already tracked.
+    ///
+    /// Unlike [`Self::get_sender_id`], this never allocates a new sender mapping and is therefore
+    /// suitable for read-only queries or best-effort cleanup on unknown addresses.
+    pub fn sender_id(&self, addr: &Address) -> Option<SenderId> {
+        self.identifiers.read().sender_id(addr)
     }
 
     /// Returns the internal [`SenderId`]s for the given addresses.
@@ -1078,7 +1091,7 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
         let removed = self.pool.write().remove_transactions_by_sender(sender_id);
 
         self.with_event_listener(|listener| listener.discarded_many(&removed));
@@ -1123,7 +1136,7 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
         self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
@@ -1133,7 +1146,7 @@ where
         sender: Address,
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let sender_id = self.sender_id(&sender)?;
         self.get_pool_data().get_pending_transaction_by_sender_and_nonce(sender_id, nonce)
     }
 
@@ -1142,7 +1155,7 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
         self.get_pool_data().queued_txs_by_sender(sender_id)
     }
 
@@ -1159,7 +1172,7 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
         self.get_pool_data().pending_txs_by_sender(sender_id)
     }
 
@@ -1168,7 +1181,7 @@ where
         &self,
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let sender_id = self.sender_id(&sender)?;
         self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
@@ -1178,7 +1191,7 @@ where
         sender: Address,
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let sender_id = self.get_sender_id(sender);
+        let sender_id = self.sender_id(&sender)?;
         self.get_pool_data().get_highest_consecutive_transaction_by_sender(
             sender_id.into_transaction_id(on_chain_nonce),
         )
@@ -1746,5 +1759,21 @@ mod tests {
 
         let identifiers = test_pool.identifiers.read();
         assert_eq!(identifiers.sender_id(&auth), Some(SenderId::from(1)));
+    }
+
+    #[test]
+    fn sender_queries_do_not_allocate_ids_for_unknown_addresses() {
+        let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
+        let sender = Address::new([9; 20]);
+
+        assert_eq!(test_pool.sender_id(&sender), None);
+        assert!(test_pool.get_transactions_by_sender(sender).is_empty());
+        assert!(test_pool.get_pending_transaction_by_sender_and_nonce(sender, 0).is_none());
+        assert!(test_pool.get_queued_transactions_by_sender(sender).is_empty());
+        assert!(test_pool.get_pending_transactions_by_sender(sender).is_empty());
+        assert!(test_pool.get_highest_transaction_by_sender(sender).is_none());
+        assert!(test_pool.get_highest_consecutive_transaction_by_sender(sender, 0).is_none());
+        assert!(test_pool.remove_transactions_by_sender(sender).is_empty());
+        assert_eq!(test_pool.sender_id(&sender), None);
     }
 }
