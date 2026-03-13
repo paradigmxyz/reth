@@ -65,6 +65,36 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Other(RawCapabilityMessage),
 }
 
+impl<N: NetworkPrimitives> PeerMessage<N> {
+    /// Returns a static string identifying the message variant for logging.
+    pub const fn message_kind(&self) -> &'static str {
+        match self {
+            Self::NewBlockHashes(_) => "NewBlockHashes",
+            Self::NewBlock(_) => "NewBlock",
+            Self::ReceivedTransaction(_) => "ReceivedTransaction",
+            Self::SendTransactions(_) => "SendTransactions",
+            Self::PooledTransactions(_) => "PooledTransactions",
+            Self::EthRequest(_) => "EthRequest",
+            Self::BlockRangeUpdated(_) => "BlockRangeUpdated",
+            Self::Other(_) => "Other",
+        }
+    }
+
+    /// Returns the number of items in the message payload, if applicable.
+    pub fn message_item_count(&self) -> usize {
+        match self {
+            Self::NewBlockHashes(msg) => msg.len(),
+            Self::ReceivedTransaction(msg) => msg.len(),
+            Self::SendTransactions(msg) => msg.len(),
+            Self::PooledTransactions(msg) => msg.len(),
+            Self::NewBlock(_) |
+            Self::EthRequest(_) |
+            Self::BlockRangeUpdated(_) |
+            Self::Other(_) => 1,
+        }
+    }
+}
+
 /// Request Variants that only target block related data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockRequest {

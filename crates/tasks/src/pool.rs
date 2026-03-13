@@ -180,10 +180,12 @@ impl WorkerPool {
     }
 
     /// Creates a new `WorkerPool` from a [`rayon::ThreadPoolBuilder`].
+    ///
+    /// Installs a panic handler that logs panics instead of aborting the process.
     pub fn from_builder(
         builder: rayon::ThreadPoolBuilder,
     ) -> Result<Self, rayon::ThreadPoolBuildError> {
-        Ok(Self { pool: builder.build()? })
+        Ok(Self { pool: build_pool_with_panic_handler(builder)? })
     }
 
     /// Returns the total number of threads in the underlying rayon pool.
@@ -281,6 +283,16 @@ impl WorkerPool {
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
     }
+}
+
+/// Builds a rayon thread pool with a panic handler that prevents aborting the process.
+///
+/// Rust's default panic hook already logs the panic message and backtrace to stderr, so the handler
+/// itself is intentionally a no-op.
+pub fn build_pool_with_panic_handler(
+    builder: rayon::ThreadPoolBuilder,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    builder.panic_handler(|_| {}).build()
 }
 
 /// Per-thread state container for a [`WorkerPool`].

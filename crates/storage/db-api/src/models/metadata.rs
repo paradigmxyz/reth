@@ -28,20 +28,8 @@ pub struct StorageSettings {
 
 impl StorageSettings {
     /// Returns the default base `StorageSettings`.
-    ///
-    /// When the `edge` feature is enabled, returns [`Self::v2()`] so that CI and
-    /// edge builds automatically use v2 storage defaults. Otherwise returns
-    /// [`Self::v1()`]. The `--storage.v2` CLI flag can also opt into v2 at runtime
-    /// regardless of feature flags.
     pub const fn base() -> Self {
-        #[cfg(feature = "edge")]
-        {
-            Self::v2()
-        }
-        #[cfg(not(feature = "edge"))]
-        {
-            Self::v1()
-        }
+        Self::v2()
     }
 
     /// Creates `StorageSettings` for v2 nodes with all storage features enabled:

@@ -7,7 +7,7 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
@@ -474,6 +474,15 @@ impl Runtime {
         self.0.handle.spawn_blocking(func)
     }
 
+    /// Moves the given value to a dedicated background thread for deallocation.
+    ///
+    /// This is useful when dropping a value is expensive (e.g. large nested collections)
+    /// and should not block the current task. Uses a persistent named thread (`"drop"`)
+    /// to avoid thread creation overhead on hot paths.
+    pub fn spawn_drop<T: Send + 'static>(&self, value: T) {
+        self.spawn_blocking_named("drop", move || drop(value));
+    }
+
     /// Spawns a blocking closure on a dedicated, named OS thread.
     ///
     /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
@@ -781,23 +790,26 @@ impl RuntimeBuilder {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
-            let cpu_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(default_threads)
-                .thread_name(|i| format!("cpu-{i:02}"))
-                .build()?;
+            let cpu_pool = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(default_threads)
+                    .thread_name(|i| format!("cpu-{i:02}")),
+            )?;
 
-            let rpc_raw = rayon::ThreadPoolBuilder::new()
-                .num_threads(rpc_threads)
-                .thread_name(|i| format!("rpc-{i:02}"))
-                .build()?;
+            let rpc_raw = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(rpc_threads)
+                    .thread_name(|i| format!("rpc-{i:02}")),
+            )?;
             let rpc_pool = BlockingTaskPool::new(rpc_raw);
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
-            let storage_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(storage_threads)
-                .thread_name(|i| format!("storage-{i:02}"))
-                .build()?;
+            let storage_pool = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(storage_threads)
+                    .thread_name(|i| format!("storage-{i:02}")),
+            )?;
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 

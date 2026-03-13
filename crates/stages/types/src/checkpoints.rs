@@ -406,7 +406,9 @@ impl StageCheckpoint {
             }
             _ => return self,
         });
-        _ = self.stage_checkpoint.map(|mut checkpoint| checkpoint.set_block_range(from, to));
+        if let Some(ref mut checkpoint) = self.stage_checkpoint {
+            checkpoint.set_block_range(from, to);
+        }
         self
     }
 

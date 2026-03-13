@@ -1,6 +1,7 @@
 //! Transactions management for the p2p network.
 
 use alloy_consensus::transaction::TxHashRef;
+use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
@@ -389,7 +390,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // install a listener for new __pending__ transactions that are allowed to be propagated
         // over the network
         let pending = pool.pending_transactions_listener();
-        let pending_pool_imports_info = PendingPoolImportsInfo::default();
+        let pending_pool_imports_info =
+            PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
         let metrics = TransactionsManagerMetrics::default();
         metrics
             .capacity_pending_pool_imports
@@ -402,9 +404,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
-            pending_pool_imports_info: PendingPoolImportsInfo::new(
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-            ),
+            pending_pool_imports_info,
             bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
@@ -759,7 +759,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         trace!(target: "net::tx::propagation",
             peer_id=format!("{peer_id:#}"),
             hashes_len=valid_announcement_data.len(),
-            hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
+            hashes=%valid_announcement_data.keys().format(", "),
             msg_version=%valid_announcement_data.msg_version(),
             client_version=%client,
             "received previously unseen and pending hashes in announcement from peer"
@@ -1910,7 +1910,7 @@ impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
+            Self::Eth66(msg) => msg.push(*pooled_tx.hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
@@ -1947,7 +1947,7 @@ impl PooledTransactionsHashesBuilder {
 
     fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(*tx.tx_hash()),
+            Self::Eth66(msg) => msg.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
@@ -1969,7 +1969,7 @@ impl PooledTransactionsHashesBuilder {
     fn build(self) -> NewPooledTransactionHashes {
         match self {
             Self::Eth66(mut msg) => {
-                msg.0.shrink_to_fit();
+                msg.shrink_to_fit();
                 msg.into()
             }
             Self::Eth68(mut msg) => {
