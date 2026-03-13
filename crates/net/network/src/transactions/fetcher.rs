@@ -92,6 +92,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Removes the peer from the active set.
     pub(crate) fn remove_peer(&mut self, peer_id: &PeerId) {
         self.active_peers.remove(peer_id);
+        for (_, metadata) in self.hashes_fetch_inflight_and_pending_fetch.iter_mut() {
+            metadata.fallback_peers_mut().remove(peer_id);
+        }
     }
 
     /// Updates metrics.
@@ -1447,6 +1450,33 @@ mod test {
             requested_hashes.into_iter().collect::<HashSet<_>>(),
             seen_hashes.into_iter().collect::<HashSet<_>>()
         )
+    }
+
+    #[test]
+    fn remove_peer_clears_fallback_entries() {
+        let tx_fetcher = &mut TransactionFetcher::default();
+        let peer_1 = PeerId::new([1; 64]);
+        let peer_2 = PeerId::new([2; 64]);
+        let hash_1 = B256::from_slice(&[1; 32]);
+        let hash_2 = B256::from_slice(&[2; 32]);
+
+        tx_fetcher.active_peers.insert(peer_1, 1);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_1, 0, Some(128));
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_1, peer_2, 0, Some(128));
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_2, peer_1, 0, None);
+
+        tx_fetcher.remove_peer(&peer_1);
+
+        assert!(tx_fetcher.active_peers.peek(&peer_1).is_none());
+
+        let hash_1_metadata =
+            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.peek(&hash_1).unwrap();
+        assert!(!hash_1_metadata.fallback_peers.iter().any(|id| id == &peer_1));
+        assert!(hash_1_metadata.fallback_peers.iter().any(|id| id == &peer_2));
+
+        let hash_2_metadata =
+            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.peek(&hash_2).unwrap();
+        assert!(!hash_2_metadata.fallback_peers.iter().any(|id| id == &peer_1));
     }
 
     #[test]
