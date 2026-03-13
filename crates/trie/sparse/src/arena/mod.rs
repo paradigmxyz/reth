@@ -111,6 +111,15 @@ struct ArenaSparseSubtrie {
     /// Metrics for subtrie-level `update_leaves` breakdown.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ArenaUpdateLeavesMetrics,
+    /// Elapsed time of the last `update_leaves` call (for straggler analysis).
+    #[cfg(feature = "metrics")]
+    last_update_leaves_elapsed: core::time::Duration,
+    /// Timestamp set right before parallel dispatch, so subtrie can measure scheduling delay.
+    #[cfg(feature = "metrics")]
+    dispatch_timestamp: Instant,
+    /// Scheduling delay: time between dispatch and actual start of work.
+    #[cfg(feature = "metrics")]
+    last_schedule_delay: core::time::Duration,
 }
 
 impl ArenaSparseSubtrie {
@@ -248,6 +257,12 @@ impl ArenaSparseSubtrie {
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         #[cfg(feature = "metrics")]
+        let subtrie_update_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        {
+            self.last_schedule_delay = subtrie_update_start - self.dispatch_timestamp;
+        }
+        #[cfg(feature = "metrics")]
         let mut seek_elapsed = core::time::Duration::ZERO;
         #[cfg(feature = "metrics")]
         let mut upsert_elapsed = core::time::Duration::ZERO;
@@ -255,6 +270,10 @@ impl ArenaSparseSubtrie {
         let mut remove_elapsed = core::time::Duration::ZERO;
         #[cfg(feature = "metrics")]
         let mut seek_count = 0u64;
+        #[cfg(feature = "metrics")]
+        let mut upsert_count = 0u64;
+        #[cfg(feature = "metrics")]
+        let mut remove_count = 0u64;
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
             #[cfg(feature = "metrics")]
@@ -292,6 +311,7 @@ impl ArenaSparseSubtrie {
                     #[cfg(feature = "metrics")]
                     {
                         upsert_elapsed += upsert_start.elapsed();
+                        upsert_count += 1;
                     }
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -312,6 +332,7 @@ impl ArenaSparseSubtrie {
                     #[cfg(feature = "metrics")]
                     {
                         remove_elapsed += remove_start.elapsed();
+                        remove_count += 1;
                     }
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -338,6 +359,30 @@ impl ArenaSparseSubtrie {
             self.metrics.subtrie_update_leaves_remove_latency.record(remove_elapsed);
             self.metrics.subtrie_update_leaves_drain_latency.record(drain_start.elapsed());
             self.metrics.subtrie_update_leaves_seek_count.record(seek_count as f64);
+            self.last_update_leaves_elapsed = subtrie_update_start.elapsed();
+
+            // Uncomment to find out about the outliers:
+            // 
+            // if self.last_update_leaves_elapsed.as_micros() >= 20 {
+            //     tracing::info!(
+            //         target: "reth::trie::subtrie_profile",
+            //         elapsed_us = self.last_update_leaves_elapsed.as_micros() as u64,
+            //         schedule_delay_us = self.last_schedule_delay.as_micros() as u64,
+            //         thread_id = ?std::thread::current().id(),
+            //         num_updates = sorted_updates.len(),
+            //         arena_nodes = self.arena.len(),
+            //         num_leaves = self.num_leaves,
+            //         seek_count,
+            //         upsert_count,
+            //         remove_count,
+            //         seek_us = seek_elapsed.as_micros() as u64,
+            //         upsert_us = upsert_elapsed.as_micros() as u64,
+            //         remove_us = remove_elapsed.as_micros() as u64,
+            //         drain_us = drain_start.elapsed().as_micros() as u64,
+            //         subtrie = ?self.path,
+            //         "heavy subtrie update_leaves"
+            //     );
+            // }
         }
 
         #[cfg(debug_assertions)]
@@ -751,6 +796,12 @@ impl ArenaParallelSparseTrie {
                 num_dirty_leaves: 0,
                 #[cfg(feature = "metrics")]
                 metrics: Default::default(),
+                #[cfg(feature = "metrics")]
+                last_update_leaves_elapsed: core::time::Duration::ZERO,
+                #[cfg(feature = "metrics")]
+                dispatch_timestamp: Instant::now(),
+                #[cfg(feature = "metrics")]
+                last_schedule_delay: core::time::Duration::ZERO,
             })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
@@ -1199,8 +1250,8 @@ impl ArenaParallelSparseTrie {
                                     ArenaSparseNode::Branch(ArenaSparseNodeBranch {
                                         state: ArenaSparseNodeState::Cached { rlp_node, .. },
                                         ..
-                                    }) |
-                                    ArenaSparseNode::Leaf {
+                                    })
+                                    | ArenaSparseNode::Leaf {
                                         state: ArenaSparseNodeState::Cached { rlp_node, .. },
                                         ..
                                     } => {
@@ -1291,8 +1342,8 @@ impl ArenaParallelSparseTrie {
                 ArenaSparseNode::Branch(b) => {
                     let short_key = &b.short_key;
                     let logical_end = path_offset + short_key.len();
-                    if full_path.len() <= logical_end ||
-                        full_path.slice(path_offset..logical_end) != *short_key
+                    if full_path.len() <= logical_end
+                        || full_path.slice(path_offset..logical_end) != *short_key
                     {
                         return None;
                     }
@@ -1339,8 +1390,8 @@ impl ArenaParallelSparseTrie {
                     if remaining != *key {
                         return Ok(LeafLookup::NonExistent);
                     }
-                    if let Some(expected) = expected_value &&
-                        *expected != *value
+                    if let Some(expected) = expected_value
+                        && *expected != *value
                     {
                         return Err(LeafLookupError::ValueMismatch {
                             path: *full_path,
@@ -1672,8 +1723,8 @@ impl ArenaParallelSparseTrie {
                     let child_nibble = head_path.last().expect("non-root leaf");
                     let parent_branch = arena[parent_idx].branch_ref();
 
-                    if parent_branch.state_mask.count_bits() == 2 &&
-                        parent_branch.sibling_child(child_nibble).is_blinded()
+                    if parent_branch.state_mask.count_bits() == 2
+                        && parent_branch.sibling_child(child_nibble).is_blinded()
                     {
                         let sibling_nibble = parent_branch
                             .state_mask
@@ -1737,8 +1788,8 @@ impl ArenaParallelSparseTrie {
                     RemoveLeafResult::Removed,
                     SubtrieCounterDeltas {
                         num_leaves_delta: -1,
-                        num_dirty_leaves_delta: (collapse_dirtied_leaf as i64) -
-                            (removed_was_dirty as i64),
+                        num_dirty_leaves_delta: (collapse_dirtied_leaf as i64)
+                            - (removed_was_dirty as i64),
                     },
                 )
             }
@@ -1845,8 +1896,8 @@ impl ArenaParallelSparseTrie {
 
         // Record the collapsed branch's logical path for trie update tracking if it
         // was previously persisted in the DB trie.
-        if let Some(trie_updates) = updates.as_mut() &&
-            !branch.branch_masks.is_empty()
+        if let Some(trie_updates) = updates.as_mut()
+            && !branch.branch_masks.is_empty()
         {
             let logical_path = cursor.head_logical_branch_path(arena);
             if !logical_path.is_empty() {
@@ -2637,8 +2688,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.cleared_subtries.iter().map(|s| s.arena.capacity() * node_size).sum();
 
         // RLP buffers.
-        let buffer_size = self.buffers.rlp_buf.capacity() +
-            self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
+        let buffer_size = self.buffers.rlp_buf.capacity()
+            + self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
 
         upper + subtrie_size + cleared_size + buffer_size
     }
@@ -2673,9 +2724,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let result = cursor.next(&mut self.upper_arena, |_, child| {
                 matches!(
                     child,
-                    ArenaSparseNode::Branch(_) |
-                        ArenaSparseNode::Subtrie(_) |
-                        ArenaSparseNode::Leaf { .. }
+                    ArenaSparseNode::Branch(_)
+                        | ArenaSparseNode::Subtrie(_)
+                        | ArenaSparseNode::Leaf { .. }
                 )
             });
 
@@ -2861,8 +2912,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let subtrie_root_path = subtrie_entry.path;
 
                     let subtrie_start = update_idx;
-                    while update_idx < sorted.len() &&
-                        sorted[update_idx].1.starts_with(&subtrie_root_path)
+                    while update_idx < sorted.len()
+                        && sorted[update_idx].1.starts_with(&subtrie_root_path)
                     {
                         update_idx += 1;
                     }
@@ -2890,7 +2941,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let num_subtrie_updates = update_idx - subtrie_start;
 
-                    if num_subtrie_updates >= threshold {
+                    if true {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
@@ -2933,10 +2984,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     continue;
                 }
                 // EmptyRoot, leaf, diverged branch, or empty child slot — upsert directly.
-                find_result @ (SeekResult::EmptyRoot |
-                SeekResult::RevealedLeaf |
-                SeekResult::Diverged |
-                SeekResult::NoChild { .. }) => match update {
+                find_result @ (SeekResult::EmptyRoot
+                | SeekResult::RevealedLeaf
+                | SeekResult::Diverged
+                | SeekResult::NoChild { .. }) => match update {
                     LeafUpdate::Changed(v) if !v.is_empty() => {
                         let (result, _deltas) = Self::upsert_leaf(
                             &mut self.upper_arena,
@@ -3047,6 +3098,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Apply updates to taken subtries, in parallel if more than one.
         #[cfg(feature = "metrics")]
         let parallel_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        {
+            let now = Instant::now();
+            for (_, subtrie, _) in &mut taken {
+                subtrie.dispatch_timestamp = now;
+            }
+        }
         if taken.len() == 1 {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
@@ -3061,6 +3119,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
         {
             self.metrics.update_leaves_parallel_subtrie_latency.record(parallel_start.elapsed());
             self.metrics.update_leaves_parallel_subtrie_count.record(taken.len() as f64);
+
+            // Record per-subtrie elapsed times for straggler analysis.
+            // Each subtrie already recorded its own total latency via its metrics field;
+            // here we read the subtrie-level timings that were just captured.
+            let mut max_dur = core::time::Duration::ZERO;
+            let mut min_dur = core::time::Duration::MAX;
+            for (_, subtrie, _) in &taken {
+                let dur = subtrie.last_update_leaves_elapsed;
+                if dur > max_dur {
+                    max_dur = dur;
+                }
+                if dur < min_dur {
+                    min_dur = dur;
+                }
+            }
+            if !taken.is_empty() {
+                self.metrics.update_leaves_parallel_max_subtrie_latency.record(max_dur);
+                self.metrics.update_leaves_parallel_min_subtrie_latency.record(min_dur);
+                self.metrics.update_leaves_parallel_straggler_delta.record(max_dur - min_dur);
+            }
         }
 
         // Collect subtrie paths before consuming `taken`, then restore subtries and
@@ -3093,8 +3171,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 match find_result {
                     SeekResult::RevealedSubtrie => {
                         let head_idx = cursor.head().expect("cursor is non-empty").index;
-                        if let ArenaSparseNode::Subtrie(s) = &self.upper_arena[head_idx] &&
-                            matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                        if let ArenaSparseNode::Subtrie(s) = &self.upper_arena[head_idx]
+                            && matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
                         {
                             self.maybe_unwrap_subtrie(&mut cursor);
                             continue;

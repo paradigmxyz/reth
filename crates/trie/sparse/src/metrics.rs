@@ -93,6 +93,13 @@ pub(crate) struct ArenaUpdateLeavesMetrics {
     /// Number of upper-trie seeks in the main walk loop.
     pub(crate) update_leaves_upper_seek_count: Histogram,
 
+    /// Max elapsed time among parallel subtries in a single batch.
+    pub(crate) update_leaves_parallel_max_subtrie_latency: Histogram,
+    /// Min elapsed time among parallel subtries in a single batch.
+    pub(crate) update_leaves_parallel_min_subtrie_latency: Histogram,
+    /// Straggler delta: max - min subtrie latency in a parallel batch.
+    pub(crate) update_leaves_parallel_straggler_delta: Histogram,
+
     // --- Subtrie-level (ArenaSparseSubtrie::update_leaves) ---
 
     /// Time spent in cursor.seek across all iterations within a single subtrie update_leaves.
