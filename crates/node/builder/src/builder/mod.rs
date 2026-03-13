@@ -743,13 +743,13 @@ pub struct BuilderContext<Node: FullNodeTypes> {
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Create a new instance of [`BuilderContext`]
-    pub fn new(
+    pub const fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, provider, executor, config_container, resources: Default::default() }
+        Self { head, provider, executor, config_container, resources: ContextResources::new() }
     }
 
     /// Returns the configured provider to interact with the blockchain.

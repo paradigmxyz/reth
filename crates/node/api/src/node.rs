@@ -72,16 +72,23 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
 /// Launch-owned resources that can be attached to node build contexts.
 #[derive(Clone, Default)]
 pub struct ContextResources {
-    entries: Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
+    entries: Option<Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
 }
 
 impl ContextResources {
+    /// Creates an empty resource container.
+    pub const fn new() -> Self {
+        Self { entries: None }
+    }
+
     /// Stores a typed resource, replacing any existing value of the same type.
     pub fn insert<T>(&mut self, value: T) -> &mut Self
     where
         T: Any + Send + Sync,
     {
-        Arc::make_mut(&mut self.entries).insert(TypeId::of::<T>(), Arc::new(value));
+        let entries =
+            Arc::make_mut(self.entries.get_or_insert_with(|| Arc::new(HashMap::default())));
+        entries.insert(TypeId::of::<T>(), Arc::new(value));
         self
     }
 
@@ -99,13 +106,17 @@ impl ContextResources {
     where
         T: Any + Send + Sync,
     {
-        self.entries.get(&TypeId::of::<T>()).and_then(|value| value.as_ref().downcast_ref())
+        self.entries
+            .as_ref()?
+            .get(&TypeId::of::<T>())
+            .and_then(|value| value.as_ref().downcast_ref())
     }
 }
 
 impl std::fmt::Debug for ContextResources {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ContextResources").field("resource_count", &self.entries.len()).finish()
+        let resource_count = self.entries.as_ref().map_or(0, |entries| entries.len());
+        f.debug_struct("ContextResources").field("resource_count", &resource_count).finish()
     }
 }
 
@@ -162,32 +173,6 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
-    /// Launch-owned resources exported to add-ons.
-    pub resources: ContextResources,
-}
-
-impl<'a, N: FullNodeComponents> AddOnsContext<'a, N> {
-    /// Returns all launch-owned resources visible to add-ons.
-    pub const fn resources(&self) -> &ContextResources {
-        &self.resources
-    }
-
-    /// Returns a typed launch resource if present.
-    pub fn resource<T>(&self) -> Option<&T>
-    where
-        T: Any + Send + Sync,
-    {
-        self.resources.get::<T>()
-    }
-
-    /// Returns a copy of the context with the given typed launch resource attached.
-    pub fn with_resource<T>(mut self, value: T) -> Self
-    where
-        T: Any + Send + Sync,
-    {
-        self.resources.insert(value);
-        self
-    }
 }
 
 /// Customizable node add-on types.
