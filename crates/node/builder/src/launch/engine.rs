@@ -81,6 +81,7 @@ impl EngineNodeLauncher {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
+            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
@@ -102,7 +103,7 @@ impl EngineNodeLauncher {
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory with changeset cache
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone()).await?
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone(), rocksdb_provider).await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })

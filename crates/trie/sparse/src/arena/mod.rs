@@ -1623,29 +1623,25 @@ impl ArenaParallelSparseTrie {
                     let child_nibble = head_path.last().expect("non-root leaf");
                     let parent_branch = arena[parent_idx].branch_ref();
 
-                    if parent_branch.state_mask.count_bits() == 2 {
-                        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                            .expect("leaf nibble not found in parent state_mask");
-                        // With exactly 2 bits set the dense array has indices 0 and 1.
-                        let sibling_dense_idx = 1 - child_idx.get();
-                        if parent_branch.children[sibling_dense_idx].is_blinded() {
-                            let sibling_nibble = parent_branch
-                                .state_mask
-                                .iter()
-                                .find(|&n| n != child_nibble)
-                                .expect("branch has two children");
-                            let mut sibling_path = cursor.parent_logical_branch_path(arena);
-                            sibling_path.push_unchecked(sibling_nibble);
-                            trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
-                            return (
-                                RemoveLeafResult::NeedsProof {
-                                    key,
-                                    proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                    min_len: (sibling_path.len() as u8).min(64),
-                                },
-                                SubtrieCounterDeltas::default(),
-                            );
-                        }
+                    if parent_branch.state_mask.count_bits() == 2 &&
+                        parent_branch.sibling_child(child_nibble).is_blinded()
+                    {
+                        let sibling_nibble = parent_branch
+                            .state_mask
+                            .iter()
+                            .find(|&n| n != child_nibble)
+                            .expect("branch has two children");
+                        let mut sibling_path = cursor.parent_logical_branch_path(arena);
+                        sibling_path.push_unchecked(sibling_nibble);
+                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
+                        return (
+                            RemoveLeafResult::NeedsProof {
+                                key,
+                                proof_key: Self::nibbles_to_padded_b256(&sibling_path),
+                                min_len: (sibling_path.len() as u8).min(64),
+                            },
+                            SubtrieCounterDeltas::default(),
+                        );
                     }
                 }
 
@@ -1653,10 +1649,7 @@ impl ArenaParallelSparseTrie {
                 let removed_was_dirty =
                     matches!(arena[head_idx].state_ref(), Some(ArenaSparseNodeState::Dirty));
 
-                // Pop the leaf entry, propagating dirty state to the parent.
-                cursor.pop(arena);
-
-                if cursor.is_empty() {
+                if cursor.depth() == 0 {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
                     arena.remove(head_idx);
@@ -1670,6 +1663,9 @@ impl ArenaParallelSparseTrie {
                         },
                     );
                 }
+
+                // Pop the leaf entry, propagating dirty state to the parent.
+                cursor.pop(arena);
 
                 // The parent must be a branch. Remove the leaf from it.
                 let parent_entry = cursor.head().expect("cursor is non-empty");
@@ -1738,10 +1734,7 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not in parent state_mask");
-        let sibling_dense_idx = 1 - child_idx.get();
-        if !parent_branch.children[sibling_dense_idx].is_blinded() {
+        if !parent_branch.sibling_child(child_nibble).is_blinded() {
             return None;
         }
 

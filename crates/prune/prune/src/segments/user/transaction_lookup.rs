@@ -95,7 +95,6 @@ where
         .into_inner();
 
         // Check where transaction hash numbers are stored
-        #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storage_v2 {
             return self.prune_rocksdb(provider, input, start, end);
         }
@@ -196,7 +195,6 @@ impl TransactionLookup {
     ///
     /// Reads transactions from static files and deletes corresponding entries
     /// from the `RocksDB` `TransactionHashNumbers` table.
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn prune_rocksdb<Provider>(
         &self,
         provider: &Provider,
@@ -438,7 +436,6 @@ mod tests {
         test_prune(10, (PruneProgress::Finished, 8));
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     #[test]
     fn prune_rocksdb() {
         use reth_db_api::models::StorageSettings;
@@ -539,7 +536,6 @@ mod tests {
     /// 1. Some transactions have already been pruned (checkpoint at tx 5)
     /// 2. The deleted entries limit is exhausted before any new deletions
     /// 3. The checkpoint should NOT advance to the next start position
-    #[cfg(all(unix, feature = "rocksdb"))]
     #[test]
     fn prune_rocksdb_zero_deleted_checkpoint() {
         use reth_db_api::models::StorageSettings;
