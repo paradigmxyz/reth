@@ -2809,35 +2809,8 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, got_root);
     }
 
-    /// Reproduces a bug in the cached hash index computation at `next_uncached_key_range`.
-    ///
-    /// The hash index for a cached child is computed as:
-    /// ```ignore
-    /// let curr_hashed_used_mask = cached_branch.hash_mask & curr_state_mask;
-    /// let hash_idx = curr_hashed_used_mask.count_ones() as usize;
-    /// ```
-    ///
-    /// `curr_state_mask` tracks which children have been built so far. When a child has its
-    /// `hash_mask` bit set but `should_retain` returns true (proof target), the cached hash is
-    /// skipped and the child's range is recalculated from leaves. If that range is **empty**
-    /// (absence proof — no leaves exist for the target), the child's bit is never set in
-    /// `curr_state_mask`. Subsequent siblings then compute a `hash_idx` that is too low,
-    /// pulling the wrong hash from the `hashes` array.
-    ///
-    /// Setup:
-    /// - Cached branch at path `[6]` with children at nibbles 3, 5, 8, all with `hash_mask` set.
-    ///   The hashes are computed from the correct leaf nodes.
-    ///   - hashes\[0\] = hash for nibble 3 (leaf at 0x63...)
-    ///   - hashes\[1\] = hash for nibble 5 (leaf at 0x65...)
-    ///   - hashes\[2\] = hash for nibble 8 (leaf at 0x68...)
-    /// - Hashed cursor has leaves at 0x65... and 0x68... (NOT 0x63...).
-    /// - Proof target at key 0x63... (absence proof — leaf was deleted).
-    ///
-    /// Expected behavior: nibble 5 should use `hashes[1]` and nibble 8 should use `hashes[2]`.
-    /// Buggy behavior: nibble 5 uses `hashes[0]` (nibble 3's hash) because `curr_state_mask`
-    /// never got bit 3 set (no leaf was pushed), so the count is off by one.
     #[test]
-    fn test_cached_hash_index_bug_with_deleted_leaf() {
+    fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 
         // Use different values to ensure distinct leaf hashes.
