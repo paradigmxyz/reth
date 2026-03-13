@@ -791,6 +791,19 @@ impl RocksDBProvider {
         })
     }
 
+    /// Gets raw bytes from the specified table without decompressing.
+    pub fn get_raw<T: Table>(&self, key: T::Key) -> ProviderResult<Option<Vec<u8>>> {
+        let encoded = key.encode();
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            this.0.get_cf(this.get_cf_handle::<T>()?, encoded.as_ref()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })
+        })
+    }
+
     /// Puts upsert a value into the specified table with the given key.
     ///
     /// # Panics

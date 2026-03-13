@@ -19,7 +19,10 @@ use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_primitives_traits::ValueWithSubKey;
-use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, ChangeSetReader, RocksDBProviderFactory,
+    StaticFileProviderFactory,
+};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
@@ -73,6 +76,31 @@ enum Subcommand {
         #[arg(long)]
         raw: bool,
     },
+    /// Gets the content of a RocksDB table for the given key
+    Rocksdb {
+        /// The RocksDB table
+        #[arg(value_enum)]
+        table: RocksDbTable,
+
+        /// The key to get content for
+        #[arg(value_parser = maybe_json_value_parser)]
+        key: String,
+
+        /// Output bytes instead of human-readable decoded value
+        #[arg(long)]
+        raw: bool,
+    },
+}
+
+/// RocksDB tables that can be queried.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum RocksDbTable {
+    /// Transaction hash to transaction number mapping
+    TransactionHashNumbers,
+    /// Account history indices
+    AccountsHistory,
+    /// Storage history indices
+    StoragesHistory,
 }
 
 impl Command {
@@ -81,6 +109,9 @@ impl Command {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
+            }
+            Subcommand::Rocksdb { table, key, raw } => {
+                get_rocksdb(tool, table, &key, raw)?;
             }
             Subcommand::StaticFile { segment, key, subkey, raw } => {
                 if let StaticFileSegment::StorageChangeSets = segment {
@@ -244,6 +275,53 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Gets a value from a RocksDB table by key.
+fn get_rocksdb<N: ProviderNodeTypes>(
+    tool: &DbTool<N>,
+    table: RocksDbTable,
+    key: &str,
+    raw: bool,
+) -> eyre::Result<()> {
+    let rocksdb = tool.provider_factory.rocksdb_provider();
+
+    match table {
+        RocksDbTable::TransactionHashNumbers => {
+            get_rocksdb_table::<tables::TransactionHashNumbers>(&rocksdb, key, raw)
+        }
+        RocksDbTable::AccountsHistory => {
+            get_rocksdb_table::<tables::AccountsHistory>(&rocksdb, key, raw)
+        }
+        RocksDbTable::StoragesHistory => {
+            get_rocksdb_table::<tables::StoragesHistory>(&rocksdb, key, raw)
+        }
+    }
+}
+
+/// Gets a value from a specific RocksDB table and prints it.
+fn get_rocksdb_table<T: Table>(
+    rocksdb: &reth_provider::providers::RocksDBProvider,
+    key_str: &str,
+    raw: bool,
+) -> eyre::Result<()> {
+    let key = table_key::<T>(key_str)?;
+
+    if raw {
+        let content = rocksdb.get_raw::<T>(key)?;
+        match content {
+            Some(bytes) => println!("{}", hex::encode_prefixed(&bytes)),
+            None => error!(target: "reth::cli", "No content for the given table key."),
+        }
+    } else {
+        let content = rocksdb.get::<T>(key)?;
+        match content {
+            Some(value) => println!("{}", serde_json::to_string_pretty(&value)?),
+            None => error!(target: "reth::cli", "No content for the given table key."),
+        }
+    }
+
+    Ok(())
 }
 
 /// Get an instance of key for given table
