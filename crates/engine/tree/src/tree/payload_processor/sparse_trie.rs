@@ -633,7 +633,7 @@ where
             if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
                 !trie.is_root_cached()
             {
-                if trie.prefix_set_len() > 60 {
+                if trie.prefix_set_len() > 50 {
                     has_large_storage_trie = true;
                 }
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
