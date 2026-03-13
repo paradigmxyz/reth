@@ -2107,6 +2107,12 @@ mod tests {
             .expect("Proof generation failed");
     }
 
+    /// Tests that `root_node` handles a cached branch with a `state_mask` bit set for a child
+    /// that has no corresponding `hash_mask` bit and no leaf data in the hashed cursor.
+    ///
+    /// This scenario occurs when a child's `hash_mask` bit is cleared (because the child's path
+    /// is in the prefix set) but the `state_mask` bit is left intact, while the
+    /// `HashedPostStateCursorFactory` overlay has deleted the leaf data for that child.
     #[test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
