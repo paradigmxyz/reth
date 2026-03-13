@@ -174,12 +174,12 @@ where
             .get_by_block_hash(block_hash.into())
             .map_err(Eth::Error::from_eth_err)?;
 
-        if cached_bal.is_none() {
-            let bal = self.eth_api().get_block_access_list(block_hash).await?;
-            Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
-        } else {
-            Ok(cached_bal.unwrap())
-        }
+        // if cached_bal.is_none() {
+        //     let bal = self.eth_api().get_block_access_list(block_hash).await?;
+        //     Ok(alloy_rlp::encode(bal.unwrap_or_default()).into())
+        // } else {
+        Ok(cached_bal.unwrap())
+        // }
     }
 
     /// Replays the given block and returns the trace of each transaction.

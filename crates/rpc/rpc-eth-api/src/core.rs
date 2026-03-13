@@ -928,7 +928,8 @@ where
                 .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?
         } else {
             // if cache is missed, we recompute
-            self.get_block_access_list(block_hash).await?.unwrap_or_default()
+            //self.get_block_access_list(block_hash).await?.unwrap_or_default()
+            BlockAccessList::default()
         };
 
         let json = serde_json::to_value(&bal)
@@ -958,7 +959,8 @@ where
                 .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?
         } else {
             // if cache is missed, we recompute
-            self.get_block_access_list(block_hash).await?.unwrap_or_default()
+            //self.get_block_access_list(block_hash).await?.unwrap_or_default()
+            BlockAccessList::default()
         };
 
         let json = serde_json::to_value(&bal)
