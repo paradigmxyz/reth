@@ -455,9 +455,9 @@ pub struct ArenaParallelismThresholds {
     /// reveal. Subtries with fewer nodes to reveal than this are revealed inline during the
     /// upper trie walk.
     pub min_revealed_nodes: usize,
-    /// Minimum number of leaf updates targeting a subtrie before it is eligible for parallel
-    /// update. Subtries with fewer updates than this are updated inline during the upper trie
-    /// walk.
+    /// Minimum total number of leaf updates across all subtries before they are processed in
+    /// parallel. When the total update count is below this threshold, all subtries are updated
+    /// serially.
     pub min_updates: usize,
     /// Minimum number of revealed leaves in a subtrie before it is eligible for parallel
     /// pruning. Subtries with fewer leaves than this are pruned inline during the upper trie
@@ -470,7 +470,7 @@ impl Default for ArenaParallelismThresholds {
         Self {
             min_dirty_leaves: 64,
             min_revealed_nodes: 16,
-            min_updates: 128,
+            min_updates: 64,
             min_leaves_for_prune: 128,
         }
     }
@@ -507,7 +507,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// Leaf updates and removals are applied via [`SparseTrie::update_leaves`]. The method walks
 /// the upper trie to route each update to the correct subtrie, then processes subtries in
-/// parallel when the update count exceeds [`ArenaParallelismThresholds::min_updates`].
+/// parallel when the total update count exceeds [`ArenaParallelismThresholds::min_updates`].
 ///
 /// [`SparseTrie::update_leaf`] and [`SparseTrie::remove_leaf`] are not yet implemented.
 ///
@@ -592,6 +592,39 @@ impl ArenaParallelSparseTrie {
             .iter()
             .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
             .collect()
+    }
+
+    /// Checks upper trie branches for blinded children whose path length is below
+    /// [`UPPER_TRIE_MAX_DEPTH`]. For each one found, fires `proof_required_fn` so the
+    /// caller can request a proof to reveal it before processing leaf updates.
+    ///
+    /// Blinded children at or beyond the subtrie boundary depth are ignored — they are
+    /// internal to subtries and do not affect upper trie structural invariants.
+    ///
+    /// Returns `true` if any blinded nodes were found (and proofs requested).
+    fn request_upper_trie_proofs(&mut self, proof_required_fn: &mut impl FnMut(B256, u8)) -> bool {
+        let ArenaSparseNode::Branch(root_branch) = &self.upper_arena[self.root] else {
+            return false;
+        };
+
+        let mut has_blinded = false;
+        let logical_path = root_branch.short_key;
+        for (nibble, child) in root_branch.child_iter() {
+            if child.is_blinded() && logical_path.len() + 1 < UPPER_TRIE_MAX_DEPTH {
+                has_blinded = true;
+                let mut child_path = logical_path;
+                child_path.push_unchecked(nibble);
+                let key = Self::nibbles_to_padded_b256(&child_path);
+                let min_len = (child_path.len() as u8).min(64);
+                proof_required_fn(key, min_len);
+            }
+        }
+
+        // With UPPER_TRIE_MAX_DEPTH == 2, the root's children are at depth 1 and their
+        // children are at depth 2 (subtrie boundary). Only the root's own children can
+        // be blinded upper trie nodes, so no cursor walk is needed. If the depth
+        // threshold ever increases, a cursor walk over deeper branches would be required.
+        has_blinded
     }
 
     /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
@@ -980,7 +1013,7 @@ impl ArenaParallelSparseTrie {
             };
 
             let Some(child_idx) = remaining_child_idx else {
-                debug_assert!(false, "single remaining child is blinded — should have been caught by check_subtrie_collapse_needs_proof");
+                debug_assert!(false, "single remaining child is blinded — upper trie should be fully revealed before update_leaves processes subtries");
                 return;
             };
 
@@ -1884,21 +1917,17 @@ impl ArenaParallelSparseTrie {
 
         let parent_entry = cursor.parent()?;
         let parent_branch = arena[parent_entry.index].branch_ref();
-        if parent_branch.state_mask.count_bits() != 2 {
-            return None;
-        }
 
-        if !parent_branch.sibling_child(child_nibble).is_blinded() {
-            return None;
-        }
+        // Check whether any sibling child is blinded. With batch processing, multiple
+        // sibling subtries can be emptied in the same pass, so we can't just check for
+        // exactly 2 children — we must scan all siblings.
+        let blinded_sibling_nibble = parent_branch
+            .child_iter()
+            .find(|(nibble, child)| *nibble != child_nibble && child.is_blinded())
+            .map(|(nibble, _)| nibble)?;
 
-        let sibling_nibble = parent_branch
-            .state_mask
-            .iter()
-            .find(|&n| n != child_nibble)
-            .expect("branch has two children");
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
-        sibling_path.push_unchecked(sibling_nibble);
+        sibling_path.push_unchecked(blinded_sibling_nibble);
 
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
@@ -2906,18 +2935,27 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
+        // Ensure all upper trie nodes are revealed before processing. Walk branches
+        // in the upper arena and request proofs for any blinded children. If any are
+        // found, keep updates in the map and return — the next call (after proofs are
+        // revealed) will have a fully revealed upper trie, preventing cascading
+        // collapses from reaching blinded nodes.
+        if self.request_upper_trie_proofs(&mut proof_required_fn) {
+            trace!(target: TRACE_TARGET, "Upper trie has blinded nodes, deferring all updates");
+            return Ok(());
+        }
+
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
 
-        let threshold = self.parallelism_thresholds.min_updates;
-
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
-        // Subtries taken for parallel processing: (arena_index, subtrie, update_range).
+        // Subtries taken for batch processing: (arena_index, subtrie, update_range).
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
+        let mut total_subtrie_updates: usize = 0;
 
         let mut update_idx = 0;
         while update_idx < sorted.len() {
@@ -2972,37 +3010,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let num_subtrie_updates = update_idx - subtrie_start;
 
-                    if num_subtrie_updates >= threshold {
-                        // Take subtrie for parallel update.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
-                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                            &mut self.upper_arena[child_idx],
-                            ArenaSparseNode::TakenSubtrie,
-                        ) else {
-                            unreachable!()
-                        };
-                        taken.push((child_idx, subtrie, subtrie_start..update_idx));
-                    } else {
-                        // Update inline.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Updating subtrie inline");
-                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[child_idx]
-                        else {
-                            unreachable!()
-                        };
-
-                        subtrie.update_leaves(subtrie_updates);
-
-                        for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
-                            #[cfg(feature = "trie-debug")]
-                            recorded_proof_targets.push((proof.key, proof.min_len));
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
-                        }
-
-                        // Check if the subtrie's root became empty after updates.
-                        self.maybe_unwrap_subtrie(&mut cursor);
-                    }
+                    // Take the subtrie for batch processing. The decision to use
+                    // parallelism is made after the walk based on total update count.
+                    trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for batch update");
+                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                        &mut self.upper_arena[child_idx],
+                        ArenaSparseNode::TakenSubtrie,
+                    ) else {
+                        unreachable!()
+                    };
+                    taken.push((child_idx, subtrie, subtrie_start..update_idx));
+                    total_subtrie_updates += num_subtrie_updates;
 
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
@@ -3103,16 +3121,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Apply updates to taken subtries, in parallel if more than one.
-        if taken.len() == 1 {
-            let (_, ref mut subtrie, ref range) = taken[0];
-            subtrie.update_leaves(&sorted[range.clone()]);
-        } else {
+        // Apply updates to taken subtries: in parallel if total updates meet the
+        // threshold and there is more than one subtrie, otherwise serially.
+        if taken.len() > 1 && total_subtrie_updates >= self.parallelism_thresholds.min_updates {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
+        } else {
+            for &mut (_, ref mut subtrie, ref range) in &mut taken {
+                subtrie.update_leaves(&sorted[range.clone()]);
+            }
         }
 
         // Collect subtrie paths before consuming `taken`, then restore subtries and
@@ -3147,14 +3167,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
                         {
                             self.maybe_unwrap_subtrie(&mut cursor);
-                            continue;
-                        }
-                        cursor.pop(&mut self.upper_arena);
+                        } else {
+                            cursor.pop(&mut self.upper_arena);
 
-                        // The parent branch (now at cursor top) may have had a sibling
-                        // removed during inline processing while this subtrie was taken.
-                        // Handle any necessary collapse or removal.
-                        self.maybe_collapse_or_remove_branch(&mut cursor);
+                            // The parent branch (now at cursor top) may have had a sibling
+                            // removed during batch processing while this subtrie was taken.
+                            // Handle any necessary collapse or removal.
+                            self.maybe_collapse_or_remove_branch(&mut cursor);
+                        }
                     }
                     _ => {
                         // Subtrie was already unwrapped by a prior collapse; dirty state
