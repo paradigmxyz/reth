@@ -3523,4 +3523,124 @@ mod tests {
             harness.assert_changes(&mut apst, changeset2);
         }
     }
+
+    /// Reproduction of the blinded-sibling collapse panic triggered by the `if true`
+    /// forced parallel path in `update_leaves`.
+    ///
+    /// Minimized from a proptest failure. `check_subtrie_collapse_needs_proof` runs
+    /// before subtries are taken and processed, but the actual collapse happens after
+    /// restoration. The check cannot predict the post-update state when a subtrie
+    /// ends up empty (e.g., all its leaves are deleted while the net changeset for
+    /// the subtrie is all-removals). After the subtrie is emptied and removed,
+    /// `maybe_collapse_or_remove_branch` finds the parent branch with a single
+    /// blinded sibling and panics.
+    #[test]
+    fn test_blinded_sibling_collapse_with_forced_parallel_path() {
+        reth_tracing::init_test_tracing();
+
+        // Construct the initial dataset from the shrunk proptest failure.
+        let mut initial = BTreeMap::new();
+        let keys_and_values: &[(u8, u8, U256)] = &[
+            (0x00, 0x00, U256::from(250u64)),
+            (0x01, 0x00, U256::from(174u64)),
+            (0x03, 0x00, U256::from(94u64)),
+            (0x06, 0x00, U256::from(225u64)),
+            (0x08, 0x00, U256::from(91u64)),
+            (0x0a, 0x00, U256::from(179u64)),
+            (0x0d, 0x00, U256::from(102u64)),
+            (0x11, 0x00, U256::from(125u64)),
+            (0x15, 0x00, U256::from(250u64)),
+            (0x17, 0x00, U256::from(3u64)),
+            (0x23, 0x00, U256::from(110u64)),
+            (0x2a, 0x00, U256::from(98u64)),
+            (0x37, 0x00, U256::from(136u64)),
+            (0x38, 0x00, U256::from(227u64)),
+            (0x3c, 0x00, U256::from(90u64)),
+            (0x43, 0x00, U256::from(96u64)),
+            (0x47, 0x00, U256::from(173u64)),
+            (0x48, 0x00, U256::from(220u64)),
+            (0x52, 0x00, U256::from(120u64)),
+            (0x55, 0x00, U256::from(39u64)),
+            (0x56, 0x00, U256::from(88u64)),
+            (0x5a, 0x00, U256::from(21u64)),
+            (0x5f, 0x00, U256::from(221u64)),
+            (0x60, 0x00, U256::from(125u64)),
+            (0x64, 0x00, U256::from(26u64)),
+            (0x68, 0x00, U256::from(125u64)),
+            (0x6f, 0x00, U256::from(154u64)),
+            (0x71, 0x00, U256::from(91u64)),
+            (0x7b, 0x00, U256::from(174u64)),
+            (0x7f, 0x00, U256::from(243u64)),
+            (0x88, 0x00, U256::from(103u64)),
+            (0x8b, 0x00, U256::from(105u64)),
+            (0x94, 0x00, U256::from(184u64)),
+            (0x96, 0x00, U256::from(152u64)),
+            (0x9e, 0x00, U256::from(30u64)),
+            (0xa1, 0x00, U256::from(184u64)),
+            (0xa7, 0x00, U256::from(155u64)),
+            (0xa8, 0x00, U256::from(55u64)),
+            (0xaa, 0x00, U256::from(59u64)),
+            (0xac, 0x00, U256::from(191u64)),
+            (0xb7, 0x00, U256::from(238u64)),
+            (0xba, 0x00, U256::from(239u64)),
+            (0xbf, 0x00, U256::from(100u64)),
+            (0xc8, 0x00, U256::from(29u64)),
+            (0xca, 0x00, U256::from(241u64)),
+            (0xcb, 0x00, U256::from(37u64)),
+            (0xce, 0x00, U256::from(137u64)),
+            (0xd7, 0x00, U256::from(202u64)),
+            (0xd8, 0x00, U256::from(209u64)),
+            (0xdd, 0x00, U256::from(22u64)),
+            (0xe5, 0x00, U256::from(224u64)),
+            (0xee, 0x00, U256::from(228u64)),
+            (0xf2, 0x00, U256::from(240u64)),
+            (0xf3, 0x00, U256::from(51u64)),
+            (0xf7, 0x00, U256::from(67u64)),
+            (0xfb, 0x00, U256::from(10u64)),
+        ];
+        // Keys with subtrie-level structure (2+ keys sharing first 2 nibbles).
+        let subtrie_keys: &[(u8, u8, U256)] = &[
+            (0x0a, 0x14, U256::from(81u64)),
+            (0x0d, 0x11, U256::from(39u64)),
+            (0x0d, 0x23, U256::from(82u64)),
+            (0xa7, 0x0d, U256::from(23u64)),
+            (0xa7, 0xa6, U256::from(85u64)),
+            (0xca, 0x4f, U256::from(164u64)),
+        ];
+
+        for &(b0, b1, val) in keys_and_values.iter().chain(subtrie_keys.iter()) {
+            let mut key = [0u8; 32];
+            key[0] = b0;
+            key[1] = b1;
+            initial.insert(B256::from(key), val);
+        }
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(4323023);
+        let changeset = build_changeset(
+            &initial,
+            BTreeMap::new(),
+            0.4401021905950668,
+            0.22302515352148555,
+            &mut rng,
+        );
+
+        let harness = ArenaTrieTestHarness::new(initial);
+
+        let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+
+        let root_node = harness.root_node();
+        apst.set_root(root_node.node, root_node.masks, true)
+            .expect("set_root should succeed");
+
+        // This panics with "single remaining child is blinded" when min_updates=1
+        // forces all subtrie updates through the taken (parallel) path.
+        harness.assert_changes(&mut apst, changeset);
+    }
 }
