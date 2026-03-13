@@ -191,9 +191,9 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
             }
         }
 
-        // Explicitly drop provider before removing from cache to avoid deadlock
-        drop(jar_provider);
-        static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+        // The cursor holds references into the cached provider, so drop it before eviction.
+        drop(cursor);
+        static_file_provider.evict_cached_provider(jar_provider);
 
         if reached_limit {
             break;

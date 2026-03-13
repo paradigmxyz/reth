@@ -594,7 +594,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 ctx.receipts_prune_mode
                     .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
             {
-                continue
+                continue;
             }
 
             for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
@@ -904,9 +904,23 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         .transpose()
     }
 
-    /// Given a segment and block range it removes the cached provider from the map.
+    /// Evicts a cached provider from the map after dropping the provider handle.
     ///
-    /// CAUTION: cached provider should be dropped before calling this or IT WILL deadlock.
+    /// Prefer this over [`Self::remove_cached_provider`] when you already hold a
+    /// [`StaticFileJarProvider`], because it guarantees the handle is dropped before touching the
+    /// cache entry again. Any cursor or other value derived from the provider must still be
+    /// dropped by the caller before eviction.
+    pub fn evict_cached_provider(&self, jar_provider: StaticFileJarProvider<'_, N>) {
+        let segment = jar_provider.segment();
+        let fixed_block_range_end = jar_provider.user_header().expected_block_end();
+        drop(jar_provider);
+        self.remove_cached_provider(segment, fixed_block_range_end);
+    }
+
+    /// Given a segment and fixed block range end it removes the cached provider from the map.
+    ///
+    /// CAUTION: prefer [`Self::evict_cached_provider`] when possible. Calling this while still
+    /// holding a cached provider handle, cursor, or other derived value can deadlock.
     pub fn remove_cached_provider(
         &self,
         segment: StaticFileSegment,
@@ -1437,18 +1451,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // If the block body indices can not be found, then it means that static
                         // files is ahead of database, and the `ensure_invariants` check will fix
                         // it by comparing with stage checkpoints.
-                        break
+                        break;
                     };
 
                     debug!(target: "reth::providers::static_file", last_block, last_tx_num = indices.last_tx_num(), "Found block body indices");
 
                     if indices.last_tx_num() <= highest_tx {
-                        break
+                        break;
                     }
 
                     if last_block == 0 {
                         debug!(target: "reth::providers::static_file", "Reached block 0 in verification loop");
-                        break
+                        break;
                     }
 
                     last_block -= 1;
@@ -1569,7 +1583,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::StorageChangeSets => {
                 if EitherWriter::storage_changesets_destination(provider).is_database() {
                     debug!(target: "reth::providers::static_file", ?segment, "Skipping storage changesets segment: changesets stored in database");
-                    return false
+                    return false;
                 }
                 true
             }
@@ -1756,7 +1770,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         unwind_target = highest_block,
                         "Setting unwind target."
                     );
-                    return Ok(Some(highest_block));
+                    return Ok(Some(highest_block))
                 }
             }
 
@@ -3163,13 +3177,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Header;
+    use alloy_primitives::BlockHash;
     use std::collections::BTreeMap;
 
     use reth_chain_state::EthPrimitives;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
-    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter};
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
@@ -3287,6 +3303,36 @@ mod tests {
             sf_rw.find_fixed_range_with_block_index(segment, Some(&mixed_size_index), 550),
             SegmentRangeInclusive::new(550, 649)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_evict_cached_provider_drops_handle_before_removal() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        {
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(10)
+                    .build()?;
+
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
+            let header = Header { number: 0, ..Default::default() };
+            writer.append_header(&header, &BlockHash::default())?;
+            writer.commit()?;
+        }
+
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
+
+        assert!(sf_rw.0.map.is_empty());
+
+        let jar_provider =
+            sf_rw.get_segment_provider_for_block(StaticFileSegment::Headers, 0, None)?;
+        assert_eq!(sf_rw.0.map.len(), 1);
+
+        sf_rw.evict_cached_provider(jar_provider);
+        assert!(sf_rw.0.map.is_empty());
 
         Ok(())
     }
