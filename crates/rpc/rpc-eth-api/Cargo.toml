@@ -68,3 +68,8 @@ op = [
     "reth-rpc-convert/op",
     "alloy-evm/op",
 ]
+
+[dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum.workspace = true
+reth-ethereum-primitives.workspace = true
