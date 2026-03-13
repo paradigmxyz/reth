@@ -597,14 +597,12 @@ where
                     if enable_arena_sparse_trie {
                         let account_trie = RevealableSparseTrie::blind_from(
                             ConfigurableSparseTrie::Arena(
-                                ArenaParallelSparseTrie::default()
-                                    .with_update_leaves_cache_depth(3),
+                                ArenaParallelSparseTrie::default(),
                             ),
                         );
                         let storage_trie = RevealableSparseTrie::blind_from(
                             ConfigurableSparseTrie::Arena(
-                                ArenaParallelSparseTrie::default()
-                                    .with_update_leaves_cache_depth(2),
+                                ArenaParallelSparseTrie::default(),
                             ),
                         );
                         SparseStateTrie::default()
