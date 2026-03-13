@@ -28,12 +28,12 @@ reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-payload-validator.workspace = true
-reth-mantle-forks = { workspace = true, optional = true }
+reth-mantle-forks = { workspace = true, optional = true, features = ["std"] }
 
 # op-reth
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-optimism-txpool.workspace = true
 
 # ethereum

@@ -82,6 +82,12 @@ fn extract_address_mapping_from_bundle(bundle_state: &BundleState) -> BTreeMap<B
 
     mapping
 }
+fn format_export_address(hashed_address: B256, original_address: Option<Address>) -> String {
+    match original_address {
+        Some(address) => format!("{:?}", address),
+        None => format!("hashed:0x{}", hex::encode(hashed_address.as_slice())),
+    }
+}
 
 /// Export full state using `BundleState`
 ///
@@ -256,12 +262,11 @@ where
         if let Some(account_info) = account_opt {
             processed_count += 1;
 
-            // Get original address first (needed for storage operations)
-            let original_address =
-                address_mapping.get(&hashed_address).copied().unwrap_or(Address::ZERO);
+            let resolved_address = address_mapping.get(&hashed_address).copied();
 
             // Check if this account is in bundle_state
-            let is_bundle_account = bundle_state.state.contains_key(&original_address);
+            let is_bundle_account =
+                resolved_address.is_some_and(|address| bundle_state.state.contains_key(&address));
 
             // Determine if we should export storage details for this account
             let should_export_storage = !export_bundle_storage_only || is_bundle_account;
@@ -312,7 +317,7 @@ where
 
             // Apply bundle state changes
             if let Some(bundle_account) =
-                address_mapping.get(&hashed_address).and_then(|addr| bundle_state.state.get(addr))
+                resolved_address.and_then(|address| bundle_state.state.get(&address))
             {
                 // Apply storage changes from bundle
                 for (slot, slot_value) in &bundle_account.storage {
@@ -333,38 +338,31 @@ where
                 }
             }
 
-            // Calculate storage root using the merged storage
-            // Build HashedStorage from hashed_storage_for_root
-            let mut hashed_storage = HashedStorage::new(false);
-            for (hashed_key, value) in &hashed_storage_for_root {
-                hashed_storage.storage.insert(*hashed_key, *value);
-            }
-
-            // Calculate storage root with bundle changes included
-            let storage_hash = if original_address != Address::ZERO &&
-                !hashed_storage_for_root.is_empty()
-            {
-                // Use the trait method through fully qualified syntax
-                use reth_trie::StorageRoot;
-                type StorageRootImpl<'a, TX> = StorageRoot<
+            // Calculate storage root from the merged database + bundle view when the address
+            // preimage is known. If we only know the hashed address, fall back to the database
+            // view because we cannot build the overlay trie without the original address.
+            let storage_hash = if hashed_storage_for_root.is_empty() {
+                "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421".to_string()
+            } else if let Some(address) = resolved_address {
+                let hashed_storage = HashedStorage::from_iter(
+                    false,
+                    hashed_storage_for_root.iter().map(|(&key, &value)| (key, value)),
+                );
+                type StorageRootImpl<'a, TX> = reth_trie::StorageRoot<
                     DatabaseTrieCursorFactory<&'a TX>,
                     DatabaseHashedCursorFactory<&'a TX>,
                 >;
 
                 match <StorageRootImpl<'_, _> as DatabaseStorageRoot<'_, _>>::overlay_root(
                     provider.tx_ref(),
-                    original_address,
+                    address,
                     hashed_storage,
                 ) {
                     Ok(root) => format!("0x{}", hex::encode(root.as_slice())),
                     Err(_) => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
                         .to_string(),
                 }
-            } else if hashed_storage_for_root.is_empty() {
-                // If storage is empty, use empty root
-                "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421".to_string()
             } else {
-                // If we don't have the original address, use database calculation
                 match reth_trie::StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address)
                     .root()
                 {
@@ -395,11 +393,7 @@ where
             };
 
             // Format address string (checksum format)
-            let address_str = if original_address == Address::ZERO {
-                format!("hashed:0x{}", hex::encode(hashed_address.as_slice()))
-            } else {
-                format!("{:?}", original_address)
-            };
+            let address_str = format_export_address(hashed_address, resolved_address);
 
             // Write account
             if !first {
@@ -481,4 +475,27 @@ where
                   "State export completed successfully");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_export_address_keeps_zero_address_when_preimage_exists() {
+        let hashed_zero = keccak256(Address::ZERO.as_slice());
+        assert_eq!(
+            format_export_address(hashed_zero, Some(Address::ZERO)),
+            format!("{:?}", Address::ZERO)
+        );
+    }
+
+    #[test]
+    fn format_export_address_uses_hashed_fallback_without_preimage() {
+        let hashed = keccak256([0x11u8; 20]);
+        assert_eq!(
+            format_export_address(hashed, None),
+            format!("hashed:0x{}", hex::encode(hashed.as_slice()))
+        );
+    }
 }

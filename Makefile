@@ -106,8 +106,8 @@ build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: build-debug-op
-build-debug-op: ## Build op-reth with mantle debug features (e.g. state-export).
-	cargo build --bin op-reth --features "$(MANTLEDEBUG_FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+build-debug-op: ## Build op-reth with mantle debug features (e.g. state-export). Uses dev profile for faster compile (output in target/debug/).
+	cargo build --bin op-reth --features "$(MANTLEDEBUG_FEATURES)" --profile dev --manifest-path crates/optimism/bin/Cargo.toml
 
 # Builds the reth binary natively.
 build-native-%:

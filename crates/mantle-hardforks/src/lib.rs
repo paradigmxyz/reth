@@ -25,12 +25,32 @@ use alloc::{vec, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{hardfork, EthereumHardfork};
 pub use alloy_hardforks::{EthereumHardforks, ForkCondition};
+#[cfg(feature = "state-export")]
+use alloy_primitives as _;
 use core::ops::Index;
+#[cfg(feature = "state-export")]
+use eyre as _;
+#[cfg(feature = "state-export")]
+use reth_db as _;
+#[cfg(feature = "state-export")]
+use reth_db_api as _;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-#[cfg(feature = "serde")]
+#[cfg(feature = "state-export")]
+use reth_primitives_traits as _;
+#[cfg(feature = "state-export")]
+use reth_provider as _;
+#[cfg(feature = "state-export")]
+use reth_trie as _;
+#[cfg(feature = "state-export")]
+use reth_trie_db as _;
+#[cfg(feature = "state-export")]
+use revm as _;
+#[cfg(any(feature = "serde", feature = "state-export"))]
 use serde as _;
 #[cfg(feature = "std")]
 use std::vec::Vec;
+#[cfg(feature = "state-export")]
+use tracing as _;
 
 /// Mantle mainnet chain ID
 pub const MANTLE_MAINNET_CHAIN_ID: u64 = 5000;

@@ -1,9 +1,10 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    providers::state::{has_hashed_snapshot_marker, macros::delegate_provider_impls},
+    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -79,7 +80,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
     /// Lookup an account in the `AccountsHistory` table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -98,7 +99,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         storage_key: StorageKey,
     ) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -122,7 +123,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
             !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
@@ -139,7 +140,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
     /// Retrieve revert hashed storage for this history provider and target address.
     fn revert_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
@@ -247,7 +248,15 @@ impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(*address)? {
-            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::NotYetWritten => {
+                if has_hashed_snapshot_marker(self.tx())? {
+                    return self
+                        .tx()
+                        .get::<tables::HashedAccounts>(keccak256(*address))
+                        .map_err(Into::into);
+                }
+                Ok(None)
+            }
             HistoryInfo::InChangeset(changeset_block_number) => {
                 // Use ChangeSetReader trait method to get the account from changesets
                 self.provider
@@ -259,7 +268,20 @@ impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                if let Some(account) =
+                    self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?
+                {
+                    return Ok(Some(account));
+                }
+
+                if has_hashed_snapshot_marker(self.tx())? {
+                    return self
+                        .tx()
+                        .get::<tables::HashedAccounts>(keccak256(*address))
+                        .map_err(Into::into);
+                }
+
+                Ok(None)
             }
         }
     }
@@ -406,7 +428,18 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::NotYetWritten => {
+                if !has_hashed_snapshot_marker(self.tx())? {
+                    return Ok(None);
+                }
+                let hashed_address = keccak256(address);
+                let hashed_slot = keccak256(storage_key);
+                let mut hashed_cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+                Ok(hashed_cursor
+                    .seek_by_key_subkey(hashed_address, hashed_slot)?
+                    .filter(|entry| entry.key == hashed_slot)
+                    .map(|entry| entry.value))
+            }
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx()
                     .cursor_dup_read::<tables::StorageChangeSets>()?
@@ -419,13 +452,30 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
                     })?
                     .value,
             )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let mut plain_cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+                if let Some(entry) = plain_cursor.seek_by_key_subkey(address, storage_key)? &&
+                    entry.key == storage_key
+                {
+                    return Ok(Some(entry.value));
+                }
+
+                if !has_hashed_snapshot_marker(self.tx())? {
+                    return Ok(Some(StorageValue::ZERO));
+                }
+
+                let hashed_address = keccak256(address);
+                let hashed_slot = keccak256(storage_key);
+                let mut hashed_cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+                if let Some(entry) =
+                    hashed_cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+                    entry.key == hashed_slot
+                {
+                    return Ok(Some(entry.value));
+                }
+
+                Ok(Some(StorageValue::ZERO))
+            }
         }
     }
 }
@@ -524,7 +574,7 @@ mod tests {
         test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
-    use alloy_primitives::{address, b256, Address, B256, U256};
+    use alloy_primitives::{address, b256, keccak256, Address, B256, U256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
@@ -541,6 +591,7 @@ mod tests {
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+    const HASHED_SNAPSHOT_MARKER: &str = "__hashed_only_state_snapshot__";
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -755,6 +806,66 @@ mod tests {
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
+        ));
+    }
+
+    #[test]
+    fn history_provider_does_not_use_hashed_storage_without_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let hashed_slot_value = U256::from(777);
+        tx.put::<tables::HashedStorages>(
+            keccak256(ADDRESS),
+            StorageEntry { key: keccak256(STORAGE), value: hashed_slot_value },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).storage(ADDRESS, STORAGE),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn history_provider_uses_hashed_storage_with_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let hashed_slot_value = U256::from(777);
+        tx.put::<tables::HashedStorages>(
+            keccak256(ADDRESS),
+            StorageEntry { key: keccak256(STORAGE), value: hashed_slot_value },
+        )
+        .unwrap();
+        tx.put::<tables::StageCheckpointProgresses>(HASHED_SNAPSHOT_MARKER.to_string(), vec![1])
+            .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).storage(ADDRESS, STORAGE),
+            Ok(Some(value)) if value == hashed_slot_value
+        ));
+    }
+
+    #[test]
+    fn history_provider_uses_hashed_account_with_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let account = Account { nonce: 11, balance: U256::from(555), bytecode_hash: None };
+        tx.put::<tables::HashedAccounts>(keccak256(ADDRESS), account).unwrap();
+        tx.put::<tables::StageCheckpointProgresses>(HASHED_SNAPSHOT_MARKER.to_string(), vec![1])
+            .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).basic_account(&ADDRESS),
+            Ok(Some(value)) if value == account
         ));
     }
 

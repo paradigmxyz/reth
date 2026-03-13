@@ -40,6 +40,7 @@ pub mod constants;
 mod dev;
 mod mantle;
 mod mantle_mainnet;
+mod mantle_sepolia;
 mod op;
 mod op_sepolia;
 
@@ -53,6 +54,7 @@ pub use base_sepolia::BASE_SEPOLIA;
 pub use basefee::*;
 pub use dev::OP_DEV;
 pub use mantle_mainnet::MANTLE_MAINNET;
+pub use mantle_sepolia::MANTLE_SEPOLIA;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
@@ -1480,5 +1482,20 @@ mod tests {
         for eth_hf in EthereumHardfork::VARIANTS {
             assert!(!content.contains(eth_hf.name()));
         }
+    }
+
+    #[test]
+    fn mantle_sepolia_spec_is_exposed() {
+        assert_eq!(MANTLE_SEPOLIA.chain().id(), 5003);
+        assert!(MANTLE_SEPOLIA.is_skadi_active_at_timestamp(1_752_649_200));
+        assert!(MANTLE_SEPOLIA.is_limb_active_at_timestamp(1_764_745_200));
+        assert!(MANTLE_SEPOLIA.is_arsia_active_at_timestamp(1_774_422_000));
+    }
+
+    #[cfg(feature = "superchain-configs")]
+    #[test]
+    fn mantle_sepolia_aliases_are_supported() {
+        assert_eq!(generated_chain_value_parser("mantle_sepolia").unwrap().chain().id(), 5003);
+        assert_eq!(generated_chain_value_parser("mantle-sepolia").unwrap().chain().id(), 5003);
     }
 }
