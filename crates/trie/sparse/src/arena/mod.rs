@@ -2817,7 +2817,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let num_subtrie_updates = update_idx - subtrie_start;
 
-                    if num_subtrie_updates >= threshold {
+                    if true {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
