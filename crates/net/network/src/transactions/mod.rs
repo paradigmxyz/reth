@@ -2186,7 +2186,6 @@ mod tests {
     };
     use secp256k1::SecretKey;
     use std::{
-        collections::HashSet,
         future::poll_fn,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
@@ -2544,8 +2543,10 @@ mod tests {
             reason: None,
         }));
 
+        // peer removed from peers map and active_peers
         assert!(!tx_manager.peers.contains_key(&peer_id));
         assert!(tx_manager.transaction_fetcher.active_peers.peek(&peer_id).is_none());
+        // fallback peer is still available for the hash
         assert_eq!(
             tx_manager.transaction_fetcher.get_idle_peer_for(hash_shared),
             Some(&fallback_peer)
