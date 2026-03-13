@@ -912,6 +912,10 @@ impl SparseTrie for ParallelSparseTrie {
         root.cached_rlp_node().is_some()
     }
 
+    fn prefix_set_len(&self) -> usize {
+        self.prefix_set.len()
+    }
+
     #[instrument(level = "debug", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");

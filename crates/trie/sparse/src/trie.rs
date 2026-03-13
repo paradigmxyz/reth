@@ -169,6 +169,11 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
     }
 
+    /// Returns the number of entries in the prefix set.
+    pub fn prefix_set_len(&self) -> usize {
+        self.as_revealed_ref().map_or(0, |trie| trie.prefix_set_len())
+    }
+
     /// Returns the root hash along with any accumulated update information.
     ///
     /// This is useful for when you need both the root hash and information about
@@ -217,6 +222,13 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value, provider)?;
         Ok(())
+    }
+
+    /// Updates the hashes of the subtries.
+    pub fn update_subtrie_hashes(&mut self) {
+        if let Some(trie) = self.as_revealed_mut() {
+            trie.update_subtrie_hashes();
+        }
     }
 
     /// Removes a leaf node at the specified key path.

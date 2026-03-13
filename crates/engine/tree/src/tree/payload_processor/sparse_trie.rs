@@ -348,7 +348,9 @@ where
                 self.dispatch_pending_targets();
                 t = Instant::now();
                 self.process_new_updates()?;
-                self.promote_pending_account_updates()?;
+                if self.promote_pending_account_updates()? {
+                    self.trie.trie_mut().update_subtrie_hashes();
+                }
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
                 if self.finished_state_updates &&
@@ -700,7 +702,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn compute_drained_storage_roots(&mut self) {
+    fn compute_drained_storage_roots(&mut self) -> bool {
         let addresses_to_compute_roots: Vec<_> = self
             .storage_updates
             .iter()
@@ -708,6 +710,7 @@ where
             .collect();
 
         let mut tries_to_compute_roots = Vec::with_capacity(addresses_to_compute_roots.len());
+        let mut has_large_storage_trie = false;
         for address in addresses_to_compute_roots {
             if let Some(trie) = self.trie.storage_tries_mut().get(address) &&
                 !trie.is_root_cached()
@@ -717,12 +720,15 @@ where
                     self.trie.take_storage_trie(address).expect("trie was created above"),
                 ));
                 self.pending_storage_roots.insert(*address);
+                has_large_storage_trie = true;
             }
         }
 
         if !tries_to_compute_roots.is_empty() {
             let _ = self.storage_roots_tx.send(tries_to_compute_roots);
         }
+
+        has_large_storage_trie
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -733,14 +739,14 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
+    fn promote_pending_account_updates(&mut self) -> SparseTrieResult<bool> {
         self.process_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
-        self.compute_drained_storage_roots();
+        let has_large_storage_trie = self.compute_drained_storage_roots();
 
         loop {
             let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
@@ -803,7 +809,7 @@ where
             }
         }
 
-        Ok(())
+        Ok(has_large_storage_trie)
     }
 
     fn dispatch_pending_targets(&mut self) {
