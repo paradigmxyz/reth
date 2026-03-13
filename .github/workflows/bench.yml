@@ -476,7 +476,7 @@ jobs:
   reth-bench:
     needs: reth-bench-ack
     name: reth-bench
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, available]
     timeout-minutes: 120
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
