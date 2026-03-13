@@ -15,6 +15,8 @@ mod headers;
 mod index_account_history;
 /// Index history of storage changes
 mod index_storage_history;
+/// Index history of transaction senders and recipients
+mod index_transaction_history;
 /// Stage for computing state root.
 mod merkle;
 mod prune;
@@ -32,6 +34,7 @@ pub use hashing_storage::*;
 pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
+pub use index_transaction_history::*;
 pub use merkle::*;
 pub use prune::*;
 pub use sender_recovery::*;
