@@ -359,6 +359,8 @@ impl ArenaSparseSubtrie {
             self.metrics.subtrie_update_leaves_remove_latency.record(remove_elapsed);
             self.metrics.subtrie_update_leaves_drain_latency.record(drain_start.elapsed());
             self.metrics.subtrie_update_leaves_seek_count.record(seek_count as f64);
+            self.metrics.subtrie_update_leaves_upsert_count.record(upsert_count as f64);
+            self.metrics.subtrie_update_leaves_remove_count.record(remove_count as f64);
             self.last_update_leaves_elapsed = subtrie_update_start.elapsed();
 
             // Uncomment to find out about the outliers:
@@ -2310,6 +2312,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
+        #[cfg(feature = "metrics")]
+        let reveal_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_nodes = nodes.len();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::RevealNodes {
             nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
@@ -2409,8 +2416,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.reveal_nodes_total_latency.record(reveal_start.elapsed());
+                self.metrics.reveal_nodes_count.record(num_nodes as f64);
+                self.metrics.reveal_nodes_parallel_subtrie_count.record(0.0);
+            }
             return Ok(());
         }
+
+        #[cfg(feature = "metrics")]
+        let parallel_subtrie_count = taken.len();
 
         // Reveal taken subtries, in parallel if more than one.
         if taken.len() == 1 {
@@ -2441,6 +2457,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
 
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.reveal_nodes_total_latency.record(reveal_start.elapsed());
+            self.metrics.reveal_nodes_count.record(num_nodes as f64);
+            self.metrics
+                .reveal_nodes_parallel_subtrie_count
+                .record(parallel_subtrie_count as f64);
+        }
+
         Ok(())
     }
 
@@ -2463,10 +2488,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
     fn root(&mut self) -> B256 {
+        #[cfg(feature = "metrics")]
+        let root_start = Instant::now();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::Root);
 
         self.update_subtrie_hashes();
+
+        #[cfg(feature = "metrics")]
+        let upper_rlp_start = Instant::now();
 
         // Merge buffered subtrie updates into self.updates before hashing the upper trie,
         // which will add its own updates directly into self.updates.
@@ -2482,6 +2513,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             &mut self.updates,
         );
 
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.root_upper_rlp_latency.record(upper_rlp_start.elapsed());
+            self.metrics.root_total_latency.record(root_start.elapsed());
+        }
+
         rlp_node.as_hash().expect("root RlpNode must be a hash")
     }
 
@@ -2491,6 +2528,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self) {
+        #[cfg(feature = "metrics")]
+        let subtrie_hashes_start = Instant::now();
+
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::UpdateSubtrieHashes);
 
@@ -2498,6 +2538,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            #[cfg(feature = "metrics")]
+            self.metrics.root_subtrie_hashes_latency.record(subtrie_hashes_start.elapsed());
             return;
         }
 
@@ -2518,6 +2560,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             };
             taken.push((idx, subtrie));
         }
+
+        #[cfg(feature = "metrics")]
+        let taken_count = taken.len();
 
         // Hash taken subtries: in parallel if total dirty leaves meet the threshold,
         // otherwise serially. This mirrors ParallelSparseTrie's all-or-nothing approach.
@@ -2543,6 +2588,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // If the root branch is already cached and nothing was taken for parallel
         // hashing, there are no dirty subtries to process.
         if taken.is_empty() && self.upper_arena[self.root].is_cached() {
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.root_subtries_hashed_count.record(0.0);
+                self.metrics.root_total_dirty_leaves.record(total_dirty_leaves as f64);
+                self.metrics.root_subtrie_hashes_latency.record(subtrie_hashes_start.elapsed());
+            }
             return;
         }
 
@@ -2580,6 +2631,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             self.update_upper_subtrie(head_idx);
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.root_subtries_hashed_count.record(taken_count as f64);
+            self.metrics.root_total_dirty_leaves.record(total_dirty_leaves as f64);
+            self.metrics.root_subtrie_hashes_latency.record(subtrie_hashes_start.elapsed());
         }
     }
 
@@ -2701,8 +2759,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
         fields(num_retained_leaves = retained_leaves.len()),
     )]
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+        #[cfg(feature = "metrics")]
+        let prune_start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let num_retained = retained_leaves.len();
+
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics.prune_total_latency.record(prune_start.elapsed());
+                self.metrics.prune_nodes_pruned.record(0.0);
+                self.metrics.prune_retained_leaves_count.record(num_retained as f64);
+                self.metrics.prune_parallel_subtrie_count.record(0.0);
+            }
             return 0;
         }
 
@@ -2806,6 +2876,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.buffers.cursor = cursor;
 
+        #[cfg(feature = "metrics")]
+        let parallel_subtrie_count = taken.len();
+
         if !taken.is_empty() {
             // Prune taken subtries, in parallel if more than one.
             if taken.len() == 1 {
@@ -2828,6 +2901,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         #[cfg(feature = "trie-debug")]
         self.record_initial_state();
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.prune_total_latency.record(prune_start.elapsed());
+            self.metrics.prune_nodes_pruned.record(pruned as f64);
+            self.metrics.prune_retained_leaves_count.record(num_retained as f64);
+            self.metrics.prune_parallel_subtrie_count.record(parallel_subtrie_count as f64);
+        }
 
         pruned
     }
@@ -3133,6 +3214,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 if dur < min_dur {
                     min_dur = dur;
                 }
+                self.metrics
+                    .subtrie_update_leaves_schedule_delay
+                    .record(subtrie.last_schedule_delay);
             }
             if !taken.is_empty() {
                 self.metrics.update_leaves_parallel_max_subtrie_latency.record(max_dur);

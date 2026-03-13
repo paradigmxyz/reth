@@ -112,6 +112,45 @@ pub(crate) struct ArenaUpdateLeavesMetrics {
     pub(crate) subtrie_update_leaves_drain_latency: Histogram,
     /// Number of seeks performed in a subtrie update_leaves call.
     pub(crate) subtrie_update_leaves_seek_count: Histogram,
+    /// Number of upsert_leaf calls in a subtrie update_leaves call.
+    pub(crate) subtrie_update_leaves_upsert_count: Histogram,
+    /// Number of remove_leaf calls in a subtrie update_leaves call.
+    pub(crate) subtrie_update_leaves_remove_count: Histogram,
+    /// Scheduling delay: time between parallel dispatch and actual start of work.
+    pub(crate) subtrie_update_leaves_schedule_delay: Histogram,
+
+    // --- root / hashing ---
+
+    /// Total time spent in `root()` (includes subtrie hashing + upper RLP).
+    pub(crate) root_total_latency: Histogram,
+    /// Time spent in `update_subtrie_hashes()` (parallel + serial subtrie hashing).
+    pub(crate) root_subtrie_hashes_latency: Histogram,
+    /// Time spent hashing the upper trie RLP in `root()`.
+    pub(crate) root_upper_rlp_latency: Histogram,
+    /// Number of subtries hashed (dirty subtries in update_subtrie_hashes).
+    pub(crate) root_subtries_hashed_count: Histogram,
+    /// Total dirty leaves across all subtries at hash time.
+    pub(crate) root_total_dirty_leaves: Histogram,
+
+    // --- reveal_nodes ---
+
+    /// Total time spent in `reveal_nodes()`.
+    pub(crate) reveal_nodes_total_latency: Histogram,
+    /// Number of proof nodes revealed.
+    pub(crate) reveal_nodes_count: Histogram,
+    /// Number of subtries taken for parallel reveal.
+    pub(crate) reveal_nodes_parallel_subtrie_count: Histogram,
+
+    // --- prune ---
+
+    /// Total time spent in `prune()`.
+    pub(crate) prune_total_latency: Histogram,
+    /// Number of nodes pruned.
+    pub(crate) prune_nodes_pruned: Histogram,
+    /// Number of retained leaves passed to prune.
+    pub(crate) prune_retained_leaves_count: Histogram,
+    /// Number of subtries taken for parallel pruning.
+    pub(crate) prune_parallel_subtrie_count: Histogram,
 }
 
 impl PartialEq for ArenaUpdateLeavesMetrics {
