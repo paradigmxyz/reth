@@ -2763,8 +2763,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
 
-        let threshold = self.parallelism_thresholds.min_updates;
-
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
@@ -2822,39 +2820,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let num_subtrie_updates = update_idx - subtrie_start;
-
-                    if num_subtrie_updates >= threshold {
-                        // Take subtrie for parallel update.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
-                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                            &mut self.upper_arena[child_idx],
-                            ArenaSparseNode::TakenSubtrie,
-                        ) else {
-                            unreachable!()
-                        };
-                        taken.push((child_idx, subtrie, subtrie_start..update_idx));
-                    } else {
-                        // Update inline.
-                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Updating subtrie inline");
-                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[child_idx]
-                        else {
-                            unreachable!()
-                        };
-
-                        subtrie.update_leaves(subtrie_updates);
-
-                        for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
-                            #[cfg(feature = "trie-debug")]
-                            recorded_proof_targets.push((proof.key, proof.min_len));
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
-                        }
-
-                        // Check if the subtrie's root became empty after updates.
-                        self.maybe_unwrap_subtrie(&mut cursor);
-                    }
+                    // Always take subtrie for deferred processing. The
+                    // parallel-vs-serial decision is made after the walk based on
+                    // total updates across all subtries.
+                    trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates = update_idx - subtrie_start, "Taking subtrie for deferred update");
+                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                        &mut self.upper_arena[child_idx],
+                        ArenaSparseNode::TakenSubtrie,
+                    ) else {
+                        unreachable!()
+                    };
+                    taken.push((child_idx, subtrie, subtrie_start..update_idx));
 
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
@@ -2955,10 +2931,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Apply updates to taken subtries, in parallel if more than one.
-        if taken.len() == 1 {
-            let (_, ref mut subtrie, ref range) = taken[0];
-            subtrie.update_leaves(&sorted[range.clone()]);
+        // Apply updates to taken subtries. Use parallel processing if there is
+        // more than one subtrie and the total number of updates across all
+        // subtries meets the threshold (all-or-nothing, matching the approach
+        // used by `update_subtrie_hashes` for `min_dirty_leaves`).
+        let total_subtrie_updates: usize = taken.iter().map(|(_, _, r)| r.len()).sum();
+        if taken.len() == 1 || total_subtrie_updates < self.parallelism_thresholds.min_updates {
+            for (_, subtrie, range) in &mut taken {
+                subtrie.update_leaves(&sorted[range.clone()]);
+            }
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
