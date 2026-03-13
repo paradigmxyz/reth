@@ -19,7 +19,7 @@ use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
@@ -86,8 +86,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         latest: SealedHeader<HeaderTy<N>>,
     ) -> ProviderResult<Self> {
         let provider = storage.provider()?;
+        let genesis_num = storage.chain_spec().genesis().number.unwrap_or_default();
         let finalized_header = provider
             .last_finalized_block_number()?
+            .or(Some(genesis_num))
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
@@ -98,6 +100,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 // safe block
                 provider.last_finalized_block_number().ok().flatten()
             })
+            .or(Some(genesis_num))
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
