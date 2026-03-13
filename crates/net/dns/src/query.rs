@@ -6,6 +6,8 @@ use crate::{
     sync::ResolveKind,
     tree::{DnsEntry, LinkEntry, TreeRootEntry},
 };
+use alloy_primitives::keccak256;
+use data_encoding::BASE32_NOPAD;
 use enr::EnrKeyUnambiguous;
 use reth_tokio_util::ratelimit::{Rate, RateLimit};
 use std::{
@@ -165,12 +167,31 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
     match lookup_with_timeout::<R>(&resolver, &fqn, timeout).await {
         Ok(Some(entry)) => {
-            resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into()))
+            resp.entry = Some(
+                verify_entry_hash(&resp.hash, &entry)
+                    .and_then(|()| entry.parse::<DnsEntry<K>>().map_err(Into::into)),
+            )
         }
         Err(err) => resp.entry = Some(Err(err)),
         Ok(None) => {}
     }
     resp
+}
+
+fn verify_entry_hash(hash: &str, entry_txt: &str) -> LookupResult<()> {
+    let expected =
+        BASE32_NOPAD.decode(hash.as_bytes()).map_err(|_| LookupError::HashMismatch(hash.into()))?;
+    let actual = keccak256(entry_txt.as_bytes());
+
+    if expected.is_empty() || expected.len() > actual.as_slice().len() {
+        return Err(LookupError::HashMismatch(hash.into()))
+    }
+
+    if actual.as_slice().starts_with(&expected) {
+        Ok(())
+    } else {
+        Err(LookupError::HashMismatch(hash.into()))
+    }
 }
 
 /// Retrieves the root entry the link points to and returns the verified entry
