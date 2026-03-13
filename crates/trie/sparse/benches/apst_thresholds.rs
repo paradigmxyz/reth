@@ -124,15 +124,17 @@ fn make_thresholds_for_reveal(threshold_value: usize) -> ArenaParallelismThresho
         min_updates: 0,
         min_dirty_leaves: 0,
         min_leaves_for_prune: 0,
+        ..Default::default()
     }
 }
 
-fn make_thresholds_for_update(threshold_value: usize) -> ArenaParallelismThresholds {
+fn make_thresholds_for_update(threshold_value: usize, global: bool) -> ArenaParallelismThresholds {
     ArenaParallelismThresholds {
         min_revealed_nodes: 0,
         min_updates: threshold_value,
         min_dirty_leaves: 0,
         min_leaves_for_prune: 0,
+        global_updates_threshold: global,
     }
 }
 
@@ -142,6 +144,7 @@ fn make_thresholds_for_hash(threshold_value: u64) -> ArenaParallelismThresholds 
         min_updates: 0,
         min_dirty_leaves: threshold_value,
         min_leaves_for_prune: 0,
+        ..Default::default()
     }
 }
 
@@ -151,12 +154,16 @@ fn make_thresholds_for_prune(threshold_value: u64) -> ArenaParallelismThresholds
         min_updates: 0,
         min_dirty_leaves: 0,
         min_leaves_for_prune: threshold_value,
+        ..Default::default()
     }
 }
 
 const DATASET_SIZES: &[usize] = &[100, 1_000, 10_000, 50_000];
 const CHANGESET_SIZES: &[usize] = &[50, 500, 5_000, 25_000];
 const THRESHOLD_VALUES: &[usize] = &[1, 4, 16, 32, 64, 128, 256, 512, 1024];
+
+const UPDATE_DATASET_SIZES: &[usize] = &[10_000, 50_000, 100_000, 200_000, 500_000];
+const UPDATE_CHANGESET_SIZES: &[usize] = &[5_000, 25_000, 50_000, 100_000];
 
 /// Runs the full pipeline up to (but not including) reveal_nodes, then times reveal_nodes.
 fn bench_reveal_nodes(c: &mut Criterion) {
@@ -205,13 +212,15 @@ fn bench_reveal_nodes(c: &mut Criterion) {
 }
 
 /// Times update_leaves after performing reveal_nodes as setup.
+/// Benchmarks both parallelism modes ("global" = all-or-nothing, "per_sub" = per-subtrie)
+/// across larger dataset/changeset sizes to find where parallelism matters.
 fn bench_update_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("update_leaves");
     group.measurement_time(Duration::from_secs(15));
-    group.sample_size(200);
+    group.sample_size(100);
 
-    for &ds in DATASET_SIZES {
-        for &cs in CHANGESET_SIZES {
+    for &ds in UPDATE_DATASET_SIZES {
+        for &cs in UPDATE_CHANGESET_SIZES {
             if cs > ds {
                 continue;
             }
@@ -219,33 +228,36 @@ fn bench_update_leaves(c: &mut Criterion) {
             let data = generate_bench_data(ds, cs, seed);
 
             for &t in THRESHOLD_VALUES {
-                let id = BenchmarkId::new("update_leaves", format!("{ds}/{cs}/t={t}"));
-                let thresholds = make_thresholds_for_update(t);
+                for &(mode_name, global) in &[("global", true), ("per_sub", false)] {
+                    let id =
+                        BenchmarkId::new("update_leaves", format!("{ds}/{cs}/t={t}/{mode_name}"));
+                    let thresholds = make_thresholds_for_update(t, global);
 
-                group.bench_function(id, |b| {
-                    b.iter_batched(
-                        || {
-                            let root_node = data.harness.root_node();
-                            let mut apst = ArenaParallelSparseTrie::default()
-                                .with_parallelism_thresholds(thresholds);
-                            apst.set_root(root_node.node, root_node.masks, false)
-                                .expect("set_root should succeed");
-                            let mut proof_nodes = data.proof_nodes.clone();
-                            apst.reveal_nodes(&mut proof_nodes)
-                                .expect("reveal_nodes should succeed");
-                            let leaf_updates = data.leaf_updates.clone();
-                            (apst, leaf_updates)
-                        },
-                        |(mut apst, mut leaf_updates): (
-                            ArenaParallelSparseTrie,
-                            B256Map<LeafUpdate>,
-                        )| {
-                            apst.update_leaves(&mut leaf_updates, |_, _| {})
-                                .expect("update_leaves should succeed");
-                        },
-                        BatchSize::SmallInput,
-                    );
-                });
+                    group.bench_function(id, |b| {
+                        b.iter_batched(
+                            || {
+                                let root_node = data.harness.root_node();
+                                let mut apst = ArenaParallelSparseTrie::default()
+                                    .with_parallelism_thresholds(thresholds);
+                                apst.set_root(root_node.node, root_node.masks, false)
+                                    .expect("set_root should succeed");
+                                let mut proof_nodes = data.proof_nodes.clone();
+                                apst.reveal_nodes(&mut proof_nodes)
+                                    .expect("reveal_nodes should succeed");
+                                let leaf_updates = data.leaf_updates.clone();
+                                (apst, leaf_updates)
+                            },
+                            |(mut apst, mut leaf_updates): (
+                                ArenaParallelSparseTrie,
+                                B256Map<LeafUpdate>,
+                            )| {
+                                apst.update_leaves(&mut leaf_updates, |_, _| {})
+                                    .expect("update_leaves should succeed");
+                            },
+                            BatchSize::SmallInput,
+                        );
+                    });
+                }
             }
         }
     }

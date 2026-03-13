@@ -424,6 +424,11 @@ pub struct ArenaParallelismThresholds {
     /// pruning. Subtries with fewer leaves than this are pruned inline during the upper trie
     /// walk.
     pub min_leaves_for_prune: u64,
+    /// When `true`, `min_updates` is compared against the **total** number of updates across
+    /// all subtries (all-or-nothing parallelism, like `min_dirty_leaves`). When `false`,
+    /// `min_updates` is compared per-subtrie: each subtrie independently decides whether to
+    /// run in parallel based on its own update count.
+    pub global_updates_threshold: bool,
 }
 
 impl Default for ArenaParallelismThresholds {
@@ -433,6 +438,7 @@ impl Default for ArenaParallelismThresholds {
             min_revealed_nodes: 16,
             min_updates: 128,
             min_leaves_for_prune: 128,
+            global_updates_threshold: true,
         }
     }
 }
@@ -2820,17 +2826,42 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    // Always take subtrie for deferred processing. The
-                    // parallel-vs-serial decision is made after the walk based on
-                    // total updates across all subtries.
-                    trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates = update_idx - subtrie_start, "Taking subtrie for deferred update");
-                    let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                        &mut self.upper_arena[child_idx],
-                        ArenaSparseNode::TakenSubtrie,
-                    ) else {
-                        unreachable!()
-                    };
-                    taken.push((child_idx, subtrie, subtrie_start..update_idx));
+                    let num_subtrie_updates = update_idx - subtrie_start;
+
+                    if self.parallelism_thresholds.global_updates_threshold ||
+                        num_subtrie_updates >= self.parallelism_thresholds.min_updates
+                    {
+                        // Take subtrie for deferred processing.
+                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for deferred update");
+                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                            &mut self.upper_arena[child_idx],
+                            ArenaSparseNode::TakenSubtrie,
+                        ) else {
+                            unreachable!()
+                        };
+                        taken.push((child_idx, subtrie, subtrie_start..update_idx));
+                    } else {
+                        // Per-subtrie mode: update inline since this subtrie is
+                        // below the threshold.
+                        trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Updating subtrie inline");
+                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[child_idx]
+                        else {
+                            unreachable!()
+                        };
+
+                        subtrie.update_leaves(subtrie_updates);
+
+                        for (target_idx, proof) in subtrie.required_proofs.drain(..) {
+                            proof_required_fn(proof.key, proof.min_len);
+                            #[cfg(feature = "trie-debug")]
+                            recorded_proof_targets.push((proof.key, proof.min_len));
+                            let (key, _, ref update) = subtrie_updates[target_idx];
+                            updates.insert(key, update.clone());
+                        }
+
+                        // Check if the subtrie's root became empty after updates.
+                        self.maybe_unwrap_subtrie(&mut cursor);
+                    }
 
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
@@ -2931,12 +2962,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Apply updates to taken subtries. Use parallel processing if there is
-        // more than one subtrie and the total number of updates across all
-        // subtries meets the threshold (all-or-nothing, matching the approach
-        // used by `update_subtrie_hashes` for `min_dirty_leaves`).
-        let total_subtrie_updates: usize = taken.iter().map(|(_, _, r)| r.len()).sum();
-        if taken.len() == 1 || total_subtrie_updates < self.parallelism_thresholds.min_updates {
+        // Apply updates to taken subtries in parallel or serially.
+        //
+        // In global mode, compare total updates across all subtries against the
+        // threshold (all-or-nothing). In per-subtrie mode, all taken subtries
+        // already exceeded the threshold individually, so always go parallel.
+        let use_serial = if self.parallelism_thresholds.global_updates_threshold {
+            let total: usize = taken.iter().map(|(_, _, r)| r.len()).sum();
+            taken.len() == 1 || total < self.parallelism_thresholds.min_updates
+        } else {
+            taken.len() == 1
+        };
+        if use_serial {
             for (_, subtrie, range) in &mut taken {
                 subtrie.update_leaves(&sorted[range.clone()]);
             }
@@ -3208,6 +3245,7 @@ mod tests {
                     min_revealed_nodes: 3,
                     min_updates: 3,
                     min_leaves_for_prune: 3,
+                    ..Default::default()
                 },
             );
             apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
