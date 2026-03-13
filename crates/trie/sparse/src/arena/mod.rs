@@ -3567,8 +3567,7 @@ mod tests {
         );
 
         let root_node = harness.root_node();
-        apst.set_root(root_node.node, root_node.masks, true)
-            .expect("set_root should succeed");
+        apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
         harness.assert_changes(&mut apst, changeset);
     }
