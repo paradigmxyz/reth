@@ -362,9 +362,6 @@ impl NodeManager {
             });
         }
 
-        // Give the node a moment to start up
-        sleep(Duration::from_secs(5)).await;
-
         Ok((child, reth_command))
     }
 
