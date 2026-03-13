@@ -1725,26 +1725,25 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
+        // This subtrie would be fully emptied by all-removal updates. If the parent
+        // has any blinded children, removing this subtrie could eventually leave the
+        // parent with a single blinded child — especially when multiple sibling
+        // subtries are taken in the same batch and also emptied. Conservatively
+        // request a proof for the first blinded sibling found.
         let child_nibble =
             subtrie_entry.path.last().expect("subtrie path must have at least one nibble");
 
         let parent_entry = cursor.parent()?;
         let parent_branch = arena[parent_entry.index].branch_ref();
-        if parent_branch.state_mask.count_bits() != 2 {
-            return None;
-        }
 
-        if !parent_branch.sibling_child(child_nibble).is_blinded() {
-            return None;
-        }
+        // Find any blinded sibling under the parent.
+        let blinded_sibling_nibble = parent_branch
+            .child_iter()
+            .find(|(nibble, child)| *nibble != child_nibble && child.is_blinded())
+            .map(|(nibble, _)| nibble)?;
 
-        let sibling_nibble = parent_branch
-            .state_mask
-            .iter()
-            .find(|&n| n != child_nibble)
-            .expect("branch has two children");
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
-        sibling_path.push_unchecked(sibling_nibble);
+        sibling_path.push_unchecked(blinded_sibling_nibble);
 
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
