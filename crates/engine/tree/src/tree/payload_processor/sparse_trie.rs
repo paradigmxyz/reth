@@ -145,8 +145,9 @@ where
         let (storage_roots_tx, storage_roots_task_rx) = mpsc::channel();
         let (root_result_tx, storage_roots_rx) = crossbeam_channel::unbounded();
 
+        let parent_span = tracing::Span::current();
         executor.spawn_blocking_named("trie-storage-roots", move || {
-            let _span = debug_span!("run_storage_roots_task").entered();
+            let _span = debug_span!(parent: parent_span, "run_storage_roots_task").entered();
             Self::run_storage_roots_task(storage_roots_task_rx, root_result_tx)
         });
 
@@ -217,8 +218,17 @@ where
     ) {
         while let Ok(tries) = tries.recv() {
             let roots_tx = roots_tx.clone();
+            let parent_span = tracing::Span::current();
             rayon::spawn(move || {
                 tries.into_par_iter().for_each(|(address, mut trie)| {
+                    let _enter = debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                        ?address,
+                        prefix_set_len = trie.prefix_set_len()
+                    )
+                    .entered();
                     trie.root().expect("all tries should have been revealed");
                     roots_tx.send((address, trie)).unwrap();
                 })
