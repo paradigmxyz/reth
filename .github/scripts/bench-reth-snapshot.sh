@@ -104,6 +104,34 @@ if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
   exit 1
 fi
 
+# Run reth to complete any pending pipeline stages so the promoted
+# baseline has a fully-synced DB (avoids SYNCING responses during benchmarks).
+update_comment "Syncing snapshot…"
+echo "Starting reth to complete pipeline stages..."
+sudo "$RETH" node --datadir "$DATADIR" --http --http.port 8545 --disable-discovery --no-persist-peers \
+  > /tmp/reth-snapshot-sync.log 2>&1 &
+SYNC_PID=$!
+for i in $(seq 1 300); do
+  SYNCING=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null \
+    | jq -r '.result' 2>/dev/null)
+  if [ "$SYNCING" = "false" ]; then
+    echo "reth finished syncing after ${i}s"
+    break
+  fi
+  if [ "$i" -eq 300 ]; then
+    echo "::error::reth failed to finish syncing within 300s"
+    cat /tmp/reth-snapshot-sync.log
+    sudo kill "$SYNC_PID" 2>/dev/null || true
+    exit 1
+  fi
+  sleep 1
+done
+sudo kill "$SYNC_PID" 2>/dev/null || true
+wait "$SYNC_PID" 2>/dev/null || true
+update_comment "Syncing snapshot… done"
+
 # Promote the new snapshot to become the schelk baseline (virgin volume).
 # This copies changed blocks from scratch → virgin so that future
 # `schelk recover` calls restore to this new state.
