@@ -20,10 +20,13 @@ use reth_primitives_traits::{
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
 ///
+///  If `allow_bal_check` is true, we compute the bal hash and match with the header bal hash
+///
 /// `gas_spent` is the `gas_used` value from the block execution result. When EIP-7778
 /// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
 /// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
 /// against the execution result's `gas_used` rather than the receipt value.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
@@ -31,6 +34,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list: &Option<BlockAccessList>,
+    allow_bal_check: bool,
     gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
@@ -54,7 +58,7 @@ where
         })
     }
     // Validate that the block access list hash matches the calculated block access list hash
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) && allow_bal_check {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
         let default_bal = BlockAccessList::default();
         let block_access_list_hash =

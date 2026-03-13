@@ -1705,6 +1705,7 @@ mod tests {
             withdrawals: Some(vec![]),
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         let api_task = tokio::spawn(async move {
@@ -1752,6 +1753,7 @@ mod tests {
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
+            slot_number: None,
         };
 
         let api_task = tokio::spawn(async move {

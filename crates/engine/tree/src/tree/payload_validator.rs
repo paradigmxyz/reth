@@ -874,11 +874,11 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = input.block_access_list().is_some();
+
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .without_state_clear()
                 .with_bal_builder_if(has_bal)
                 .build()
         });
@@ -896,19 +896,21 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    Some(metrics),
-                )
-            });
+            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
+                |address, precompile| {
+                    let metrics = self
+                        .precompile_cache_metrics
+                        .entry(*address)
+                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                        .clone();
+                    CachedPrecompile::wrap(
+                        precompile,
+                        self.precompile_cache_map.cache_for_address(*address),
+                        spec_id,
+                        Some(metrics),
+                    )
+                },
+            );
         }
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
@@ -936,6 +938,7 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
+            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -956,7 +959,7 @@ where
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
 
-            let built_bal = &result.block_access_list;
+            let built_bal = db.take_built_alloy_bal();
 
             // Compute hashes and compare
             let expected_hash = expected_bal
@@ -1003,6 +1006,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
+        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -1018,6 +1022,11 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        if has_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1061,6 +1070,10 @@ where
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
+            }
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
         drop(exec_span);
@@ -1372,9 +1385,13 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) =
-            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
-        {
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            block,
+            output,
+            receipt_root_bloom,
+            None,
+            false,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
@@ -2102,6 +2119,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_used(),
             Self::Block(block) => block.gas_used(),
+        }
+    }
+
+    /// Returns the gas limit used by the block.
+    pub fn gas_limit(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_limit(),
+            Self::Block(block) => block.gas_limit(),
         }
     }
 }
