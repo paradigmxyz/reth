@@ -394,15 +394,13 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
-        let mut modules = TransportRpcModules::default();
-
-        if !module_config.is_empty() {
+        if module_config.is_empty() {
+            TransportRpcModules::default()
+        } else {
             let config = module_config.config.clone().unwrap_or_default();
             let mut registry = self.into_registry(config, eth, engine_events);
-            modules = registry.create_transport_rpc_modules(module_config);
+            registry.create_transport_rpc_modules(module_config)
         }
-
-        modules
     }
 }
 
