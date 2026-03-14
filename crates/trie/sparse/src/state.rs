@@ -547,17 +547,28 @@ where
         self.storage
             .tries
             .iter_mut()
-            .map(|(address, trie)| {
+            .filter_map(|(address, trie)| {
                 let trie = trie.as_revealed_mut().unwrap();
+
+                // Avoid consuming empty update sets for unchanged storage tries.
+                let has_updates = {
+                    let updates = trie.updates_ref();
+                    updates.wiped ||
+                        !updates.updated_nodes.is_empty() ||
+                        !updates.removed_nodes.is_empty()
+                };
+                if !has_updates {
+                    return None;
+                }
+
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
                     is_deleted: updates.wiped,
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
-                (*address, updates)
+                Some((*address, updates))
             })
-            .filter(|(_, updates)| !updates.is_empty())
             .collect()
     }
 
