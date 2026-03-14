@@ -45,7 +45,6 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_engine_tree::tree::EngineSharedCaches;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
@@ -774,7 +773,6 @@ where
     pub async fn with_components<CB>(
         self,
         components_builder: CB,
-        shared_caches: EngineSharedCaches<<CB::Components as NodeComponents<T>>::Evm>,
         on_component_initialized: Box<
             dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
         >,
@@ -794,8 +792,7 @@ where
             self.blockchain_db().clone(),
             self.task_executor().clone(),
             self.configs().clone(),
-        )
-        .with_resource(shared_caches);
+        );
 
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;

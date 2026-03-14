@@ -124,11 +124,7 @@ impl EngineNodeLauncher {
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
-            .with_components(
-                components_builder,
-                main_shared_caches.clone(),
-                on_component_initialized,
-            )
+            .with_components(components_builder, on_component_initialized)
             .await?;
 
         // spawn exexs if any

@@ -15,14 +15,7 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    fmt::Debug,
-    future::Future,
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
@@ -67,57 +60,6 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
         BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
     >
 {
-}
-
-/// Launch-owned resources that can be attached to node build contexts.
-#[derive(Clone, Default)]
-pub struct ContextResources {
-    entries: Option<Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
-}
-
-impl ContextResources {
-    /// Creates an empty resource container.
-    pub const fn new() -> Self {
-        Self { entries: None }
-    }
-
-    /// Stores a typed resource, replacing any existing value of the same type.
-    pub fn insert<T>(&mut self, value: T) -> &mut Self
-    where
-        T: Any + Send + Sync,
-    {
-        let entries =
-            Arc::make_mut(self.entries.get_or_insert_with(|| Arc::new(HashMap::default())));
-        entries.insert(TypeId::of::<T>(), Arc::new(value));
-        self
-    }
-
-    /// Returns a copy with the given typed resource inserted.
-    pub fn with<T>(mut self, value: T) -> Self
-    where
-        T: Any + Send + Sync,
-    {
-        self.insert(value);
-        self
-    }
-
-    /// Returns the typed resource if present.
-    pub fn get<T>(&self) -> Option<&T>
-    where
-        T: Any + Send + Sync,
-    {
-        self.entries
-            .as_ref()?
-            .get(&TypeId::of::<T>())
-            .and_then(|value| value.as_ref().downcast_ref())
-    }
-}
-
-impl std::fmt::Debug for ContextResources {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let resource_count = self.entries.as_ref().map_or(0, |entries| entries.len());
-        f.debug_struct("ContextResources").field("resource_count", &resource_count).finish()
-    }
 }
 
 /// Encapsulates all types and components of the node.
@@ -265,27 +207,5 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
 
     async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ContextResources;
-
-    #[derive(Debug, PartialEq, Eq)]
-    struct First(&'static str);
-
-    #[derive(Debug, PartialEq, Eq)]
-    struct Second(u64);
-
-    #[test]
-    fn context_resources_store_and_replace_by_type() {
-        let resources = ContextResources::default()
-            .with(First("initial"))
-            .with(Second(7))
-            .with(First("updated"));
-
-        assert_eq!(resources.get::<First>(), Some(&First("updated")));
-        assert_eq!(resources.get::<Second>(), Some(&Second(7)));
     }
 }
