@@ -105,6 +105,9 @@ pub struct Command {
     #[arg(long, value_name = "HASH", help_heading = "Explicit Value Overrides")]
     requests_hash: Option<B256>,
 
+    /// Override the slot number with a specific value.
+    #[arg(long, value_name = "U64", help_heading = "Explicit Value Overrides")]
+    slot_number: Option<u64>,
     // ==================== Auto-Invalidation Flags ====================
     /// Invalidate the parent hash by setting it to a random value.
     #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
@@ -158,6 +161,14 @@ pub struct Command {
     #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
     invalidate_requests_hash: bool,
 
+    /// Invalidate the block access list by setting it to a random value (EIP-7928).
+    #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
+    invalidate_block_access_list: bool,
+
+    /// Invalidate the slot number by setting it to an random value.(EIP-7843).
+    #[arg(long, default_value_t = false, help_heading = "Auto-Invalidation Flags")]
+    invalidate_slot_number: bool,
+
     // ==================== Meta Flags ====================
     /// Skip block hash recalculation after modifications.
     #[arg(long, default_value_t = false, help_heading = "Meta Flags")]
@@ -199,6 +210,7 @@ impl Command {
             block_hash: self.block_hash,
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
+            slot_number: self.slot_number,
             invalidate_parent_hash: self.invalidate_parent_hash,
             invalidate_state_root: self.invalidate_state_root,
             invalidate_receipts_root: self.invalidate_receipts_root,
@@ -211,6 +223,8 @@ impl Command {
             invalidate_withdrawals: self.invalidate_withdrawals,
             invalidate_blob_gas_used: self.invalidate_blob_gas_used,
             invalidate_excess_blob_gas: self.invalidate_excess_blob_gas,
+            invalidate_block_access_list: self.invalidate_block_access_list,
+            invalidate_slot_number: self.invalidate_slot_number,
         }
     }
 
@@ -240,7 +254,7 @@ impl Command {
             ExecutionPayload::V1(p) => config.apply_to_payload_v1(p),
             ExecutionPayload::V2(p) => config.apply_to_payload_v2(p),
             ExecutionPayload::V3(p) => config.apply_to_payload_v3(p),
-            ExecutionPayload::V4(p) => config.apply_to_payload_v3(&mut p.payload_inner),
+            ExecutionPayload::V4(p) => config.apply_to_payload_v4(p),
         };
 
         let skip_recalc = self.skip_hash_recalc || config.should_skip_hash_recalc();
