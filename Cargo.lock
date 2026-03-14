@@ -9651,6 +9651,7 @@ version = "1.11.3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",

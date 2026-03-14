@@ -36,6 +36,7 @@ reth-fs-util.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
