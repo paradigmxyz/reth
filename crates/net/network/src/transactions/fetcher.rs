@@ -442,8 +442,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             search_durations.find_idle_peer
         );
 
-        // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return false };
+        // peer may have disconnected between finding it idle and requesting here
+        let Some(peer) = peers.get(&peer_id) else {
+            // put hashes back into pending fetch so they can be retried with another peer
+            for hash in &hashes_to_request {
+                self.hashes_pending_fetch.insert(*hash);
+            }
+            return false
+        };
         let conn_eth_version = peer.version;
 
         // fill the request with more hashes pending fetch that have been announced by the peer.
