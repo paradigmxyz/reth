@@ -1,12 +1,11 @@
 use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-#[cfg(all(unix, feature = "rocksdb"))]
-use reth_db_api::Tables;
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     tables,
     transaction::DbTxMut,
+    Tables,
 };
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
@@ -148,7 +147,6 @@ where
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
@@ -691,7 +689,6 @@ mod tests {
         }
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
         use super::*;
         use reth_db_api::models::StorageBeforeTx;

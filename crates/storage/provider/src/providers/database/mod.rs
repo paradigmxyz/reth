@@ -28,8 +28,8 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, NodePrimitivesProvider,
+    StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -40,7 +40,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 mod provider;
 pub use provider::{
@@ -195,12 +195,10 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
         self.rocksdb_provider.clone()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }
@@ -367,7 +365,58 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             },
         );
 
+        // Step 4: Heal finalized/safe block numbers that may be ahead of the
+        // highest header on nodes coming from <=1.10.2.
+        //
+        // Unwinds already set it to the target block.
+        if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
+            self.heal_chain_state_block_numbers(&provider_ro)?;
+        }
+
         Ok((rocksdb_unwind, static_file_unwind))
+    }
+
+    /// If the stored finalized or safe block number is ahead of the highest
+    /// header, resets it to the highest header.
+    fn heal_chain_state_block_numbers(
+        &self,
+        provider_ro: &DatabaseProvider<<N::DB as Database>::TX, N>,
+    ) -> ProviderResult<()> {
+        let highest_header = self.last_block_number()?;
+
+        let finalized = provider_ro.last_finalized_block_number()?;
+        let safe = provider_ro.last_safe_block_number()?;
+
+        if finalized.is_none_or(|f| f <= highest_header) && safe.is_none_or(|s| s <= highest_header)
+        {
+            return Ok(());
+        }
+
+        let provider_rw = self.provider_rw()?;
+
+        if let Some(finalized) = finalized.filter(|&f| f > highest_header) {
+            info!(
+                target: "providers::db",
+                finalized,
+                highest_header,
+                "Healing finalized block number",
+            );
+            provider_rw.save_finalized_block_number(highest_header)?;
+        }
+
+        if let Some(safe) = safe.filter(|&s| s > highest_header) {
+            info!(
+                target: "providers::db",
+                safe,
+                highest_header,
+                "Healing safe block number",
+            );
+            provider_rw.save_safe_block_number(highest_header)?;
+        }
+
+        provider_rw.commit()?;
+
+        Ok(())
     }
 }
 

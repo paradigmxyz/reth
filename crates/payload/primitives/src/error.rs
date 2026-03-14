@@ -139,9 +139,7 @@ impl NewPayloadError {
     pub fn other(err: impl error::Error + Send + Sync + 'static) -> Self {
         Self::Other(Box::new(err))
     }
-}
 
-impl NewPayloadError {
     /// Returns `true` if the error is caused by a block hash mismatch.
     #[inline]
     pub const fn is_block_hash_mismatch(&self) -> bool {

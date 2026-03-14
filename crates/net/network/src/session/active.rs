@@ -742,7 +742,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
                                         debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
-                                        return this.close_on_error(error, cx)
+                                        this.on_bad_message();
+                                        return this
+                                            .try_disconnect(DisconnectReason::ProtocolBreach, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
                                         // failed to send due to lack of capacity
@@ -752,6 +754,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             }
                             Err(err) => {
                                 debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
+                                if err.is_protocol_breach() {
+                                    this.on_bad_message();
+                                    return this.try_disconnect(DisconnectReason::ProtocolBreach, cx)
+                                }
                                 return this.close_on_error(err, cx)
                             }
                         }
@@ -966,6 +972,7 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream, UnifiedStatus,
     };
+    use reth_eth_wire_types::{EthMessageID, RawCapabilityMessage};
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -1159,6 +1166,40 @@ mod tests {
         });
 
         fut.await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_invalid_message_disconnects_with_protocol_breach() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
+            client_stream
+                .start_send_raw(RawCapabilityMessage::eth(
+                    EthMessageID::PooledTransactions,
+                    vec![0xc0].into(),
+                ))
+                .unwrap();
+            client_stream.flush().await.unwrap();
+
+            let msg = client_stream.next().await.unwrap().unwrap_err();
+            assert_eq!(msg.as_disconnected(), Some(DisconnectReason::ProtocolBreach));
+        });
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let session = builder.connect_incoming(incoming).await;
+            session.await;
+
+            tx.send(()).unwrap();
+        });
+
+        fut.await;
+        rx.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

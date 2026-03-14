@@ -295,6 +295,7 @@ where
     fn extract_reward_traces<H: BlockHeader>(
         &self,
         header: &H,
+        block_hash: BlockHash,
         ommers: Option<&[H]>,
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
@@ -303,6 +304,7 @@ where
 
         let block_reward = block_reward(base_block_reward, ommers_cnt);
         traces.push(reward_trace(
+            block_hash,
             header,
             RewardAction {
                 author: header.beneficiary(),
@@ -316,6 +318,7 @@ where
         for uncle in ommers {
             let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
             traces.push(reward_trace(
+                block_hash,
                 header,
                 RewardAction {
                     author: uncle.beneficiary(),
@@ -428,6 +431,7 @@ where
                     all_traces.extend(
                         self.extract_reward_traces(
                             block.header(),
+                            block.hash(),
                             block.body().ommers(),
                             base_block_reward,
                         )
@@ -502,6 +506,7 @@ where
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),
+                block.hash(),
                 block.body().ommers(),
                 base_block_reward,
             ));
@@ -795,9 +800,13 @@ pub struct BlockStorageAccess {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
-fn reward_trace<H: BlockHeader>(header: &H, reward: RewardAction) -> LocalizedTransactionTrace {
+fn reward_trace<H: BlockHeader>(
+    block_hash: BlockHash,
+    header: &H,
+    reward: RewardAction,
+) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash_slow()),
+        block_hash: Some(block_hash),
         block_number: Some(header.number()),
         transaction_hash: None,
         transaction_position: None,

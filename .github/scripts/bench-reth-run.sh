@@ -11,6 +11,8 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
+#               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 set -euo pipefail
 
 LABEL="$1"
@@ -139,6 +141,14 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
   RETH_ARGS+=(--metrics "$BENCH_METRICS_ADDR")
 fi
 
+# OTLP traces and logs export
+if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+fi
+if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+fi
+
 # Tracy profiling: add --log.tracy flags and set environment
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   RETH_ARGS+=(--log.tracy --log.tracy.filter "${BENCH_TRACY_FILTER:-debug}")
@@ -149,16 +159,29 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+SUDO_ENV=()
+if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
+  SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
+  SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
+fi
+
+# Limit reth memory to 95% of available RAM to prevent OOM kills
+TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+MEM_LIMIT=$(( TOTAL_MEM_KB * 95 / 100 * 1024 ))
+echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 1024 ))MB)"
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 

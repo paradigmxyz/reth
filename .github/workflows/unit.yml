@@ -19,15 +19,13 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.type }} / ${{ matrix.storage }}
+    name: test / ${{ matrix.type }}
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
       RUST_BACKTRACE: 1
-      EDGE_FEATURES: ${{ matrix.storage == 'edge' && 'edge' || '' }}
     strategy:
       matrix:
         type: [ethereum]
-        storage: [stable, edge]
         include:
           - type: ethereum
             features: asm-keccak ethereum
@@ -50,14 +48,14 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
-            --features "${{ matrix.features }} $EDGE_FEATURES" --locked \
+            --features "${{ matrix.features }}" --locked \
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:
     name: Ethereum state tests
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
