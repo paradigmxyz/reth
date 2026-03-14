@@ -468,6 +468,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.transaction_fetcher.remove_peer(peer_id);
     }
 
+    /// Penalizes and disconnects a peer that violated the protocol (e.g. sent malformed blob
+    /// sidecar data).
     fn disconnect_peer_for_protocol_violation(&self, peer_id: PeerId) {
         self.report_peer_bad_transactions(peer_id);
         self.network.disconnect_peer_with_reason(peer_id, DisconnectReason::SubprotocolSpecific);
