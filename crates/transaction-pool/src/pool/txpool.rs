@@ -33,11 +33,13 @@ use alloy_eips::{
 #[cfg(test)]
 use alloy_primitives::Address;
 use alloy_primitives::{map::AddressSet, TxHash, B256};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
+    collections::{btree_map::Entry, hash_map, BTreeMap},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -1387,7 +1389,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Max number of executable transaction slots guaranteed per account
     max_account_slots: usize,
     /// _All_ transactions identified by their hash.
-    by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
+    by_hash: FxHashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Contains the currently known information about the senders.
@@ -1405,7 +1407,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All accounts with a pooled authorization
-    auths: FxHashMap<SenderId, HashSet<TxHash>>,
+    auths: FxHashMap<SenderId, FxHashSet<TxHash>>,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
 }
