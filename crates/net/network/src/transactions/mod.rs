@@ -460,6 +460,14 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
     }
 
+    /// Handles a closed peer session, removing the peer from transaction-local tracking state.
+    fn on_peer_session_closed(&mut self, peer_id: &PeerId) {
+        if let Some(mut peer) = self.peers.remove(peer_id) {
+            self.policies.propagation_policy_mut().on_session_closed(&mut peer);
+        }
+        self.transaction_fetcher.remove_peer(peer_id);
+    }
+
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
@@ -1246,13 +1254,7 @@ where
     fn on_network_event(&mut self, event_result: NetworkEvent<PeerRequest<N>>) {
         match event_result {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
-                // remove the peer
-
-                let peer = self.peers.remove(&peer_id);
-                if let Some(mut peer) = peer {
-                    self.policies.propagation_policy_mut().on_session_closed(&mut peer);
-                }
-                self.transaction_fetcher.remove_peer(&peer_id);
+                self.on_peer_session_closed(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
                 // process active peer session and broadcast available transaction from the pool
@@ -2167,7 +2169,7 @@ mod tests {
         NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, Signature, TxKind, U256};
+    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2509,6 +2511,46 @@ mod tests {
         assert!(!pool.is_empty());
         assert!(pool.get(signed_tx.tx_hash()).is_some());
         handle.terminate().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_session_closed_cleans_transaction_peer_state() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let fallback_peer = PeerId::new([2; 64]);
+        let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
+        let hash_shared = B256::from_slice(&[1; 32]);
+
+        tx_manager.peers.insert(peer_id, peer);
+        buffer_hash_to_tx_fetcher(
+            &mut tx_manager.transaction_fetcher,
+            hash_shared,
+            peer_id,
+            0,
+            None,
+        );
+        buffer_hash_to_tx_fetcher(
+            &mut tx_manager.transaction_fetcher,
+            hash_shared,
+            fallback_peer,
+            0,
+            None,
+        );
+        tx_manager.transaction_fetcher.active_peers.insert(peer_id, 1);
+
+        tx_manager.on_network_event(NetworkEvent::Peer(PeerEvent::SessionClosed {
+            peer_id,
+            reason: None,
+        }));
+
+        // peer removed from peers map and active_peers
+        assert!(!tx_manager.peers.contains_key(&peer_id));
+        assert!(tx_manager.transaction_fetcher.active_peers.peek(&peer_id).is_none());
+        // fallback peer is still available for the hash
+        assert_eq!(
+            tx_manager.transaction_fetcher.get_idle_peer_for(hash_shared),
+            Some(&fallback_peer)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
