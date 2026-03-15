@@ -3523,21 +3523,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
-        //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
-        self.static_file_provider()
-            .get_writer(block, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        // Prune static-file headers above `block`, if the segment exists. During live sync via
+        // the Engine API, headers may only exist in MDBX and not yet in static files, so this
+        // being `None` is a legitimate state — there is simply nothing to prune.
+        if let Some(highest_static_file_block) =
+            self.static_file_provider().get_highest_static_file_block(StaticFileSegment::Headers)
+        {
+            // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
+            // sure we remove only what is ABOVE the block.
+            //
+            // i.e., if the highest static file block is 8, we want to remove above block 5 only,
+            // we will have three blocks to remove, which will be block 8, 7, and 6.
+            debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
+            self.static_file_provider()
+                .get_writer(block, StaticFileSegment::Headers)?
+                .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        }
 
         // First transaction to be removed
         let unwind_tx_from = self
@@ -5381,5 +5382,69 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn test_remove_blocks_above_no_static_file_headers() {
+        // Simulates the Engine API reorg scenario where headers exist only in MDBX
+        // and have not yet been persisted to static files. `remove_blocks_above` must
+        // not panic when the Headers static file segment is absent.
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        // Insert genesis + block 1 (writes to both static files and MDBX).
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Delete the Headers static file segment, simulating a state where headers
+        // are only in MDBX (as happens during live sync before persistence).
+        factory.static_file_provider().delete_segment(StaticFileSegment::Headers).unwrap();
+
+        // remove_blocks_above should skip static file pruning gracefully instead of
+        // panicking on the old `.expect("todo: error handling")`.
+        let provider_rw = factory.provider_rw().unwrap();
+        let result = provider_rw.remove_blocks_above(0);
+        assert!(
+            result.is_ok(),
+            "remove_blocks_above must not panic when static file headers are absent: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_remove_blocks_above_with_static_file_headers() {
+        // Verifies that the normal path (headers present in static files) still prunes correctly.
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        // Insert genesis + block 1.
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Headers static file segment should exist.
+        assert!(
+            factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .is_some(),
+            "headers should be in static files before removal"
+        );
+
+        // remove_blocks_above(0) should prune block 1 headers from static files.
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.remove_blocks_above(0).unwrap();
+        provider_rw.commit().unwrap();
+
+        // After removal, the highest header block should be genesis (block 0).
+        assert_eq!(
+            factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(0),
+            "only genesis header should remain after removing blocks above 0"
+        );
     }
 }
