@@ -32,6 +32,14 @@ pub(crate) fn load_jwt_secret(jwt_secret: Option<&str>) -> Result<Option<String>
     }
 }
 
+/// Emits a warning for Prague `engine_newPayloadV4` requests built from RPC blocks.
+pub(crate) fn warn_v4_requests_hash_only() {
+    eprintln!(
+        "Warning: V4 payloads generated from RPC blocks can only send `requests_hash`; \
+         the target node must enable `--engine.accept-execution-requests-hash`."
+    );
+}
+
 /// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
 ///
 /// Examples: "30000000", "30M", "1G", "2G"
