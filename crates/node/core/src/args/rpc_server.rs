@@ -64,6 +64,10 @@ pub struct DefaultRpcServerArgs {
     ipcdisable: bool,
     ipcpath: String,
     ipc_socket_permissions: Option<String>,
+    operator: bool,
+    operator_addr: IpAddr,
+    operator_port: u16,
+    operator_api: Option<RpcModuleSelection>,
     auth_addr: IpAddr,
     auth_port: u16,
     auth_jwtsecret: Option<PathBuf>,
@@ -186,6 +190,30 @@ impl DefaultRpcServerArgs {
     /// Set the default IPC socket permissions
     pub fn with_ipc_socket_permissions(mut self, v: Option<String>) -> Self {
         self.ipc_socket_permissions = v;
+        self
+    }
+
+    /// Set the default operator enabled state
+    pub const fn with_operator(mut self, v: bool) -> Self {
+        self.operator = v;
+        self
+    }
+
+    /// Set the default operator address
+    pub const fn with_operator_addr(mut self, v: IpAddr) -> Self {
+        self.operator_addr = v;
+        self
+    }
+
+    /// Set the default operator port
+    pub const fn with_operator_port(mut self, v: u16) -> Self {
+        self.operator_port = v;
+        self
+    }
+
+    /// Set the default operator API modules
+    pub fn with_operator_api(mut self, v: Option<RpcModuleSelection>) -> Self {
+        self.operator_api = v;
         self
     }
 
@@ -375,6 +403,10 @@ impl Default for DefaultRpcServerArgs {
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
             ipc_socket_permissions: None,
+            operator: false,
+            operator_addr: Ipv4Addr::LOCALHOST.into(),
+            operator_port: constants::DEFAULT_OPERATOR_RPC_PORT,
+            operator_api: None,
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
@@ -470,6 +502,26 @@ pub struct RpcServerArgs {
     #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
+    /// Enable the Operator-RPC server.
+    ///
+    /// This starts an additional HTTP-RPC server that can serve a different set of API modules
+    /// on a separate port. Useful for exposing operator-specific APIs without affecting the
+    /// public-facing RPC server.
+    #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().operator)]
+    pub operator: bool,
+
+    /// Operator server address to listen on
+    #[arg(long = "operator.addr", default_value_t = DefaultRpcServerArgs::get_global().operator_addr)]
+    pub operator_addr: IpAddr,
+
+    /// Operator server port to listen on
+    #[arg(long = "operator.port", default_value_t = DefaultRpcServerArgs::get_global().operator_port)]
+    pub operator_port: u16,
+
+    /// Rpc Modules to be configured for the operator server
+    #[arg(long = "operator.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().operator_api.as_ref().map(|v| v.to_string().into())))]
+    pub operator_api: Option<RpcModuleSelection>,
+
     /// Auth server address to listen on
     #[arg(long = "authrpc.addr", default_value_t = DefaultRpcServerArgs::get_global().auth_addr)]
     pub auth_addr: IpAddr,
@@ -503,8 +555,8 @@ pub struct RpcServerArgs {
     #[arg(long = "disable-auth-server", alias = "disable-engine-api", default_value_t = DefaultRpcServerArgs::get_global().disable_auth_server)]
     pub disable_auth_server: bool,
 
-    /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
-    /// `--ws.api`.
+    /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api`,
+    /// `--ws.api`, and `--operator.api`.
     ///
     /// This is __not__ used for the authenticated engine-API RPC server, see
     /// `--authrpc.jwtsecret`.
@@ -682,6 +734,18 @@ impl RpcServerArgs {
         self
     }
 
+    /// Enables the Operator-RPC server.
+    pub const fn with_operator(mut self) -> Self {
+        self.operator = true;
+        self
+    }
+
+    /// Configures modules for the Operator-RPC server.
+    pub fn with_operator_api(mut self, operator_api: RpcModuleSelection) -> Self {
+        self.operator_api = Some(operator_api);
+        self
+    }
+
     /// Enables the Auth IPC
     pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
@@ -699,6 +763,7 @@ impl RpcServerArgs {
     /// * The `auth_port` is scaled by a factor of `instance * 100`
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
+    /// * The `operator_port` is scaled by a factor of `instance * 2 + 1`
     /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
     ///
     /// # Panics
@@ -718,6 +783,8 @@ impl RpcServerArgs {
             self.http_port -= instance - 1;
             // ws port is scaled by a factor of instance * 2
             self.ws_port += instance * 2 - 2;
+            // operator port is scaled by a factor of instance * 2 + 1
+            self.operator_port += instance * 2 - 1;
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }
@@ -753,12 +820,20 @@ impl RpcServerArgs {
         self
     }
 
+    /// Set the operator port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub const fn with_operator_unused_port(mut self) -> Self {
+        self.operator_port = 0;
+        self
+    }
+
     /// Configure all ports to be set to a random unused port when bound, and set the IPC path to a
     /// random path.
     pub fn with_unused_ports(mut self) -> Self {
         self = self.with_http_unused_port();
         self = self.with_ws_unused_port();
         self = self.with_auth_unused_port();
+        self = self.with_operator_unused_port();
         self = self.with_ipc_random_path();
         self
     }
@@ -783,6 +858,9 @@ impl RpcServerArgs {
             return true;
         }
         if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+            return true;
+        }
+        if self.operator && self.operator_api.as_ref().is_some_and(|api| api.contains(&ns)) {
             return true;
         }
         // IPC exposes all modules when enabled
@@ -813,6 +891,10 @@ impl Default for RpcServerArgs {
             ipcdisable,
             ipcpath,
             ipc_socket_permissions,
+            operator,
+            operator_addr,
+            operator_port,
+            operator_api,
             auth_addr,
             auth_port,
             auth_jwtsecret,
@@ -857,6 +939,10 @@ impl Default for RpcServerArgs {
             ipcdisable,
             ipcpath,
             ipc_socket_permissions,
+            operator,
+            operator_addr,
+            operator_port,
+            operator_api,
             auth_addr,
             auth_port,
             auth_jwtsecret,
@@ -1017,6 +1103,10 @@ mod tests {
             ipcdisable: false,
             ipcpath: "reth.ipc".to_string(),
             ipc_socket_permissions: Some("0o666".to_string()),
+            operator: false,
+            operator_addr: "127.0.0.1".parse().unwrap(),
+            operator_port: constants::DEFAULT_OPERATOR_RPC_PORT,
+            operator_api: None,
             auth_addr: "127.0.0.1".parse().unwrap(),
             auth_port: 8551,
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),

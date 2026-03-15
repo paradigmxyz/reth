@@ -9,6 +9,9 @@ pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
 /// The default port for the auth server.
 pub const DEFAULT_AUTH_PORT: u16 = 8551;
 
+/// The default port for the operator RPC server.
+pub const DEFAULT_OPERATOR_RPC_PORT: u16 = 8547;
+
 /// The default maximum block range allowed to filter
 pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 

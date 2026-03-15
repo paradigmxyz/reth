@@ -357,6 +357,26 @@ RPC:
 
           If not specified, the permissions will be set by the system's umask.
 
+      --operator
+          Enable the Operator-RPC server.
+
+          This starts an additional HTTP-RPC server that can serve a different set of API modules on a separate port. Useful for exposing operator-specific APIs without affecting the public-facing RPC server.
+
+      --operator.addr <OPERATOR_ADDR>
+          Operator server address to listen on
+
+          [default: 127.0.0.1]
+
+      --operator.port <OPERATOR_PORT>
+          Operator server port to listen on
+
+          [default: 8547]
+
+      --operator.api <OPERATOR_API>
+          Rpc Modules to be configured for the operator server
+
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev, testing]
+
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
 
@@ -388,7 +408,7 @@ RPC:
           This will prevent the authenticated engine-API server from starting. Use this if you're running a node that doesn't need to serve engine API requests.
 
       --rpc.jwtsecret <HEX>
-          Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
+          Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api`, `--ws.api`, and `--operator.api`.
 
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 

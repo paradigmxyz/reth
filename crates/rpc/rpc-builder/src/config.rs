@@ -163,6 +163,14 @@ impl RethRpcServerConfig for RpcServerArgs {
             config = config.with_ipc(RpcModuleSelection::default_ipc_modules());
         }
 
+        if self.operator {
+            config = config.with_operator(
+                self.operator_api
+                    .clone()
+                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
+            );
+        }
+
         config
     }
 
@@ -221,6 +229,20 @@ impl RethRpcServerConfig for RpcServerArgs {
         if self.is_ipc_enabled() {
             config =
                 config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
+        }
+
+        if self.operator {
+            let socket_address = SocketAddr::new(self.operator_addr, self.operator_port);
+            config = config
+                .with_operator_address(socket_address)
+                .with_operator(self.http_ws_server_builder());
+        }
+
+        if self.operator_api.is_some() && !self.operator {
+            warn!(
+                target: "reth::cli",
+                "The --operator.api flag is set but --operator is not enabled. Operator RPC API will not be exposed."
+            );
         }
 
         config
