@@ -356,7 +356,12 @@ where
         let ctx = self.ctx.clone();
         self.executor.prewarming_pool().install_fn(|| {
             bal.par_iter().for_each_init(
-                || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox, true>>),
+                || {
+                    (
+                        ctx.clone(),
+                        None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+                    )
+                },
                 |(ctx, provider), account| {
                     if ctx.should_stop() {
                         return;
