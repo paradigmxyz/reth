@@ -112,7 +112,7 @@ where
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
-                    slot_number: None,
+                    slot_number: request.payload_attributes.slot_number,
                 };
 
                 let mut builder = evm_config
@@ -121,6 +121,9 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
 
                 builder.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+                if is_bal_enabled {
+                    builder.evm_mut().db_mut().bump_bal_index();
+                }
 
                 let mut total_fees = U256::ZERO;
                 let base_fee = builder.evm_mut().block().basefee();
@@ -199,6 +202,9 @@ where
 
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
+                    if is_bal_enabled {
+                        builder.evm_mut().db_mut().bump_bal_index();
+                    }
                 }
                 let outcome = builder.finish(&state).map_err(Eth::Error::from_eth_err)?;
 
