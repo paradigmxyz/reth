@@ -12,6 +12,10 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
+/// The default max targets for limiting the number of account and storage proof targets to be
+/// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
+pub const DEFAULT_MULTIPROOF_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 
@@ -110,6 +114,8 @@ pub struct TreeConfig {
     has_enough_parallelism: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
+    /// Max targets for forcing multiproof chunking regardless of worker availability.
+    multiproof_max_targets_for_chunking: usize,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
     /// Whether to disable the precompile cache
@@ -176,6 +182,7 @@ impl Default for TreeConfig {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+            multiproof_max_targets_for_chunking: DEFAULT_MULTIPROOF_MAX_TARGETS_FOR_CHUNKING,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
@@ -238,6 +245,7 @@ impl TreeConfig {
             cross_block_cache_size,
             has_enough_parallelism,
             multiproof_chunk_size,
+            multiproof_max_targets_for_chunking: DEFAULT_MULTIPROOF_MAX_TARGETS_FOR_CHUNKING,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
@@ -289,6 +297,11 @@ impl TreeConfig {
     /// Return the effective multiproof task chunk size.
     pub const fn effective_multiproof_chunk_size(&self) -> usize {
         self.multiproof_chunk_size
+    }
+
+    /// Return the max targets threshold for forcing multiproof chunking.
+    pub const fn multiproof_max_targets_for_chunking(&self) -> usize {
+        self.multiproof_max_targets_for_chunking
     }
 
     /// Return the number of reserved CPU cores for non-reth processes
@@ -447,6 +460,15 @@ impl TreeConfig {
     /// Setter for multiproof task chunk size for proof targets.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
         self.multiproof_chunk_size = multiproof_chunk_size;
+        self
+    }
+
+    /// Setter for max targets threshold for forcing multiproof chunking.
+    pub const fn with_multiproof_max_targets_for_chunking(
+        mut self,
+        max_targets_for_chunking: usize,
+    ) -> Self {
+        self.multiproof_max_targets_for_chunking = max_targets_for_chunking;
         self
     }
 
