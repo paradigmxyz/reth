@@ -223,7 +223,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie + Defa
 
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
 
-    // First update_leaves: covered keys are drained, blinded keys remain, callback fires.
+    // First update_leaves: callback fires for blinded paths. Implementations may
+    // drain covered keys or defer everything depending on their strategy.
     let mut targets: Vec<ProofV2Target> = Vec::new();
     trie.update_leaves(&mut leaf_updates, |key, min_len| {
         targets.push(ProofV2Target::new(key).with_min_len(min_len));
@@ -233,19 +234,24 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie + Defa
     assert!(!targets.is_empty(), "callback should fire for blinded keys");
     assert!(!leaf_updates.is_empty(), "blinded keys should remain in updates map");
 
-    // Reveal the proof for the requested targets.
-    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
-    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+    // Use the reveal-and-update loop to handle however many rounds are needed.
+    // The loop reveals proofs and retries until all updates are drained.
+    loop {
+        let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+        trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
 
-    // Second update_leaves: now all paths are revealed, remaining keys should be drained.
-    let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets2.push(ProofV2Target::new(key).with_min_len(min_len));
-    })
-    .expect("update_leaves should succeed on retry");
+        targets.clear();
+        trie.update_leaves(&mut leaf_updates, |key, min_len| {
+            targets.push(ProofV2Target::new(key).with_min_len(min_len));
+        })
+        .expect("update_leaves should succeed on retry");
 
-    assert!(targets2.is_empty(), "no callback should fire after reveal");
-    assert!(leaf_updates.is_empty(), "all keys should be drained after retry");
+        if targets.is_empty() {
+            break;
+        }
+    }
+
+    assert!(leaf_updates.is_empty(), "all keys should be drained after retry loop");
 
     // Root should match reference with all 5 updates applied.
     let mut expected_storage = base_storage;

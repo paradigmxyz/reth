@@ -594,23 +594,36 @@ where
                         target: "engine::tree::payload_processor",
                         "Creating new sparse trie - no preserved trie available"
                     );
-                    let default_trie = if enable_arena_sparse_trie {
-                        RevealableSparseTrie::blind_from(
-                            ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
-                        )
+                    if enable_arena_sparse_trie {
+                        let account_trie = RevealableSparseTrie::blind_from(
+                            ConfigurableSparseTrie::Arena(
+                                ArenaParallelSparseTrie::default()
+                                    .with_update_leaves_cache_depth(3),
+                            ),
+                        );
+                        let storage_trie = RevealableSparseTrie::blind_from(
+                            ConfigurableSparseTrie::Arena(
+                                ArenaParallelSparseTrie::default()
+                                    .with_update_leaves_cache_depth(2),
+                            ),
+                        );
+                        SparseStateTrie::default()
+                            .with_accounts_trie(account_trie)
+                            .with_default_storage_trie(storage_trie)
+                            .with_updates(true)
                     } else {
-                        RevealableSparseTrie::blind_from(
+                        let default_trie = RevealableSparseTrie::blind_from(
                             ConfigurableSparseTrie::HashMap(
                                 ParallelSparseTrie::default().with_parallelism_thresholds(
                                     PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
                                 ),
                             ),
-                        )
-                    };
-                    SparseStateTrie::default()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true)
+                        );
+                        SparseStateTrie::default()
+                            .with_accounts_trie(default_trie.clone())
+                            .with_default_storage_trie(default_trie)
+                            .with_updates(true)
+                    }
                 });
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
