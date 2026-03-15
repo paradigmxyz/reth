@@ -1117,6 +1117,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
     // Before trying status handshake, set up the version to negotiated shared version
     status.set_eth_version(eth_version);
+    let eth_max_message_size = handshake.max_message_size();
 
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
         // if the shared caps are 1, we know both support the eth version
@@ -1128,7 +1129,8 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             .await
         {
             Ok(their_status) => {
-                let eth_stream = EthStream::new(eth_version, p2p_stream);
+                let eth_stream =
+                    EthStream::with_max_message_size(eth_version, p2p_stream, eth_max_message_size);
                 (eth_stream.into(), their_status)
             }
             Err(err) => {

@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    ethstream::MAX_MESSAGE_SIZE,
+    message::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
@@ -26,6 +26,11 @@ pub trait EthRlpxHandshake: Debug + Send + Sync + 'static {
         fork_filter: ForkFilter,
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>>;
+
+    /// Returns the maximum allowed ETH message size for this handshake implementation.
+    fn max_message_size(&self) -> usize {
+        MAX_MESSAGE_SIZE
+    }
 }
 
 /// An unauthenticated stream that can send and receive messages.
