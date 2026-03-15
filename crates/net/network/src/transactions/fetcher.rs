@@ -666,18 +666,17 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Tries to fill request with hashes pending fetch so that the expected [`PooledTransactions`]
     /// response is full enough. A mutable reference to a list of hashes to request is passed as
     /// parameter. A budget is passed as parameter, this ensures that the node stops searching
-    /// for more hashes after the budget is depleted. Under bad network conditions, the cache of
-    /// hashes pending fetch may become very full for a while. As the node recovers, the hashes
-    /// pending fetch cache should get smaller. The budget should aim to be big enough to loop
-    /// through all buffered hashes in good network conditions.
+    /// for more hashes after the budget is depleted.
     ///
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
     /// guessed at [`AVERAGE_BYTE_SIZE_TX_ENCODED`].
     ///
-    /// Loops through hashes pending fetch and does:
+    /// Iterates the peer's seen hashes and checks against hashes pending fetch, rather than
+    /// the reverse. This is more efficient because `seen_hashes` (peer's seen transactions) is
+    /// typically much smaller than `hashes_pending_fetch`.
     ///
-    /// 1. Check if a hash pending fetch is seen by peer.
+    /// 1. Check if a hash seen by peer is pending fetch.
     /// 2. Optimistically include the hash in the request.
     /// 3. Accumulate expected total response size.
     /// 4. Check if acc size and hashes count is at limit, if so stop looping.
@@ -686,13 +685,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
+        mut budget_fill_request: Option<usize>,
     ) {
         let Some(hash) = hashes_to_request.iter().next() else { return };
 
         let mut acc_size_response = self
             .hashes_fetch_inflight_and_pending_fetch
-            .get(hash)
+            .peek(hash)
             .and_then(|entry| entry.tx_encoded_len())
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
@@ -703,11 +702,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             return
         }
 
-        // try to fill request by checking if any other hashes pending fetch (in lru order) are
-        // also seen by peer
-        for hash in self.hashes_pending_fetch.iter() {
-            // 1. Check if a hash pending fetch is seen by peer.
-            if !seen_hashes.contains(hash) {
+        // iterate the peer's seen hashes and check if any are pending fetch, rather than
+        // iterating all pending hashes and probing the peer's seen set — this is more efficient
+        // because seen_hashes is typically much smaller than hashes_pending_fetch
+        for hash in seen_hashes.iter() {
+            // 1. Check if a hash seen by peer is pending fetch.
+            if !self.hashes_pending_fetch.contains(hash) {
                 continue
             };
 
@@ -717,15 +717,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             // 3. Accumulate expected total response size.
             let size = self
                 .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
+                .peek(hash)
                 .and_then(|entry| entry.tx_encoded_len())
                 .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
             acc_size_response += size;
 
             // 4. Check if acc size or hashes count is at limit, if so stop looping.
-            // if expected response is full enough or the number of hashes in the request is
-            // enough, we're satisfied
             if acc_size_response >=
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES ||
                 hashes_to_request.len() >
@@ -735,7 +733,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
 
             if let Some(ref mut bud) = budget_fill_request {
-                *bud -= 1;
+                *bud = bud.saturating_sub(1);
                 if *bud == 0 {
                     break
                 }
@@ -1512,5 +1510,94 @@ mod test {
         assert_eq!(VerificationOutcome::ReportPeer, outcome);
         assert_eq!(1, verified_payload.len());
         assert!(verified_payload.contains(&signed_tx_1));
+    }
+
+    /// Benchmarks the two iteration strategies for computing the intersection of
+    /// `hashes_pending_fetch` and `seen_hashes`:
+    ///
+    /// - OLD: iterate `hashes_pending_fetch` (large), probe `seen_hashes` (small)
+    /// - NEW: iterate `seen_hashes` (small), probe `hashes_pending_fetch` (large)
+    ///
+    /// Verifies both produce the same result and prints timing comparison.
+    ///
+    /// Run with: `cargo test -p reth-network bench_fill_request --release -- --ignored --nocapture`
+    #[test]
+    #[ignore = "benchmark, not for CI"]
+    fn bench_fill_request_iteration_direction() {
+        use std::time::Instant;
+
+        const NUM_PENDING: usize = 12_800;
+        const NUM_SEEN: usize = 320;
+        const NUM_OVERLAP: usize = 50;
+        const ITERS: usize = 1000;
+
+        // setup hashes_pending_fetch (large set)
+        let mut hashes_pending_fetch = LruCache::new(NUM_PENDING as u32);
+        for i in 0..NUM_PENDING {
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&(i as u64).to_be_bytes());
+            hashes_pending_fetch.insert(B256::from(bytes));
+        }
+
+        // setup seen_hashes (small set) with NUM_OVERLAP overlapping entries
+        let mut seen_hashes = LruCache::new(NUM_SEEN as u32);
+        for i in 0..NUM_OVERLAP {
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&(i as u64).to_be_bytes());
+            seen_hashes.insert(B256::from(bytes));
+        }
+        for i in 0..(NUM_SEEN - NUM_OVERLAP) {
+            let mut bytes = [0xFFu8; 32];
+            bytes[..8].copy_from_slice(&(i as u64).to_be_bytes());
+            seen_hashes.insert(B256::from(bytes));
+        }
+
+        // OLD approach: iterate large set, probe small set
+        let start = Instant::now();
+        let mut old_result = HashSet::new();
+        for _ in 0..ITERS {
+            old_result.clear();
+            for hash in hashes_pending_fetch.iter() {
+                if seen_hashes.contains(hash) {
+                    old_result.insert(*hash);
+                }
+            }
+        }
+        let old_elapsed = start.elapsed();
+
+        // NEW approach: iterate small set, probe large set
+        let start = Instant::now();
+        let mut new_result = HashSet::new();
+        for _ in 0..ITERS {
+            new_result.clear();
+            for hash in seen_hashes.iter() {
+                if hashes_pending_fetch.contains(hash) {
+                    new_result.insert(*hash);
+                }
+            }
+        }
+        let new_elapsed = start.elapsed();
+
+        // verify correctness: both find the same intersection
+        assert_eq!(old_result, new_result, "both approaches must find the same intersection");
+        assert_eq!(
+            old_result.len(),
+            NUM_OVERLAP,
+            "should find all {NUM_OVERLAP} overlapping hashes"
+        );
+
+        let speedup = old_elapsed.as_nanos() as f64 / new_elapsed.as_nanos() as f64;
+
+        println!("\n=== fill_request iteration direction benchmark ===");
+        println!("pending_fetch: {NUM_PENDING}, seen_hashes: {NUM_SEEN}, overlap: {NUM_OVERLAP}");
+        println!("OLD (iterate pending, probe seen):  {old_elapsed:?} / {ITERS} iters");
+        println!("NEW (iterate seen, probe pending):  {new_elapsed:?} / {ITERS} iters");
+        println!("Speedup: {speedup:.1}x");
+
+        // the new approach should be faster in this scenario
+        assert!(
+            new_elapsed < old_elapsed,
+            "iterating the smaller set should be faster: new={new_elapsed:?} vs old={old_elapsed:?}"
+        );
     }
 }
