@@ -35,3 +35,7 @@ tokio = { workspace = true, features = ["time"] }
 serde_json.workspace = true
 
 ringbuffer.workspace = true
+
+[dev-dependencies]
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }

@@ -1,4 +1,5 @@
-use crate::BlockProvider;
+use crate::RawBlockProvider;
+use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
@@ -9,13 +10,23 @@ use tokio::sync::mpsc::Sender;
 
 /// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
 /// RPC subscriptions.
-#[derive(derive_more::Debug, Clone)]
+#[derive(derive_more::Debug)]
 pub struct RpcBlockProvider<N: Network, PrimitiveBlock> {
     #[debug(skip)]
     provider: Arc<dyn Provider<N>>,
     url: String,
     #[debug(skip)]
     convert: Arc<dyn Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync>,
+}
+
+impl<N: Network, PrimitiveBlock> Clone for RpcBlockProvider<N, PrimitiveBlock> {
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            url: self.url.clone(),
+            convert: self.convert.clone(),
+        }
+    }
 }
 
 impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
@@ -66,7 +77,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
     }
 }
 
-impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
+impl<N: Network, PrimitiveBlock> RawBlockProvider for RpcBlockProvider<N, PrimitiveBlock>
 where
     PrimitiveBlock: Block + 'static,
 {
@@ -79,10 +90,11 @@ where
                     target: "consensus::debug-client",
                     %err,
                     url=%self.url,
-                    "Failed to subscribe to blocks",
+                    "Failed to subscribe to blocks, retrying in 1s",
                 );
             }) else {
-                return
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue
             };
 
             while let Some(res) = stream.next().await {
@@ -112,13 +124,13 @@ where
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
+    async fn get_block(&self, block: BlockNumberOrTag) -> eyre::Result<Self::Block> {
         let block = self
             .provider
-            .get_block_by_number(block_number.into())
+            .get_block_by_number(block)
             .full()
             .await?
-            .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
+            .ok_or_else(|| eyre::eyre!("block not found for {block}"))?;
         Ok((self.convert)(block))
     }
 }

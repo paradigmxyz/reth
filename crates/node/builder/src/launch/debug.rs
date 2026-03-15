@@ -5,7 +5,8 @@ use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
-    BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
+    BlockProvider, DebugConsensusClient, EtherscanBlockProvider, ForkchoiceMode,
+    ForkchoiceProvider, RpcBlockProvider,
 };
 use reth_engine_local::{LocalMiner, MiningMode};
 use reth_node_api::{
@@ -114,9 +115,11 @@ impl<L> DebugNodeLauncher<L> {
 
 /// Type alias for the default debug block provider. We use etherscan provider to satisfy the
 /// bounds.
-pub type DefaultDebugBlockProvider<N> = EtherscanBlockProvider<
-    <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
-    BlockTy<<N as FullNodeTypes>::Types>,
+pub type DefaultDebugBlockProvider<N> = ForkchoiceProvider<
+    EtherscanBlockProvider<
+        <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+        BlockTy<<N as FullNodeTypes>::Types>,
+    >,
 >;
 
 /// Future for the [`DebugNodeLauncher`].
@@ -132,6 +135,7 @@ where
     map_attributes:
         Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
     debug_block_provider: Option<B>,
+    forkchoice_mode: ForkchoiceMode,
     mining_mode: Option<MiningMode<N::Pool>>,
 }
 
@@ -153,6 +157,7 @@ where
             local_payload_attributes_builder: Some(Box::new(builder)),
             map_attributes: None,
             debug_block_provider: self.debug_block_provider,
+            forkchoice_mode: self.forkchoice_mode,
             mining_mode: self.mining_mode,
         }
     }
@@ -168,8 +173,18 @@ where
             local_payload_attributes_builder: None,
             map_attributes: Some(Box::new(f)),
             debug_block_provider: self.debug_block_provider,
+            forkchoice_mode: self.forkchoice_mode,
             mining_mode: self.mining_mode,
         }
+    }
+
+    /// Sets the [`ForkchoiceMode`] used by the default RPC and Etherscan block providers.
+    ///
+    /// This has no effect when a custom block provider is set via
+    /// [`with_debug_block_provider`](Self::with_debug_block_provider).
+    pub const fn with_forkchoice_mode(mut self, mode: ForkchoiceMode) -> Self {
+        self.forkchoice_mode = mode;
+        self
     }
 
     /// Sets a custom [`MiningMode`] for the local miner in dev mode.
@@ -198,6 +213,7 @@ where
             local_payload_attributes_builder: self.local_payload_attributes_builder,
             map_attributes: self.map_attributes,
             debug_block_provider: Some(provider),
+            forkchoice_mode: self.forkchoice_mode,
             mining_mode: self.mining_mode,
         }
     }
@@ -209,6 +225,7 @@ where
             local_payload_attributes_builder,
             map_attributes,
             debug_block_provider,
+            forkchoice_mode,
             mining_mode,
         } = self;
 
@@ -242,6 +259,7 @@ where
                     N::Types::rpc_to_primitive_block(rpc_block)
                 })
                 .await?;
+            let block_provider = ForkchoiceProvider::with_mode(block_provider, forkchoice_mode);
 
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
@@ -272,6 +290,7 @@ where
                 chain.id(),
                 N::Types::rpc_to_primitive_block,
             );
+            let block_provider = ForkchoiceProvider::with_mode(block_provider, forkchoice_mode);
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
                 Arc::new(block_provider),
@@ -358,6 +377,7 @@ where
             local_payload_attributes_builder: None,
             map_attributes: None,
             debug_block_provider: None,
+            forkchoice_mode: ForkchoiceMode::default(),
             mining_mode: None,
         }
     }
