@@ -2,7 +2,7 @@
 
 use crate::BlockHeader;
 use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
 
 /// A helper trait for [`Header`]s that allows for mutable access to the headers values.
 ///
@@ -22,6 +22,15 @@ pub trait HeaderMut: BlockHeader {
 
     /// Updates the block difficulty.
     fn set_difficulty(&mut self, difficulty: U256);
+
+    /// Updates the mix hash.
+    fn set_mix_hash(&mut self, mix_hash: B256);
+
+    /// Updates the extra data.
+    fn set_extra_data(&mut self, extra_data: Bytes);
+
+    /// Updates the parent beacon block root.
+    fn set_parent_beacon_block_root(&mut self, parent_beacon_block_root: Option<B256>);
 
     /// Updates the block number (alias for CLI compatibility).
     fn set_number(&mut self, number: u64) {
@@ -48,5 +57,17 @@ impl HeaderMut for Header {
 
     fn set_difficulty(&mut self, difficulty: U256) {
         self.difficulty = difficulty;
+    }
+
+    fn set_mix_hash(&mut self, mix_hash: B256) {
+        self.mix_hash = mix_hash;
+    }
+
+    fn set_extra_data(&mut self, extra_data: Bytes) {
+        self.extra_data = extra_data;
+    }
+
+    fn set_parent_beacon_block_root(&mut self, parent_beacon_block_root: Option<B256>) {
+        self.parent_beacon_block_root = parent_beacon_block_root;
     }
 }
