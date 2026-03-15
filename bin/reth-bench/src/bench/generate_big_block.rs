@@ -11,8 +11,8 @@ use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ForkchoiceState, JwtSecret,
-    PayloadAttributes,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+    ForkchoiceState, JwtSecret, PayloadAttributes,
 };
 use alloy_transport::layers::RetryBackoffLayer;
 use clap::Parser;
@@ -261,7 +261,7 @@ pub struct Command {
 /// A built payload ready for execution.
 struct BuiltPayload {
     block_number: u64,
-    envelope: ExecutionPayloadEnvelopeV4,
+    envelope: ExecutionPayloadEnvelopeV6,
     block_hash: B256,
     timestamp: u64,
     /// The actual gas used in the built block.
@@ -615,7 +615,7 @@ impl Command {
 
             // Execute payload
             info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
-            self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
+            self.execute_payload_v5(auth_provider, built.envelope, parent_hash).await?;
             info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
 
             parent_hash = current_block_hash;
@@ -813,21 +813,21 @@ impl Command {
         Ok(())
     }
 
-    async fn execute_payload_v4(
+    async fn execute_payload_v5(
         &self,
         provider: &RootProvider<AnyNetwork>,
-        envelope: ExecutionPayloadEnvelopeV4,
+        envelope: ExecutionPayloadEnvelopeV6,
         parent_hash: B256,
     ) -> eyre::Result<()> {
         let block_hash =
-            envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
+            envelope.execution_payload.payload_inner.payload_inner.payload_inner.block_hash;
 
         let status = provider
-            .new_payload_v4(
-                envelope.envelope_inner.execution_payload,
+            .new_payload_v5(
+                envelope.execution_payload,
                 vec![],
                 B256::ZERO,
-                envelope.execution_requests.to_vec(),
+                envelope.execution_requests.to_vec().into(),
             )
             .await?;
 
@@ -841,7 +841,7 @@ impl Command {
             finalized_block_hash: parent_hash,
         };
 
-        let fcu_result = provider.fork_choice_updated_v3(fcu_state, None).await?;
+        let fcu_result = provider.fork_choice_updated_v4(fcu_state, None).await?;
 
         if !fcu_result.is_valid() {
             return Err(eyre::eyre!("FCU rejected: {:?}", fcu_result));
