@@ -7,7 +7,7 @@ use super::message::MAX_MESSAGE_SIZE;
 use crate::{
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
-    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
+    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage, SnapVersion,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
@@ -69,15 +69,33 @@ impl<S, N> EthSnapStream<S, N>
 where
     N: NetworkPrimitives,
 {
-    /// Create a new eth and snap protocol stream
+    /// Create a new eth and snap protocol stream.
+    ///
+    /// Defaults to snap/1 for backwards compatibility. Use [`Self::new_with_snap`] to specify
+    /// a snap version explicitly.
     pub const fn new(stream: S, eth_version: EthVersion) -> Self {
-        Self { eth_snap: EthSnapStreamInner::new(eth_version), inner: stream }
+        Self::new_with_snap(stream, eth_version, SnapVersion::Snap1)
+    }
+
+    /// Create a new eth and snap protocol stream with explicit snap version.
+    pub const fn new_with_snap(
+        stream: S,
+        eth_version: EthVersion,
+        snap_version: SnapVersion,
+    ) -> Self {
+        Self { eth_snap: EthSnapStreamInner::new(eth_version, snap_version), inner: stream }
     }
 
     /// Returns the eth version
     #[inline]
     pub const fn eth_version(&self) -> EthVersion {
         self.eth_snap.eth_version()
+    }
+
+    /// Returns the snap version
+    #[inline]
+    pub const fn snap_version(&self) -> SnapVersion {
+        self.eth_snap.snap_version()
     }
 
     /// Returns the underlying stream
@@ -181,13 +199,13 @@ where
     }
 }
 
-/// Stream handling combined eth and snap protocol logic
-/// Snap version is not critical to specify yet,
-/// Only one version, snap/1, does exist.
+/// Stream handling combined eth and snap protocol logic.
 #[derive(Debug, Clone)]
 struct EthSnapStreamInner<N> {
     /// Eth protocol version
     eth_version: EthVersion,
+    /// Snap protocol version
+    snap_version: SnapVersion,
     /// Type marker
     _pd: PhantomData<N>,
 }
@@ -197,13 +215,18 @@ where
     N: NetworkPrimitives,
 {
     /// Create a new eth and snap protocol stream
-    const fn new(eth_version: EthVersion) -> Self {
-        Self { eth_version, _pd: PhantomData }
+    const fn new(eth_version: EthVersion, snap_version: SnapVersion) -> Self {
+        Self { eth_version, snap_version, _pd: PhantomData }
     }
 
     #[inline]
     const fn eth_version(&self) -> EthVersion {
         self.eth_version
+    }
+
+    #[inline]
+    const fn snap_version(&self) -> SnapVersion {
+        self.snap_version
     }
 
     /// Decode a message from the stream
@@ -249,7 +272,11 @@ where
             let adjusted_message_id = message_id - EthMessageID::message_count(self.eth_version);
             let mut buf = &bytes[1..];
 
-            match SnapProtocolMessage::decode(adjusted_message_id, &mut buf) {
+            match SnapProtocolMessage::decode_versioned(
+                self.snap_version,
+                adjusted_message_id,
+                &mut buf,
+            ) {
                 Ok(snap_msg) => Ok(EthSnapMessage::Snap(snap_msg)),
                 Err(err) => Err(EthSnapStreamError::Rlp(err)),
             }
@@ -289,13 +316,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EthMessage, SnapProtocolMessage};
+    use crate::{EthMessage, SnapProtocolMessage, SnapVersion};
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::B256;
     use alloy_rlp::Encodable;
     use reth_eth_wire_types::{
-        message::RequestPair, GetAccountRangeMessage, GetBlockAccessLists, GetBlockHeaders,
-        HeadersDirection,
+        message::RequestPair, GetAccountRangeMessage, GetBlockAccessLists,
+        GetBlockAccessListsSnapMessage, GetBlockHeaders, HeadersDirection,
     };
 
     // Helper to create eth message and its bytes
@@ -327,7 +354,8 @@ mod tests {
             response_bytes: 1000,
         });
 
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap1);
         let encoded = inner.encode_snap_message(snap_msg.clone());
 
         (snap_msg, BytesMut::from(&encoded[..]))
@@ -335,7 +363,8 @@ mod tests {
 
     #[test]
     fn test_eth_message_roundtrip() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap1);
         let (eth_msg, eth_bytes) = create_eth_message();
 
         // Verify encoding
@@ -363,7 +392,8 @@ mod tests {
 
     #[test]
     fn test_snap_protocol() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap1);
         let (snap_msg, snap_bytes) = create_snap_message();
 
         // Verify encoding
@@ -395,7 +425,8 @@ mod tests {
 
     #[test]
     fn test_message_id_boundaries() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap1);
 
         // Create a bytes buffer with eth message ID at the max boundary with minimal content
         let eth_max_id = EthMessageID::max(EthVersion::Eth67);
@@ -423,7 +454,8 @@ mod tests {
 
     #[test]
     fn test_eth70_message_id_0x12_is_snap() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70, SnapVersion::Snap1);
         let snap_msg = SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
             request_id: 1,
             root_hash: B256::default(),
@@ -441,7 +473,8 @@ mod tests {
 
     #[test]
     fn test_eth71_message_id_0x12_is_eth() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71);
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71, SnapVersion::Snap1);
         let eth_msg = EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
             request_id: 1,
             message: GetBlockAccessLists(vec![B256::ZERO]),
@@ -455,5 +488,40 @@ mod tests {
             panic!("expected eth message");
         };
         assert_eq!(decoded_eth, eth_msg);
+    }
+
+    #[test]
+    fn test_snap2_get_block_access_lists_roundtrip() {
+        let inner =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap2);
+        let snap_msg = SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsSnapMessage {
+            request_id: 1,
+            block_hashes: vec![B256::ZERO, B256::repeat_byte(0x01)],
+        });
+
+        let encoded = inner.encode_snap_message(snap_msg.clone());
+        let decoded = inner.decode_message(BytesMut::from(&encoded[..])).unwrap();
+        let EthSnapMessage::Snap(decoded_snap) = decoded else {
+            panic!("expected snap message");
+        };
+        assert_eq!(decoded_snap, snap_msg);
+    }
+
+    #[test]
+    fn test_snap2_0x06_decodes_as_get_block_access_lists() {
+        let inner_v2 =
+            EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67, SnapVersion::Snap2);
+        let snap_msg = SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsSnapMessage {
+            request_id: 1,
+            block_hashes: vec![B256::ZERO],
+        });
+        let encoded = inner_v2.encode_snap_message(snap_msg.clone());
+
+        // Under snap/2, 0x06 should decode as GetBlockAccessLists
+        let decoded = inner_v2.decode_message(BytesMut::from(&encoded[..])).unwrap();
+        assert!(matches!(
+            decoded,
+            EthSnapMessage::Snap(SnapProtocolMessage::GetBlockAccessLists(_))
+        ));
     }
 }

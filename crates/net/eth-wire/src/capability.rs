@@ -5,7 +5,7 @@ use crate::{
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    Capability, EthMessageID, EthVersion,
+    Capability, EthMessageID, EthVersion, SnapVersion,
 };
 use derive_more::{Deref, DerefMut};
 use std::{
@@ -29,6 +29,13 @@ pub enum SharedCapability {
         ///
         /// This represents the message ID offset for the first message of the eth capability in
         /// the message id space.
+        offset: u8,
+    },
+    /// The `snap` capability.
+    Snap {
+        /// (Highest) negotiated version of the snap capability.
+        version: SnapVersion,
+        /// The message ID offset for this capability.
         offset: u8,
     },
     /// Any other unknown capability.
@@ -63,6 +70,12 @@ impl SharedCapability {
 
         match name {
             "eth" => Ok(Self::eth(EthVersion::try_from(version)?, offset)),
+            "snap" => {
+                let snap_version = SnapVersion::try_from(version).map_err(|e| {
+                    SharedCapabilityError::UnsupportedVersion(ParseVersionError::new(e))
+                })?;
+                Ok(Self::snap(snap_version, offset))
+            }
             _ => Ok(Self::UnknownCapability {
                 cap: Capability::new(name.to_string(), version as usize),
                 offset,
@@ -76,10 +89,16 @@ impl SharedCapability {
         Self::Eth { version, offset }
     }
 
+    /// Creates a new [`SharedCapability`] for snap with the given version and offset.
+    pub(crate) const fn snap(version: SnapVersion, offset: u8) -> Self {
+        Self::Snap { version, offset }
+    }
+
     /// Returns the capability.
     pub const fn capability(&self) -> Cow<'_, Capability> {
         match self {
             Self::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
+            Self::Snap { version, .. } => Cow::Owned(Capability::snap(*version)),
             Self::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
         }
     }
@@ -89,6 +108,7 @@ impl SharedCapability {
     pub fn name(&self) -> &str {
         match self {
             Self::Eth { .. } => "eth",
+            Self::Snap { .. } => "snap",
             Self::UnknownCapability { cap, .. } => cap.name.as_ref(),
         }
     }
@@ -99,10 +119,17 @@ impl SharedCapability {
         matches!(self, Self::Eth { .. })
     }
 
+    /// Returns true if the capability is snap.
+    #[inline]
+    pub const fn is_snap(&self) -> bool {
+        matches!(self, Self::Snap { .. })
+    }
+
     /// Returns the version of the capability.
     pub const fn version(&self) -> u8 {
         match self {
             Self::Eth { version, .. } => *version as u8,
+            Self::Snap { version, .. } => *version as u8,
             Self::UnknownCapability { cap, .. } => cap.version as u8,
         }
     }
@@ -115,13 +142,23 @@ impl SharedCapability {
         }
     }
 
+    /// Returns the snap version if it's the `snap` capability.
+    pub const fn snap_version(&self) -> Option<SnapVersion> {
+        match self {
+            Self::Snap { version, .. } => Some(*version),
+            _ => None,
+        }
+    }
+
     /// Returns the message ID offset of the current capability.
     ///
-    /// This represents the message ID offset for the first message of the eth capability in the
+    /// This represents the message ID offset for the first message of the capability in the
     /// message id space.
     pub const fn message_id_offset(&self) -> u8 {
         match self {
-            Self::Eth { offset, .. } | Self::UnknownCapability { offset, .. } => *offset,
+            Self::Eth { offset, .. } |
+            Self::Snap { offset, .. } |
+            Self::UnknownCapability { offset, .. } => *offset,
         }
     }
 
@@ -131,10 +168,14 @@ impl SharedCapability {
         self.message_id_offset() - MAX_RESERVED_MESSAGE_ID - 1
     }
 
+    /// The number of protocol messages in the snap protocol (8 for all versions).
+    const SNAP_MESSAGE_COUNT: u8 = 8;
+
     /// Returns the number of protocol messages supported by this capability.
     pub const fn num_messages(&self) -> u8 {
         match self {
             Self::Eth { version, .. } => EthMessageID::message_count(*version),
+            Self::Snap { .. } => Self::SNAP_MESSAGE_COUNT,
             Self::UnknownCapability { messages, .. } => *messages,
         }
     }
@@ -174,6 +215,18 @@ impl SharedCapabilities {
         self.iter_caps()
             .find_map(SharedCapability::eth_version)
             .ok_or(P2PStreamError::CapabilityNotShared)
+    }
+
+    /// Returns the snap capability if it is shared.
+    #[inline]
+    pub fn snap(&self) -> Option<&SharedCapability> {
+        self.iter_caps().find(|c| c.is_snap())
+    }
+
+    /// Returns the negotiated snap version if it is shared.
+    #[inline]
+    pub fn snap_version(&self) -> Option<SnapVersion> {
+        self.iter_caps().find_map(SharedCapability::snap_version)
     }
 
     /// Returns true if the shared capabilities contain the given capability.

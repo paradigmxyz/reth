@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthMessageID, EthVersion, SnapVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -45,6 +45,24 @@ impl Protocol {
         Self::eth(EthVersion::Eth68)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    ///
+    /// All snap protocol versions use 8 message IDs (0x00–0x07).
+    pub const fn snap(version: SnapVersion) -> Self {
+        let cap = Capability::snap(version);
+        Self::new(cap, 8)
+    }
+
+    /// Returns the [`SnapVersion::Snap1`] capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::Snap1)
+    }
+
+    /// Returns the [`SnapVersion::Snap2`] capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::Snap2)
+    }
+
     /// Consumes the type and returns a tuple of the [Capability] and number of messages.
     #[inline]
     pub(crate) fn split(self) -> (Capability, u8) {
@@ -63,6 +81,12 @@ impl From<EthVersion> for Protocol {
     }
 }
 
+impl From<SnapVersion> for Protocol {
+    fn from(version: SnapVersion) -> Self {
+        Self::snap(version)
+    }
+}
+
 /// A helper type to keep track of the protocol version and number of messages used by the protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ProtoVersion {
@@ -78,13 +102,17 @@ mod tests {
 
     #[test]
     fn test_protocol_eth_message_count() {
-        // Test that Protocol::eth() returns correct message counts for each version
-        // This ensures that EthMessageID::message_count() produces the expected results
         assert_eq!(Protocol::eth(EthVersion::Eth66).messages(), 17);
         assert_eq!(Protocol::eth(EthVersion::Eth67).messages(), 17);
         assert_eq!(Protocol::eth(EthVersion::Eth68).messages(), 17);
         assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth70).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth71).messages(), 20);
+    }
+
+    #[test]
+    fn test_protocol_snap_message_count() {
+        assert_eq!(Protocol::snap(SnapVersion::Snap1).messages(), 8);
+        assert_eq!(Protocol::snap(SnapVersion::Snap2).messages(), 8);
     }
 }

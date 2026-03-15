@@ -8,10 +8,17 @@ use core::{fmt, str::FromStr};
 use derive_more::Display;
 use reth_codecs_derive::add_arbitrary_tests;
 
-/// Error thrown when failed to parse a valid [`EthVersion`].
+/// Error thrown when failed to parse a valid [`EthVersion`] or [`SnapVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("Unknown eth protocol version: {0}")]
+#[error("Unknown protocol version: {0}")]
 pub struct ParseVersionError(String);
+
+impl ParseVersionError {
+    /// Creates a new `ParseVersionError` with the given message.
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
 
 /// The `eth` protocol version.
 #[repr(u8)]
