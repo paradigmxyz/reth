@@ -43,18 +43,20 @@ pub struct EngineApiMetrics {
 impl EngineApiMetrics {
     /// Records metrics for block execution.
     ///
-    /// This method updates metrics for execution time, gas usage, and the number
+    /// This method updates metrics for execution time, gas usage, transaction count, and the number
     /// of accounts, storage slots and bytecodes updated.
     pub fn record_block_execution<R>(
         &self,
         output: &BlockExecutionOutput<R>,
         execution_duration: Duration,
+        num_transactions: u64,
     ) {
         let execution_secs = execution_duration.as_secs_f64();
         let gas_used = output.result.gas_used;
 
-        // Update gas metrics
+        // Update gas and transaction metrics
         self.executor.gas_processed_total.increment(gas_used);
+        self.executor.transactions_processed_total.increment(num_transactions);
         self.executor.gas_per_second.set(gas_used as f64 / execution_secs);
         self.executor.gas_used_histogram.record(gas_used as f64);
         self.executor.execution_histogram.record(execution_secs);
@@ -597,7 +599,7 @@ mod tests {
             },
         };
 
-        metrics.record_block_execution(&output, Duration::from_millis(100));
+        metrics.record_block_execution(&output, Duration::from_millis(100), 1);
 
         let snapshot = snapshotter.snapshot().into_vec();
 

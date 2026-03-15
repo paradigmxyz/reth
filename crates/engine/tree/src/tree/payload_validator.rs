@@ -948,7 +948,7 @@ where
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
-        self.metrics.record_block_execution(&output, execution_duration);
+        self.metrics.record_block_execution(&output, execution_duration, transaction_count as u64);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 

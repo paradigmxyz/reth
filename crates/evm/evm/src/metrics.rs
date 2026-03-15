@@ -2,7 +2,7 @@
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Block, FastInstant as Instant, RecoveredBlock};
+use reth_primitives_traits::{Block, BlockBody, FastInstant as Instant, RecoveredBlock};
 
 /// Executor metrics.
 #[derive(Metrics, Clone)]
@@ -10,6 +10,8 @@ use reth_primitives_traits::{Block, FastInstant as Instant, RecoveredBlock};
 pub struct ExecutorMetrics {
     /// The total amount of gas processed.
     pub gas_processed_total: Counter,
+    /// The total number of transactions processed.
+    pub transactions_processed_total: Counter,
     /// The instantaneous amount of gas processed per second.
     pub gas_per_second: Gauge,
     /// The Histogram for amount of gas used.
@@ -38,7 +40,7 @@ pub struct ExecutorMetrics {
 
 impl ExecutorMetrics {
     /// Helper function for metered execution
-    fn metered<F, R>(&self, f: F) -> R
+    fn metered<F, R>(&self, num_transactions: u64, f: F) -> R
     where
         F: FnOnce() -> (u64, R),
     {
@@ -49,6 +51,7 @@ impl ExecutorMetrics {
 
         // Update gas metrics.
         self.gas_processed_total.increment(gas_used);
+        self.transactions_processed_total.increment(num_transactions);
         self.gas_per_second.set(gas_used as f64 / execution_duration);
         self.gas_used_histogram.record(gas_used as f64);
         self.execution_histogram.record(execution_duration);
@@ -68,7 +71,8 @@ impl ExecutorMetrics {
         B: Block,
         B::Header: BlockHeader,
     {
-        self.metered(|| (block.header().gas_used(), f(block)))
+        let num_transactions = block.body().transaction_count() as u64;
+        self.metered(num_transactions, || (block.header().gas_used(), f(block)))
     }
 }
 
@@ -109,7 +113,7 @@ mod tests {
     fn test_metered_helper_tracks_timing() {
         let metrics = ExecutorMetrics::default();
 
-        let result = metrics.metered(|| {
+        let result = metrics.metered(5, || {
             // Simulate some work
             std::thread::sleep(std::time::Duration::from_millis(10));
             (500, "test_result")
