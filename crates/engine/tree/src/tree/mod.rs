@@ -2334,7 +2334,11 @@ where
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_any_sync_target(child_num_hash.hash) &&
-                        matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
+                        matches!(
+                            res,
+                            InsertPayloadOk::Inserted(BlockStatus::Valid) |
+                                InsertPayloadOk::AlreadySeen(BlockStatus::Valid)
+                        )
                     {
                         debug!(target: "engine::tree", child =?child_num_hash, "connected sync target block");
                         // we just inserted a block that we know is part of the canonical chain, so
