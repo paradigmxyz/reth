@@ -187,7 +187,7 @@ jobs:
           cache-on-failure: true
 
       - name: Download pre-collected PGO profile
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pgo-profdata
           path: dist
