@@ -180,3 +180,52 @@ fn evm_to_precompiles_map(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, ForkCondition};
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use std::sync::Arc;
+
+    /// Build a chain spec where all block-based forks are at genesis,
+    /// Paris is at genesis (TTD=0), and Shanghai activates at `shanghai_ts`.
+    fn chain_spec_with_shanghai_at(shanghai_ts: u64) -> ChainSpec {
+        ChainSpec::builder()
+            .chain(Chain::from_id(1337))
+            .genesis(Default::default())
+            .paris_activated()
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(shanghai_ts))
+            .build()
+    }
+
+    #[test]
+    fn config_errors_when_timestamp_precedes_all_forks() {
+        // Shanghai at timestamp 1000, genesis block at timestamp 0.
+        let spec = Arc::new(chain_spec_with_shanghai_at(1000));
+        let provider = MockEthProvider::<EthPrimitives>::new()
+            .with_chain_spec(spec.clone())
+            .with_genesis_block();
+        let evm_config = EthEvmConfig::new(spec);
+        let handler = EthConfigHandler::new(provider, evm_config);
+
+        let result = handler.config();
+        assert!(result.is_err(), "expected error when latest timestamp is before all forks");
+    }
+
+    #[test]
+    fn config_returns_current_fork_when_shanghai_is_active() {
+        // Shanghai at timestamp 0 (active at genesis).
+        let spec = Arc::new(chain_spec_with_shanghai_at(0));
+        let provider = MockEthProvider::<EthPrimitives>::new()
+            .with_chain_spec(spec.clone())
+            .with_genesis_block();
+        let evm_config = EthEvmConfig::new(spec);
+        let handler = EthConfigHandler::new(provider, evm_config);
+
+        let result = handler.config();
+        assert!(result.is_ok(), "expected ok when Shanghai is active at genesis");
+    }
+}
