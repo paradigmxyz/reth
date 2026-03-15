@@ -60,7 +60,7 @@ jobs:
       # Docker build (forks)
       - name: Set up Docker Buildx
         if: steps.fork.outputs.is_fork == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build reth image (Docker)
         if: steps.fork.outputs.is_fork == 'true'
