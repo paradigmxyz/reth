@@ -2387,6 +2387,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.upper_arena[self.root].is_cached()
     }
 
+    fn prefix_set_len(&self) -> usize {
+        self.upper_arena
+            .iter()
+            .map(|(_, node)| {
+                if let ArenaSparseNode::Subtrie(s) = node {
+                    s.num_dirty_leaves as usize
+                } else {
+                    0
+                }
+            })
+            .sum()
+    }
+
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self) {
         #[cfg(feature = "trie-debug")]
