@@ -171,6 +171,11 @@ impl EngineNodeLauncher {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
+        pruner_builder =
+            pruner_builder.delete_limit(engine_tree_config.persistence_pruner_delete_limit());
+        if let Some(timeout) = engine_tree_config.persistence_pruner_timeout() {
+            pruner_builder = pruner_builder.timeout(timeout);
+        }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
