@@ -37,7 +37,7 @@ use std::{
 };
 use tar::Archive;
 use tokio::task;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tui::{run_selector, SelectorOutput};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
@@ -1010,6 +1010,33 @@ impl CompressionFormat {
     }
 }
 
+/// Files that should be preserved across snapshot extraction.
+///
+/// These are node-specific identity and authentication files that, if overwritten
+/// by a snapshot archive, would silently break the connection with the consensus
+/// layer client or change the node's P2P identity.
+const PRESERVED_FILES: &[&str] = &["jwt.hex", "discovery-secret"];
+
+/// Unpacks a tar archive into `target_dir`, skipping entries that would overwrite
+/// [`PRESERVED_FILES`] already present in the target directory.
+fn unpack_archive<R: Read>(mut archive: Archive<R>, target_dir: &Path) -> Result<()> {
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_path_buf();
+
+        // Skip preserved files that already exist in the target directory
+        if PRESERVED_FILES.iter().any(|&name| path.ends_with(name)) &&
+            target_dir.join(&path).exists()
+        {
+            debug!(target: "reth::cli", ?path, "Skipping preserved file during extraction");
+            continue;
+        }
+
+        entry.unpack_in(target_dir)?;
+    }
+    Ok(())
+}
+
 /// Extracts a compressed tar archive to the target directory with progress tracking.
 fn extract_archive<R: Read>(
     reader: R,
@@ -1023,11 +1050,11 @@ fn extract_archive<R: Read>(
     match format {
         CompressionFormat::Lz4 => {
             let decoder = Decoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir)?;
         }
         CompressionFormat::Zstd => {
             let decoder = ZstdDecoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir)?;
         }
     }
 
@@ -1043,10 +1070,10 @@ fn extract_archive_raw<R: Read>(
 ) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
-            Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive(Archive::new(Decoder::new(reader)?), target_dir)?;
         }
         CompressionFormat::Zstd => {
-            Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
+            unpack_archive(Archive::new(ZstdDecoder::new(reader)?), target_dir)?;
         }
     }
     Ok(())
