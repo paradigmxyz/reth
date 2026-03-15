@@ -44,8 +44,8 @@ use alloy_primitives::{TxHash, B256};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
-    HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
+    DedupPayload, DisconnectReason, EthNetworkPrimitives, EthVersion, GetPooledTransactions,
+    HandleMempoolData, HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
     RequestTxHashes, Transactions, ValidAnnouncementData,
 };
@@ -468,13 +468,26 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.transaction_fetcher.remove_peer(peer_id);
     }
 
+    /// Penalizes and disconnects a peer that violated the protocol (e.g. sent malformed blob
+    /// sidecar data).
+    fn disconnect_peer_for_protocol_violation(&self, peer_id: PeerId) {
+        self.report_peer_bad_transactions(peer_id);
+        self.network.disconnect_peer_with_reason(peer_id, DisconnectReason::SubprotocolSpecific);
+    }
+
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
     }
 
-    /// Penalize the peers that intentionally sent the bad transaction, and cache it to avoid
-    /// fetching or importing it again.
+    /// Handles a failed transaction import.
+    ///
+    /// Protocol violations (e.g. malformed blob sidecars) result in immediate peer disconnect
+    /// without caching the hash as bad — the transaction may be valid when fetched from another
+    /// peer.
+    ///
+    /// Other bad transactions are penalized and cached in `bad_imports` to avoid fetching or
+    /// importing them again.
     ///
     /// Errors that count as bad transactions are:
     ///
@@ -498,6 +511,18 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - wrong versioned kzg commitment hash
     fn on_bad_import(&mut self, err: PoolError) {
         let peers = self.transactions_by_peers.remove(&err.hash);
+
+        if err.is_protocol_violation() {
+            // Protocol violations (e.g. malformed blob sidecars) warrant immediate disconnect.
+            // The tx hash is NOT added to bad_imports because the transaction itself may be valid
+            // — the issue is peer-specific (bad sidecar data), not transaction-specific.
+            if let Some(peers) = peers {
+                for peer_id in peers {
+                    self.disconnect_peer_for_protocol_violation(peer_id);
+                }
+            }
+            return
+        }
 
         // if we're _currently_ syncing, we ignore a bad transaction
         if !err.is_bad_transaction() || self.network.is_syncing() {
@@ -2169,6 +2194,7 @@ mod tests {
         NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{TxEip1559, TxLegacy};
+    use alloy_eips::eip4844::BlobTransactionValidationError;
     use alloy_primitives::{hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
@@ -2181,11 +2207,13 @@ mod tests {
     };
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
-    use reth_transaction_pool::test_utils::{
-        testing_pool, MockTransaction, MockTransactionFactory, TestPool,
+    use reth_transaction_pool::{
+        error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError},
+        test_utils::{testing_pool, MockTransaction, MockTransactionFactory, TestPool},
     };
     use secp256k1::SecretKey;
     use std::{
+        collections::HashSet,
         future::poll_fn,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
@@ -2551,6 +2579,67 @@ mod tests {
             tx_manager.transaction_fetcher.get_idle_peer_for(hash_shared),
             Some(&fallback_peer)
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_protocol_violation_not_cached_as_bad_import() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let hash = B256::from_slice(&[1; 32]);
+
+        tx_manager.network.update_sync_state(SyncState::Idle);
+        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+
+        let err = PoolError::new(
+            hash,
+            InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::InvalidEip4844Blob(
+                BlobTransactionValidationError::InvalidProof,
+            )),
+        );
+
+        tx_manager.on_bad_import(err);
+
+        assert!(!tx_manager.bad_imports.contains(&hash));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_missing_blob_sidecar_not_cached_as_bad_import() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let hash = B256::from_slice(&[3; 32]);
+
+        tx_manager.network.update_sync_state(SyncState::Idle);
+        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+
+        let err = PoolError::new(
+            hash,
+            InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+            ),
+        );
+
+        tx_manager.on_bad_import(err);
+
+        assert!(!tx_manager.bad_imports.contains(&hash));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_non_protocol_violation_still_cached_as_bad_import() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let hash = B256::from_slice(&[2; 32]);
+
+        tx_manager.network.update_sync_state(SyncState::Idle);
+        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+
+        let err = PoolError::new(
+            hash,
+            InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::NoEip4844Blobs),
+        );
+
+        tx_manager.on_bad_import(err);
+
+        assert!(tx_manager.bad_imports.contains(&hash));
     }
 
     #[tokio::test(flavor = "multi_thread")]
