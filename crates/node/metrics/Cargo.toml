@@ -39,6 +39,9 @@ tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18.0"
 
+[target.'cfg(all(tokio_unstable, target_os = "linux", any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))'.dependencies]
+tokio = { workspace = true, features = ["taskdump"] }
+
 [dev-dependencies]
 socket2.workspace = true
 
@@ -49,3 +52,4 @@ workspace = true
 jemalloc = ["dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "dep:jemalloc_pprof", "dep:mappings", "dep:pprof_util", "dep:reth-fs-util", "dep:tempfile"]
 jemalloc-symbols = ["jemalloc-prof", "jemalloc_pprof?/symbolize"]
+tokio-taskdump = []
