@@ -105,7 +105,7 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
 >;
 
 /// Entrypoint for executing the payload.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
