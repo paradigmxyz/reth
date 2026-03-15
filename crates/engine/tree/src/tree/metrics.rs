@@ -534,6 +534,8 @@ pub struct BlockValidationMetrics {
     pub anchored_overlay_trie_updates_size: Histogram,
     /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
     pub anchored_overlay_hashed_state_size: Histogram,
+    /// Number of block hashes cached after execution (BLOCKHASH opcode usage).
+    pub block_hash_cache_size: Histogram,
 }
 
 impl BlockValidationMetrics {
