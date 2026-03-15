@@ -356,7 +356,12 @@ where
         let ctx = self.ctx.clone();
         self.executor.prewarming_pool().install_fn(|| {
             bal.par_iter().for_each_init(
-                || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
+                || {
+                    (
+                        ctx.clone(),
+                        None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+                    )
+                },
                 |(ctx, provider), account| {
                     if ctx.should_stop() {
                         return;
@@ -600,7 +605,7 @@ where
     /// thread.
     fn prefetch_bal_account(
         &self,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
         let state_provider = match provider {
@@ -621,7 +626,7 @@ where
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
                 let cache_metrics = saved_cache.metrics().clone();
-                slot.insert(CachedStateProvider::new(built, caches, cache_metrics))
+                slot.insert(CachedStateProvider::new_prewarm(built, caches, cache_metrics))
             }
         };
 
