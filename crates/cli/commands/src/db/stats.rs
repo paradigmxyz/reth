@@ -329,11 +329,8 @@ impl Command {
                 total_offsets_size += offsets_size;
                 total_config_size += config_size;
 
-                // Manually drop provider, otherwise removal from cache will deadlock.
-                drop(jar_provider);
-
-                // Removes from cache, since if we have many files, it may hit ulimit limits
-                static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+                // Evict from the cache after each file to avoid holding too many open handles.
+                static_file_provider.evict_cached_provider(jar_provider);
             }
 
             if !self.detailed_segments {
