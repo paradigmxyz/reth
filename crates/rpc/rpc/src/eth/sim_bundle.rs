@@ -280,7 +280,7 @@ where
 
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&item.tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                        .map_err(|e| Eth::Error::from_evm_err_with_index(e, tx_index))?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
