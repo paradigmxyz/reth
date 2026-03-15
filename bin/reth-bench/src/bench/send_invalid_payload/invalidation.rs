@@ -1,6 +1,8 @@
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
-use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
+};
 
 /// Configuration for invalidating payload fields
 #[derive(Debug, Default)]
@@ -21,6 +23,7 @@ pub(super) struct InvalidationConfig {
     pub(super) block_hash: Option<B256>,
     pub(super) blob_gas_used: Option<u64>,
     pub(super) excess_blob_gas: Option<u64>,
+    pub(super) slot_number: Option<u64>,
 
     // Auto-invalidation flags
     pub(super) invalidate_parent_hash: bool,
@@ -35,6 +38,8 @@ pub(super) struct InvalidationConfig {
     pub(super) invalidate_withdrawals: bool,
     pub(super) invalidate_blob_gas_used: bool,
     pub(super) invalidate_excess_blob_gas: bool,
+    pub(super) invalidate_block_access_list: bool,
+    pub(super) invalidate_slot_number: bool,
 }
 
 impl InvalidationConfig {
@@ -212,6 +217,32 @@ impl InvalidationConfig {
         if self.invalidate_excess_blob_gas {
             payload.excess_blob_gas = u64::MAX;
             changes.push("excess_blob_gas = MAX (auto-invalidated)".to_string());
+        }
+
+        changes
+    }
+
+    /// Applies invalidations to a V4 payload, returns list of what was changed.
+    pub(super) fn apply_to_payload_v4(&self, payload: &mut ExecutionPayloadV4) -> Vec<String> {
+        let mut changes = self.apply_to_payload_v3(&mut payload.payload_inner);
+
+        // Explicit override for slot_number
+        if let Some(slot_number) = self.slot_number {
+            payload.slot_number = slot_number;
+            changes.push(format!("slot_number = {slot_number}"));
+        }
+
+        // Handle block access list invalidation (V4+)
+        if self.invalidate_block_access_list {
+            let fake_bal = Bytes::from_static(&[0x01, 0x02, 0x03]);
+            payload.block_access_list = fake_bal.clone();
+            changes.push(format!("block_access_list = {fake_bal} (auto-invalidated)"));
+        }
+
+        // Handle slot number invalidation (V4+)
+        if self.invalidate_slot_number {
+            payload.slot_number = u64::MAX;
+            changes.push("slot_number = MAX (auto-invalidated)".to_string());
         }
 
         changes

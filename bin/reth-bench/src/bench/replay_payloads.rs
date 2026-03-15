@@ -1,6 +1,6 @@
 //! Command for replaying pre-generated payloads from disk.
 //!
-//! This command reads `ExecutionPayloadEnvelopeV4` files from a directory and replays them
+//! This command reads `ExecutionPayloadEnvelopeV6` files from a directory and replays them
 //! in sequence using `newPayload` followed by `forkchoiceUpdated`.
 //!
 //! Supports configurable waiting behavior:
@@ -30,7 +30,7 @@ use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
+    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV6, ExecutionPayloadSidecar,
     ForkchoiceState, JwtSecret, PraguePayloadFields,
 };
 use clap::Parser;
@@ -152,7 +152,7 @@ struct LoadedPayload {
     /// The index (from filename).
     index: u64,
     /// The payload envelope.
-    envelope: ExecutionPayloadEnvelopeV4,
+    envelope: ExecutionPayloadEnvelopeV6,
     /// The block hash.
     block_hash: B256,
 }
@@ -305,14 +305,15 @@ impl Command {
         for (i, payload) in payloads.iter().enumerate() {
             let envelope = &payload.envelope;
             let block_hash = payload.block_hash;
-            let execution_payload = &envelope.envelope_inner.execution_payload;
-            let inner_payload = &execution_payload.payload_inner.payload_inner;
+            let execution_payload = &envelope.execution_payload;
+            let inner_payload = &execution_payload.payload_inner.payload_inner.payload_inner;
 
             let gas_used = inner_payload.gas_used;
             let gas_limit = inner_payload.gas_limit;
             let block_number = inner_payload.block_number;
             let transaction_count =
-                execution_payload.payload_inner.payload_inner.transactions.len() as u64;
+                execution_payload.payload_inner.payload_inner.payload_inner.transactions.len()
+                    as u64;
 
             debug!(
                 target: "reth-bench",
@@ -491,11 +492,11 @@ impl Command {
         for (index, path) in indexed_paths {
             let content = std::fs::read_to_string(&path)
                 .wrap_err_with(|| format!("Failed to read {:?}", path))?;
-            let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
+            let envelope: ExecutionPayloadEnvelopeV6 = serde_json::from_str(&content)
                 .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
 
             let block_hash =
-                envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
+                envelope.execution_payload.payload_inner.payload_inner.payload_inner.block_hash;
 
             debug!(
                 target: "reth-bench",
@@ -552,6 +553,7 @@ impl Command {
                     3 => EngineApiMessageVersion::V3,
                     4 => EngineApiMessageVersion::V4,
                     5 => EngineApiMessageVersion::V5,
+                    6 => EngineApiMessageVersion::V6,
                     v => return Err(eyre::eyre!("Invalid version {} in {:?}", v, path)),
                 }
                 .into()

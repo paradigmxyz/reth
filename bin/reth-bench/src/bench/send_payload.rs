@@ -78,7 +78,7 @@ impl Command {
             block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
 
         // Convert to execution payload
-        let execution_payload = ExecutionPayload::from_block_slow(&block).0;
+        let execution_payload = ExecutionPayload::from_block_slow(&block).0; //ToDo: add bal ?
 
         let use_v4 = block.header.requests_hash.is_some();
 

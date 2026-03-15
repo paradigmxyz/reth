@@ -43,6 +43,14 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated>;
+
+    /// Calls `engine_forkChoiceUpdatedV4` with the given [`ForkchoiceState`] and optional
+    /// [`PayloadAttributes`], and waits until the response is VALID.
+    async fn fork_choice_updated_v4_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated>;
 }
 
 #[async_trait::async_trait]
@@ -162,6 +170,40 @@ where
 
         Ok(status)
     }
+
+    async fn fork_choice_updated_v4_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated> {
+        debug!(
+            target: "reth-bench",
+            method = "engine_forkchoiceUpdatedV3",
+            ?fork_choice_state,
+            ?payload_attributes,
+            "Sending forkchoiceUpdated"
+        );
+
+        let mut status =
+            self.fork_choice_updated_v4(fork_choice_state, payload_attributes.clone()).await?;
+
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(
+                    target: "reth-bench",
+                    ?status,
+                    ?fork_choice_state,
+                    ?payload_attributes,
+                    "Invalid forkchoiceUpdatedV4 message",
+                );
+                panic!("Invalid forkchoiceUpdatedV4: {status:?}");
+            }
+            status =
+                self.fork_choice_updated_v4(fork_choice_state, payload_attributes.clone()).await?;
+        }
+
+        Ok(status)
+    }
 }
 
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
@@ -189,7 +231,7 @@ pub(crate) fn block_to_new_payload(
         .into_consensus();
 
     // Convert to execution payload
-    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block); // ToDo: add bal ?
     let (version, params, execution_data) =
         payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
 
@@ -387,10 +429,10 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
 ) -> TransportResult<ForkchoiceUpdated> {
     // FCU V3 is used for Cancun, Prague, and Amsterdam (there is no FCU V4-V6)
     match message_version {
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 |
         EngineApiMessageVersion::V6 => {
+            provider.fork_choice_updated_v4_wait(forkchoice_state, payload_attributes).await
+        }
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {
