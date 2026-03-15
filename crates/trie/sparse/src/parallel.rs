@@ -469,7 +469,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
         // during traversal, or clean it up if we error.
-        self.upper_subtrie.inner.values.insert(full_path, value.clone());
+        self.upper_subtrie.inner.values.insert(full_path, value);
 
         // Start at the root, traversing until we find either the node to update or a subtrie to
         // update.
@@ -554,7 +554,12 @@ impl SparseTrie for ParallelSparseTrie {
             // At this point we know the value is not in the upper subtrie, and the call to
             // `update_leaf` below will insert it into the lower subtrie. So remove it from the
             // upper subtrie.
-            self.upper_subtrie.inner.values.remove(&full_path);
+            let value = self
+                .upper_subtrie
+                .inner
+                .values
+                .remove(&full_path)
+                .expect("value was inserted into upper subtrie at start of update_leaf");
 
             // Use subtrie_for_path to ensure the subtrie has the correct path.
             //
