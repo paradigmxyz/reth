@@ -165,10 +165,11 @@ where
     info!(target: "reth::cli", "Executing stage.");
     let provider = output_provider_factory.database_provider_rw()?;
 
-    let mut stage = MerkleStage::Execution {
+    let mut stage: MerkleStage = MerkleStage::Execution {
         // Forces updating the root instead of calculating from scratch
         rebuild_threshold: u64::MAX,
         incremental_threshold: u64::MAX,
+        parallel: None,
     };
 
     loop {
