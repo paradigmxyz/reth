@@ -311,16 +311,20 @@ where
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
-            for start_block in range.step_by(incremental_threshold as usize) {
+            let total_chunks = range.clone().step_by(incremental_threshold as usize).count();
+            for (chunk_idx, start_block) in
+                range.step_by(incremental_threshold as usize).enumerate()
+            {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
-                debug!(
+                info!(
                     target: "sync::stages::merkle::exec",
                     current = ?current_block_number,
                     target = ?to_block,
-                    incremental_threshold,
+                    chunk = chunk_idx + 1,
+                    total_chunks,
                     chunk_range = ?chunk_range,
-                    "Processing chunk"
+                    "Processing incremental chunk"
                 );
                 let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
                     DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
