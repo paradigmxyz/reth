@@ -21,7 +21,7 @@ use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnv, TxEnvFor,
+    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnv, TxEnvFor, ZeroParentBeaconBlockRoot,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -127,9 +127,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .into());
                     }
 
+                    let mut next_attrs = this.next_env_attributes(&parent)?;
+                    // Zero parentBeaconBlockRoot for simulated blocks by default,
+                    // matching spec behavior where consensus-layer fields default
+                    // to zero. User overrides are applied later via
+                    // apply_block_overrides.
+                    next_attrs.zero_parent_beacon_block_root();
+
                     let mut evm_env = this
                         .evm_config()
-                        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
+                        .next_evm_env(&parent, &next_attrs)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
 
@@ -205,7 +212,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let ctx = this
                         .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
+                        .context_for_next_block(&parent, next_attrs)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
                     let map_err = |e: EthApiError| -> Self::Error {
