@@ -90,7 +90,19 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                 BlockNumberOrTag::Finalized => self.finalized_block_hash(),
                 BlockNumberOrTag::Safe => self.safe_block_hash(),
                 BlockNumberOrTag::Earliest => self.block_hash(self.earliest_block_number()?),
-                BlockNumberOrTag::Number(num) => self.block_hash(num),
+                BlockNumberOrTag::Number(num) => {
+                    let hash = self.block_hash(num)?;
+                    if hash.is_none() {
+                        let earliest = self.earliest_block_number()?;
+                        if num < earliest {
+                            return Err(ProviderError::BlockExpired {
+                                requested: num,
+                                earliest_available: earliest,
+                            });
+                        }
+                    }
+                    Ok(hash)
+                }
             },
         }
     }
@@ -135,3 +147,112 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
 
 #[cfg(test)]
 fn _object_safe(_: Box<dyn BlockIdReader>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::map::B256Map;
+
+    /// A minimal provider that simulates a pruned node where blocks before `earliest` are
+    /// unavailable.
+    struct PrunedProvider {
+        earliest: BlockNumber,
+        hashes: B256Map<BlockNumber>,
+    }
+
+    impl PrunedProvider {
+        fn new(earliest: BlockNumber) -> Self {
+            Self { earliest, hashes: B256Map::default() }
+        }
+
+        fn with_block(mut self, num: BlockNumber, hash: B256) -> Self {
+            self.hashes.insert(hash, num);
+            self
+        }
+    }
+
+    impl BlockHashReader for PrunedProvider {
+        fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+            Ok(self.hashes.iter().find(|&(_, &n)| n == number).map(|(&h, _)| h))
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: BlockNumber,
+            _end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockNumReader for PrunedProvider {
+        fn chain_info(&self) -> ProviderResult<ChainInfo> {
+            Ok(ChainInfo::default())
+        }
+
+        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.earliest + 100)
+        }
+
+        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.earliest + 100)
+        }
+
+        fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.earliest)
+        }
+
+        fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            Ok(None)
+        }
+    }
+
+    impl BlockIdReader for PrunedProvider {
+        fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+            Ok(None)
+        }
+
+        fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+            Ok(None)
+        }
+
+        fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn block_hash_for_id_returns_expired_for_pruned_block() {
+        let provider = PrunedProvider::new(1_000_000);
+
+        // Block below earliest → BlockExpired
+        let err = provider
+            .block_hash_for_id(BlockId::number(999_999))
+            .expect_err("should return BlockExpired for pruned block");
+        assert!(
+            matches!(
+                err,
+                ProviderError::BlockExpired { requested: 999_999, earliest_available: 1_000_000 }
+            ),
+            "expected BlockExpired, got: {err:?}"
+        );
+
+        // Block at earliest boundary → Ok(None) (not pruned, just missing)
+        let result = provider.block_hash_for_id(BlockId::number(1_000_000));
+        assert_eq!(result.unwrap(), None);
+
+        // Block above earliest → Ok(None) (not pruned, just missing)
+        let result = provider.block_hash_for_id(BlockId::number(2_000_000));
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn block_hash_for_id_returns_hash_when_available() {
+        let hash = B256::with_last_byte(0x42);
+        let provider = PrunedProvider::new(1_000_000).with_block(1_000_001, hash);
+
+        // Block exists → returns hash regardless of pruning
+        let result = provider.block_hash_for_id(BlockId::number(1_000_001));
+        assert_eq!(result.unwrap(), Some(hash));
+    }
+}
