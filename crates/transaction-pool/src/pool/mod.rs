@@ -157,8 +157,12 @@ where
     has_event_listeners: AtomicBool,
     /// Listeners for new _full_ pending transactions.
     pending_transaction_listener: RwLock<Vec<PendingTransactionHashListener>>,
+    /// Tracks whether any pending transaction listeners have ever been installed.
+    has_pending_tx_listeners: AtomicBool,
     /// Listeners for new transactions added to the pool.
     transaction_listener: RwLock<Vec<TransactionListener<T::Transaction>>>,
+    /// Tracks whether any transaction listeners have ever been installed.
+    has_tx_listeners: AtomicBool,
     /// Listener for new blob transaction sidecars added to the pool.
     blob_transaction_sidecar_listener: Mutex<Vec<BlobTransactionSidecarListener>>,
     /// Metrics for the blob store
@@ -182,7 +186,9 @@ where
             has_event_listeners: AtomicBool::new(false),
             pool: RwLock::new(TxPool::new(ordering, config.clone())),
             pending_transaction_listener: Default::default(),
+            has_pending_tx_listeners: AtomicBool::new(false),
             transaction_listener: Default::default(),
+            has_tx_listeners: AtomicBool::new(false),
             blob_transaction_sidecar_listener: Default::default(),
             config,
             blob_store,
@@ -279,6 +285,7 @@ where
         // Clean up dead listeners before adding new one
         listeners.retain(|l| !l.sender.is_closed());
         listeners.push(listener);
+        self.has_pending_tx_listeners.store(true, Ordering::Relaxed);
 
         rx
     }
@@ -295,6 +302,7 @@ where
         // Clean up dead listeners before adding new one
         listeners.retain(|l| !l.sender.is_closed());
         listeners.push(listener);
+        self.has_tx_listeners.store(true, Ordering::Relaxed);
 
         rx
     }
@@ -769,6 +777,10 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::pending_transactions_listener_for`](crate::TransactionPool).
     pub fn on_new_pending_transaction(&self, pending: &AddedPendingTransaction<T::Transaction>) {
+        if !self.has_pending_tx_listeners.load(Ordering::Relaxed) {
+            return
+        }
+
         let mut needs_cleanup = false;
 
         {
@@ -782,9 +794,11 @@ where
 
         // Clean up dead listeners if we detected any closed channels
         if needs_cleanup {
-            self.pending_transaction_listener
-                .write()
-                .retain(|listener| !listener.sender.is_closed());
+            let mut listeners = self.pending_transaction_listener.write();
+            listeners.retain(|listener| !listener.sender.is_closed());
+            if listeners.is_empty() {
+                self.has_pending_tx_listeners.store(false, Ordering::Relaxed);
+            }
         }
     }
 
@@ -797,6 +811,10 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::new_transactions_listener_for`](crate::TransactionPool).
     pub fn on_new_transaction(&self, event: NewTransactionEvent<T::Transaction>) {
+        if !self.has_tx_listeners.load(Ordering::Relaxed) {
+            return
+        }
+
         let mut needs_cleanup = false;
 
         {
@@ -818,7 +836,11 @@ where
 
         // Clean up dead listeners if we detected any closed channels
         if needs_cleanup {
-            self.transaction_listener.write().retain(|listener| !listener.sender.is_closed());
+            let mut listeners = self.transaction_listener.write();
+            listeners.retain(|listener| !listener.sender.is_closed());
+            if listeners.is_empty() {
+                self.has_tx_listeners.store(false, Ordering::Relaxed);
+            }
         }
     }
 
@@ -854,31 +876,43 @@ where
         trace!(target: "txpool", promoted=outcome.promoted.len(), discarded= outcome.discarded.len() ,"notifying listeners on state change");
 
         // notify about promoted pending transactions - emit hashes
-        let mut needs_pending_cleanup = false;
-        {
-            let listeners = self.pending_transaction_listener.read();
-            for listener in listeners.iter() {
-                if !listener.send_all(outcome.pending_transactions(listener.kind)) {
-                    needs_pending_cleanup = true;
+        if self.has_pending_tx_listeners.load(Ordering::Relaxed) {
+            let mut needs_pending_cleanup = false;
+            {
+                let listeners = self.pending_transaction_listener.read();
+                for listener in listeners.iter() {
+                    if !listener.send_all(outcome.pending_transactions(listener.kind)) {
+                        needs_pending_cleanup = true;
+                    }
                 }
             }
-        }
-        if needs_pending_cleanup {
-            self.pending_transaction_listener.write().retain(|l| !l.sender.is_closed());
+            if needs_pending_cleanup {
+                let mut listeners = self.pending_transaction_listener.write();
+                listeners.retain(|l| !l.sender.is_closed());
+                if listeners.is_empty() {
+                    self.has_pending_tx_listeners.store(false, Ordering::Relaxed);
+                }
+            }
         }
 
         // emit full transactions
-        let mut needs_tx_cleanup = false;
-        {
-            let listeners = self.transaction_listener.read();
-            for listener in listeners.iter() {
-                if !listener.send_all(outcome.full_pending_transactions(listener.kind)) {
-                    needs_tx_cleanup = true;
+        if self.has_tx_listeners.load(Ordering::Relaxed) {
+            let mut needs_tx_cleanup = false;
+            {
+                let listeners = self.transaction_listener.read();
+                for listener in listeners.iter() {
+                    if !listener.send_all(outcome.full_pending_transactions(listener.kind)) {
+                        needs_tx_cleanup = true;
+                    }
                 }
             }
-        }
-        if needs_tx_cleanup {
-            self.transaction_listener.write().retain(|l| !l.sender.is_closed());
+            if needs_tx_cleanup {
+                let mut listeners = self.transaction_listener.write();
+                listeners.retain(|l| !l.sender.is_closed());
+                if listeners.is_empty() {
+                    self.has_tx_listeners.store(false, Ordering::Relaxed);
+                }
+            }
         }
 
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
@@ -913,45 +947,57 @@ where
     ) {
         // Notify about promoted pending transactions (similar to notify_on_new_state)
         if !promoted.is_empty() {
-            let mut needs_pending_cleanup = false;
-            {
-                let listeners = self.pending_transaction_listener.read();
-                for listener in listeners.iter() {
-                    let promoted_hashes = promoted.iter().filter_map(|tx| {
-                        if listener.kind.is_propagate_only() && !tx.propagate {
-                            None
-                        } else {
-                            Some(*tx.hash())
+            if self.has_pending_tx_listeners.load(Ordering::Relaxed) {
+                let mut needs_pending_cleanup = false;
+                {
+                    let listeners = self.pending_transaction_listener.read();
+                    for listener in listeners.iter() {
+                        let promoted_hashes = promoted.iter().filter_map(|tx| {
+                            if listener.kind.is_propagate_only() && !tx.propagate {
+                                None
+                            } else {
+                                Some(*tx.hash())
+                            }
+                        });
+                        if !listener.send_all(promoted_hashes) {
+                            needs_pending_cleanup = true;
                         }
-                    });
-                    if !listener.send_all(promoted_hashes) {
-                        needs_pending_cleanup = true;
                     }
                 }
-            }
-            if needs_pending_cleanup {
-                self.pending_transaction_listener.write().retain(|l| !l.sender.is_closed());
+                if needs_pending_cleanup {
+                    let mut listeners = self.pending_transaction_listener.write();
+                    listeners.retain(|l| !l.sender.is_closed());
+                    if listeners.is_empty() {
+                        self.has_pending_tx_listeners.store(false, Ordering::Relaxed);
+                    }
+                }
             }
 
             // in this case we should also emit promoted transactions in full
-            let mut needs_tx_cleanup = false;
-            {
-                let listeners = self.transaction_listener.read();
-                for listener in listeners.iter() {
-                    let promoted_txs = promoted.iter().filter_map(|tx| {
-                        if listener.kind.is_propagate_only() && !tx.propagate {
-                            None
-                        } else {
-                            Some(NewTransactionEvent::pending(tx.clone()))
+            if self.has_tx_listeners.load(Ordering::Relaxed) {
+                let mut needs_tx_cleanup = false;
+                {
+                    let listeners = self.transaction_listener.read();
+                    for listener in listeners.iter() {
+                        let promoted_txs = promoted.iter().filter_map(|tx| {
+                            if listener.kind.is_propagate_only() && !tx.propagate {
+                                None
+                            } else {
+                                Some(NewTransactionEvent::pending(tx.clone()))
+                            }
+                        });
+                        if !listener.send_all(promoted_txs) {
+                            needs_tx_cleanup = true;
                         }
-                    });
-                    if !listener.send_all(promoted_txs) {
-                        needs_tx_cleanup = true;
                     }
                 }
-            }
-            if needs_tx_cleanup {
-                self.transaction_listener.write().retain(|l| !l.sender.is_closed());
+                if needs_tx_cleanup {
+                    let mut listeners = self.transaction_listener.write();
+                    listeners.retain(|l| !l.sender.is_closed());
+                    if listeners.is_empty() {
+                        self.has_tx_listeners.store(false, Ordering::Relaxed);
+                    }
+                }
             }
         }
 
