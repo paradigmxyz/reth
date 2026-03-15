@@ -104,6 +104,47 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+/// Shared cache handles that can be exported to engine consumers and downstream payload builders.
+#[derive(Debug, Clone)]
+pub struct EngineSharedCaches<Evm: ConfigureEvm> {
+    execution_cache: PayloadExecutionCache,
+    sparse_state_trie: SharedPreservedSparseTrie,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+}
+
+impl<Evm> Default for EngineSharedCaches<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    fn default() -> Self {
+        Self {
+            execution_cache: Default::default(),
+            sparse_state_trie: Default::default(),
+            precompile_cache_map: Default::default(),
+        }
+    }
+}
+
+impl<Evm> EngineSharedCaches<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    /// Returns the shared execution cache handle.
+    pub fn execution_cache(&self) -> PayloadExecutionCache {
+        self.execution_cache.clone()
+    }
+
+    /// Returns the shared precompile cache map.
+    pub fn precompile_cache_map(&self) -> PrecompileCacheMap<SpecFor<Evm>> {
+        self.precompile_cache_map.clone()
+    }
+
+    /// Returns the shared sparse trie handle for engine-internal use.
+    pub(crate) fn sparse_state_trie(&self) -> SharedPreservedSparseTrie {
+        self.sparse_state_trie.clone()
+    }
+}
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -112,8 +153,8 @@ where
 {
     /// The executor used by to spawn tasks.
     executor: Runtime,
-    /// The most recent cache used for execution.
-    execution_cache: PayloadExecutionCache,
+    /// Shared caches reused across payload processing.
+    shared_caches: EngineSharedCaches<Evm>,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -126,12 +167,6 @@ where
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
     precompile_cache_disabled: bool,
-    /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
-    /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
-    /// preservation across sequential payload validations.
-    sparse_state_trie: SharedPreservedSparseTrie,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -159,19 +194,17 @@ where
         executor: Runtime,
         evm_config: Evm,
         config: &TreeConfig,
-        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        shared_caches: EngineSharedCaches<Evm>,
     ) -> Self {
         Self {
             executor,
-            execution_cache: Default::default(),
+            shared_caches,
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
-            precompile_cache_map,
-            sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -189,8 +222,8 @@ where
         debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
         // Wait for both caches in parallel using std threads
-        let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
+        let execution_cache = self.shared_caches.execution_cache();
+        let sparse_trie = self.shared_caches.sparse_state_trie();
 
         // Use channels and spawn_blocking instead of std::thread::spawn
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
@@ -504,12 +537,12 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
-            precompile_cache_map: self.precompile_cache_map.clone(),
+            precompile_cache_map: self.shared_caches.precompile_cache_map(),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),
-            self.execution_cache.clone(),
+            self.shared_caches.execution_cache(),
             prewarm_ctx,
             to_multi_proof,
         );
@@ -537,7 +570,7 @@ where
     /// instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
+        if let Some(cache) = self.shared_caches.execution_cache().get_cache_for(parent_hash) {
             debug!("reusing execution cache");
             cache
         } else {
@@ -562,7 +595,7 @@ where
         parent_state_root: B256,
         chunk_size: usize,
     ) {
-        let preserved_sparse_trie = self.sparse_state_trie.clone();
+        let preserved_sparse_trie = self.shared_caches.sparse_state_trie();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
@@ -706,7 +739,7 @@ where
         bundle_state: &BundleState,
     ) {
         let disable_cache_metrics = self.disable_cache_metrics;
-        self.execution_cache.update_with_guard(|cached| {
+        self.shared_caches.execution_cache().update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
                     target: "engine::caching",
@@ -1018,11 +1051,11 @@ pub struct PayloadExecutionCache {
 }
 
 impl PayloadExecutionCache {
-    /// Returns the cache for `parent_hash` if it's available for use.
+    /// Returns the cache backing store for `parent_hash` if it's available for reuse.
     ///
-    /// A cache is considered available when:
-    /// - It exists and matches the requested parent hash
-    /// - No other tasks are currently using it (checked via Arc reference count)
+    /// If the tracked cache is available but keyed to a different parent hash, the cache is
+    /// cleared and returned so callers can reuse the underlying allocations without carrying over
+    /// stale state.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let start = Instant::now();
@@ -1061,7 +1094,7 @@ impl PayloadExecutionCache {
                     // and picking up polluted data if the fork block fails.
                     c.clear_with_hash(parent_hash);
                 }
-                return Some(c.clone())
+                return Some(c.clone());
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }
@@ -1175,8 +1208,9 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
-        precompile_cache::PrecompileCacheMap,
+        payload_processor::{
+            evm_state_to_hashed_post_state, EngineSharedCaches, ExecutionEnv, PayloadProcessor,
+        },
         StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
@@ -1288,7 +1322,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
+            EngineSharedCaches::default(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1300,13 +1334,17 @@ mod tests {
         let bundle_state = BundleState::default();
 
         // Cache should be empty initially
-        assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
+        assert!(payload_processor
+            .shared_caches
+            .execution_cache()
+            .get_cache_for(block_hash)
+            .is_none());
 
         // Update cache with inserted block
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // Cache should now exist for the block hash
-        let cached = payload_processor.execution_cache.get_cache_for(block_hash);
+        let cached = payload_processor.shared_caches.execution_cache().get_cache_for(block_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
     }
@@ -1317,13 +1355,14 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
+            EngineSharedCaches::default(),
         );
 
         // Setup: populate cache with block 1
         let block1_hash = B256::from([1u8; 32]);
         payload_processor
-            .execution_cache
+            .shared_caches
+            .execution_cache()
             .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
         // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
@@ -1338,11 +1377,11 @@ mod tests {
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // Cache should still be for block 1 (unchanged)
-        let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
+        let cached = payload_processor.shared_caches.execution_cache().get_cache_for(block1_hash);
         assert!(cached.is_some(), "Original cache should be preserved");
 
         // Cache for block 3 should not exist
-        let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
+        let cached3 = payload_processor.shared_caches.execution_cache().get_cache_for(block3_hash);
         assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
@@ -1452,7 +1491,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
+            EngineSharedCaches::default(),
         );
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();

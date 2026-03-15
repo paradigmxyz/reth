@@ -203,6 +203,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            EngineSharedCaches::default(),
             changeset_cache.clone(),
             reth_tasks::Runtime::test(),
         );
@@ -407,6 +408,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            EngineSharedCaches::default(),
             changeset_cache,
             reth_tasks::Runtime::test(),
         );

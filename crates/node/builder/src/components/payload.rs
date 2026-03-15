@@ -1,6 +1,6 @@
 //! Payload service component for the node builder.
 
-use crate::{BuilderContext, FullNodeTypes};
+use crate::{BuilderContext, ConfigureEvm, FullNodeTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::{NodeTypes, PayloadBuilderFor};
@@ -80,7 +80,7 @@ impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EvmConfig: Send,
+    EvmConfig: ConfigureEvm + Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,
 {
     async fn spawn_payload_builder_service(

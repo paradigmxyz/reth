@@ -15,7 +15,7 @@ use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
-    tree::TreeConfig,
+    tree::{EngineSharedCaches, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -90,6 +90,8 @@ impl EngineNodeLauncher {
 
         // Create changeset cache that will be shared across the engine
         let changeset_cache = ChangesetCache::new();
+        let main_shared_caches =
+            EngineSharedCaches::<<CB::Components as NodeComponents<T>>::Evm>::default();
 
         // setup the launch context
         let ctx = ctx
@@ -123,7 +125,8 @@ impl EngineNodeLauncher {
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
-            .with_components(components_builder, on_component_initialized).await?;
+            .with_components(components_builder, on_component_initialized)
+            .await?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -194,7 +197,12 @@ impl EngineNodeLauncher {
         // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
-            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), changeset_cache.clone())
+            .build_tree_validator_with_caches(
+                &add_ons_ctx,
+                engine_tree_config.clone(),
+                changeset_cache.clone(),
+                main_shared_caches.clone(),
+            )
             .await?;
 
         // Create the consensus engine stream with optional reorg
@@ -207,8 +215,15 @@ impl EngineNodeLauncher {
                 || async {
                     // Create a separate cache for reorg validator (not shared with main engine)
                     let reorg_cache = ChangesetCache::new();
+                    let reorg_shared_caches =
+                        EngineSharedCaches::<<CB::Components as NodeComponents<T>>::Evm>::default();
                     validator_builder
-                        .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), reorg_cache)
+                        .build_tree_validator_with_caches(
+                            &add_ons_ctx,
+                            engine_tree_config.clone(),
+                            reorg_cache,
+                            reorg_shared_caches,
+                        )
                         .await
                 },
                 node_config.debug.reorg_frequency,
