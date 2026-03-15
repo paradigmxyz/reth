@@ -895,14 +895,28 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn is_root_cached(&self) -> bool {
-        self.prefix_set.is_empty() &&
-            self.upper_subtrie
-                .nodes
-                .get(&Nibbles::default())
-                .is_some_and(|node| node.cached_rlp_node().is_some())
+        if !self.prefix_set.is_empty() {
+            return false;
+        }
+
+        let Some(root) = self.upper_subtrie.nodes.get(&Nibbles::default()) else {
+            // Empty trie
+            return true;
+        };
+
+        // Empty trie
+        if matches!(root, SparseNode::Empty) {
+            return true;
+        }
+
+        root.cached_rlp_node().is_some()
     }
 
-    #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
+    fn prefix_set_len(&self) -> usize {
+        self.prefix_set.len()
+    }
+
+    #[instrument(level = "debug", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 

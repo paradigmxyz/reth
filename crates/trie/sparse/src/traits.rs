@@ -193,6 +193,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
 
+    /// Returns the number of entries in the prefix set.
+    fn prefix_set_len(&self) -> usize;
+
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
@@ -482,6 +485,10 @@ mod configurable_sparse_trie {
 
         fn is_root_cached(&self) -> bool {
             delegate!(self, is_root_cached)
+        }
+
+        fn prefix_set_len(&self) -> usize {
+            delegate!(self, prefix_set_len)
         }
 
         fn update_subtrie_hashes(&mut self) {
