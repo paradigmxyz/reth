@@ -7,7 +7,8 @@
 //! - **`--wait-time`**: Fixed sleep interval between blocks.
 //! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
 //!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence.
+//!   threshold. This ensures the benchmark doesn't outpace persistence. Cannot be used with
+//!   `--reth-new-payload` because `reth_newPayload` already waits for persistence by default.
 //!
 //! Both options can be used together or independently.
 
@@ -24,7 +25,9 @@ use crate::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
-    valid_payload::{call_forkchoice_updated_with_reth, call_new_payload_with_reth},
+    valid_payload::{
+        call_forkchoice_updated_with_reth, call_new_payload_with_reth, reth_new_payload_wait,
+    },
 };
 use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -96,7 +99,15 @@ pub struct Command {
     /// doesn't outpace persistence.
     ///
     /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    ///
+    /// Cannot be used with `--reth-new-payload` because `reth_newPayload` already
+    /// waits for persistence by default.
+    #[arg(
+        long,
+        default_value = "false",
+        conflicts_with = "reth_new_payload",
+        verbatim_doc_comment
+    )]
     wait_for_persistence: bool,
 
     /// Engine persistence threshold used for deciding when to wait for persistence.
@@ -137,6 +148,14 @@ pub struct Command {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
+
+    /// Skip waiting for persistence and cache locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
+    /// `reth_newPayload` endpoint, causing it to execute the payload immediately
+    /// without waiting for in-flight persistence or cache updates.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    no_wait: bool,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
@@ -345,7 +364,8 @@ impl Command {
                         },
                     ),
                 };
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data),))?)
+                let wait = reth_new_payload_wait(self.no_wait);
+                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data), wait))?)
             } else {
                 (
                     Some(EngineApiMessageVersion::V4),
