@@ -4,6 +4,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::FastInstant as Instant;
 
 /// Payload builder service metrics
 #[derive(Metrics, Clone)]
@@ -27,6 +28,10 @@ pub(crate) struct PayloadBuilderServiceMetrics {
     pub(crate) resolve_duration_seconds: Histogram,
     /// Histogram of new payload job creation latency in seconds
     pub(crate) new_job_duration_seconds: Histogram,
+    /// Age of the oldest in-flight payload job in seconds.
+    /// Resets to 0 when no jobs are active. A sustained high value
+    /// indicates a stuck build (e.g. deadlocked finalization or state root).
+    pub(crate) oldest_active_job_age_seconds: Gauge,
 }
 
 impl PayloadBuilderServiceMetrics {
@@ -50,5 +55,15 @@ impl PayloadBuilderServiceMetrics {
     pub(crate) fn set_resolved_revenue(&self, block: u64, value: f64) {
         self.resolved_block.set(block as f64);
         self.resolved_revenue.set(value)
+    }
+
+    /// Updates the oldest active job age gauge from the current set of in-flight jobs.
+    pub(crate) fn set_oldest_job_age<T>(
+        &self,
+        jobs: &[(T, alloy_rpc_types::engine::PayloadId, tracing::Span, Instant)],
+    ) {
+        let age =
+            jobs.iter().map(|(_, _, _, created_at)| created_at.elapsed()).max().unwrap_or_default();
+        self.oldest_active_job_age_seconds.set(age.as_secs_f64());
     }
 }
