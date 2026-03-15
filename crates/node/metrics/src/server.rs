@@ -10,7 +10,6 @@ use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
 use http_body_util::Full;
 use metrics::describe_gauge;
-use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
@@ -99,16 +98,15 @@ impl MetricServer {
             self.start_push_gateway_task(
                 url.clone(),
                 *push_gateway_interval,
-                hooks.clone(),
                 task_executor.clone(),
             )?;
         }
 
-        // Describe metrics after recorder installation
+        // Describe metrics after recorder installation.
+        // Note: process metrics are described by the recorder itself.
         describe_db_metrics();
         describe_static_file_metrics();
         describe_rocksdb_metrics();
-        Collector::default().describe();
         describe_memory_stats();
         describe_io_stats();
 
@@ -175,7 +173,6 @@ impl MetricServer {
         &self,
         url: String,
         interval: Duration,
-        hooks: Hooks,
         task_executor: TaskExecutor,
     ) -> eyre::Result<()> {
         let client = Client::builder()
@@ -191,8 +188,7 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        hooks.iter().for_each(|hook| hook());
-                        let metrics = handle.handle().render();
+                        let metrics = handle.collect_and_render();
                         match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
                             Ok(response) => {
                                 if !response.status().is_success() {
@@ -325,7 +321,7 @@ async fn handle_request(
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
             hook();
-            let metrics = handle.handle().render();
+            let metrics = handle.collect_and_render();
             let mut response = Response::new(Full::new(Bytes::from(metrics)));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             response
