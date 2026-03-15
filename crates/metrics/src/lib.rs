@@ -20,5 +20,8 @@ pub use metrics_derive::Metrics;
 #[cfg(feature = "common")]
 pub mod common;
 
+mod span;
+pub use span::{EnteredMeteredSpan, MeteredSpan, SpanExt};
+
 /// Re-export core metrics crate.
 pub use metrics;

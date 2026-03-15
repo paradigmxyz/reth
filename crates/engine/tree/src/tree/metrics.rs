@@ -76,16 +76,6 @@ impl EngineApiMetrics {
         &self.executor
     }
 
-    /// Records the duration of block pre-execution changes (e.g., beacon root update).
-    pub fn record_pre_execution(&self, elapsed: Duration) {
-        self.executor.pre_execution_histogram.record(elapsed);
-    }
-
-    /// Records the duration of block post-execution changes (e.g., finalization).
-    pub fn record_post_execution(&self, elapsed: Duration) {
-        self.executor.post_execution_histogram.record(elapsed);
-    }
-
     /// Records execution duration into the gas-bucketed execution histogram.
     pub fn record_block_execution_gas_bucket(&self, gas_used: u64, elapsed: Duration) {
         let idx = GasBucketMetrics::bucket_index(gas_used);
@@ -105,11 +95,6 @@ impl EngineApiMetrics {
     /// Records the time spent waiting for the next transaction from the iterator.
     pub fn record_transaction_wait(&self, elapsed: Duration) {
         self.executor.transaction_wait_histogram.record(elapsed);
-    }
-
-    /// Records the duration of a single transaction execution.
-    pub fn record_transaction_execution(&self, elapsed: Duration) {
-        self.executor.transaction_execution_histogram.record(elapsed);
     }
 }
 
