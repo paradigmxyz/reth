@@ -9,6 +9,7 @@ use crate::StaticFileProviderFactory;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
 use rayon::prelude::*;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_db_api::tables;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -57,7 +58,8 @@ impl RocksDBProvider {
             + BlockBodyIndicesProvider
             + StorageChangeSetReader
             + ChangeSetReader
-            + TransactionsProvider<Transaction: Encodable2718>,
+            + TransactionsProvider<Transaction: Encodable2718>
+            + ChainSpecProvider,
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
@@ -114,11 +116,14 @@ impl RocksDBProvider {
 
         // Fast path: clear any stale data and return.
         if checkpoint == 0 {
-            tracing::info!(
-                target: "reth::providers::rocksdb",
-                "TransactionHashNumbers: checkpoint is 0, clearing stale data"
-            );
-            self.clear::<tables::TransactionHashNumbers>()?;
+            if self.first::<tables::TransactionHashNumbers>()?.is_some() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "TransactionHashNumbers: checkpoint is 0, clearing stale data"
+                );
+                self.clear::<tables::TransactionHashNumbers>()?;
+            }
+
             return Ok(None);
         }
 
@@ -256,8 +261,11 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider:
-            DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StaticFileProviderFactory
+            + StorageChangeSetReader
+            + ChainSpecProvider,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
@@ -266,12 +274,23 @@ impl RocksDBProvider {
 
         // Fast path: clear any stale data and return.
         if checkpoint == 0 {
-            tracing::info!(
-                target: "reth::providers::rocksdb",
-                "StoragesHistory: checkpoint is 0, clearing stale data"
-            );
-            self.clear::<tables::StoragesHistory>()?;
-            return Ok(None);
+            let genesis_entries = provider
+                .chain_spec()
+                .genesis()
+                .alloc
+                .values()
+                .filter_map(|account| account.storage.as_ref().map(|s| s.len()))
+                .sum();
+
+            // Only trigger potentially slow healing if we have any entries beyond the genesis data.
+            if self.iter::<tables::StoragesHistory>()?.count() > genesis_entries {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "StoragesHistory: checkpoint is 0, clearing stale data"
+                );
+            } else {
+                return Ok(None);
+            }
         }
 
         let sf_tip = provider
@@ -351,7 +370,11 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StaticFileProviderFactory
+            + ChangeSetReader
+            + ChainSpecProvider,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
@@ -360,12 +383,17 @@ impl RocksDBProvider {
 
         // Fast path: clear any stale data and return.
         if checkpoint == 0 {
-            tracing::info!(
-                target: "reth::providers::rocksdb",
-                "AccountsHistory: checkpoint is 0, clearing stale data"
-            );
-            self.clear::<tables::AccountsHistory>()?;
-            return Ok(None);
+            let genesis_entries = provider.chain_spec().genesis().alloc.len();
+
+            // Only trigger potentially slow healing if we have any entries beyond the genesis data.
+            if self.iter::<tables::AccountsHistory>()?.count() > genesis_entries {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "AccountsHistory: checkpoint is 0, clearing stale data"
+                );
+            } else {
+                return Ok(None);
+            }
         }
 
         let sf_tip = provider
@@ -438,13 +466,18 @@ impl RocksDBProvider {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::{
+        init::insert_genesis_history,
         providers::{rocksdb::RocksDBBuilder, static_file::StaticFileWriter},
-        test_utils::create_test_provider_factory,
-        BlockWriter, DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
+        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
+        BlockWriter, DatabaseProviderFactory, RocksDBProviderFactory, StageCheckpointWriter,
+        TransactionsProvider,
     };
     use alloy_primitives::{Address, B256};
+    use reth_chainspec::MAINNET;
     use reth_db::cursor::{DbCursorRO, DbCursorRW};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, StorageSettings},
@@ -659,35 +692,38 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_storages_history_has_data_no_checkpoint_prunes_data() {
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        // Insert data into RocksDB
-        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
-        rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
-
-        // Verify data exists
-        assert!(rocksdb.last::<tables::StoragesHistory>().unwrap().is_some());
+    fn test_check_consistency_storages_history_preserves_genesis_entries_at_checkpoint_zero(
+    ) -> eyre::Result<()> {
+        // Modify mainnet chainspec to include a single genesis storage slot
+        let mut chain_spec = MAINNET.clone();
+        Arc::make_mut(&mut chain_spec).genesis.alloc.first_entry().unwrap().get_mut().storage =
+            Some(From::from([(B256::random(), B256::random())]));
 
         // Create a test provider factory for MDBX with NO checkpoint
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let rocksdb = factory.rocksdb_provider();
         factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Insert genesis history into RocksDB
+        let provider_rw = factory.database_provider_rw().unwrap();
+        insert_genesis_history(&provider_rw, factory.chain_spec().genesis.alloc.iter())?;
+        provider_rw.commit()?;
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has data but checkpoint is 0
-        // This means RocksDB has stale data that should be pruned (healed)
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+        // This should not prune anything because only genesis entries are present
+        let result = rocksdb.heal_storages_history(&provider).unwrap();
+        assert_eq!(result, None, "Should skip healing when only genesis entries present");
 
-        // Verify data was pruned
+        // Verify data was NOT deleted
         assert!(
-            rocksdb.last::<tables::StoragesHistory>().unwrap().is_none(),
-            "RocksDB should be empty after pruning"
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().count() > 0,
+            "Genesis entries should be preserved"
         );
+
+        Ok(())
     }
+
     #[test]
     fn test_check_consistency_mdbx_behind_checkpoint_needs_unwind() {
         let temp_dir = TempDir::new().unwrap();
@@ -1067,36 +1103,31 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_accounts_history_has_data_no_checkpoint_prunes_data() {
-        use reth_db_api::models::ShardedKey;
-
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        // Insert data into RocksDB
-        let key = ShardedKey::new(Address::ZERO, 50);
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
-        rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
-
-        // Verify data exists
-        assert!(rocksdb.last::<tables::AccountsHistory>().unwrap().is_some());
-
+    fn test_check_consistency_accounts_history_preserves_genesis_entries_at_checkpoint_zero(
+    ) -> eyre::Result<()> {
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
+        let rocksdb = factory.rocksdb_provider();
+
+        // Insert genesis history into RocksDB
+        let provider_rw = factory.database_provider_rw().unwrap();
+        insert_genesis_history(&provider_rw, factory.chain_spec().genesis.alloc.iter())?;
+        provider_rw.commit()?;
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has data but checkpoint is 0
-        // This means RocksDB has stale data that should be pruned (healed)
+        // This should not prune anything because only genesis entries are present
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, None, "Should heal by pruning, no unwind needed");
 
-        // Verify data was pruned
+        // Verify data was NOT deleted
         assert!(
-            rocksdb.last::<tables::AccountsHistory>().unwrap().is_none(),
-            "RocksDB should be empty after pruning"
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().count() > 0,
+            "Genesis entries should be preserved"
         );
+
+        Ok(())
     }
 
     #[test]
