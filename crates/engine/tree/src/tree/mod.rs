@@ -1758,35 +1758,35 @@ where
         else {
             return Ok(())
         };
-        if sync_target_state.finalized_block_hash.is_zero() {
-            // no finalized block, can't check distance
-            return Ok(())
-        }
-        // get the block number of the finalized block, if we have it
-        let newest_finalized = self
-            .state
-            .buffer
-            .block(&sync_target_state.finalized_block_hash)
-            .map(|block| block.number());
+        // Only check whether we need to run backfill again if we have a finalized block,
+        // but always fall through to the head download check below.
+        if !sync_target_state.finalized_block_hash.is_zero() {
+            // get the block number of the finalized block, if we have it
+            let newest_finalized = self
+                .state
+                .buffer
+                .block(&sync_target_state.finalized_block_hash)
+                .map(|block| block.number());
 
-        // The block number that the backfill finished at - if the progress or newest
-        // finalized is None then we can't check the distance anyways.
-        //
-        // If both are Some, we perform another distance check and return the desired
-        // backfill target
-        if let Some(backfill_target) =
-            ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
-                // Determines whether or not we should run backfill again, in case
-                // the new gap is still large enough and requires running backfill again
-                self.backfill_sync_target(progress, finalized_number, None)
-            })
-        {
-            // request another backfill run
-            self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
-                backfill_target.into(),
-            )));
-            return Ok(())
-        };
+            // The block number that the backfill finished at - if the progress or newest
+            // finalized is None then we can't check the distance anyways.
+            //
+            // If both are Some, we perform another distance check and return the desired
+            // backfill target
+            if let Some(backfill_target) = ctrl.block_number().zip(newest_finalized).and_then(
+                |(progress, finalized_number)| {
+                    // Determines whether or not we should run backfill again, in case
+                    // the new gap is still large enough and requires running backfill again
+                    self.backfill_sync_target(progress, finalized_number, None)
+                },
+            ) {
+                // request another backfill run
+                self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
+                    backfill_target.into(),
+                )));
+                return Ok(())
+            }
+        }
 
         // Check if there are more blocks to sync between current head and FCU target
         if let Some(lowest_buffered) =
