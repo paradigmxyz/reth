@@ -107,9 +107,12 @@ pub(crate) fn prepare_payload_request(
     let cancun_active = chain_spec.is_cancun_active_at_timestamp(timestamp);
     let prague_active = chain_spec.is_prague_active_at_timestamp(timestamp);
     let osaka_active = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    let amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp); // Todo: Enable by default for bal bench
 
-    // FCU version: V3 for Cancun+Prague+Osaka, V2 for Shanghai, V1 otherwise
-    let fcu_version = if cancun_active {
+    // FCU version:V6 for Amsterdam, V3 for Cancun+Prague+Osaka, V2 for Shanghai, V1 otherwise
+    let fcu_version = if amsterdam_active {
+        EngineApiMessageVersion::V6
+    } else if cancun_active {
         EngineApiMessageVersion::V3
     } else if shanghai_active {
         EngineApiMessageVersion::V2
@@ -119,7 +122,9 @@ pub(crate) fn prepare_payload_request(
 
     // getPayload version: 5 for Osaka, 4 for Prague, 3 for Cancun, 2 for Shanghai, 1 otherwise
     // newPayload version: 4 for Prague+Osaka (no V5), 3 for Cancun, 2 for Shanghai, 1 otherwise
-    let (get_payload_version, new_payload_version) = if osaka_active {
+    let (get_payload_version, new_payload_version) = if amsterdam_active {
+        (6, EngineApiMessageVersion::V6)
+    } else if osaka_active {
         (5, EngineApiMessageVersion::V4) // Osaka uses getPayloadV5 but newPayloadV4
     } else if prague_active {
         (4, EngineApiMessageVersion::V4)
@@ -138,7 +143,7 @@ pub(crate) fn prepare_payload_request(
             suggested_fee_recipient: Address::ZERO,
             withdrawals: shanghai_active.then(Vec::new),
             parent_beacon_block_root: cancun_active.then_some(B256::ZERO),
-            slot_number: None,
+            slot_number: amsterdam_active.then_some(0),
         },
         forkchoice_state: ForkchoiceState {
             head_block_hash: parent_hash,
@@ -257,6 +262,21 @@ pub(crate) async fn get_payload_with_sidecar(
             let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
             Ok((
                 ExecutionPayload::V3(envelope.execution_payload),
+                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
+            ))
+        }
+        6 => {
+            let envelope = provider.get_payload_v6(payload_id).await?;
+            let versioned_hashes =
+                versioned_hashes_from_commitments(&envelope.blobs_bundle.commitments);
+            let cancun_fields = CancunPayloadFields {
+                parent_beacon_block_root: parent_beacon_block_root
+                    .ok_or_eyre("parent_beacon_block_root required for V6")?,
+                versioned_hashes,
+            };
+            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
+            Ok((
+                ExecutionPayload::V4(envelope.execution_payload),
                 ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
             ))
         }
