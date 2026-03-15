@@ -8385,6 +8385,7 @@ dependencies = [
  "eyre",
  "fixed-cache",
  "futures",
+ "indexmap 2.13.0",
  "metrics",
  "metrics-util",
  "moka",
