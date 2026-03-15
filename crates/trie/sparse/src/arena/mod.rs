@@ -1725,26 +1725,25 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
+        // This subtrie would be fully emptied by all-removal updates. If the parent
+        // has any blinded children, removing this subtrie could eventually leave the
+        // parent with a single blinded child — especially when multiple sibling
+        // subtries are taken in the same batch and also emptied. Conservatively
+        // request a proof for the first blinded sibling found.
         let child_nibble =
             subtrie_entry.path.last().expect("subtrie path must have at least one nibble");
 
         let parent_entry = cursor.parent()?;
         let parent_branch = arena[parent_entry.index].branch_ref();
-        if parent_branch.state_mask.count_bits() != 2 {
-            return None;
-        }
 
-        if !parent_branch.sibling_child(child_nibble).is_blinded() {
-            return None;
-        }
+        // Find any blinded sibling under the parent.
+        let blinded_sibling_nibble = parent_branch
+            .child_iter()
+            .find(|(nibble, child)| *nibble != child_nibble && child.is_blinded())
+            .map(|(nibble, _)| nibble)?;
 
-        let sibling_nibble = parent_branch
-            .state_mask
-            .iter()
-            .find(|&n| n != child_nibble)
-            .expect("branch has two children");
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
-        sibling_path.push_unchecked(sibling_nibble);
+        sibling_path.push_unchecked(blinded_sibling_nibble);
 
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
@@ -3247,5 +3246,54 @@ mod tests {
 
             harness.assert_changes(&mut apst, changeset2);
         }
+    }
+
+    /// Minimal reproduction of the blinded-sibling collapse panic.
+    ///
+    /// A parent branch at nibble `0xd` has 3 children: subtries `0xd7`, `0xd8`,
+    /// `0xdd` — each containing a single leaf.  When `min_updates = 1` forces the
+    /// parallel path, subtries `0xd7` and `0xdd` are both taken and emptied by
+    /// all-removal updates.  `check_subtrie_collapse_needs_proof` evaluates each
+    /// independently and sees the parent with 3 children (safe), so it lets both
+    /// through.  During the post-restore unwrap phase, unwrapping `0xd7` drops the
+    /// parent to 2 children, then unwrapping `0xdd` drops it to 1 — the still-
+    /// blinded `0xd8` — triggering the panic in `maybe_collapse_or_remove_branch`.
+    #[test]
+    fn test_blinded_sibling_collapse_with_forced_parallel_path() {
+        let key = |b0: u8| {
+            let mut k = [0u8; 32];
+            k[0] = b0;
+            B256::from(k)
+        };
+
+        // Three keys under nibble 0xd (each becomes its own subtrie at depth 2).
+        // A fourth key under a different nibble so the root is a multi-child branch.
+        let initial: BTreeMap<B256, U256> = [
+            (key(0xd7), U256::from(1)),
+            (key(0xd8), U256::from(2)),
+            (key(0xdd), U256::from(3)),
+            (key(0xaa), U256::from(4)),
+        ]
+        .into();
+
+        // Delete the two outer siblings; leave 0xd8 untouched (blinded).
+        let changeset: BTreeMap<B256, U256> =
+            [(key(0xd7), U256::ZERO), (key(0xdd), U256::ZERO)].into();
+
+        let harness = ArenaTrieTestHarness::new(initial);
+
+        let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+
+        let root_node = harness.root_node();
+        apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        harness.assert_changes(&mut apst, changeset);
     }
 }
