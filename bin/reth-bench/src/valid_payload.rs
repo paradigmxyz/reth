@@ -164,6 +164,25 @@ where
     }
 }
 
+/// Intermediate data from converting an RPC block to engine API params.
+///
+/// Contains both the final versioned params and the intermediate payload/sidecar
+/// needed for creating reorg variants.
+pub(crate) struct NewPayloadData {
+    /// Engine API version. `None` when using `reth_newPayload`.
+    pub(crate) version: Option<EngineApiMessageVersion>,
+    /// Serialized params for the engine API call.
+    pub(crate) params: serde_json::Value,
+    /// The execution payload (for creating reorg variants). `None` when using RLP blocks.
+    pub(crate) payload: Option<ExecutionPayload>,
+    /// The execution payload sidecar. `None` when using RLP blocks.
+    pub(crate) sidecar: Option<ExecutionPayloadSidecar>,
+    /// Whether this is an Optimism payload.
+    pub(crate) is_optimism: bool,
+    /// The withdrawals root from the original block.
+    pub(crate) withdrawals_root: Option<B256>,
+}
+
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
 ///
 /// Returns `(version, versioned_params, execution_data)`.
@@ -173,11 +192,27 @@ pub(crate) fn block_to_new_payload(
     rlp: Option<Bytes>,
     reth_new_payload: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let data = block_to_new_payload_data(block, is_optimism, rlp, reth_new_payload)?;
+    Ok((data.version, data.params))
+}
+
+/// Converts an RPC block into [`NewPayloadData`] containing both the versioned params
+/// and the intermediate payload/sidecar needed for creating reorg variants.
+pub(crate) fn block_to_new_payload_data(
+    block: AnyRpcBlock,
+    is_optimism: bool,
+    rlp: Option<Bytes>,
+    reth_new_payload: bool,
+) -> eyre::Result<NewPayloadData> {
     if let Some(rlp) = rlp {
-        return Ok((
-            None,
-            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),))?,
-        ));
+        return Ok(NewPayloadData {
+            version: None,
+            params: serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),))?,
+            payload: None,
+            sidecar: None,
+            is_optimism,
+            withdrawals_root: None,
+        });
     }
     let block = block
         .into_inner()
@@ -189,15 +224,71 @@ pub(crate) fn block_to_new_payload(
         .into_consensus();
 
     // Convert to execution payload
+    let withdrawals_root = block.withdrawals_root;
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    let (version, params, execution_data) =
-        payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
+    let (version, params, execution_data) = payload_to_new_payload(
+        payload.clone(),
+        sidecar.clone(),
+        is_optimism,
+        withdrawals_root,
+        None,
+    )?;
 
-    if reth_new_payload {
-        Ok((None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?))
+    let (version, params) = if reth_new_payload {
+        (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?)
     } else {
-        Ok((Some(version), params))
+        (Some(version), params)
+    };
+
+    Ok(NewPayloadData {
+        version,
+        params,
+        payload: Some(payload),
+        sidecar: Some(sidecar),
+        is_optimism,
+        withdrawals_root,
+    })
+}
+
+/// Creates a reorg variant of the given payload by modifying `extra_data` and recomputing
+/// the block hash.
+///
+/// Returns the new block hash and versioned params for the engine API call.
+pub(crate) fn create_reorg_payload(
+    payload: &ExecutionPayload,
+    sidecar: &ExecutionPayloadSidecar,
+    is_optimism: bool,
+    withdrawals_root: Option<B256>,
+    reth_new_payload: bool,
+) -> eyre::Result<(B256, Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let mut payload = payload.clone();
+
+    // Modify extra_data to produce a different block hash
+    let v1 = payload.as_v1_mut();
+    let mut extra = v1.extra_data.to_vec();
+    if extra.is_empty() {
+        extra.push(0x00);
+    } else {
+        extra[0] ^= 0xFF;
     }
+    v1.extra_data = extra.into();
+
+    // Recompute block hash from the modified payload
+    let block = payload.clone().into_block_with_sidecar_raw(sidecar)?;
+    let new_hash = block.header.hash_slow();
+    payload.as_v1_mut().block_hash = new_hash;
+
+    // Convert to versioned params
+    let (version, params, execution_data) =
+        payload_to_new_payload(payload, sidecar.clone(), is_optimism, withdrawals_root, None)?;
+
+    let (version, params) = if reth_new_payload {
+        (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?)
+    } else {
+        (Some(version), params)
+    };
+
+    Ok((new_hash, version, params))
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an

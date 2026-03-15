@@ -397,6 +397,8 @@ impl Command {
                 new_payload_result,
                 fcu_latency,
                 total_latency,
+                reorg_new_payload_timings: None,
+                reorg_fcu_latency: None,
             };
 
             let current_duration = total_benchmark_duration.elapsed();
