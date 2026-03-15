@@ -6,12 +6,13 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
+    models::storage_sharded_key::StorageShardedKey,
     table::Table,
     tables,
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
@@ -31,8 +32,10 @@ use reth_trie_db::{
     hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot,
 };
-
-use std::fmt::Debug;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+};
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -569,6 +572,69 @@ impl<
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         self.storage_by_lookup_key(address, storage_key)
+    }
+
+    fn storage_range(
+        &self,
+        address: Address,
+        key_start: B256,
+        limit: usize,
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
+        }
+
+        let slots: BTreeSet<B256> = self.provider.with_rocksdb_tx(|_rocks_tx_ref| {
+            let mut slots = BTreeSet::new();
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(rocks_tx) = _rocks_tx_ref {
+                let iter = rocks_tx.iter_from::<tables::StoragesHistory>(
+                    StorageShardedKey::new(address, B256::ZERO, 0),
+                )?;
+                for entry in iter {
+                    let (key, _) = entry?;
+                    if key.address != address {
+                        break;
+                    }
+                    slots.insert(key.sharded_key.key);
+                }
+                return Ok(slots);
+            }
+
+            let mut cursor = self.tx().cursor_read::<tables::StoragesHistory>()?;
+            let walker = cursor.walk_range(
+                StorageShardedKey::new(address, B256::ZERO, 0)..=
+                    StorageShardedKey::last(address, B256::repeat_byte(0xff)),
+            )?;
+            for entry in walker {
+                let (key, _) = entry?;
+                slots.insert(key.sharded_key.key);
+            }
+            Ok(slots)
+        })?;
+
+        let mut candidates: BTreeMap<B256, B256> = BTreeMap::new();
+        for slot in &slots {
+            let hashed = alloy_primitives::keccak256(slot);
+            if hashed >= key_start {
+                candidates.insert(hashed, *slot);
+            }
+        }
+
+        let mut result: Vec<(B256, StorageEntry)> = Vec::new();
+        for (hashed, slot) in candidates {
+            if let Some(value) = self.storage_by_lookup_key(address, slot)? &&
+                !value.is_zero()
+            {
+                result.push((hashed, StorageEntry::new(slot, value)));
+                if result.len() == limit {
+                    break;
+                }
+            }
+        }
+
+        Ok(result)
     }
 }
 

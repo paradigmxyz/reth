@@ -3,7 +3,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
 };
@@ -18,6 +18,7 @@ use reth_trie::{
     StateRoot, StorageMultiProof, StorageRoot, TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
+use std::collections::BTreeMap;
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -272,6 +273,46 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             }
             Ok(None)
         }
+    }
+
+    fn storage_range(
+        &self,
+        address: Address,
+        key_start: B256,
+        limit: usize,
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
+        if self.0.cached_storage_settings().use_hashed_state() {
+            return Ok(Vec::new());
+        }
+
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut result: BTreeMap<B256, StorageEntry> = BTreeMap::new();
+        let mut cutoff: Option<B256> = None;
+        let walker = cursor.walk_dup(Some(address), None)?;
+        for entry in walker {
+            let (_, storage_entry) = entry?;
+            if storage_entry.value == StorageValue::ZERO {
+                continue;
+            }
+            let hashed = alloy_primitives::keccak256(storage_entry.key);
+            if hashed < key_start {
+                continue;
+            }
+            if let Some(c) = cutoff &&
+                hashed >= c
+            {
+                continue;
+            }
+            result.insert(hashed, storage_entry);
+            if result.len() > limit {
+                cutoff = result.keys().next_back().copied();
+                if let Some(c) = cutoff {
+                    result.remove(&c);
+                }
+            }
+        }
+
+        Ok(result.into_iter().collect())
     }
 }
 
