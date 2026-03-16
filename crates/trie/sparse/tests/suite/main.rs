@@ -270,6 +270,7 @@ sparse_trie_tests! {
     test_orphaned_value_update_falls_through_to_full_insertion,
     test_branch_collapse_updates_leaf_key_len_across_subtries,
     test_remove_leaf_does_not_reveal_blind_subtries,
+    test_branch_collapse_multi_empty_subtries_blinded_remaining,
 
     // root
     test_root_empty_trie,

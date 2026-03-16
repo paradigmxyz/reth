@@ -1322,3 +1322,86 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
         "root after modifying retained leaf should match reference"
     );
 }
+
+/// Branch collapse across multiple emptied subtries with blinded remaining child.
+///
+/// A branch at nibble `0xd` has 3 children: two revealed subtries (at `0xd7` and `0xdd`)
+/// each containing a single leaf, and one blinded subtrie (at `0xd8`). Removing both
+/// revealed leaves empties their subtries, leaving the branch with a single blinded child
+/// that cannot be collapsed without a proof.
+///
+/// ```text
+/// root (branch)
+///  └─ 0xd (branch, 3 children)
+///       ├─ 0xd7 → Leaf (revealed)
+///       ├─ 0xd8 → Leaf (BLINDED)
+///       └─ 0xdd → Leaf (revealed)
+///
+/// After removing 0xd7 and 0xdd:
+///   0xd branch has single child (0xd8), must collapse,
+///   but 0xd8 is blinded → needs proof
+/// ```
+pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Three keys sharing first nibble 0xd, differing at second nibble.
+    let key_d7 = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0xd7;
+        key
+    };
+    let key_d8 = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0xd8;
+        key
+    };
+    let key_dd = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0xdd;
+        key
+    };
+
+    let base_storage: BTreeMap<B256, U256> =
+        BTreeMap::from([(key_d7, U256::from(1)), (key_d8, U256::from(2)), (key_dd, U256::from(3))]);
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+
+    // Reveal only 0xd7 and 0xdd, leaving 0xd8's subtrie blinded.
+    let mut trie: T = harness.init_trie_with_targets(&[key_d7, key_dd], false, new_trie);
+
+    // Remove both revealed leaves — their subtries empty, branch collapses to
+    // single child (0xd8) which is blinded.
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([
+        (key_d7, U256::ZERO),
+        (key_dd, U256::ZERO),
+    ]));
+
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, min_len| {
+        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    })
+    .expect("update_leaves should succeed");
+
+    // Callback should fire for the blinded child at 0xd8.
+    assert!(!targets.is_empty(), "callback should fire for blinded child during branch collapse");
+    // Removal keys should remain in the map for retry.
+    assert!(!leaf_updates.is_empty(), "removal keys should remain in map after blinded hit");
+
+    // Reveal the blinded subtrie.
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+
+    // Retry — now the sibling is revealed, branch can collapse.
+    trie.update_leaves(&mut leaf_updates, |_, _| {})
+        .expect("update_leaves should succeed on retry");
+    assert!(leaf_updates.is_empty(), "keys should be drained after successful retry");
+
+    // Root should match reference trie with only key_d8.
+    let expected_harness = SuiteTestHarness::new(BTreeMap::from([(key_d8, U256::from(2))]));
+    let root = trie.root();
+    assert_eq!(
+        root,
+        expected_harness.original_root(),
+        "root should match trie with only the previously-blinded leaf"
+    );
+}
