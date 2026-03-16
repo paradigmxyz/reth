@@ -182,7 +182,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie + Default>
     let mut expected_storage = storage;
     expected_storage.insert(keys[0], new_value);
     let expected_harness = SuiteTestHarness::new(expected_storage);
-    let expected_root = expected_harness.original_root;
+    let expected_root = expected_harness.original_root();
 
     assert_eq!(root_after, expected_root, "root after prune + update should match reference trie");
 }
@@ -217,7 +217,7 @@ pub(super) fn test_prune_then_reveal_pruned_subtree<T: SparseTrie + Default>() {
     let mut expected_storage = storage;
     expected_storage.insert(keys[2], new_value);
     let expected_harness = SuiteTestHarness::new(expected_storage);
-    let expected_root = expected_harness.original_root;
+    let expected_root = expected_harness.original_root();
 
     assert_eq!(
         root_after, expected_root,
@@ -338,7 +338,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie + Defaul
     let mut trie: T = harness.init_trie_fully_revealed(false);
 
     let root_before = trie.root();
-    assert_eq!(root_before, harness.original_root);
+    assert_eq!(root_before, harness.original_root());
 
     // Prune retaining only the small-subtrie leaf — the large subtrie should
     // be replaced by hash stubs, and the small subtrie handled gracefully.

@@ -15,6 +15,7 @@
 #   PGO_BLOCKS      - Number of blocks for PGO profiling (default: 20)
 #   BOLT_BLOCKS     - Number of blocks for BOLT profiling (default: 20)
 #   SKIP_BOLT       - Temporarily skip BOLT phases (default: false)
+#   STRIP_SYMBOLS   - Strip debug symbols from output binary (default: true)
 #   COLLECT_PGO_ONLY - Stop after producing merged.profdata (default: false)
 #   PGO_PROFDATA    - Path to pre-collected merged.profdata (optional)
 #   PROFILE         - Cargo profile (default: maxperf-symbols)
@@ -48,6 +49,7 @@ cd "$(dirname "$0")/../.."
 PGO_BLOCKS="${PGO_BLOCKS:-20}"
 BOLT_BLOCKS="${BOLT_BLOCKS:-20}"
 SKIP_BOLT="${SKIP_BOLT:-false}"
+STRIP_SYMBOLS="${STRIP_SYMBOLS:-true}"
 COLLECT_PGO_ONLY="${COLLECT_PGO_ONLY:-false}"
 PROFILE="${PROFILE:-maxperf-symbols}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
@@ -62,6 +64,11 @@ RPC_URL="${RPC_URL:-}"
 SKIP_BOLT_BOOL=false
 if [[ "${SKIP_BOLT,,}" == "true" || "$SKIP_BOLT" == "1" ]]; then
     SKIP_BOLT_BOOL=true
+fi
+
+STRIP_SYMBOLS_BOOL=false
+if [[ "${STRIP_SYMBOLS,,}" == "true" || "$STRIP_SYMBOLS" == "1" ]]; then
+    STRIP_SYMBOLS_BOOL=true
 fi
 
 COLLECT_PGO_ONLY_BOOL=false
@@ -116,6 +123,7 @@ echo "LLVM:        $LLVM_VERSION"
 echo "PGO blocks:  $PGO_BLOCKS"
 echo "BOLT blocks: $BOLT_BLOCKS"
 echo "Skip BOLT:   $SKIP_BOLT"
+echo "Strip symbols: $STRIP_SYMBOLS"
 echo "Collect only: $COLLECT_PGO_ONLY"
 echo "PGO profdata: ${PGO_PROFDATA:-<collect with reth-bench>}"
 echo "RUSTFLAGS:   ${BASE_RUSTFLAGS:-<unset>}"
@@ -314,8 +322,12 @@ if [ "$SKIP_BOLT_BOOL" = true ]; then
         cargo build "${CARGO_ARGS[@]}" --target "$TARGET"
 
     BUILT_BIN="$PWD/target/$TARGET/$PROFILE_DIR/reth"
-    echo "Stripping debug symbols..."
-    strip "$BUILT_BIN"
+    if [ "$STRIP_SYMBOLS_BOOL" = true ]; then
+        echo "Stripping debug symbols..."
+        strip "$BUILT_BIN"
+    else
+        echo "Skipping strip (STRIP_SYMBOLS=$STRIP_SYMBOLS)"
+    fi
     publish_binary "$BUILT_BIN"
     gha_section_end
 else
@@ -386,8 +398,12 @@ else
         -use-gnu-stack \
         --skip-funcs='.*drop_in_place.*'
 
-    echo "Stripping debug symbols..."
-    strip "$OPTIMIZED_BIN"
+    if [ "$STRIP_SYMBOLS_BOOL" = true ]; then
+        echo "Stripping debug symbols..."
+        strip "$OPTIMIZED_BIN"
+    else
+        echo "Skipping strip (STRIP_SYMBOLS=$STRIP_SYMBOLS)"
+    fi
     publish_binary "$OPTIMIZED_BIN"
     gha_section_end
 fi

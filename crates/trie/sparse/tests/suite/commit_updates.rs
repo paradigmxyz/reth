@@ -63,7 +63,7 @@ pub(super) fn test_commit_updates_syncs_branch_masks<T: SparseTrie + Default>() 
         (key_e, U256::from(5)),
     ]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
-    assert_eq!(hash2, expected_harness.original_root, "hash2 should match reference trie");
+    assert_eq!(hash2, expected_harness.original_root(), "hash2 should match reference trie");
 
     // updates2 should NOT contain the same paths as updates1 — commit_updates
     // resets the baseline so only the delta from round 2 is reported.
@@ -93,7 +93,7 @@ pub(super) fn test_commit_updates_empty_is_noop<T: SparseTrie + Default>() {
     let mut trie: T = harness.init_trie_fully_revealed(true);
 
     let hash1 = trie.root();
-    assert_eq!(hash1, harness.original_root);
+    assert_eq!(hash1, harness.original_root());
 
     trie.commit_updates(&HashMap::default(), &HashSet::default());
 

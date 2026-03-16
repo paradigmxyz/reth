@@ -16,7 +16,9 @@ use reth_trie_common::{
     BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
     TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use tracing::{debug, instrument, trace};
+#[cfg(feature = "std")]
+use tracing::debug;
+use tracing::{instrument, trace};
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -993,6 +995,7 @@ struct HotSlotKey {
 }
 
 /// Slot-specific helpers for the `BucketedLfu<HotSlotKey>`.
+#[cfg(feature = "std")]
 impl BucketedLfu<HotSlotKey> {
     /// Returns retained slots grouped by address.
     fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {

@@ -1338,7 +1338,6 @@ impl SparseTrie for ParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::UpdateLeaves {
             updates: recorded_updates,
-            remaining_keys: updates.keys().copied().collect(),
             proof_targets: recorded_proof_targets,
         });
 

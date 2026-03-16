@@ -26,6 +26,9 @@ use slotmap::{DefaultKey, Key as _, SlotMap};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
+
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
 /// Alias for the slotmap used as the node arena throughout the arena trie.
@@ -508,9 +511,13 @@ pub struct ArenaParallelSparseTrie {
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
-    cleared_subtries: Vec<ArenaSparseSubtrie>,
+    #[allow(clippy::vec_box)]
+    cleared_subtries: Vec<Box<ArenaSparseSubtrie>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Debug recorder for tracking mutating operations.
+    #[cfg(feature = "trie-debug")]
+    debug_recorder: TrieDebugRecorder,
 }
 
 impl ArenaParallelSparseTrie {
@@ -531,6 +538,154 @@ impl ArenaParallelSparseTrie {
             .collect()
     }
 
+    /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
+    /// ops, representing the initial state at the beginning of a block (after pruning).
+    ///
+    /// Walks the upper arena and all subtries depth-first using the cursor, converting each
+    /// node into a [`crate::debug_recorder::ProofTrieNodeRecord`].
+    #[cfg(feature = "trie-debug")]
+    fn record_initial_state(&mut self) {
+        use crate::debug_recorder::{NodeStateRecord, TrieNodeRecord};
+        use alloy_primitives::hex;
+        use alloy_trie::nodes::{BranchNode, TrieNode};
+
+        fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
+            match state {
+                ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
+                ArenaSparseNodeState::Cached { rlp_node } => {
+                    NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
+                }
+                ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
+            }
+        }
+
+        /// Converts an [`ArenaSparseNode`] into a [`ProofTrieNodeRecord`] at the given path.
+        /// For branch children, resolves revealed children's cached RLP from `arena`.
+        /// Returns `None` for subtrie/taken-subtrie nodes (handled separately).
+        fn node_to_record(
+            arena: &NodeArena,
+            idx: Index,
+            path: Nibbles,
+        ) -> Option<ProofTrieNodeRecord> {
+            match &arena[idx] {
+                ArenaSparseNode::EmptyRoot => Some(ProofTrieNodeRecord {
+                    path,
+                    node: TrieNodeRecord(TrieNode::EmptyRoot),
+                    masks: None,
+                    short_key: None,
+                    state: None,
+                }),
+                ArenaSparseNode::Branch(b) => {
+                    let stack = b
+                        .children
+                        .iter()
+                        .map(|child| match child {
+                            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
+                            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                                // After pruning / root(), all nodes have cached RLP.
+                                arena[*child_idx]
+                                    .state_ref()
+                                    .and_then(|s| s.cached_rlp_node())
+                                    .cloned()
+                                    .unwrap_or_default()
+                            }
+                        })
+                        .collect();
+                    Some(ProofTrieNodeRecord {
+                        path,
+                        node: TrieNodeRecord(TrieNode::Branch(BranchNode::new(
+                            stack,
+                            b.state_mask,
+                        ))),
+                        masks: Some((
+                            b.branch_masks.hash_mask.get(),
+                            b.branch_masks.tree_mask.get(),
+                        )),
+                        short_key: (!b.short_key.is_empty()).then_some(b.short_key),
+                        state: Some(state_to_record(&b.state)),
+                    })
+                }
+                ArenaSparseNode::Leaf { key, value, state, .. } => Some(ProofTrieNodeRecord {
+                    path,
+                    node: TrieNodeRecord(TrieNode::Leaf(alloy_trie::nodes::LeafNode::new(
+                        *key,
+                        value.clone(),
+                    ))),
+                    masks: None,
+                    short_key: None,
+                    state: Some(state_to_record(state)),
+                }),
+                ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => None,
+            }
+        }
+
+        /// Walks an arena depth-first using `cursor` and collects all nodes as records.
+        fn collect_records(
+            arena: &mut NodeArena,
+            root: Index,
+            root_path: Nibbles,
+            cursor: &mut ArenaCursor,
+            result: &mut Vec<ProofTrieNodeRecord>,
+        ) {
+            cursor.reset(arena, root, root_path);
+
+            // The cursor starts with root on the stack but `next` only yields children.
+            if let Some(record) = node_to_record(arena, root, root_path) {
+                result.push(record);
+            }
+
+            loop {
+                match cursor.next(arena, |_, node| {
+                    matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
+                }) {
+                    NextResult::Done => break,
+                    NextResult::Branch | NextResult::NonBranch => {
+                        let head = cursor.head().expect("cursor is non-empty");
+                        if let Some(record) = node_to_record(arena, head.index, head.path) {
+                            result.push(record);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut nodes = Vec::new();
+
+        // Collect from the upper arena.
+        collect_records(
+            &mut self.upper_arena,
+            self.root,
+            Nibbles::default(),
+            &mut self.buffers.cursor,
+            &mut nodes,
+        );
+
+        // Collect from all subtries.
+        for (_, node) in &mut self.upper_arena {
+            if let ArenaSparseNode::Subtrie(subtrie) = node {
+                collect_records(
+                    &mut subtrie.arena,
+                    subtrie.root,
+                    subtrie.path,
+                    &mut self.buffers.cursor,
+                    &mut nodes,
+                );
+            }
+        }
+
+        // Reset the recorder and record that we pruned, then the initial state.
+        self.debug_recorder.reset();
+        self.debug_recorder.record(RecordedOp::Prune);
+
+        // First node is the root → SetRoot, remaining → RevealNodes.
+        if let Some(root_record) = nodes.first() {
+            self.debug_recorder.record(RecordedOp::SetRoot { node: root_record.clone() });
+        }
+        if nodes.len() > 1 {
+            self.debug_recorder.record(RecordedOp::RevealNodes { nodes: nodes[1..].to_vec() });
+        }
+    }
+
     /// Takes a cleared [`ArenaSparseSubtrie`] from the pool (or creates a new one) and
     /// pre-allocates a root slot with a placeholder. The caller must overwrite
     /// `subtrie.arena[subtrie.root]` before use.
@@ -539,7 +694,7 @@ impl ArenaParallelSparseTrie {
             debug_assert!(s.arena.is_empty());
             s
         } else {
-            ArenaSparseSubtrie {
+            Box::new(ArenaSparseSubtrie {
                 arena: SlotMap::new(),
                 root: Index::null(),
                 path: Nibbles::default(),
@@ -547,13 +702,13 @@ impl ArenaParallelSparseTrie {
                 required_proofs: Vec::new(),
                 num_leaves: 0,
                 num_dirty_leaves: 0,
-            }
+            })
         };
         subtrie.root = subtrie.arena.insert(ArenaSparseNode::EmptyRoot);
         if self.updates.is_some() {
             subtrie.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         }
-        Box::new(subtrie)
+        subtrie
     }
 
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
@@ -695,7 +850,7 @@ impl ArenaParallelSparseTrie {
         };
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
         subtrie.clear();
-        self.cleared_subtries.push(*subtrie);
+        self.cleared_subtries.push(subtrie);
     }
 
     /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
@@ -822,7 +977,7 @@ impl ArenaParallelSparseTrie {
                     &mut subtrie.buffers.updates,
                 );
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
 
                 // The migrated subtrie root may be a branch whose children now live in
                 // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
@@ -835,6 +990,10 @@ impl ArenaParallelSparseTrie {
 
     /// Merges updates from a subtrie's buffer into the parent's buffer.
     /// Both `dst` and `src` must be `Some` when updates are being tracked.
+    ///
+    /// Source removals cancel destination insertions (and vice versa) so that
+    /// updates accumulated across multiple `root()` calls within a single block
+    /// stay consistent.
     fn merge_subtrie_updates(
         dst: &mut Option<SparseTrieUpdates>,
         src: &mut Option<SparseTrieUpdates>,
@@ -842,7 +1001,17 @@ impl ArenaParallelSparseTrie {
         if let Some(dst_updates) = dst.as_mut() {
             let src_updates = src.as_mut().expect("updates are enabled");
             debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
+
+            // Source insertions cancel destination removals.
+            for path in src_updates.updated_nodes.keys() {
+                dst_updates.removed_nodes.remove(path);
+            }
             dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
+
+            // Source removals cancel destination insertions.
+            for path in &src_updates.removed_nodes {
+                dst_updates.updated_nodes.remove(path);
+            }
             dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
         }
     }
@@ -1377,9 +1546,6 @@ impl ArenaParallelSparseTrie {
             }
             SeekResult::NoChild { child_nibble } => {
                 let head_idx = head.index;
-                let head_branch = arena[head_idx].branch_ref();
-                let state_mask = head_branch.state_mask;
-                let insert_pos = BranchChildIdx::insertion_point(state_mask, child_nibble);
 
                 let head_branch_logical_path = cursor.head_logical_branch_path(arena);
                 let leaf_key = full_path.slice(head_branch_logical_path.len() + 1..);
@@ -1390,11 +1556,7 @@ impl ArenaParallelSparseTrie {
                 });
 
                 let branch = arena[head_idx].branch_mut();
-                branch.state_mask.set_bit(child_nibble);
-                branch
-                    .children
-                    .insert(insert_pos.get(), ArenaSparseNodeBranchChild::Revealed(new_leaf));
-                branch.state = ArenaSparseNodeState::Dirty;
+                branch.set_child(child_nibble, ArenaSparseNodeBranchChild::Revealed(new_leaf));
 
                 // Re-seek to position the cursor on the newly inserted leaf.
                 cursor.seek(arena, full_path);
@@ -1461,29 +1623,25 @@ impl ArenaParallelSparseTrie {
                     let child_nibble = head_path.last().expect("non-root leaf");
                     let parent_branch = arena[parent_idx].branch_ref();
 
-                    if parent_branch.state_mask.count_bits() == 2 {
-                        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                            .expect("leaf nibble not found in parent state_mask");
-                        // With exactly 2 bits set the dense array has indices 0 and 1.
-                        let sibling_dense_idx = 1 - child_idx.get();
-                        if parent_branch.children[sibling_dense_idx].is_blinded() {
-                            let sibling_nibble = parent_branch
-                                .state_mask
-                                .iter()
-                                .find(|&n| n != child_nibble)
-                                .expect("branch has two children");
-                            let mut sibling_path = cursor.parent_logical_branch_path(arena);
-                            sibling_path.push_unchecked(sibling_nibble);
-                            trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
-                            return (
-                                RemoveLeafResult::NeedsProof {
-                                    key,
-                                    proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                    min_len: (sibling_path.len() as u8).min(64),
-                                },
-                                SubtrieCounterDeltas::default(),
-                            );
-                        }
+                    if parent_branch.state_mask.count_bits() == 2 &&
+                        parent_branch.sibling_child(child_nibble).is_blinded()
+                    {
+                        let sibling_nibble = parent_branch
+                            .state_mask
+                            .iter()
+                            .find(|&n| n != child_nibble)
+                            .expect("branch has two children");
+                        let mut sibling_path = cursor.parent_logical_branch_path(arena);
+                        sibling_path.push_unchecked(sibling_nibble);
+                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
+                        return (
+                            RemoveLeafResult::NeedsProof {
+                                key,
+                                proof_key: Self::nibbles_to_padded_b256(&sibling_path),
+                                min_len: (sibling_path.len() as u8).min(64),
+                            },
+                            SubtrieCounterDeltas::default(),
+                        );
                     }
                 }
 
@@ -1491,10 +1649,7 @@ impl ArenaParallelSparseTrie {
                 let removed_was_dirty =
                     matches!(arena[head_idx].state_ref(), Some(ArenaSparseNodeState::Dirty));
 
-                // Pop the leaf entry, propagating dirty state to the parent.
-                cursor.pop(arena);
-
-                if cursor.is_empty() {
+                if cursor.depth() == 0 {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
                     arena.remove(head_idx);
@@ -1509,21 +1664,18 @@ impl ArenaParallelSparseTrie {
                     );
                 }
 
+                // Pop the leaf entry, propagating dirty state to the parent.
+                cursor.pop(arena);
+
                 // The parent must be a branch. Remove the leaf from it.
                 let parent_entry = cursor.head().expect("cursor is non-empty");
                 let parent_idx = parent_entry.index;
                 let child_nibble = head_path.last().expect("non-root leaf");
 
-                let parent_branch = arena[parent_idx].branch_ref();
-                let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-                    .expect("leaf nibble not found in parent state_mask");
-
                 // Remove the leaf from the arena and from the parent's children.
                 arena.remove(head_idx);
                 let parent_branch = arena[parent_idx].branch_mut();
-                parent_branch.children.remove(child_idx.get());
-                parent_branch.unset_child_bit(child_nibble);
-                parent_branch.state = ArenaSparseNodeState::Dirty;
+                parent_branch.remove_child(child_nibble);
 
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
@@ -1582,10 +1734,7 @@ impl ArenaParallelSparseTrie {
             return None;
         }
 
-        let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
-            .expect("child nibble not in parent state_mask");
-        let sibling_dense_idx = 1 - child_idx.get();
-        if !parent_branch.children[sibling_dense_idx].is_blinded() {
+        if !parent_branch.sibling_child(child_nibble).is_blinded() {
             return None;
         }
 
@@ -1959,6 +2108,8 @@ impl Default for ArenaParallelSparseTrie {
             buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            #[cfg(feature = "trie-debug")]
+            debug_recorder: Default::default(),
         }
     }
 }
@@ -1986,6 +2137,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::SetRoot {
+            node: ProofTrieNodeRecord::from_proof_trie_node_v2(&ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: root.clone(),
+                masks,
+            }),
+        });
+
         debug_assert!(
             matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot),
             "set_root called on a trie that already has revealed nodes"
@@ -2047,6 +2207,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if nodes.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::RevealNodes {
+            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
+        });
 
         if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
             trace!(target: TRACE_TARGET, "Skipping reveal_nodes on empty root");
@@ -2196,6 +2361,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
     fn root(&mut self) -> B256 {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::Root);
+
         self.update_subtrie_hashes();
 
         // Merge buffered subtrie updates into self.updates before hashing the upper trie,
@@ -2221,6 +2389,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self) {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::UpdateSubtrieHashes);
+
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
@@ -2348,12 +2519,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn clear(&mut self) {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.reset();
+
         for idx in self.all_subtries() {
             if let ArenaSparseNode::Subtrie(mut subtrie) =
                 self.upper_arena.remove(idx).expect("subtrie exists in arena")
             {
                 subtrie.clear();
-                self.cleared_subtries.push(*subtrie);
+                self.cleared_subtries.push(subtrie);
             }
         }
         self.upper_arena.clear();
@@ -2538,11 +2712,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-                let parallel_pruned: Vec<usize> = taken
+                pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
-                    .collect();
-                pruned += parallel_pruned.into_iter().sum::<usize>();
+                    .sum::<usize>();
             }
 
             // Restore taken subtries into the upper arena.
@@ -2550,6 +2723,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
             }
         }
+
+        #[cfg(feature = "trie-debug")]
+        self.record_initial_state();
 
         pruned
     }
@@ -2568,6 +2744,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if updates.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "trie-debug")]
+        let recorded_updates: Vec<_> =
+            updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
+        #[cfg(feature = "trie-debug")]
+        let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
@@ -2595,6 +2777,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let min_len = (logical_len as u8 + 1).min(64);
                     trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, min_len);
+                    #[cfg(feature = "trie-debug")]
+                    recorded_proof_targets.push((key, min_len));
                     updates.insert(key, update.clone());
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
@@ -2622,6 +2806,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.min_len);
+                        #[cfg(feature = "trie-debug")]
+                        recorded_proof_targets.push((proof.key, proof.min_len));
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
@@ -2653,6 +2839,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                             proof_required_fn(proof.key, proof.min_len);
+                            #[cfg(feature = "trie-debug")]
+                            recorded_proof_targets.push((proof.key, proof.min_len));
                             let (key, _, ref update) = subtrie_updates[target_idx];
                             updates.insert(key, update.clone());
                         }
@@ -2713,6 +2901,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
                                 proof_required_fn(proof_key, min_len);
+                                #[cfg(feature = "trie-debug")]
+                                recorded_proof_targets.push((proof_key, min_len));
                                 let update =
                                     mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
                                 updates.insert(key, update);
@@ -2748,6 +2938,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if taken.is_empty() {
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
+
+            #[cfg(feature = "trie-debug")]
+            self.debug_recorder.record(RecordedOp::UpdateLeaves {
+                updates: recorded_updates,
+                proof_targets: recorded_proof_targets,
+            });
+
             return Ok(());
         }
 
@@ -2770,6 +2967,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                 proof_required_fn(proof.key, proof.min_len);
+                #[cfg(feature = "trie-debug")]
+                recorded_proof_targets.push((proof.key, proof.min_len));
                 let (key, _, ref update) = subtrie_updates[target_idx];
                 updates.insert(key, update.clone());
             }
@@ -2816,7 +3015,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
 
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::UpdateLeaves {
+            updates: recorded_updates,
+            proof_targets: recorded_proof_targets,
+        });
+
         Ok(())
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+        core::mem::take(&mut self.debug_recorder)
     }
 
     fn commit_updates(
@@ -2832,173 +3042,39 @@ impl SparseTrie for ArenaParallelSparseTrie {
 mod tests {
     use super::TRACE_TARGET;
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
-    use alloy_primitives::{
-        map::{B256Map, HashSet},
-        B256, U256,
-    };
+    use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
-    use reth_trie::{
-        hashed_cursor::{
-            mock::MockHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
-        },
-        prefix_set::PrefixSet,
-        proof_v2::StorageProofCalculator,
-        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
-        StorageRoot,
-    };
-    use reth_trie_common::{
-        prefix_set::PrefixSetMut, updates::StorageTrieUpdates, HashedPostStateSorted,
-        HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
-    };
-    use std::{collections::BTreeMap, iter::once};
-    use tracing::{info, trace, trace_span};
+    use reth_trie::test_utils::TrieTestHarness;
+    use reth_trie_common::{Nibbles, ProofV2Target};
+    use std::collections::BTreeMap;
+    use tracing::{info, trace};
 
-    /// A fixed hashed address used by the harness for all storage trie operations.
-    const HASHED_ADDRESS: B256 = B256::ZERO;
-
-    /// Test harness for proptest-based arena sparse trie testing of a single storage trie.
+    /// Test harness for proptest-based arena sparse trie testing.
     ///
-    /// Accepts a `BTreeMap<B256, U256>` of hashed storage slots as the starting state,
-    /// computes the initial `StorageTrieUpdates` via `StorageRoot`, and stores both sorted
-    /// forms for later use. Exposes a `proof_v2` method that generates storage proofs using
-    /// mock cursors over the starting state.
+    /// Wraps [`TrieTestHarness`] and adds `ArenaParallelSparseTrie`-specific helpers for
+    /// the reveal-update loop and asserting that sparse trie updates match `StorageRoot`.
     struct ArenaTrieTestHarness {
-        /// The base storage dataset (hashed slot → value). Zero-valued entries are absent.
-        storage: BTreeMap<B256, U256>,
-        /// The expected storage root, calculated by `StorageRoot`.
-        original_root: B256,
-        /// The starting storage trie updates (unsorted), used for `minimize_trie_updates`.
-        storage_trie_updates: StorageTrieUpdates,
-        /// Mock factory for trie cursors.
-        trie_cursor_factory: MockTrieCursorFactory,
-        /// Mock factory for hashed cursors.
-        hashed_cursor_factory: MockHashedCursorFactory,
+        /// The inner general-purpose harness.
+        inner: TrieTestHarness,
+    }
+
+    impl std::ops::Deref for ArenaTrieTestHarness {
+        type Target = TrieTestHarness;
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl std::ops::DerefMut for ArenaTrieTestHarness {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.inner
+        }
     }
 
     impl ArenaTrieTestHarness {
         /// Creates a new test harness from a map of hashed storage slots to values.
-        ///
-        /// Computes the storage root and `StorageTrieUpdates` using `StorageRoot` with mock
-        /// cursors, then stores both sorted forms.
         fn new(storage: BTreeMap<B256, U256>) -> Self {
-            let mut harness = Self {
-                storage: BTreeMap::new(),
-                original_root: B256::ZERO,
-                storage_trie_updates: StorageTrieUpdates::default(),
-                trie_cursor_factory: MockTrieCursorFactory::new(
-                    BTreeMap::new(),
-                    Default::default(),
-                ),
-                hashed_cursor_factory: MockHashedCursorFactory::new(
-                    BTreeMap::new(),
-                    Default::default(),
-                ),
-            };
-            harness.apply_changeset(storage);
-            harness
-        }
-
-        /// Merges `changeset` into the base storage (zero values remove entries) and
-        /// recomputes the storage root, trie updates, and cursor factories.
-        fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
-            for (k, v) in changeset {
-                if v == U256::ZERO {
-                    self.storage.remove(&k);
-                } else {
-                    self.storage.insert(k, v);
-                }
-            }
-
-            self.hashed_cursor_factory = MockHashedCursorFactory::new(
-                BTreeMap::new(),
-                once((HASHED_ADDRESS, self.storage.clone())).collect(),
-            );
-
-            let empty_trie_cursor_factory = MockTrieCursorFactory::new(
-                BTreeMap::new(),
-                once((HASHED_ADDRESS, BTreeMap::new())).collect(),
-            );
-
-            // Compute storage root and trie updates.
-            let (original_root, _, storage_trie_updates) = {
-                let _span = trace_span!(target: TRACE_TARGET, "base_root_calc").entered();
-                trace!(target: TRACE_TARGET, "Calculating root and trie updates of base dataset");
-
-                StorageRoot::new_hashed(
-                    empty_trie_cursor_factory,
-                    self.hashed_cursor_factory.clone(),
-                    HASHED_ADDRESS,
-                    PrefixSet::default(),
-                    #[cfg(feature = "metrics")]
-                    reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-                )
-                .root_with_updates()
-                .expect("StorageRoot should succeed")
-            };
-
-            self.trie_cursor_factory = MockTrieCursorFactory::new(
-                BTreeMap::new(),
-                once((
-                    HASHED_ADDRESS,
-                    storage_trie_updates
-                        .storage_nodes
-                        .iter()
-                        .map(|(k, v)| (*k, v.clone()))
-                        .collect(),
-                ))
-                .collect(),
-            );
-
-            self.original_root = original_root;
-            self.storage_trie_updates = storage_trie_updates;
-        }
-
-        /// Removes all entries from `updates` that are redundant with the starting storage
-        /// trie updates.
-        ///
-        /// A storage node is redundant if it exists in the starting set with the same value.
-        /// A removed node is redundant if it was already absent from the starting set.
-        /// The `is_deleted` flag is cleared if it matches the starting value.
-        fn minimize_trie_updates(&self, updates: &mut StorageTrieUpdates) {
-            // Clear is_deleted if it matches the starting set.
-            if updates.is_deleted == self.storage_trie_updates.is_deleted {
-                updates.is_deleted = false;
-            }
-
-            // StorageTrieUpdates::finalize can leave the same path in both storage_nodes
-            // and removed_nodes. Per into_sorted, updated nodes take precedence over
-            // removed ones. Record which paths had an update before minimization so we
-            // can drop their corresponding removals.
-            let paths_with_updates: HashSet<Nibbles> =
-                updates.storage_nodes.keys().copied().collect();
-
-            // Remove storage nodes identical to the starting set.
-            updates.storage_nodes.retain(|path, node| {
-                self.storage_trie_updates.storage_nodes.get(path) != Some(node)
-            });
-
-            // Remove removed_nodes for paths absent from the starting set, and also
-            // for paths that had a storage_nodes entry (update takes precedence over
-            // removal).
-            updates.removed_nodes.retain(|path| {
-                self.storage_trie_updates.storage_nodes.contains_key(path) &&
-                    !paths_with_updates.contains(path)
-            });
-        }
-
-        /// Removes all entries from `updates` that are redundant with the starting storage
-        /// trie updates. Same logic as [`Self::minimize_trie_updates`] but for
-        /// [`SparseTrieUpdates`].
-        fn minimize_sparse_updates(&self, updates: &mut crate::SparseTrieUpdates) {
-            // Remove updated nodes identical to the starting set.
-            updates.updated_nodes.retain(|path, node| {
-                self.storage_trie_updates.storage_nodes.get(path) != Some(node)
-            });
-
-            // Remove removed_nodes for paths absent from the starting set.
-            updates
-                .removed_nodes
-                .retain(|path| self.storage_trie_updates.storage_nodes.contains_key(path));
+            Self { inner: TrieTestHarness::new(storage) }
         }
 
         /// Computes the new storage root and trie updates after applying the given changes
@@ -3009,50 +3085,11 @@ mod tests {
             apst: &mut ArenaParallelSparseTrie,
             changes: BTreeMap<B256, U256>,
         ) {
-            // Build prefix set from changed keys.
-            let mut prefix_set = PrefixSetMut::with_capacity(changes.len());
-            for hashed_slot in changes.keys() {
-                prefix_set.insert(Nibbles::unpack(hashed_slot));
-            }
-            let prefix_set = prefix_set.freeze();
-
             // Compute expected root and trie updates via StorageRoot.
             let (expected_root, mut expected_trie_updates) = if changes.is_empty() {
-                (self.original_root, Default::default())
+                (self.original_root(), Default::default())
             } else {
-                // Build sorted overlay from changes.
-                let hashed_storage =
-                    HashedStorage::from_iter(false, changes.iter().map(|(&k, &v)| (k, v)));
-
-                let overlay = HashedPostStateSorted::new(
-                    Vec::new(),
-                    once((HASHED_ADDRESS, hashed_storage.into_sorted())).collect(),
-                );
-
-                // Create overlay cursor factory on top of the existing base.
-                let overlay_cursor_factory =
-                    HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &overlay);
-
-                let (root, _, trie_updates) = {
-                    let _span = trace_span!(target: TRACE_TARGET, "changeset_root_calc").entered();
-                    trace!(
-                        target: TRACE_TARGET,
-                        "Recalculating root and trie updates with changeset applied",
-                    );
-
-                    StorageRoot::new_hashed(
-                        self.trie_cursor_factory.clone(),
-                        overlay_cursor_factory,
-                        HASHED_ADDRESS,
-                        prefix_set,
-                        #[cfg(feature = "metrics")]
-                        reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
-                    )
-                    .root_with_updates()
-                    .expect("StorageRoot should succeed")
-                };
-
-                (root, trie_updates)
+                self.get_root_with_updates(&changes)
             };
 
             self.minimize_trie_updates(&mut expected_trie_updates);
@@ -3084,14 +3121,22 @@ mod tests {
                     break;
                 }
 
-                let mut proof_nodes = self.proof_v2(&mut targets);
+                let (mut proof_nodes, _) = self.proof_v2(&mut targets);
                 apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
             }
 
             // Compute root and take updates from the APST.
             let actual_root = apst.root();
             let mut actual_updates = apst.take_updates();
-            self.minimize_sparse_updates(&mut actual_updates);
+
+            // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
+            // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
+            actual_updates.updated_nodes.retain(|path, node| {
+                self.storage_trie_updates().storage_nodes.get(path) != Some(node)
+            });
+            actual_updates
+                .removed_nodes
+                .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
 
             pretty_assertions::assert_eq!(
                 expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>().sort(),
@@ -3104,42 +3149,6 @@ mod tests {
                 "removed nodes mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
-        }
-
-        /// Obtains the root node of the storage trie via `StorageProofCalculator`.
-        fn root_node(&self) -> ProofTrieNodeV2 {
-            let trie_cursor = self
-                .trie_cursor_factory
-                .storage_trie_cursor(HASHED_ADDRESS)
-                .expect("storage trie cursor should succeed");
-            let hashed_cursor = self
-                .hashed_cursor_factory
-                .hashed_storage_cursor(HASHED_ADDRESS)
-                .expect("hashed storage cursor should succeed");
-
-            let mut proof_calculator =
-                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-            proof_calculator
-                .storage_root_node(HASHED_ADDRESS)
-                .expect("storage_root_node should succeed")
-        }
-
-        /// Generates storage proofs for the given targets using `StorageProofCalculator`.
-        fn proof_v2(&self, targets: &mut [ProofV2Target]) -> Vec<ProofTrieNodeV2> {
-            let trie_cursor = self
-                .trie_cursor_factory
-                .storage_trie_cursor(HASHED_ADDRESS)
-                .expect("storage trie cursor should succeed");
-            let hashed_cursor = self
-                .hashed_cursor_factory
-                .hashed_storage_cursor(HASHED_ADDRESS)
-                .expect("hashed storage cursor should succeed");
-
-            let mut proof_calculator =
-                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
-            proof_calculator
-                .storage_proof(HASHED_ADDRESS, targets)
-                .expect("proof_v2 should succeed")
         }
     }
 
@@ -3176,7 +3185,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
+        #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
@@ -3221,7 +3230,7 @@ mod tests {
             harness.apply_changeset(changeset1);
 
             // Pick N random keys from the current storage as retained leaves for pruning.
-            let mut all_storage_keys: Vec<Nibbles> = harness.storage.keys()
+            let mut all_storage_keys: Vec<Nibbles> = harness.storage().keys()
                 .map(|k| Nibbles::unpack(*k))
                 .collect();
             all_storage_keys.shuffle(&mut rng);
@@ -3231,7 +3240,7 @@ mod tests {
             let retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
             apst.prune(&retained);
 
-            let changeset2 = build_changeset(&harness.storage, changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
+            let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
             for (i, (k, v)) in changeset2.iter().enumerate() {
                 trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
             }

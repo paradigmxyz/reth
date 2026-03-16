@@ -235,8 +235,8 @@ pub(crate) fn payload_to_new_payload(
                         ))?,
                     )
                 } else {
-                    // Extract actual Requests from RequestsOrHash
-                    let requests = prague.requests.requests_hash();
+                    // Preserve the original RequestsOrHash payload for engine_newPayloadV4.
+                    let requests = prague.requests.clone();
                     (
                         version,
                         serde_json::to_value((

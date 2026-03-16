@@ -36,8 +36,6 @@ serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-rocksdb = ["reth-db-api/rocksdb"]
-edge = ["rocksdb"]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",

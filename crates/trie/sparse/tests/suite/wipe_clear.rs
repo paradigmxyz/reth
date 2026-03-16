@@ -16,7 +16,7 @@ pub(super) fn test_wipe_resets_to_empty_root<T: SparseTrie + Default>() {
 
     // Compute root to confirm the trie is populated.
     let root_before = trie.root();
-    assert_eq!(root_before, harness.original_root);
+    assert_eq!(root_before, harness.original_root());
     assert_ne!(root_before, EMPTY_ROOT_HASH);
 
     // Wipe and verify empty root.
@@ -41,7 +41,7 @@ pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie
 
     // Compute root to populate the trie fully.
     let root_before = trie.root();
-    assert_eq!(root_before, harness.original_root);
+    assert_eq!(root_before, harness.original_root());
     assert_ne!(root_before, EMPTY_ROOT_HASH);
 
     // Clear and verify empty root.
@@ -72,7 +72,7 @@ pub(super) fn test_wipe_produces_wiped_updates<T: SparseTrie + Default>() {
 
     // Compute root to populate the trie fully.
     let root_before = trie.root();
-    assert_eq!(root_before, harness.original_root);
+    assert_eq!(root_before, harness.original_root());
     assert_ne!(root_before, EMPTY_ROOT_HASH);
 
     // Wipe the trie.
@@ -103,7 +103,7 @@ pub(super) fn test_clear_then_reuse_trie<T: SparseTrie + Default>() {
     let mut trie: T = harness_1.init_trie_fully_revealed(false);
 
     let root_1 = trie.root();
-    assert_eq!(root_1, harness_1.original_root);
+    assert_eq!(root_1, harness_1.original_root());
     assert_ne!(root_1, EMPTY_ROOT_HASH);
 
     // Phase 2: clear the trie and verify empty.
@@ -125,7 +125,7 @@ pub(super) fn test_clear_then_reuse_trie<T: SparseTrie + Default>() {
 
     let keys_2: Vec<B256> = storage_2.keys().copied().collect();
     let mut targets: Vec<ProofV2Target> = keys_2.iter().map(|k| ProofV2Target::new(*k)).collect();
-    let mut proof_nodes = harness_2.proof_v2(&mut targets);
+    let (mut proof_nodes, _) = harness_2.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed on cleared trie");
 
     // Phase 4: insert a 4th leaf.
@@ -140,7 +140,7 @@ pub(super) fn test_clear_then_reuse_trie<T: SparseTrie + Default>() {
 
     // Update the reference harness with the 4th leaf.
     harness_2.apply_changeset(changeset);
-    assert_eq!(root_2, harness_2.original_root, "root after clear+reuse must match reference");
+    assert_eq!(root_2, harness_2.original_root(), "root after clear+reuse must match reference");
     assert_ne!(root_2, root_1, "new root must differ from pre-clear root");
     assert_ne!(root_2, EMPTY_ROOT_HASH, "new root must not be empty");
 }
