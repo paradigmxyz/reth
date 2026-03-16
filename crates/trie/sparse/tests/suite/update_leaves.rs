@@ -1364,7 +1364,7 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     let base_storage: BTreeMap<B256, U256> =
         BTreeMap::from([(key_d7, U256::from(1)), (key_d8, U256::from(2)), (key_dd, U256::from(3))]);
 
-    let harness = SuiteTestHarness::new(base_storage.clone());
+    let harness = SuiteTestHarness::new(base_storage);
 
     // Reveal only 0xd7 and 0xdd, leaving 0xd8's subtrie blinded.
     let mut trie: T = harness.init_trie_with_targets(&[key_d7, key_dd], false, new_trie);
