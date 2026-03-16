@@ -36,6 +36,8 @@ pub struct CachedReads {
     pub contracts: B256Map<Bytecode>,
     /// Block hash mapped to the block number.
     pub block_hashes: HashMap<u64, B256>,
+    /// Hit/miss counters for cache operations.
+    pub counts: CachedReadsCounts,
 }
 
 // === impl CachedReads ===
@@ -49,6 +51,11 @@ impl CachedReads {
     /// Gets a mutable [`Database`] that will cache reads from the underlying database.
     pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
+    }
+
+    /// Resets all hit/miss counters to zero.
+    pub fn reset_counts(&mut self) {
+        self.counts = CachedReadsCounts::default();
     }
 
     /// Inserts an account info into the cache.
@@ -106,8 +113,12 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let basic = match self.cached.accounts.entry(address) {
-            Entry::Occupied(entry) => entry.get().info.clone(),
+            Entry::Occupied(entry) => {
+                self.cached.counts.account_hits += 1;
+                entry.get().info.clone()
+            }
             Entry::Vacant(entry) => {
+                self.cached.counts.account_misses += 1;
                 entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
             }
         };
@@ -116,8 +127,14 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         let code = match self.cached.contracts.entry(code_hash) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
+            Entry::Occupied(entry) => {
+                self.cached.counts.contract_hits += 1;
+                entry.get().clone()
+            }
+            Entry::Vacant(entry) => {
+                self.cached.counts.contract_misses += 1;
+                entry.insert(self.db.code_by_hash_ref(code_hash)?).clone()
+            }
         };
         Ok(code)
     }
@@ -125,10 +142,17 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.cached.accounts.entry(address) {
             Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(index) {
-                Entry::Occupied(entry) => Ok(*entry.get()),
-                Entry::Vacant(entry) => Ok(*entry.insert(self.db.storage_ref(address, index)?)),
+                Entry::Occupied(entry) => {
+                    self.cached.counts.storage_hits += 1;
+                    Ok(*entry.get())
+                }
+                Entry::Vacant(entry) => {
+                    self.cached.counts.storage_misses += 1;
+                    Ok(*entry.insert(self.db.storage_ref(address, index)?))
+                }
             },
             Entry::Vacant(acc_entry) => {
+                self.cached.counts.storage_misses += 1;
                 // acc needs to be loaded for us to access slots.
                 let info = self.db.basic_ref(address)?;
                 let (account, value) = if info.is_some() {
@@ -147,8 +171,14 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         let hash = match self.cached.block_hashes.entry(number) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
+            Entry::Occupied(entry) => {
+                self.cached.counts.block_hash_hits += 1;
+                *entry.get()
+            }
+            Entry::Vacant(entry) => {
+                self.cached.counts.block_hash_misses += 1;
+                *entry.insert(self.db.block_hash_ref(number)?)
+            }
         };
         Ok(hash)
     }
@@ -205,9 +235,123 @@ impl CachedAccount {
     }
 }
 
+/// Hit/miss counters for [`CachedReads`] operations.
+///
+/// Tracks how often each category of read (account, storage, contract, block hash)
+/// was served from cache vs fetched from the underlying database.
+#[derive(Debug, Clone, Default)]
+pub struct CachedReadsCounts {
+    /// Number of account lookups served from cache.
+    pub account_hits: u64,
+    /// Number of account lookups fetched from the underlying database.
+    pub account_misses: u64,
+    /// Number of storage slot lookups served from cache.
+    pub storage_hits: u64,
+    /// Number of storage slot lookups fetched from the underlying database.
+    pub storage_misses: u64,
+    /// Number of contract code lookups served from cache.
+    pub contract_hits: u64,
+    /// Number of contract code lookups fetched from the underlying database.
+    pub contract_misses: u64,
+    /// Number of block hash lookups served from cache.
+    pub block_hash_hits: u64,
+    /// Number of block hash lookups fetched from the underlying database.
+    pub block_hash_misses: u64,
+}
+
+impl CachedReadsCounts {
+    /// Returns the total number of cache hits across all categories.
+    pub const fn total_hits(&self) -> u64 {
+        self.account_hits + self.storage_hits + self.contract_hits + self.block_hash_hits
+    }
+
+    /// Returns the total number of cache misses across all categories.
+    pub const fn total_misses(&self) -> u64 {
+        self.account_misses + self.storage_misses + self.contract_misses + self.block_hash_misses
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Simple in-memory database for testing.
+    #[derive(Default)]
+    struct TestDb {
+        accounts: AddressMap<AccountInfo>,
+        storage: AddressMap<U256Map<U256>>,
+        contracts: B256Map<Bytecode>,
+        block_hashes: HashMap<u64, B256>,
+    }
+
+    impl DatabaseRef for TestDb {
+        type Error = core::convert::Infallible;
+
+        fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.accounts.get(&address).cloned())
+        }
+
+        fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(self.contracts.get(&code_hash).cloned().unwrap_or_default())
+        }
+
+        fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+            Ok(self.storage.get(&address).and_then(|s| s.get(&index)).copied().unwrap_or_default())
+        }
+
+        fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+            Ok(self.block_hashes.get(&number).copied().unwrap_or_default())
+        }
+    }
+
+    #[test]
+    fn test_cached_reads_counts() {
+        let address = Address::from_slice(&[1u8; 20]);
+        let slot = U256::from(42);
+
+        let mut db = TestDb::default();
+        db.accounts.insert(address, AccountInfo::default());
+        db.storage.entry(address).or_default().insert(slot, U256::from(100));
+        db.block_hashes.insert(1, B256::from_slice(&[0xaa; 32]));
+
+        let mut cached = CachedReads::default();
+
+        // First reads are misses
+        {
+            let mut db_mut = cached.as_db_mut(&db);
+            db_mut.basic(address).unwrap();
+            db_mut.storage(address, slot).unwrap();
+            db_mut.block_hash(1).unwrap();
+        }
+        assert_eq!(cached.counts.account_misses, 1);
+        assert_eq!(cached.counts.account_hits, 0);
+        assert_eq!(cached.counts.storage_misses, 1);
+        assert_eq!(cached.counts.storage_hits, 0);
+        assert_eq!(cached.counts.block_hash_misses, 1);
+        assert_eq!(cached.counts.block_hash_hits, 0);
+        assert_eq!(cached.counts.total_misses(), 3);
+        assert_eq!(cached.counts.total_hits(), 0);
+
+        // Second reads are hits
+        {
+            let mut db_mut = cached.as_db_mut(&db);
+            db_mut.basic(address).unwrap();
+            db_mut.storage(address, slot).unwrap();
+            db_mut.block_hash(1).unwrap();
+        }
+        assert_eq!(cached.counts.account_misses, 1);
+        assert_eq!(cached.counts.account_hits, 1);
+        assert_eq!(cached.counts.storage_misses, 1);
+        assert_eq!(cached.counts.storage_hits, 1);
+        assert_eq!(cached.counts.block_hash_misses, 1);
+        assert_eq!(cached.counts.block_hash_hits, 1);
+        assert_eq!(cached.counts.total_hits(), 3);
+
+        // Reset works
+        cached.reset_counts();
+        assert_eq!(cached.counts.total_hits(), 0);
+        assert_eq!(cached.counts.total_misses(), 0);
+    }
 
     #[test]
     fn test_extend_with_two_cached_reads() {
