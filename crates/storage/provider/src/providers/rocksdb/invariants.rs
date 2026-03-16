@@ -283,7 +283,7 @@ impl RocksDBProvider {
                 .sum();
 
             // Only trigger potentially slow healing if we have any entries beyond the genesis data.
-            if self.iter::<tables::StoragesHistory>()?.count() > genesis_entries {
+            if self.iter::<tables::StoragesHistory>()?.nth(genesis_entries).is_some() {
                 tracing::info!(
                     target: "reth::providers::rocksdb",
                     "StoragesHistory: checkpoint is 0, clearing stale data"
@@ -386,7 +386,7 @@ impl RocksDBProvider {
             let genesis_entries = provider.chain_spec().genesis().alloc.len();
 
             // Only trigger potentially slow healing if we have any entries beyond the genesis data.
-            if self.iter::<tables::AccountsHistory>()?.count() > genesis_entries {
+            if self.iter::<tables::AccountsHistory>()?.nth(genesis_entries).is_some() {
                 tracing::info!(
                     target: "reth::providers::rocksdb",
                     "AccountsHistory: checkpoint is 0, clearing stale data"
