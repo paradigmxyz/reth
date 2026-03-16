@@ -71,17 +71,13 @@ function metricRows(summary) {
   ];
 }
 
-// Wait time rows: array of { title, baseline, feature } objects.
+// Wait time rows: one row per metric showing mean values.
 function waitTimeRows(summary) {
   const waitTimes = summary.wait_times || {};
   const rows = [];
   for (const key of Object.keys(waitTimes)) {
     const wt = waitTimes[key];
-    rows.push(
-      { title: `${wt.title} (mean)`, baseline: fmtMs(wt.baseline.mean_ms), feature: fmtMs(wt.feature.mean_ms) },
-      { title: `${wt.title} (p50)`,  baseline: fmtMs(wt.baseline.p50_ms),  feature: fmtMs(wt.feature.p50_ms) },
-      { title: `${wt.title} (p95)`,  baseline: fmtMs(wt.baseline.p95_ms),  feature: fmtMs(wt.feature.p95_ms) },
-    );
+    rows.push({ title: wt.title, baseline: fmtMs(wt.baseline.mean_ms), feature: fmtMs(wt.feature.mean_ms) });
   }
   return rows;
 }
