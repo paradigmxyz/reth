@@ -10,6 +10,7 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
 use rayon::prelude::*;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_db::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
 use reth_db_api::tables;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -272,25 +273,29 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: clear any stale data and return.
+        // Fast path: clear and re-insert genesis history.
         if checkpoint == 0 {
-            let genesis_entries = provider
-                .chain_spec()
-                .genesis()
-                .alloc
-                .values()
-                .filter_map(|account| account.storage.as_ref().map(|s| s.len()))
-                .sum();
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "StoragesHistory: checkpoint is 0, clearing stale data"
+            );
+            self.clear::<tables::StoragesHistory>()?;
 
-            // Only trigger potentially slow healing if we have any entries beyond the genesis data.
-            if self.iter::<tables::StoragesHistory>()?.nth(genesis_entries).is_some() {
-                tracing::info!(
-                    target: "reth::providers::rocksdb",
-                    "StoragesHistory: checkpoint is 0, clearing stale data"
-                );
-            } else {
-                return Ok(None);
+            let chain_spec = provider.chain_spec();
+            let genesis = chain_spec.genesis();
+            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
+            for (addr, account) in &genesis.alloc {
+                if let Some(storage) = &account.storage {
+                    for key in storage.keys() {
+                        self.put::<tables::StoragesHistory>(
+                            StorageShardedKey::last(*addr, *key),
+                            &list,
+                        )?;
+                    }
+                }
             }
+
+            return Ok(None);
         }
 
         let sf_tip = provider
@@ -381,19 +386,22 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: clear any stale data and return.
+        // Fast path: clear and re-insert genesis history.
         if checkpoint == 0 {
-            let genesis_entries = provider.chain_spec().genesis().alloc.len();
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "AccountsHistory: checkpoint is 0, clearing stale data"
+            );
+            self.clear::<tables::AccountsHistory>()?;
 
-            // Only trigger potentially slow healing if we have any entries beyond the genesis data.
-            if self.iter::<tables::AccountsHistory>()?.nth(genesis_entries).is_some() {
-                tracing::info!(
-                    target: "reth::providers::rocksdb",
-                    "AccountsHistory: checkpoint is 0, clearing stale data"
-                );
-            } else {
-                return Ok(None);
+            let chain_spec = provider.chain_spec();
+            let genesis = chain_spec.genesis();
+            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
+            for addr in genesis.alloc.keys() {
+                self.put::<tables::AccountsHistory>(ShardedKey::last(*addr), &list)?;
             }
+
+            return Ok(None);
         }
 
         let sf_tip = provider
@@ -561,11 +569,14 @@ mod tests {
 
         let result = rocksdb.heal_storages_history(&provider).unwrap();
         assert_eq!(result, None, "StoragesHistory should return early at checkpoint 0");
-        assert!(rocksdb.first::<tables::StoragesHistory>().unwrap().is_none());
 
         let result = rocksdb.heal_accounts_history(&provider).unwrap();
         assert_eq!(result, None, "AccountsHistory should return early at checkpoint 0");
-        assert!(rocksdb.first::<tables::AccountsHistory>().unwrap().is_none());
+        // Genesis account history entries are re-inserted
+        assert_eq!(
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().count(),
+            factory.chain_spec().genesis().alloc.len()
+        );
     }
 
     #[test]
