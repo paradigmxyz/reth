@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn test_find_leaf_exists<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_exists<T: SparseTrie>(new_trie: fn() -> T) {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
     let key3 = B256::with_last_byte(0x30);
@@ -9,7 +9,7 @@ pub(super) fn test_find_leaf_exists<T: SparseTrie + Default>() {
         [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     let key2_nibbles = Nibbles::unpack(key2);
 
@@ -29,7 +29,7 @@ pub(super) fn test_find_leaf_exists<T: SparseTrie + Default>() {
     );
 }
 
-pub(super) fn test_find_leaf_nonexistent<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_nonexistent<T: SparseTrie>(new_trie: fn() -> T) {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
     let key3 = B256::with_last_byte(0x30);
@@ -38,7 +38,7 @@ pub(super) fn test_find_leaf_nonexistent<T: SparseTrie + Default>() {
         [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     let nonexistent_key = B256::with_last_byte(0x99);
     let nonexistent_nibbles = Nibbles::unpack(nonexistent_key);
@@ -52,7 +52,7 @@ pub(super) fn test_find_leaf_nonexistent<T: SparseTrie + Default>() {
 
 /// `find_leaf` on a path that traverses a blinded node returns
 /// `Err(LeafLookupError::BlindedNode)`.
-pub(super) fn test_find_leaf_blinded<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_blinded<T: SparseTrie>(new_trie: fn() -> T) {
     // Use ≥16 keys per nibble group so branch children become hash nodes (>32 bytes RLP),
     // ensuring partial reveal leaves blinded subtries.
     let mut base_storage = BTreeMap::new();
@@ -78,7 +78,7 @@ pub(super) fn test_find_leaf_blinded<T: SparseTrie + Default>() {
     let harness = SuiteTestHarness::new(base_storage);
 
     // Reveal only group_a keys, leaving group_b's subtrie blinded.
-    let trie: T = harness.init_trie_with_targets(&group_a_keys, false);
+    let trie: T = harness.init_trie_with_targets(&group_a_keys, false, new_trie);
 
     // Look up a key in group_b — should hit a blinded node.
     let blinded_key = group_b_keys[0];
@@ -93,7 +93,7 @@ pub(super) fn test_find_leaf_blinded<T: SparseTrie + Default>() {
 
 /// `find_leaf` with an expected value that doesn't match the actual leaf value
 /// returns `Err(LeafLookupError::ValueMismatch)`.
-pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie>(new_trie: fn() -> T) {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
     let key3 = B256::with_last_byte(0x30);
@@ -102,7 +102,7 @@ pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie + Default>() {
         [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     let key2_nibbles = Nibbles::unpack(key2);
     let wrong_value = encode_fixed_size(&U256::from(999)).to_vec();
@@ -119,7 +119,7 @@ pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie + Default>() {
 ///
 /// Two leaves sharing prefix 0x12 create a branch with children at nibbles 3 and 5.
 /// Searching for a key with nibble 7 at that branch position should return `NonExistent`.
-pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie>(new_trie: fn() -> T) {
     // key1 nibbles: 1,2,3,4,0,0,...  →  B256 = 0x12340000...
     let mut key1 = B256::ZERO;
     key1.0[0] = 0x12;
@@ -134,7 +134,7 @@ pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie + Defau
         [(key1, U256::from(1)), (key2, U256::from(2))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // search_path nibbles: 1,2,7,8,0,0,...  →  B256 = 0x12780000...
     // Nibble 7 is unset at the branch (only 3 and 5 are set).
@@ -155,7 +155,7 @@ pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie + Defau
 ///
 /// A single leaf at nibbles [1,2,3,4,5,6,...] creates an extension root with key 0x12.
 /// Searching for a key at nibbles [1,2,7,8,...] diverges from that extension.
-pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie>(new_trie: fn() -> T) {
     // Single leaf: nibbles [1,2,3,4,5,6,0,0,...] → B256 = 0x12345600...
     let mut key1 = B256::ZERO;
     key1.0[0] = 0x12;
@@ -165,7 +165,7 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + De
     let base_storage: BTreeMap<B256, U256> = once((key1, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // Search path diverges from the extension: nibbles [1,2,7,8,0,0,...] → B256 = 0x12780000...
     let mut search_key = B256::ZERO;
@@ -185,7 +185,7 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie + De
 ///
 /// A single leaf at nibbles [1,2,3,4,0,0,...] exists. Searching for a key at nibbles
 /// [1,2,3,4,5,6,0,0,...] extends past the existing leaf — it should return `NonExistent`.
-pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie + Default>() {
+pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie>(new_trie: fn() -> T) {
     // Existing leaf at short path: nibbles [1,2,3,4,0,0,...] → B256 = 0x12340000...
     let mut existing_key = B256::ZERO;
     existing_key.0[0] = 0x12;
@@ -194,7 +194,7 @@ pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie + Default
     let base_storage: BTreeMap<B256, U256> = once((existing_key, U256::from(1))).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
-    let trie: T = harness.init_trie_fully_revealed(false);
+    let trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // Search path extends past the existing leaf: nibbles [1,2,3,4,5,6,0,0,...]
     // → B256 = 0x12345600...
