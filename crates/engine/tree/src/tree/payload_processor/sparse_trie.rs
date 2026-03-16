@@ -328,12 +328,7 @@ where
 
             // Update subtrie hashes for account and storage tries to incrementally
             // compute intermediate hashes after each round of updates.
-            self.trie.calculate_subtries();
-            for trie in self.trie.storage_tries_mut().values_mut() {
-                if let RevealableSparseTrie::Revealed(trie) = trie {
-                    trie.update_subtrie_hashes();
-                }
-            }
+            self.update_subtrie_hashes();
         }
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
@@ -608,6 +603,39 @@ where
         self.account_cache_misses += updates_len_after as u64;
 
         Ok(updates_len_after < updates_len_before)
+    }
+
+    /// Updates subtrie hashes for the account trie and all revealed storage tries.
+    ///
+    /// Storage tries are updated in parallel via rayon.
+    fn update_subtrie_hashes(&mut self) {
+        self.trie.calculate_subtries();
+
+        struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
+        // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
+        // documented at the use site below.
+        unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
+
+        let tries: Vec<SendStorageTriePtr<S>> = self
+            .trie
+            .storage_tries_mut()
+            .values_mut()
+            .filter(|trie| trie.is_revealed())
+            .map(|trie| SendStorageTriePtr(trie as *mut _))
+            .collect();
+
+        tries.into_par_iter().for_each(|SendStorageTriePtr(trie)| {
+            // SAFETY:
+            // - pointers are created from `storage_tries_mut().values_mut()` above;
+            // - `values_mut()` yields each entry exactly once, so no aliasing;
+            // - we do not insert/remove entries between pointer collection and use, so pointers
+            //   stay valid and map reallocation cannot occur.
+            unsafe {
+                if let RevealableSparseTrie::Revealed(trie) = &mut *trie {
+                    trie.update_subtrie_hashes();
+                }
+            }
+        });
     }
 
     /// Computes storage roots for accounts whose storage updates are fully drained.
