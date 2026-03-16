@@ -44,8 +44,8 @@ use alloy_primitives::{TxHash, B256};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    DedupPayload, DisconnectReason, EthNetworkPrimitives, EthVersion, GetPooledTransactions,
-    HandleMempoolData, HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
+    DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
+    HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
     RequestTxHashes, Transactions, ValidAnnouncementData,
 };
@@ -468,13 +468,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.transaction_fetcher.remove_peer(peer_id);
     }
 
-    /// Penalizes and disconnects a peer that violated the protocol (e.g. sent malformed blob
-    /// sidecar data).
-    fn disconnect_peer_for_protocol_violation(&self, peer_id: PeerId) {
-        self.report_peer_bad_transactions(peer_id);
-        self.network.disconnect_peer_with_reason(peer_id, DisconnectReason::SubprotocolSpecific);
-    }
-
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
@@ -482,9 +475,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
     /// Handles a failed transaction import.
     ///
-    /// Protocol violations (e.g. malformed blob sidecars) result in immediate peer disconnect
-    /// without caching the hash as bad — the transaction may be valid when fetched from another
-    /// peer.
+    /// Blob sidecar errors (e.g. invalid proof, missing sidecar) are penalized via
+    /// `report_peer_bad_transactions` but NOT cached in `bad_imports` — the transaction itself
+    /// may be valid when fetched from another peer with correct sidecar data.
     ///
     /// Other bad transactions are penalized and cached in `bad_imports` to avoid fetching or
     /// importing them again.
@@ -512,13 +505,13 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     fn on_bad_import(&mut self, err: PoolError) {
         let peers = self.transactions_by_peers.remove(&err.hash);
 
-        if err.is_protocol_violation() {
-            // Protocol violations (e.g. malformed blob sidecars) warrant immediate disconnect.
-            // The tx hash is NOT added to bad_imports because the transaction itself may be valid
-            // — the issue is peer-specific (bad sidecar data), not transaction-specific.
+        if err.is_bad_blob_sidecar() {
+            // Blob sidecar errors: penalize but do NOT cache the hash as bad.
+            // The transaction may be valid — only the sidecar from this peer was wrong.
+            // Using regular penalties means repeated offenders still get disconnected.
             if let Some(peers) = peers {
                 for peer_id in peers {
-                    self.disconnect_peer_for_protocol_violation(peer_id);
+                    self.report_peer_bad_transactions(peer_id);
                 }
             }
             return
@@ -2582,7 +2575,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_protocol_violation_not_cached_as_bad_import() {
+    async fn test_bad_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
         let peer_id = PeerId::new([1; 64]);
         let hash = B256::from_slice(&[1; 32]);
@@ -2624,7 +2617,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_non_protocol_violation_still_cached_as_bad_import() {
+    async fn test_non_blob_sidecar_error_still_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
         let peer_id = PeerId::new([1; 64]);
         let hash = B256::from_slice(&[2; 32]);

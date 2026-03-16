@@ -146,13 +146,14 @@ impl PoolError {
         }
     }
 
-    /// Returns `true` if the error indicates a protocol violation that should result in an
-    /// immediate peer disconnect, without proving that the transaction hash itself is globally
-    /// invalid.
+    /// Returns `true` if this is a blob sidecar error that should NOT be cached as a bad import.
+    ///
+    /// The transaction hash may be valid — the issue is peer-specific (e.g. malformed sidecar
+    /// data), so we penalize the peer but allow re-fetching from other peers.
     #[inline]
-    pub const fn is_protocol_violation(&self) -> bool {
+    pub const fn is_bad_blob_sidecar(&self) -> bool {
         match &self.kind {
-            PoolErrorKind::InvalidTransaction(err) => err.is_protocol_violation(),
+            PoolErrorKind::InvalidTransaction(err) => err.is_bad_blob_sidecar(),
             _ => false,
         }
     }
@@ -411,10 +412,12 @@ impl InvalidPoolTransactionError {
         }
     }
 
-    /// Returns `true` if the failure indicates a protocol violation that should result in an
-    /// immediate peer disconnect.
+    /// Returns `true` if this is a blob sidecar error (e.g. invalid proof, missing sidecar).
+    ///
+    /// These errors indicate the sidecar data from a specific peer was bad, but the transaction
+    /// hash itself may be valid when fetched from another peer.
     #[inline]
-    pub const fn is_protocol_violation(&self) -> bool {
+    pub const fn is_bad_blob_sidecar(&self) -> bool {
         matches!(
             self,
             Self::Eip4844(
@@ -504,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_violation_detection() {
+    fn bad_blob_sidecar_detection() {
         let err = PoolError::new(
             TxHash::ZERO,
             InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::InvalidEip4844Blob(
@@ -512,7 +515,7 @@ mod tests {
             )),
         );
 
-        assert!(err.is_protocol_violation());
+        assert!(err.is_bad_blob_sidecar());
 
         let err = PoolError::new(
             TxHash::ZERO,
@@ -521,13 +524,13 @@ mod tests {
             ),
         );
 
-        assert!(err.is_protocol_violation());
+        assert!(err.is_bad_blob_sidecar());
 
         let err = PoolError::new(
             TxHash::ZERO,
             InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::NoEip4844Blobs),
         );
 
-        assert!(!err.is_protocol_violation());
+        assert!(!err.is_bad_blob_sidecar());
     }
 }
