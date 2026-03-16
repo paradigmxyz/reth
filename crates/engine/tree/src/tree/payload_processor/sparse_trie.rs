@@ -325,6 +325,15 @@ where
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
+
+            // Update subtrie hashes for account and storage tries to incrementally
+            // compute intermediate hashes after each round of updates.
+            self.trie.calculate_subtries();
+            for trie in self.trie.storage_tries_mut().values_mut() {
+                if let RevealableSparseTrie::Revealed(trie) = trie {
+                    trie.update_subtrie_hashes();
+                }
+            }
         }
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
