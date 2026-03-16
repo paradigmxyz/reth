@@ -51,6 +51,7 @@ impl RpcStateCacheArgs {
         self.max_blocks = 0;
         self.max_receipts = 0;
         self.max_headers = 0;
+        self.max_cached_tx_hashes = 0;
     }
 }
 
