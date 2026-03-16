@@ -384,12 +384,26 @@ impl ProofWorkerHandle {
 pub struct ProofTaskCtx<Factory> {
     /// The factory for creating state providers.
     factory: Factory,
+    /// Maximum random jitter to apply before each proof computation (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
 }
 
 impl<Factory> ProofTaskCtx<Factory> {
     /// Creates a new [`ProofTaskCtx`] with the given factory.
     pub const fn new(factory: Factory) -> Self {
-        Self { factory }
+        Self {
+            factory,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
+        }
+    }
+
+    /// Sets the maximum proof jitter duration (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn with_proof_jitter(mut self, jitter: Option<Duration>) -> Self {
+        self.proof_jitter = jitter;
+        self
     }
 }
 
@@ -707,6 +721,19 @@ where
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
+            #[cfg(feature = "trie-debug")]
+            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    jitter_us = jitter.as_micros(),
+                    "Storage worker applying proof jitter"
+                );
+                std::thread::sleep(jitter);
+            }
+
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
                     self.process_storage_proof(
@@ -979,6 +1006,19 @@ where
 
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
+
+            #[cfg(feature = "trie-debug")]
+            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    jitter_us = jitter.as_micros(),
+                    "Account worker applying proof jitter"
+                );
+                std::thread::sleep(jitter);
+            }
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {

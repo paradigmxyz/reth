@@ -1287,7 +1287,9 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(hash.block_hash)?.map(SealedHeader::seal_slow),
+            BlockId::Hash(hash) => self
+                .header(hash.block_hash)?
+                .map(|header| SealedHeader::new(header, hash.block_hash)),
         })
     }
 
@@ -1312,7 +1314,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1366,7 +1367,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1419,7 +1419,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .storage
                     .into_iter()
@@ -1471,12 +1470,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .storage
-                    .into_iter()
+                    .iter()
                     .flatten()
-                    .map(|revert: PlainStorageRevert| revert.storage_revert.len())
+                    .map(|(_, revert)| revert.storage.len())
                     .sum::<usize>();
             }
         }
@@ -1500,7 +1496,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1546,7 +1541,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1599,7 +1593,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .accounts
                     .into_iter()
@@ -1642,15 +1635,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         let mut count = 0;
         if let Some(head_block) = &self.head_block {
             for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .accounts
-                    .len();
+                count += state.block_ref().execution_output.state.reverts.len();
             }
         }
 

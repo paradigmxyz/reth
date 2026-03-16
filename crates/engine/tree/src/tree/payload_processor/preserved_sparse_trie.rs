@@ -2,12 +2,12 @@
 
 use alloy_primitives::B256;
 use parking_lot::Mutex;
-use reth_trie_sparse::SparseStateTrie;
+use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::{sync::Arc, time::Instant};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
-pub(super) type SparseTrie = SparseStateTrie;
+pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, ConfigurableSparseTrie>;
 
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///

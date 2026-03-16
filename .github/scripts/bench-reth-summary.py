@@ -422,6 +422,7 @@ def generate_markdown(
     summary: dict, comparison_table: str,
     wait_time_tables: list[str] | None = None,
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
+    grafana_url: str | None = None,
 ) -> str:
     """Generate a markdown comment body."""
     lines = ["## Benchmark Results", ""]
@@ -441,6 +442,9 @@ def generate_markdown(
                 lines.append(table)
                 lines.append("")
         lines.append("</details>")
+    if grafana_url:
+        lines.append("")
+        lines.append(f"**[Grafana Dashboard]({grafana_url})**")
     return "\n".join(lines)
 
 
@@ -469,6 +473,7 @@ def main():
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
     parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
     parser.add_argument("--gas-ramp-blocks", type=int, default=0, help="Number of gas ramp blocks (big blocks mode)")
+    parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
     if len(args.baseline_csv) != len(args.feature_csv):
@@ -575,6 +580,7 @@ def main():
         repo=args.repo,
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
+        grafana_url=args.grafana_url,
     )
 
     with open(args.output_markdown, "w") as f:

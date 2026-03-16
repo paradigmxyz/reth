@@ -290,6 +290,7 @@ mod tests {
             storage_version: 2,
             timestamp: 0,
             base_url: None,
+            reth_version: None,
             components: BTreeMap::new(),
         }
     }

@@ -24,7 +24,7 @@ pub(crate) struct GasRampPayloadFile {
     /// Engine API version (1-5).
     ///
     /// `None` indicates that `reth_newPayload` should be used.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) version: Option<u8>,
     /// The block hash for FCU.
     pub(crate) block_hash: B256,

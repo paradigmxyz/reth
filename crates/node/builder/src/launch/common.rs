@@ -472,6 +472,7 @@ where
     pub async fn create_provider_factory<N, Evm>(
         &self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
@@ -489,12 +490,16 @@ where
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics, statistics, and default tables
-        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
-            .with_default_tables()
-            .with_metrics()
-            .with_statistics()
-            .build()?;
+        // Use the provided RocksDB provider or create a new one
+        let rocksdb_provider = if let Some(provider) = rocksdb_provider {
+            provider
+        } else {
+            RocksDBProvider::builder(self.data_dir().rocksdb())
+                .with_default_tables()
+                .with_metrics()
+                .with_statistics()
+                .build()?
+        };
 
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -573,12 +578,14 @@ where
     pub async fn with_provider_factory<N, Evm>(
         self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
+        let factory =
+            self.create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),

@@ -11,6 +11,8 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
+#               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 set -euo pipefail
 
 LABEL="$1"
@@ -22,6 +24,24 @@ LOG="${OUTPUT_DIR}/node.log"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
+  # Stop tracy-capture first (SIGINT makes it disconnect and flush to disk)
+  # Must happen before killing reth, otherwise reth keeps streaming data.
+  if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
+    echo "Stopping tracy-capture..."
+    kill -INT "$TRACY_PID" 2>/dev/null || true
+    for i in $(seq 1 30); do
+      kill -0 "$TRACY_PID" 2>/dev/null || break
+      if [ $((i % 10)) -eq 0 ]; then
+        echo "Waiting for tracy-capture to finish writing... (${i}s)"
+      fi
+      sleep 1
+    done
+    if kill -0 "$TRACY_PID" 2>/dev/null; then
+      echo "tracy-capture still running after 30s, killing..."
+      kill -9 "$TRACY_PID" 2>/dev/null || true
+    fi
+    wait "$TRACY_PID" 2>/dev/null || true
+  fi
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       # Send SIGINT to the inner reth process by exact name (not -f which
@@ -58,6 +78,7 @@ cleanup() {
   fi
 }
 TAIL_PID=
+TRACY_PID=
 trap cleanup EXIT
 
 # Clean up stale schelk state from a previous cancelled run.
@@ -116,16 +137,51 @@ if [ -n "$EXTRA_NODE_ARGS" ]; then
   RETH_ARGS+=($EXTRA_NODE_ARGS)
 fi
 
+if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+  RETH_ARGS+=(--metrics "$BENCH_METRICS_ADDR")
+fi
+
+# OTLP traces and logs export
+if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+fi
+if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+fi
+
+# Tracy profiling: add --log.tracy flags and set environment
+if [ "${BENCH_TRACY:-off}" != "off" ]; then
+  RETH_ARGS+=(--log.tracy --log.tracy.filter "${BENCH_TRACY_FILTER:-debug}")
+  if [ "${BENCH_TRACY}" = "on" ]; then
+    export TRACY_NO_SYS_TRACE=1
+  elif [ "${BENCH_TRACY}" = "full" ]; then
+    export TRACY_SAMPLING_HZ="${BENCH_TRACY_SAMPLING_HZ:-1}"
+  fi
+fi
+
+SUDO_ENV=()
+if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
+  SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
+  SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
+fi
+
+# Limit reth memory to 95% of available RAM to prevent OOM kills
+TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+MEM_LIMIT=$(( TOTAL_MEM_KB * 95 / 100 * 1024 ))
+echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 1024 ))MB)"
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 
@@ -169,6 +225,15 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   GAS_RAMP_COUNT=$(find "$BIG_BLOCKS_DIR/gas-ramp-dir" -name '*.json' | wc -l)
   echo "$GAS_RAMP_COUNT" > "$OUTPUT_DIR/gas_ramp_blocks.txt"
   echo "Gas ramp blocks: $GAS_RAMP_COUNT"
+
+  # Start tracy-capture so profile only covers the benchmark
+  if [ "${BENCH_TRACY:-off}" != "off" ]; then
+    echo "Starting tracy-capture..."
+    tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+    TRACY_PID=$!
+    sleep 0.5  # give tracy-capture time to connect
+  fi
+
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
     "${EXTRA_BENCH_ARGS[@]}" \
@@ -186,6 +251,14 @@ else
     --jwt-secret "$DATADIR/jwt.hex" \
     --advance "${BENCH_WARMUP_BLOCKS:-50}" \
     "${EXTRA_BENCH_ARGS[@]}" 2>&1 | sed -u "s/^/[bench] /"
+
+  # Start tracy-capture after warmup so profile only covers the benchmark
+  if [ "${BENCH_TRACY:-off}" != "off" ]; then
+    echo "Starting tracy-capture..."
+    tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+    TRACY_PID=$!
+    sleep 0.5  # give tracy-capture time to connect
+  fi
 
   # Benchmark
   $BENCH_NICE "$RETH_BENCH" new-payload-fcu \

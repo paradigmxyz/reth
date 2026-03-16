@@ -154,5 +154,9 @@ mod op {
 
     impl SignedTransaction for OpPooledTransaction {}
 
-    impl SignedTransaction for OpTxEnvelope {}
+    impl SignedTransaction for OpTxEnvelope {
+        fn is_system_tx(&self) -> bool {
+            self.is_system_transaction()
+        }
+    }
 }

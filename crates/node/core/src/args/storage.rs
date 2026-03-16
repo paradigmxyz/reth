@@ -4,26 +4,20 @@ use clap::{ArgAction, Args};
 
 /// Parameters for storage configuration.
 ///
-/// This controls whether the node uses v2 storage defaults (with `RocksDB` and static file
-/// optimizations) or v1/legacy storage defaults.
+/// V2 storage is now the default for all new databases. The `--storage.v2` flag is
+/// accepted for backwards compatibility but has no effect — v2 is always used.
+///
+/// Existing databases always use the settings persisted in their metadata.
 ///
 /// Individual storage settings can be overridden with `--static-files.*` and `--rocksdb.*` flags.
 #[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "Storage")]
 pub struct StorageArgs {
-    /// Enable v2 storage defaults (static files + `RocksDB` routing).
+    /// Deprecated no-op: v2 storage is now always enabled for new databases.
     ///
-    /// When enabled, the node uses optimized storage settings:
-    /// - Receipts and transaction senders in static files
-    /// - History indices in `RocksDB` (accounts, storages, transaction hashes)
-    /// - Account and storage changesets in static files
-    ///
-    /// This is a genesis-initialization-only setting: changing it after genesis requires a
-    /// re-sync.
-    ///
-    /// Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*`
-    /// flags.
-    #[arg(long = "storage.v2", action = ArgAction::SetTrue)]
+    /// Kept for backwards compatibility with existing scripts and configurations.
+    /// Existing databases always use the settings persisted in their metadata.
+    #[arg(long = "storage.v2", action = ArgAction::SetTrue, hide = true)]
     pub v2: bool,
 }
 
@@ -41,14 +35,13 @@ mod tests {
 
     #[test]
     fn test_default_storage_args() {
-        let default_args = StorageArgs::default();
         let args = CommandParser::<StorageArgs>::parse_from(["reth"]).args;
-        assert_eq!(args, default_args);
-        assert!(!args.v2);
+        assert_eq!(args, StorageArgs::default());
     }
 
     #[test]
-    fn test_parse_v2_flag() {
+    fn test_parse_v2_flag_accepted() {
+        // Flag is accepted for backwards compatibility but is a no-op
         let args = CommandParser::<StorageArgs>::parse_from(["reth", "--storage.v2"]).args;
         assert!(args.v2);
     }

@@ -16,6 +16,11 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
+#[cfg(feature = "std")]
+mod arena;
+#[cfg(feature = "std")]
+pub use arena::*;
+
 mod parallel;
 pub use parallel::*;
 

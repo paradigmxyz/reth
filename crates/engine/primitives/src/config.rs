@@ -146,11 +146,18 @@ pub struct TreeConfig {
     slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
+    /// Whether to use the arena-based sparse trie implementation.
+    enable_arena_sparse_trie: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
     /// If `Some`, after waiting this duration for the state root task, a sequential state root
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
+    /// Maximum random jitter applied before each proof computation (trie-debug only).
+    /// When set, each proof worker sleeps for a random duration up to this value
+    /// before starting a proof calculation.
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
 }
 
 impl Default for TreeConfig {
@@ -180,7 +187,10 @@ impl Default for TreeConfig {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 }
@@ -239,7 +249,10 @@ impl TreeConfig {
             sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
+            enable_arena_sparse_trie: false,
             state_root_task_timeout,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 
@@ -539,6 +552,17 @@ impl TreeConfig {
         self
     }
 
+    /// Returns whether the arena-based sparse trie is enabled.
+    pub const fn enable_arena_sparse_trie(&self) -> bool {
+        self.enable_arena_sparse_trie
+    }
+
+    /// Setter for whether to enable the arena-based sparse trie.
+    pub const fn with_enable_arena_sparse_trie(mut self, value: bool) -> Self {
+        self.enable_arena_sparse_trie = value;
+        self
+    }
+
     /// Returns the state root task timeout.
     pub const fn state_root_task_timeout(&self) -> Option<Duration> {
         self.state_root_task_timeout
@@ -547,6 +571,19 @@ impl TreeConfig {
     /// Setter for state root task timeout.
     pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.state_root_task_timeout = timeout;
+        self
+    }
+
+    /// Returns the proof jitter duration, if configured (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn proof_jitter(&self) -> Option<Duration> {
+        self.proof_jitter
+    }
+
+    /// Setter for proof jitter (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn with_proof_jitter(mut self, proof_jitter: Option<Duration>) -> Self {
+        self.proof_jitter = proof_jitter;
         self
     }
 }

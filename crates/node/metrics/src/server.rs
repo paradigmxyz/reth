@@ -1,6 +1,7 @@
 use crate::{
     chain::ChainSpecInfo,
     hooks::{Hook, Hooks},
+    process::register_process_metrics,
     recorder::install_prometheus_recorder,
     version::VersionInfo,
 };
@@ -113,6 +114,7 @@ impl MetricServer {
 
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
+        register_process_metrics();
 
         Ok(())
     }
@@ -455,6 +457,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_metrics_endpoint() {
+        // Install the recorder before serve() so gauge registrations are captured,
+        // mirroring how start_prometheus_endpoint() works in the real node launch.
+        install_prometheus_recorder();
+
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
         let version_info = VersionInfo {
             version: "test",
@@ -490,6 +496,7 @@ mod tests {
         let body = response.text().await.unwrap();
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
+        assert!(body.contains("process_cli_args"), "expected process_cli_args metric in output");
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);
