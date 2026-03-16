@@ -1528,16 +1528,12 @@ fn blocking_process_modular_archive(
             let cache_dir = cache_dir.ok_or_else(|| eyre::eyre!("Missing cache directory"))?;
             let archive_path = cache_dir.join(&archive.file_name);
             let part_path = cache_dir.join(format!("{}.part", archive.file_name));
-            let result = resumable_download(
-                &archive.url,
-                cache_dir,
-                shared.as_ref(),
-                cancel_token.clone(),
-            )
-            .and_then(|(downloaded_path, _)| {
-                let file = fs::open(&downloaded_path)?;
-                extract_archive_raw(file, format, target_dir)
-            });
+            let result =
+                resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())
+                    .and_then(|(downloaded_path, _)| {
+                        let file = fs::open(&downloaded_path)?;
+                        extract_archive_raw(file, format, target_dir)
+                    });
             let _ = fs::remove_file(&archive_path);
             let _ = fs::remove_file(&part_path);
 
