@@ -1517,6 +1517,16 @@ enum RocksReadSnapshotInner<'db> {
     ReadOnly(SnapshotWithThreadMode<'db, DB>),
 }
 
+impl<'db> RocksReadSnapshotInner<'db> {
+    /// Returns a raw iterator over a column family.
+    fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
+        match self {
+            Self::ReadWrite(snap) => RocksDBRawIterEnum::ReadWrite(snap.raw_iterator_cf(cf)),
+            Self::ReadOnly(snap) => RocksDBRawIterEnum::ReadOnly(snap.raw_iterator_cf(cf)),
+        }
+    }
+}
+
 impl fmt::Debug for RocksReadSnapshot<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksReadSnapshot")
@@ -1617,67 +1627,52 @@ impl<'db> RocksReadSnapshot<'db> {
         };
 
         let cf = self.cf_handle::<T>()?;
+        let mut iter = self.inner.raw_iterator_cf(cf);
 
-        macro_rules! history_info_with_iter {
-            ($snap:expr) => {{
-                let mut iter = $snap.raw_iterator_cf(cf);
+        iter.seek(encoded_key);
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
 
-                iter.seek(encoded_key);
-                iter.status().map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
-
-                if !iter.valid() {
-                    return fallback();
-                }
-
-                let Some(key_bytes) = iter.key() else {
-                    return fallback();
-                };
-                if !key_matches(key_bytes)? {
-                    return fallback();
-                }
-
-                let Some(value_bytes) = iter.value() else {
-                    return fallback();
-                };
-                let chunk = BlockNumberList::decompress(value_bytes)?;
-                let (rank, found_block) = compute_history_rank(&chunk, block_number);
-
-                let is_before_first_write =
-                    if needs_prev_shard_check(rank, found_block, block_number) {
-                        iter.prev();
-                        iter.status().map_err(|e| {
-                            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                                message: e.to_string().into(),
-                                code: -1,
-                            }))
-                        })?;
-                        let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
-                        !has_prev
-                    } else {
-                        false
-                    };
-
-                Ok(HistoryInfo::from_lookup(
-                    found_block,
-                    is_before_first_write,
-                    lowest_available_block_number,
-                ))
-            }};
+        if !iter.valid() {
+            return fallback();
         }
 
-        match &self.inner {
-            RocksReadSnapshotInner::ReadWrite(snap) => {
-                history_info_with_iter!(snap)
-            }
-            RocksReadSnapshotInner::ReadOnly(snap) => {
-                history_info_with_iter!(snap)
-            }
+        let Some(key_bytes) = iter.key() else {
+            return fallback();
+        };
+        if !key_matches(key_bytes)? {
+            return fallback();
         }
+
+        let Some(value_bytes) = iter.value() else {
+            return fallback();
+        };
+        let chunk = BlockNumberList::decompress(value_bytes)?;
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
+
+        let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
+            iter.prev();
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
+            !has_prev
+        } else {
+            false
+        };
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
     }
 }
 
