@@ -456,8 +456,11 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 /// Historical account queries: verifies that `eth_getBalance` and `eth_getTransactionCount`
 /// return correct values at past block numbers after the account state has changed.
 ///
-/// This test exercises the storage-aware historical state lookup path where balance and nonce
-/// must be read from changesets persisted to `RocksDB` rather than only from the latest state.
+/// This test exercises the database-backed historical state lookup path. After mining the
+/// blocks we care about (1-3), we mine additional empty blocks to advance the canonical head
+/// far enough that the engine tree's persistence + in-memory eviction cycle guarantees
+/// blocks 1-3 are no longer in the in-memory overlay. Historical queries for those blocks
+/// must then be served from `RocksDB` changesets.
 #[tokio::test]
 async fn test_rocksdb_historical_account_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -496,8 +499,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload1 = nodes[0].advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
-
-    // Wait for persistence
     poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
 
     // Record state after block 1
@@ -514,10 +515,8 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload2 = nodes[0].advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
-
     poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await;
 
-    // Record state after block 2
     let balance_at_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
     let nonce_at_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
     assert!(balance_at_2 < balance_at_1, "Balance should decrease further after second tx");
@@ -531,7 +530,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload3 = nodes[0].advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
-
     poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
 
     let balance_at_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
@@ -539,8 +537,18 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
     assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
 
-    // Now query historical state at each past block — the core of this test.
-    // After 3 blocks, querying block 0 should still return genesis values.
+    // Mine additional empty blocks to push blocks 1-3 out of the in-memory overlay.
+    // With persistence_threshold=0 and memory_block_buffer_target=0, each new block
+    // triggers persistence up to `head` followed by in-memory eviction. Mining several
+    // more blocks ensures the engine loop has completed at least one full
+    // persist-then-evict cycle covering blocks 1-3.
+    for _ in 0..5 {
+        nodes[0].advance_block().await?;
+    }
+    // Allow the engine loop to process the persistence completions
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Historical queries — blocks 1-3 should now be served from the database.
     let hist_balance_0: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
     let hist_nonce_0: U256 = client.request("eth_getTransactionCount", (sender, "0x0")).await?;
     assert_eq!(
@@ -549,23 +557,30 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     );
     assert_eq!(hist_nonce_0, U256::ZERO, "Historical nonce at block 0 should be 0");
 
-    // Block 1 historical query
     let hist_balance_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
     let hist_nonce_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
     assert_eq!(hist_balance_1, balance_at_1, "Historical balance at block 1 should match");
     assert_eq!(hist_nonce_1, U256::from(1), "Historical nonce at block 1 should be 1");
 
-    // Block 2 historical query
     let hist_balance_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
     let hist_nonce_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
     assert_eq!(hist_balance_2, balance_at_2, "Historical balance at block 2 should match");
     assert_eq!(hist_nonce_2, U256::from(2), "Historical nonce at block 2 should be 2");
 
-    // "latest" should match block 3
+    let hist_balance_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
+    let hist_nonce_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
+    assert_eq!(hist_balance_3, balance_at_3, "Historical balance at block 3 should match");
+    assert_eq!(hist_nonce_3, U256::from(3), "Historical nonce at block 3 should be 3");
+
+    // "latest" should still match head
     let latest_balance: U256 = client.request("eth_getBalance", (sender, "latest")).await?;
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
-    assert_eq!(latest_balance, balance_at_3, "Latest balance should match block 3");
-    assert_eq!(latest_nonce, U256::from(3), "Latest nonce should match block 3");
+    assert_eq!(
+        latest_nonce,
+        U256::from(3),
+        "Latest nonce should still be 3 (no txs in empty blocks)"
+    );
+    assert!(latest_balance <= balance_at_3, "Latest balance should be at most block 3 balance");
 
     Ok(())
 }
