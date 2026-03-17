@@ -126,7 +126,7 @@ impl ArenaSparseSubtrie {
     }
 
     fn clear(&mut self) {
-        self.arena.clear();
+        self.arena = SlotMap::new();
         self.buffers.clear();
         self.required_proofs.clear();
         self.num_leaves = 0;
@@ -2530,7 +2530,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 self.cleared_subtries.push(subtrie);
             }
         }
-        self.upper_arena.clear();
+        self.upper_arena = SlotMap::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
@@ -2539,14 +2539,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn shrink_nodes_to(&mut self, size: usize) {
-        self.upper_arena.shrink_to(size);
-        for (_, node) in &mut self.upper_arena {
-            if let ArenaSparseNode::Subtrie(s) = node {
-                s.arena.shrink_to(size);
-            }
-        }
+        // We do not shrink the upper trie for now.
+        //
+        // As soon as a trie rotates from a live subtrie into the
+        // cleared_subtrie it will be properly shrunk.
         for s in &mut self.cleared_subtries {
-            s.arena.shrink_to(size);
+            if s.arena.capacity() > size {
+                s.arena = SlotMap::with_capacity(size);
+            }
         }
     }
 
