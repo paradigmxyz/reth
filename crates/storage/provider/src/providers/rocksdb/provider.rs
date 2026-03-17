@@ -3003,7 +3003,7 @@ mod tests {
         assert_eq!(result, HistoryInfo::InChangeset(100));
     }
 
-    /// Verifies that history lookups work on a read-only RocksDB provider.
+    /// Verifies that history lookups work on a read-only `RocksDB` provider.
     /// This was the original bug — read-only mode panicked on `account_history_info`.
     #[test]
     fn test_account_history_info_read_only() {
