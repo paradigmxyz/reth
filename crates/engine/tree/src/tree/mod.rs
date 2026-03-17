@@ -2057,6 +2057,17 @@ where
         ))
     }
 
+    /// Returns `true` if a block with the given hash is known, either in memory or in the
+    /// database. This is a lightweight existence check that avoids constructing a full
+    /// [`SealedHeader`].
+    fn has_block_by_hash(&self, hash: B256) -> ProviderResult<bool> {
+        if self.state.tree_state.contains_hash(&hash) {
+            Ok(true)
+        } else {
+            self.provider.is_known(hash)
+        }
+    }
+
     /// Return sealed block header from in-memory state or database by hash.
     fn sealed_header_by_hash(
         &self,
@@ -2101,7 +2112,7 @@ where
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        if self.sealed_header_by_hash(parent_hash)?.is_some() {
+        if self.has_block_by_hash(parent_hash)? {
             return Ok(Some(parent_hash))
         }
 
@@ -2115,7 +2126,7 @@ where
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_block.is_none() && self.sealed_header_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.has_block_by_hash(current_hash)? {
                 return Ok(Some(current_hash))
             }
         }
@@ -2782,7 +2793,7 @@ where
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
         // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
             convert_to_block(self, input)?;
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
         }
