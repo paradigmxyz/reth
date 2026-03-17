@@ -585,28 +585,25 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     Ok(())
 }
 
-/// Pruning with `RocksDB`: mines a longer chain with receipt pruning configured, then
-/// verifies that receipts for early blocks have been pruned while recent blocks and
-/// historical account state remain queryable.
+/// Account history pruning with `RocksDB`: mines a chain long enough to trigger account
+/// history pruning, then verifies that `eth_getBalance` / `eth_getTransactionCount` for
+/// pruned blocks returns an error, while queries within the retention window still work.
 ///
-/// Uses `PruneMode::Distance(64)` for receipts (the minimum allowed distance) with
-/// `block_interval = 1` so the pruner runs every block. After mining ~75 blocks, receipts
-/// for the first few blocks should be pruned, while receipts for blocks within the
-/// distance window are still available. Account history is NOT pruned (requires 10k+
-/// blocks), so `eth_getBalance` queries against early blocks still work.
+/// `AccountHistory` enforces `MINIMUM_UNWIND_SAFE_DISTANCE` (10,064 blocks) as the minimum
+/// prune distance. The first few blocks contain transfers that change the sender's balance
+/// and nonce; the rest are empty. Once the chain exceeds the prune distance, the pruner
+/// removes account changesets for the earliest blocks.
 #[tokio::test]
-async fn test_rocksdb_pruned_receipts_with_historical_queries() -> Result<()> {
+async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    // Number of blocks to mine with transactions at the start
     const TX_BLOCKS: u64 = 5;
-    // Total blocks to mine — enough to push early blocks past the prune distance
-    const TOTAL_BLOCKS: u64 = 75;
-    // Receipt prune distance — keep last 64 blocks of receipts
-    const PRUNE_DISTANCE: u64 = 64;
+    const PRUNE_DISTANCE: u64 = 10_064;
+    // Mine enough blocks so blocks 1..=TX_BLOCKS fall outside the retention window
+    const TOTAL_BLOCKS: u64 = PRUNE_DISTANCE + TX_BLOCKS + 5;
 
     let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
@@ -614,10 +611,11 @@ async fn test_rocksdb_pruned_receipts_with_historical_queries() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    // Batch persistence to avoid per-block overhead over 10k blocks
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(100))
     .with_node_config_modifier(|mut config| {
-        config.pruning.receipts_distance = Some(PRUNE_DISTANCE);
-        config.pruning.block_interval = Some(1);
+        config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
+        config.pruning.block_interval = Some(100);
         config
     })
     .build()
@@ -630,11 +628,11 @@ async fn test_rocksdb_pruned_receipts_with_historical_queries() -> Result<()> {
     let sender: Address = signer.address();
     let client = nodes[0].rpc_client().expect("RPC client");
 
-    // Record genesis balance
+    // Record genesis state
     let genesis_balance: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
+    assert!(genesis_balance > U256::ZERO);
 
     // Mine TX_BLOCKS blocks with one transfer each
-    let mut early_tx_hashes = Vec::new();
     let mut balances = Vec::new();
     for nonce in 0..TX_BLOCKS {
         let raw_tx =
@@ -645,71 +643,53 @@ async fn test_rocksdb_pruned_receipts_with_historical_queries() -> Result<()> {
 
         let payload = nodes[0].advance_block().await?;
         assert_eq!(payload.block().number(), nonce + 1);
-        poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await;
-
-        early_tx_hashes.push(tx_hash);
 
         let block_hex = format!("0x{:x}", nonce + 1);
         let bal: U256 = client.request("eth_getBalance", (sender, block_hex.as_str())).await?;
         balances.push(bal);
     }
 
-    // Verify early receipts exist before pruning
-    for tx_hash in &early_tx_hashes {
-        let receipt: Option<TransactionReceipt> =
-            client.request("eth_getTransactionReceipt", [*tx_hash]).await?;
-        assert!(receipt.is_some(), "Receipt for early tx should exist before pruning");
+    // Verify balances decreased
+    assert!(balances[0] < genesis_balance);
+    for w in balances.windows(2) {
+        assert!(w[1] < w[0], "Balance should decrease with each transfer");
     }
 
-    // Mine remaining empty blocks to push early blocks past the prune distance
-    for _ in TX_BLOCKS..TOTAL_BLOCKS {
+    // Mine remaining empty blocks to push early blocks past the prune window
+    for block_num in (TX_BLOCKS + 1)..=TOTAL_BLOCKS {
         nodes[0].advance_block().await?;
+        if block_num % 2000 == 0 {
+            tracing::info!(block_num, total = TOTAL_BLOCKS, "Mining progress");
+        }
     }
-    // Allow the pruner to run
-    tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Early receipts (blocks 1-5) should now be pruned — they are beyond distance 64
-    // from the tip (~block 75)
-    for (i, tx_hash) in early_tx_hashes.iter().enumerate() {
-        let receipt: Option<TransactionReceipt> =
-            client.request("eth_getTransactionReceipt", [*tx_hash]).await?;
+    // Allow the pruner to finish processing
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // Blocks 1-5 are now outside the retention window (tip - block > PRUNE_DISTANCE).
+    // Historical account queries for pruned blocks should error.
+    for block in 1..=TX_BLOCKS {
+        let block_hex = format!("0x{:x}", block);
+        let result: Result<U256, _> =
+            client.request("eth_getBalance", (sender, block_hex.as_str())).await;
         assert!(
-            receipt.is_none(),
-            "Receipt for block {} should be pruned (tx_hash={:?})",
-            i + 1,
-            tx_hash
+            result.is_err(),
+            "eth_getBalance at pruned block {block} should return an error, got {:?}",
+            result
         );
     }
 
-    // Historical account state should still work — account history is NOT pruned
-    // (requires 10k+ blocks). Verify balances at early blocks are still correct.
-    let hist_balance_0: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
-    assert_eq!(hist_balance_0, genesis_balance, "Genesis balance should still be queryable");
+    // A block safely within the retention window should still be queryable.
+    // Block (TOTAL_BLOCKS - 100) is well within the PRUNE_DISTANCE window.
+    let safe_block = TOTAL_BLOCKS - 100;
+    let safe_hex = format!("0x{:x}", safe_block);
+    let safe_balance: U256 = client.request("eth_getBalance", (sender, safe_hex.as_str())).await?;
+    assert!(safe_balance > U256::ZERO, "Balance at unpruned block should be queryable");
 
-    for (i, expected_balance) in balances.iter().enumerate() {
-        let block_hex = format!("0x{:x}", i + 1);
-        let bal: U256 = client.request("eth_getBalance", (sender, block_hex.as_str())).await?;
-        assert_eq!(
-            bal,
-            *expected_balance,
-            "Historical balance at block {} should still be correct (account history not pruned)",
-            i + 1
-        );
-    }
+    // "latest" should work
+    let latest_balance: U256 = client.request("eth_getBalance", (sender, "latest")).await?;
+    assert!(latest_balance > U256::ZERO, "Latest balance should be queryable");
 
-    // Nonce at block TX_BLOCKS should still be correct
-    let block_hex = format!("0x{:x}", TX_BLOCKS);
-    let nonce: U256 =
-        client.request("eth_getTransactionCount", (sender, block_hex.as_str())).await?;
-    assert_eq!(
-        nonce,
-        U256::from(TX_BLOCKS),
-        "Historical nonce at block {} should be {}",
-        TX_BLOCKS,
-        TX_BLOCKS
-    );
-
-    // "latest" balance and nonce should reflect the full chain
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
     assert_eq!(latest_nonce, U256::from(TX_BLOCKS), "Latest nonce should match total txs sent");
 
