@@ -25,22 +25,24 @@ pub trait RocksDBProviderFactory {
     /// full commit path.
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()>;
 
-    /// Executes a closure with a `RocksDB` provider reference for reading.
+    /// Executes a closure with a `RocksDB` point-in-time snapshot for consistent reads.
     ///
     /// This helper encapsulates `RocksDB` access for read operations.
     /// On legacy MDBX-only nodes (where `storage_v2` is false), this skips creating
-    /// the `RocksDB` provider entirely, avoiding unnecessary overhead.
+    /// the `RocksDB` snapshot entirely, avoiding unnecessary overhead.
     ///
     /// Unlike a transaction-based approach, this works in both read-only and read-write
-    /// modes since it uses the provider's mode-agnostic read methods directly.
-    fn with_rocksdb_provider<F, R>(&self, f: F) -> ProviderResult<R>
+    /// modes since the snapshot provides a consistent view of the data at the time it
+    /// was created.
+    fn with_rocksdb_snapshot<F, R>(&self, f: F) -> ProviderResult<R>
     where
         Self: StorageSettingsCache,
         F: FnOnce(RocksDBRefArg<'_>) -> ProviderResult<R>,
     {
         if self.cached_storage_settings().storage_v2 {
             let rocksdb = self.rocksdb_provider();
-            return f(Some(&rocksdb));
+            let snapshot = rocksdb.snapshot();
+            return f(Some(snapshot));
         }
         f(None)
     }
@@ -86,7 +88,7 @@ mod tests {
     use reth_db_api::models::StorageSettings;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Mock `RocksDB` provider that tracks `tx()` calls.
+    /// Mock `RocksDB` provider that tracks snapshot creation calls.
     struct MockRocksDBProvider {
         tx_call_count: AtomicUsize,
     }
@@ -148,10 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_settings_skip_rocksdb_provider() {
+    fn test_legacy_settings_skip_rocksdb_snapshot() {
         let provider = TestProvider::new(StorageSettings::v1());
 
-        let result = provider.with_rocksdb_provider(|rocksdb| {
+        let result = provider.with_rocksdb_snapshot(|rocksdb| {
             assert!(rocksdb.is_none(), "legacy settings should pass None");
             Ok(42)
         });
@@ -165,12 +167,12 @@ mod tests {
     }
 
     #[test]
-    fn test_rocksdb_settings_create_provider() {
+    fn test_rocksdb_settings_create_snapshot() {
         let settings = StorageSettings::v2();
         let provider = TestProvider::new(settings);
 
-        let result = provider.with_rocksdb_provider(|rocksdb| {
-            assert!(rocksdb.is_some(), "rocksdb settings should pass Some provider");
+        let result = provider.with_rocksdb_snapshot(|rocksdb| {
+            assert!(rocksdb.is_some(), "rocksdb settings should pass Some snapshot");
             Ok(42)
         });
 

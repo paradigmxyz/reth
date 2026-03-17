@@ -68,11 +68,11 @@ pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
 /// The raw `RocksDB` batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
 pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
 
-/// Helper type for `RocksDB` provider reference argument in reader constructors.
+/// Helper type for `RocksDB` snapshot argument in reader constructors.
 ///
 /// The `Option` allows callers to skip `RocksDB` access when it isn't needed
 /// (e.g., on legacy MDBX-only nodes).
-pub type RocksDBRefArg<'a> = Option<&'a crate::providers::RocksDBProvider>;
+pub type RocksDBRefArg<'a> = Option<crate::providers::rocksdb::RocksReadSnapshot<'a>>;
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -672,8 +672,8 @@ pub enum EitherReader<'a, CURSOR, N> {
     Database(CURSOR, PhantomData<&'a ()>),
     /// Read from static file
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
-    /// Read from `RocksDB` provider (works in both read-only and read-write modes)
-    RocksDB(&'a crate::providers::RocksDBProvider),
+    /// Read from `RocksDB` snapshot (works in both read-only and read-write modes)
+    RocksDB(crate::providers::rocksdb::RocksReadSnapshot<'a>),
 }
 
 impl<'a> EitherReader<'a, (), ()> {
@@ -706,7 +706,7 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
-                rocksdb.expect("storages_history_in_rocksdb requires rocksdb provider"),
+                rocksdb.expect("storages_history_in_rocksdb requires rocksdb snapshot"),
             ));
         }
 
@@ -727,7 +727,7 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
-                rocksdb.expect("transaction_hash_numbers_in_rocksdb requires rocksdb provider"),
+                rocksdb.expect("transaction_hash_numbers_in_rocksdb requires rocksdb snapshot"),
             ));
         }
 
@@ -748,7 +748,7 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
-                rocksdb.expect("account_history_in_rocksdb requires rocksdb provider"),
+                rocksdb.expect("account_history_in_rocksdb requires rocksdb snapshot"),
             ));
         }
 
@@ -820,7 +820,7 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(provider) => provider.get::<tables::TransactionHashNumbers>(hash),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::TransactionHashNumbers>(hash),
         }
     }
 }
@@ -837,7 +837,7 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(provider) => provider.get::<tables::StoragesHistory>(key),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::StoragesHistory>(key),
         }
     }
 
@@ -861,7 +861,7 @@ where
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(provider) => provider.storage_history_info(
+            Self::RocksDB(snapshot) => snapshot.storage_history_info(
                 address,
                 storage_key,
                 block_number,
@@ -883,7 +883,7 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(provider) => provider.get::<tables::AccountsHistory>(key),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::AccountsHistory>(key),
         }
     }
 
@@ -906,8 +906,8 @@ where
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(provider) => {
-                provider.account_history_info(address, block_number, lowest_available_block_number)
+            Self::RocksDB(snapshot) => {
+                snapshot.account_history_info(address, block_number, lowest_available_block_number)
             }
         }
     }
@@ -1442,7 +1442,7 @@ mod rocksdb_tests {
 
             // RocksDB query via EitherReader
             let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
-                EitherReader::RocksDB(&rocks_provider);
+                EitherReader::RocksDB(rocks_provider.snapshot());
             let rocks_result = rocks_reader
                 .account_history_info(address, query.block_number, query.lowest_available)
                 .unwrap();
@@ -1537,7 +1537,7 @@ mod rocksdb_tests {
 
             // RocksDB query via EitherReader
             let mut rocks_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
-                EitherReader::RocksDB(&rocks_provider);
+                EitherReader::RocksDB(rocks_provider.snapshot());
             let rocks_result = rocks_reader
                 .storage_history_info(
                     address,
@@ -1805,10 +1805,10 @@ mod rocksdb_tests {
     }
 
     /// Test that `EitherReader::new_accounts_history` panics when settings require
-    /// `RocksDB` but no provider is given (`None`). This is an invariant violation that
-    /// indicates a bug - `with_rocksdb_provider` should always provide a provider when needed.
+    /// `RocksDB` but no snapshot is given (`None`). This is an invariant violation that
+    /// indicates a bug - `with_rocksdb_snapshot` should always provide a snapshot when needed.
     #[test]
-    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb provider")]
+    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb snapshot")]
     fn test_settings_mismatch_panics() {
         let factory = create_test_provider_factory();
 
