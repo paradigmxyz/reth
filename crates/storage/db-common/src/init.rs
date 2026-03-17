@@ -633,7 +633,7 @@ where
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let header = provider_rw
         .header_by_number(block)?
-        .map(SealedHeader::seal_slow)
+        .map(|h| SealedHeader::new(h, hash))
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
 
     let expected_state_root = header.state_root();
@@ -1051,7 +1051,6 @@ mod tests {
             )
         };
 
-        #[cfg(feature = "rocksdb")]
         {
             let settings = factory.cached_storage_settings();
             let rocksdb = factory.rocksdb_provider();
@@ -1076,13 +1075,6 @@ mod tests {
             } else {
                 collect_from_mdbx(&factory)
             };
-            assert_eq!(accounts, expected_accounts);
-            assert_eq!(storages, expected_storages);
-        }
-
-        #[cfg(not(feature = "rocksdb"))]
-        {
-            let (accounts, storages) = collect_from_mdbx(&factory);
             assert_eq!(accounts, expected_accounts);
             assert_eq!(storages, expected_storages);
         }
