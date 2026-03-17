@@ -1405,3 +1405,65 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
         "root should match trie with only the previously-blinded leaf"
     );
 }
+
+/// Regression: subtrie emptied by deletes mixed with `LeafUpdate::Touched`.
+///
+/// When all `Changed` updates in a subtrie are removals and they would empty the subtrie,
+/// the `might_empty_subtrie` guard must still trigger even if `Touched` entries are present.
+/// `Touched` is a no-op that doesn't prevent the subtrie from being emptied.
+pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_trie: fn() -> T) {
+    // Two leaves under prefix 0xAB (the target subtrie), one under 0xAC (sibling at
+    // depth 1 to force the 0xAB child into a subtrie at depth 2), one under 0xCD
+    // (sibling at depth 0 to force a branch at the root).
+    let mut key_ab1 = B256::ZERO;
+    key_ab1[0] = 0xAB;
+    key_ab1[31] = 0x11;
+    let mut key_ab2 = B256::ZERO;
+    key_ab2[0] = 0xAB;
+    key_ab2[31] = 0x22;
+    let mut key_ab3 = B256::ZERO;
+    key_ab3[0] = 0xAB;
+    key_ab3[31] = 0x33;
+    let mut key_ac1 = B256::ZERO;
+    key_ac1[0] = 0xAC;
+    key_ac1[31] = 0x44;
+    let mut key_cd1 = B256::ZERO;
+    key_cd1[0] = 0xCD;
+    key_cd1[31] = 0x01;
+
+    let value = U256::from(1u64);
+
+    let base_storage: BTreeMap<B256, U256> =
+        [(key_ab1, value), (key_ab2, value), (key_ac1, value), (key_cd1, value)]
+            .into_iter()
+            .collect();
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+    let all_keys = vec![key_ab1, key_ab2, key_ac1, key_cd1];
+    let mut trie: T = harness.init_trie_with_targets(&all_keys, false, new_trie);
+
+    // Verify initial root matches.
+    let root = trie.root();
+    assert_eq!(root, harness.original_root(), "initial root mismatch");
+
+    // Delete both 0xAB leaves + Touched on a third 0xAB key (not in the trie).
+    // Touched is a no-op but must not prevent the might_empty_subtrie guard.
+    let mut leaf_updates: B256Map<LeafUpdate> = [
+        (key_ab1, LeafUpdate::Changed(Vec::new())),
+        (key_ab2, LeafUpdate::Changed(Vec::new())),
+        (key_ab3, LeafUpdate::Touched),
+    ]
+    .into_iter()
+    .collect();
+
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+
+    // Root should match reference trie with ab1 and ab2 removed.
+    let mut expected_storage = base_storage;
+    expected_storage.remove(&key_ab1);
+    expected_storage.remove(&key_ab2);
+    let expected_harness = SuiteTestHarness::new(expected_storage);
+
+    let actual_root = trie.root();
+    assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
+}
