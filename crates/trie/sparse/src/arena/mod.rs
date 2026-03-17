@@ -9,7 +9,7 @@ use nodes::{
 };
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{B256Map, HashMap, HashSet},
@@ -58,6 +58,54 @@ fn prefix_range(
         end += 1;
     }
     begin..end
+}
+
+/// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
+/// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
+/// traversal.
+fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
+    let mut new_arena = SlotMap::with_capacity(arena.len());
+    let mut queue = VecDeque::new();
+
+    let root_node = arena.remove(*root).expect("root exists");
+    let new_root = new_arena.insert(root_node);
+    queue.push_back(new_root);
+
+    while let Some(new_idx) = queue.pop_front() {
+        // Invariant: any node popped from `queue` has been moved into `new_arena` but
+        // its Branch.children have not been rewritten yet — every Revealed(idx) here is
+        // still an old-arena index, and the child is still present in `arena` because
+        // only this parent's iteration can remove it (each child has exactly one parent).
+        let old_children: SmallVec<[(usize, Index); 16]> = match &new_arena[new_idx] {
+            ArenaSparseNode::Branch(b) => b
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| match c {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => Some((i, *old_idx)),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+
+        for (child_pos, old_child_idx) in old_children {
+            let child_node = arena.remove(old_child_idx).expect("child exists");
+            let new_child_idx = new_arena.insert(child_node);
+            let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
+            b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+            queue.push_back(new_child_idx);
+        }
+    }
+
+    debug_assert!(
+        arena.is_empty(),
+        "compact_arena: {} orphaned nodes remaining after BFS drain",
+        arena.len(),
+    );
+
+    *arena = new_arena;
+    *root = new_root;
 }
 
 /// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
@@ -207,6 +255,11 @@ impl ArenaSparseSubtrie {
         }
 
         self.num_leaves -= pruned_leaves;
+
+        if pruned > 0 {
+            compact_arena(&mut self.arena, &mut self.root);
+        }
+
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
         pruned
@@ -2722,6 +2775,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             for (child_idx, subtrie, _) in taken {
                 self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
             }
+        }
+
+        if pruned > 0 {
+            compact_arena(&mut self.upper_arena, &mut self.root);
         }
 
         #[cfg(feature = "trie-debug")]
