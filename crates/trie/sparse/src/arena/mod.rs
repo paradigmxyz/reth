@@ -3172,6 +3172,140 @@ mod tests {
         }
     }
 
+    /// Regression: subtrie emptied by deletes mixed with `LeafUpdate::Touched`.
+    ///
+    /// The `might_empty_subtrie` guard uses `all_removals` which requires every update to
+    /// be `Changed(vec![])`. A `Touched` entry (which is a no-op inside the subtrie) causes
+    /// `all_removals` to be `false`, bypassing the guard. The subtrie is then taken for
+    /// parallel processing, both deletions succeed, and the subtrie becomes `EmptyRoot`.
+    /// The post-restore `debug_assert!` fires:
+    ///     "taken subtrie became EmptyRoot — should have been forced inline"
+    ///
+    /// Reproduces crash-cd982b5cc4f8457d4da6fc8f3b8ad5e91fc20768 from the swarm fuzzer.
+    #[test]
+    fn test_subtrie_emptied_by_deletes_with_touched() {
+        reth_tracing::init_test_tracing();
+
+        // Keys are pre-hashed B256 values. Nibbles::unpack converts each byte to two nibbles.
+        // UPPER_TRIE_MAX_DEPTH = 2, so all keys sharing the first byte (2 nibbles) land in
+        // the same subtrie.
+        //
+        // We place two leaves under prefix 0xAB (the target subtrie), one under 0xAC
+        // (to force a branch at depth 1, ensuring the 0xAB child becomes a subtrie at
+        // depth 2), and one under 0xCD (to force a branch at the root).
+        let mut key_ab1 = B256::ZERO;
+        key_ab1[0] = 0xAB;
+        key_ab1[31] = 0x11;
+        let mut key_ab2 = B256::ZERO;
+        key_ab2[0] = 0xAB;
+        key_ab2[31] = 0x22;
+        let mut key_ab3 = B256::ZERO;
+        key_ab3[0] = 0xAB;
+        key_ab3[31] = 0x33;
+        let mut key_ac1 = B256::ZERO;
+        key_ac1[0] = 0xAC;
+        key_ac1[31] = 0x44;
+        let mut key_cd1 = B256::ZERO;
+        key_cd1[0] = 0xCD;
+        key_cd1[31] = 0x01;
+
+        let value = U256::from(1u64);
+
+        // Initial state: two leaves in the 0xAB subtrie, one in 0xAC (sibling at depth 1),
+        // one in 0xCD (sibling at depth 0). This forces a branch at depth 0 (first nibble)
+        // and a branch at depth 1 (second nibble), with subtries created at depth 2.
+        let initial: BTreeMap<B256, U256> = [
+            (key_ab1, value),
+            (key_ab2, value),
+            (key_ac1, value),
+            (key_cd1, value),
+        ]
+        .into_iter()
+        .collect();
+
+        let harness = ArenaTrieTestHarness::new(initial);
+        let root_node = harness.root_node();
+
+        let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                // min_updates=1 ensures the subtrie is taken for parallel processing.
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        apst.set_root(root_node.node, root_node.masks, false)
+            .expect("set_root should succeed");
+
+        // Reveal all leaves via a no-op update-reveal loop (values match the initial
+        // state so the trie content doesn't change).
+        let rlp_value = alloy_rlp::encode_fixed_size(&value).to_vec();
+        let mut reveal_updates: B256Map<LeafUpdate> = [
+            (key_ab1, LeafUpdate::Changed(rlp_value.clone())),
+            (key_ab2, LeafUpdate::Changed(rlp_value.clone())),
+            (key_ac1, LeafUpdate::Changed(rlp_value.clone())),
+            (key_cd1, LeafUpdate::Changed(rlp_value)),
+        ]
+        .into_iter()
+        .collect();
+
+        loop {
+            let mut targets: Vec<ProofV2Target> = Vec::new();
+            apst.update_leaves(&mut reveal_updates, |key, min_len| {
+                targets.push(ProofV2Target::new(key).with_min_len(min_len));
+            })
+            .expect("update_leaves should succeed");
+
+            if targets.is_empty() {
+                break;
+            }
+
+            let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+            apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+        }
+
+        let root = apst.root();
+        assert_eq!(root, harness.original_root(), "reveal root mismatch");
+
+        // Trigger the bug: delete both 0xAB leaves + Touched on a third 0xAB key.
+        // The subtrie has num_leaves=2. The batch has 3 updates (2 deletions + 1 Touched).
+        // `all_removals` is false (Touched is not Changed(vec![])), so `might_empty_subtrie`
+        // is false. The guard allows parallel processing. Both deletions succeed, Touched
+        // is a no-op, and the subtrie becomes EmptyRoot.
+        let mut bug_updates: B256Map<LeafUpdate> = [
+            (key_ab1, LeafUpdate::Changed(Vec::new())),
+            (key_ab2, LeafUpdate::Changed(Vec::new())),
+            (key_ab3, LeafUpdate::Touched),
+        ]
+        .into_iter()
+        .collect();
+
+        loop {
+            let mut targets: Vec<ProofV2Target> = Vec::new();
+            apst.update_leaves(&mut bug_updates, |key, min_len| {
+                targets.push(ProofV2Target::new(key).with_min_len(min_len));
+            })
+            .expect("update_leaves should succeed");
+
+            if targets.is_empty() {
+                break;
+            }
+
+            let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+            apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+        }
+
+        // After the fix, the root should match the oracle with ab1 and ab2 removed.
+        let mut expected_storage = harness.storage().clone();
+        expected_storage.remove(&key_ab1);
+        expected_storage.remove(&key_ab2);
+        let expected_harness = ArenaTrieTestHarness::new(expected_storage);
+
+        let actual_root = apst.root();
+        assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
+    }
+
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
 
