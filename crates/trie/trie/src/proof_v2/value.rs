@@ -98,7 +98,9 @@ impl<T, H> SyncAccountValueEncoder<T, H> {
         }
     }
 
-    /// Set the storage prefix sets.
+    /// Sets the storage prefix sets. When given, all cached storage trie hashes matching the
+    /// prefix sets will be invalidated during storage root calculation for the corresponding
+    /// accounts.
     pub fn with_storage_prefix_sets(mut self, storage_prefix_sets: B256Map<PrefixSet>) -> Self {
         self.storage_prefix_sets = Rc::new(storage_prefix_sets);
         self
@@ -157,9 +159,9 @@ where
         // Return a deferred encoder that will synchronously compute the storage root when encode()
         // is called.
         SyncAccountDeferredValueEncoder {
-            trie_cursor_factory: self.trie_cursor_factory.clone(),
-            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
-            storage_prefix_sets: self.storage_prefix_sets.clone(),
+            trie_cursor_factory: Rc::clone(&self.trie_cursor_factory),
+            hashed_cursor_factory: Rc::clone(&self.hashed_cursor_factory),
+            storage_prefix_sets: Rc::clone(&self.storage_prefix_sets),
             hashed_address,
             account,
         }

@@ -85,4 +85,7 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "rand/serde",
 ]
-rpc = ["dep:alloy-rpc-types-eth"]
+rpc = [
+    "dep:alloy-rpc-types-eth",
+    "alloy-rpc-types-eth?/serde",
+]

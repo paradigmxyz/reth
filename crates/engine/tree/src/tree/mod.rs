@@ -791,15 +791,10 @@ where
         // If the canonical chain is ahead of the new chain,
         // gather all blocks until new head number.
         while current_canonical_number > current_number {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-                current_canonical_number -= 1;
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
+            current_canonical_number -= 1;
         }
 
         // Both new and old chain pointers are now at the same height.
@@ -808,14 +803,9 @@ where
         // Walk both chains from specified hashes at same height until
         // a common ancestor (fork block) is reached.
         while old_hash != current_hash {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
             {
@@ -942,36 +932,22 @@ where
         let new_head_hash = canonical_header.hash();
         let new_head_number = canonical_header.number();
 
-        // Try to load the canonical ancestor's block
-        match self.canonical_block_by_hash(new_head_hash)? {
-            Some(executed_block) => {
-                // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![executed_block],
-                    old: old_blocks,
-                });
+        // Load the canonical ancestor's block
+        let executed_block = self.canonical_block_by_hash(new_head_hash)?;
+        // Perform the reorg to properly handle the unwind
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
 
-                // CRITICAL: Update the canonical head after the reorg
-                // This ensures get_canonical_head() returns the correct block
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+        // CRITICAL: Update the canonical head after the reorg
+        // This ensures get_canonical_head() returns the correct block
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-                debug!(
-                    target: "engine::tree",
-                    block_number = new_head_number,
-                    block_hash = ?new_head_hash,
-                    "Successfully loaded canonical ancestor into memory via reorg"
-                );
-            }
-            None => {
-                // Fallback: update header only if block cannot be found
-                warn!(
-                    target: "engine::tree",
-                    block_hash = ?new_head_hash,
-                    "Could not find canonical ancestor block, updating header only"
-                );
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
-            }
-        }
+        debug!(
+            target: "engine::tree",
+            block_number = new_head_number,
+            block_hash = ?new_head_hash,
+            "Successfully loaded canonical ancestor into memory via reorg"
+        );
 
         Ok(())
     }
@@ -997,18 +973,17 @@ where
             return Ok(());
         }
 
-        // Try to load the block from storage
-        if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
-            self.canonical_in_memory_state
-                .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
+        // Load the block from storage
+        let executed_block = self.canonical_block_by_hash(block_hash)?;
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
-            debug!(
-                target: "engine::tree",
-                block_number,
-                block_hash = ?block_hash,
-                "Added canonical block to in-memory state"
-            );
-        }
+        debug!(
+            target: "engine::tree",
+            block_number,
+            block_hash = ?block_hash,
+            "Added canonical block to in-memory state"
+        );
 
         Ok(())
     }
@@ -2029,11 +2004,11 @@ where
     /// pruned for a given block, this operation will return an error. On archive nodes, it
     /// can retrieve any block.
     #[instrument(level = "debug", target = "engine::tree", skip(self))]
-    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
+    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(Some(block.clone()))
+            return Ok(block.clone())
         }
 
         let (block, senders) = self
@@ -2075,11 +2050,11 @@ where
             },
         });
 
-        Ok(Some(ExecutedBlock::new(
+        Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output,
             trie_data,
-        )))
+        ))
     }
 
     /// Return sealed block header from in-memory state or database by hash.

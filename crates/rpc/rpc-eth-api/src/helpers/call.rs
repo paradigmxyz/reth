@@ -73,7 +73,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
             }
 
             let block = block.unwrap_or_default();
@@ -490,6 +490,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
+
+            // Disable additional fee charges (e.g. L2 operator fees),
+            // consistent with prepare_call_env and estimate_gas_with.
+            evm_env.cfg_env.disable_fee_charge = true;
 
             // Disable EIP-7825 transaction gas limit cap so that the gas limit
             // fallback (block gas limit) is not rejected when it exceeds the

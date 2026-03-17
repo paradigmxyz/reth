@@ -1,18 +1,12 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
+    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
-use slotmap::{DefaultKey, SlotMap};
 use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
-
-/// Alias for the slotmap key type used as node references throughout the arena trie.
-type Index = DefaultKey;
-/// Alias for the slotmap used as the node arena throughout the arena trie.
-type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 /// An entry on the cursor's traversal stack, tracking an ancestor node during trie walks.
 #[derive(Debug, Clone)]
@@ -93,17 +87,14 @@ impl ArenaCursor {
         self.stack.len() - 1
     }
 
-    /// Returns `true` if the stack is empty.
-    pub(super) const fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
-
-    /// Clears the traversal stack and pushes the given root entry.
+    /// Replaces the root entry on the stack with a new one.
+    ///
+    /// The stack must contain exactly the root (depth 0) or be empty (freshly constructed).
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(
-            self.stack.is_empty() && !self.needs_pop,
-            "cursor must be fully drained before reset; stack has {} entries, needs_pop={}",
+            self.stack.len() <= 1 && !self.needs_pop,
+            "cursor must be drained before reset; stack has {} entries, needs_pop={}",
             self.stack.len(),
             self.needs_pop,
         );
@@ -150,18 +141,15 @@ impl ArenaCursor {
                 _ => false,
             });
             if child_is_dirty {
-                let parent_state = arena[parent.index].state_mut();
-                if !matches!(parent_state, ArenaSparseNodeState::Dirty) {
-                    *parent_state = ArenaSparseNodeState::Dirty;
-                }
+                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
             }
         }
 
         entry
     }
 
-    /// Drains the stack, propagating dirty state from each entry to its parent,
-    /// then removes the final (root) entry.
+    /// Drains the stack down to the root, propagating dirty state from each popped entry
+    /// to its parent. The root entry remains on the stack (there is no parent to propagate to).
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     pub(super) fn drain(&mut self, arena: &mut NodeArena) {
         trace!(target: TRACE_TARGET, "Draining stack");
@@ -169,7 +157,6 @@ impl ArenaCursor {
         while self.stack.len() > 1 {
             self.pop(arena);
         }
-        self.stack.clear();
     }
 
     /// Returns the logical path of the branch at the top of the stack.

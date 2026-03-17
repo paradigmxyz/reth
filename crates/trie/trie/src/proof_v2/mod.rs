@@ -112,7 +112,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     ///
     /// When given, all cached hashes matching the [`PrefixSet`] will be invalidated. When all but
     /// one of a branch's children match the prefix set then that remaining child's cached hash, if
-    /// any will also be invalidated. This allows for properly handling branch collapse situations,
+    /// any, will also be invalidated. This allows for properly handling branch collapse situations,
     /// where all but one child of a branch is deleted and the remaining child is required to be
     /// unrevealed in order to collapse the branch.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
@@ -2107,12 +2107,6 @@ mod tests {
             .expect("Proof generation failed");
     }
 
-    /// Tests that `root_node` handles a cached branch with a `state_mask` bit set for a child
-    /// that has no corresponding `hash_mask` bit and no leaf data in the hashed cursor.
-    ///
-    /// This scenario occurs when a child's `hash_mask` bit is cleared (because the child's path
-    /// is in the prefix set) but the `state_mask` bit is left intact, while the
-    /// `HashedPostStateCursorFactory` overlay has deleted the leaf data for that child.
     #[test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
