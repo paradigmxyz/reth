@@ -655,11 +655,17 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         assert!(w[1] < w[0], "Balance should decrease with each transfer");
     }
 
-    // Mine remaining empty blocks to push early blocks past the prune window
-    for block_num in (TX_BLOCKS + 1)..=TOTAL_BLOCKS {
+    // Mine remaining blocks to push early blocks past the prune window.
+    // Each block needs a transaction because the payload builder requires non-empty payloads.
+    for nonce in TX_BLOCKS..TOTAL_BLOCKS {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
         nodes[0].advance_block().await?;
-        if block_num % 2000 == 0 {
-            tracing::info!(block_num, total = TOTAL_BLOCKS, "Mining progress");
+        if (nonce + 1) % 2000 == 0 {
+            tracing::info!(block = nonce + 1, total = TOTAL_BLOCKS, "Mining progress");
         }
     }
 
@@ -691,7 +697,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     assert!(latest_balance > U256::ZERO, "Latest balance should be queryable");
 
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
-    assert_eq!(latest_nonce, U256::from(TX_BLOCKS), "Latest nonce should match total txs sent");
+    assert_eq!(latest_nonce, U256::from(TOTAL_BLOCKS), "Latest nonce should match total blocks");
 
     Ok(())
 }
