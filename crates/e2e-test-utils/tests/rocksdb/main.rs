@@ -600,6 +600,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 /// and nonce; the rest are empty. Once the chain exceeds the prune distance, the pruner
 /// removes account changesets for the earliest blocks.
 #[tokio::test]
+#[ignore = "requires mining >10k blocks to exceed MINIMUM_UNWIND_SAFE_DISTANCE, too slow for CI"]
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
