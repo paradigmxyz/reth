@@ -601,9 +601,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         block_hash: BlockHash,
     ) -> ProviderResult<StateProviderBox> {
         // Resolve block number and verify it's canonical before destructuring self
-        let block_number = self
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        let block_number =
+            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         self.ensure_canonical_block(block_number)?;
 
         let Self { storage_provider, head_block, .. } = self;
