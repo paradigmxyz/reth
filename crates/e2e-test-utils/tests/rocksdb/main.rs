@@ -537,12 +537,18 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
     assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
 
-    // Mine additional empty blocks to push blocks 1-3 out of the in-memory overlay.
+    // Mine additional blocks to push blocks 1-3 out of the in-memory overlay.
     // With persistence_threshold=0 and memory_block_buffer_target=0, each new block
     // triggers persistence up to `head` followed by in-memory eviction. Mining several
     // more blocks ensures the engine loop has completed at least one full
     // persist-then-evict cycle covering blocks 1-3.
-    for _ in 0..5 {
+    // Each block needs a transaction because the payload builder requires non-empty payloads.
+    for nonce in 3..8u64 {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
         nodes[0].advance_block().await?;
     }
     // Allow the engine loop to process the persistence completions
@@ -577,10 +583,10 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
     assert_eq!(
         latest_nonce,
-        U256::from(3),
-        "Latest nonce should still be 3 (no txs in empty blocks)"
+        U256::from(8),
+        "Latest nonce should be 8 (3 original + 5 extra blocks)"
     );
-    assert!(latest_balance <= balance_at_3, "Latest balance should be at most block 3 balance");
+    assert!(latest_balance < balance_at_3, "Latest balance should be less than block 3 balance");
 
     Ok(())
 }
