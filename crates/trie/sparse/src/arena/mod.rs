@@ -2822,7 +2822,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     // can detect blinded siblings and request proofs.
                     let all_removals = subtrie_updates
                         .iter()
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_))) // Ignore Touched
+                        // Filter out Touched, as they don't affect the structure of the trie. So an
+                        // update set with 2 removals and one Touched could still result in an empty
+                        // sub trie.
+                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
                         .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
                     let subtrie_num_leaves = match &self.upper_arena[child_idx] {
                         ArenaSparseNode::Subtrie(s) => s.num_leaves,
