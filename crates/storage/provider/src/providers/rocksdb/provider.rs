@@ -430,16 +430,6 @@ impl RocksDBProviderInner {
         cf.ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
     }
 
-    /// Gets the column family handle for a table from the read-write database.
-    ///
-    /// # Panics
-    /// Panics if in read-only mode.
-    fn cf_handle_rw(&self, name: &str) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
-        self.db_rw()
-            .cf_handle(name)
-            .ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", name)))
-    }
-
     /// Gets a value from a column family.
     fn get_cf(
         &self,
@@ -1369,8 +1359,8 @@ impl RocksDBProvider {
 impl RocksDBProvider {
     /// Lookup account history and return [`HistoryInfo`] directly.
     ///
-    /// Unlike [`RocksTx::account_history_info`], this works in both read-only and read-write
-    /// modes since it uses the provider's mode-agnostic raw iterator.
+    /// Works in both read-only and read-write modes since it uses the provider's mode-agnostic
+    /// raw iterator.
     pub fn account_history_info(
         &self,
         address: Address,
@@ -1378,7 +1368,7 @@ impl RocksDBProvider {
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let key = ShardedKey::new(address, block_number);
-        self.history_info_on_provider::<tables::AccountsHistory>(
+        self.history_info::<tables::AccountsHistory>(
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
@@ -1393,8 +1383,8 @@ impl RocksDBProvider {
 
     /// Lookup storage history and return [`HistoryInfo`] directly.
     ///
-    /// Unlike [`RocksTx::storage_history_info`], this works in both read-only and read-write
-    /// modes since it uses the provider's mode-agnostic raw iterator.
+    /// Works in both read-only and read-write modes since it uses the provider's mode-agnostic
+    /// raw iterator.
     pub fn storage_history_info(
         &self,
         address: Address,
@@ -1403,7 +1393,7 @@ impl RocksDBProvider {
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let key = StorageShardedKey::new(address, storage_key, block_number);
-        self.history_info_on_provider::<tables::StoragesHistory>(
+        self.history_info::<tables::StoragesHistory>(
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
@@ -1421,9 +1411,8 @@ impl RocksDBProvider {
 
     /// Generic history lookup using the provider's mode-agnostic raw iterator.
     ///
-    /// This is the provider-level equivalent of [`RocksTx::history_info`] and works
-    /// in both read-only and read-write modes.
-    fn history_info_on_provider<T>(
+    /// Works in both read-only and read-write modes.
+    fn history_info<T>(
         &self,
         encoded_key: &[u8],
         block_number: BlockNumber,
@@ -2397,151 +2386,6 @@ impl<'db> RocksTx<'db> {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
     }
-
-    /// Lookup account history and return [`HistoryInfo`] directly.
-    ///
-    /// This is a thin wrapper around `history_info` that:
-    /// - Builds the `ShardedKey` for the address + target block.
-    /// - Validates that the found shard belongs to the same address.
-    pub fn account_history_info(
-        &self,
-        address: Address,
-        block_number: BlockNumber,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<HistoryInfo> {
-        let key = ShardedKey::new(address, block_number);
-        self.history_info::<tables::AccountsHistory>(
-            key.encode().as_ref(),
-            block_number,
-            lowest_available_block_number,
-            |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
-            |prev_bytes| {
-                <ShardedKey<Address> as Decode>::decode(prev_bytes)
-                    .map(|k| k.key == address)
-                    .unwrap_or(false)
-            },
-        )
-    }
-
-    /// Lookup storage history and return [`HistoryInfo`] directly.
-    ///
-    /// This is a thin wrapper around `history_info` that:
-    /// - Builds the `StorageShardedKey` for address + storage key + target block.
-    /// - Validates that the found shard belongs to the same address and storage slot.
-    pub fn storage_history_info(
-        &self,
-        address: Address,
-        storage_key: B256,
-        block_number: BlockNumber,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<HistoryInfo> {
-        let key = StorageShardedKey::new(address, storage_key, block_number);
-        self.history_info::<tables::StoragesHistory>(
-            key.encode().as_ref(),
-            block_number,
-            lowest_available_block_number,
-            |key_bytes| {
-                let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
-                Ok(k.address == address && k.sharded_key.key == storage_key)
-            },
-            |prev_bytes| {
-                <StorageShardedKey as Decode>::decode(prev_bytes)
-                    .map(|k| k.address == address && k.sharded_key.key == storage_key)
-                    .unwrap_or(false)
-            },
-        )
-    }
-
-    /// Generic history lookup for sharded history tables.
-    ///
-    /// Seeks to the shard containing `block_number`, checks if the key matches via `key_matches`,
-    /// and uses `prev_key_matches` to detect if a previous shard exists for the same key.
-    fn history_info<T>(
-        &self,
-        encoded_key: &[u8],
-        block_number: BlockNumber,
-        lowest_available_block_number: Option<BlockNumber>,
-        key_matches: impl FnOnce(&[u8]) -> Result<bool, reth_db_api::DatabaseError>,
-        prev_key_matches: impl Fn(&[u8]) -> bool,
-    ) -> ProviderResult<HistoryInfo>
-    where
-        T: Table<Value = BlockNumberList>,
-    {
-        // History may be pruned if a lowest available block is set.
-        let is_maybe_pruned = lowest_available_block_number.is_some();
-        let fallback = || {
-            Ok(if is_maybe_pruned {
-                HistoryInfo::MaybeInPlainState
-            } else {
-                HistoryInfo::NotYetWritten
-            })
-        };
-
-        let cf = self.provider.0.cf_handle_rw(T::NAME)?;
-
-        // Create a raw iterator to access key bytes directly.
-        let mut iter: DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>> =
-            self.inner.raw_iterator_cf(&cf);
-
-        // Seek to the smallest key >= encoded_key.
-        iter.seek(encoded_key);
-        Self::raw_iter_status_ok(&iter)?;
-
-        if !iter.valid() {
-            // No shard found at or after target block.
-            //
-            // (MaybeInPlainState) The key may have been written, but due to pruning we may not have
-            // changesets and history, so we need to make a plain state lookup.
-            // (HistoryInfo::NotYetWritten) The key has not been written to at all.
-            return fallback();
-        }
-
-        // Check if the found key matches our target entity.
-        let Some(key_bytes) = iter.key() else {
-            return fallback();
-        };
-        if !key_matches(key_bytes)? {
-            // The found key is for a different entity.
-            return fallback();
-        }
-
-        // Decompress the block list for this shard.
-        let Some(value_bytes) = iter.value() else {
-            return fallback();
-        };
-        let chunk = BlockNumberList::decompress(value_bytes)?;
-        let (rank, found_block) = compute_history_rank(&chunk, block_number);
-
-        // Lazy check for previous shard - only called when needed.
-        // If we can step to a previous shard for this same key, history already exists,
-        // so the target block is not before the first write.
-        let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
-            iter.prev();
-            Self::raw_iter_status_ok(&iter)?;
-            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
-            !has_prev
-        } else {
-            false
-        };
-
-        Ok(HistoryInfo::from_lookup(
-            found_block,
-            is_before_first_write,
-            lowest_available_block_number,
-        ))
-    }
-
-    /// Returns an error if the raw iterator is in an invalid state due to an I/O error.
-    fn raw_iter_status_ok(
-        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>>,
-    ) -> ProviderResult<()> {
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
-    }
 }
 
 /// Wrapper enum for `RocksDB` iterators that works in both read-write and read-only modes.
@@ -3083,16 +2927,12 @@ mod tests {
         let shard_key = ShardedKey::new(address, u64::MAX);
         provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
 
-        let tx = provider.tx();
-
         // Query for block 50 with lowest_available_block_number = 100
         // This simulates a pruned state where data before block 100 is not available.
         // Since we're before the first write AND pruning boundary is set, we need to
         // check the changeset at the first write block.
-        let result = tx.account_history_info(address, 50, Some(100)).unwrap();
+        let result = provider.account_history_info(address, 50, Some(100)).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(100));
-
-        tx.rollback().unwrap();
     }
 
     #[test]
