@@ -476,7 +476,7 @@ jobs:
   reth-bench:
     needs: reth-bench-ack
     name: reth-bench
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, available]
     timeout-minutes: 120
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
@@ -1195,10 +1195,21 @@ jobs:
                 comment_id: parseInt(ackCommentId),
                 body,
               });
-            } else {
-              // No PR — write results to job summary
-              await core.summary.addRaw(body).write();
             }
+
+      - name: Write job summary
+        if: success()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const jobSummary = require('./.github/scripts/bench-job-summary.js');
+            await jobSummary({
+              core,
+              context,
+              chartSha: '${{ steps.push-charts.outputs.sha }}',
+              grafanaUrl: '${{ steps.metrics.outputs.grafana-url }}',
+              runId: '${{ github.run_id }}',
+            });
 
       - name: Send Slack notification (success)
         if: success() && env.BENCH_NO_SLACK != 'true'

@@ -28,8 +28,8 @@ on:
         required: false
         type: boolean
         default: false
-      disable_pgo:
-        description: "Disable PGO profiling entirely"
+      pgo:
+        description: "Enable PGO profiling"
         required: false
         type: boolean
         default: false
@@ -41,10 +41,10 @@ on:
 
 jobs:
   collect-pgo-profile:
-    if: github.repository == 'paradigmxyz/reth' && !(github.event_name == 'workflow_dispatch' && inputs.disable_pgo)
+    if: github.repository == 'paradigmxyz/reth' && github.event_name == 'workflow_dispatch' && inputs.pgo
     uses: ./.github/workflows/pgo-profile.yml
     with:
-      pgo_blocks: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo_blocks || '20' }}
+      pgo_blocks: ${{ inputs.pgo_blocks || '20' }}
     secrets: inherit
 
   build:
@@ -77,7 +77,7 @@ jobs:
           echo "dirty=false" >> "$GITHUB_OUTPUT"
 
       - name: Download pre-collected PGO profile
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.disable_pgo) }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo }}
         uses: actions/download-artifact@v7
         with:
           name: pgo-profdata
@@ -86,11 +86,7 @@ jobs:
       - name: Configure PGO build args
         id: pgo
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ "${{ inputs.disable_pgo }}" == "true" ]]; then
-            echo "use_pgo_bolt=false" >> "$GITHUB_OUTPUT"
-            echo "pgo_profdata=" >> "$GITHUB_OUTPUT"
-            echo "PGO disabled via workflow input"
-          else
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ "${{ inputs.pgo }}" == "true" ]]; then
             if [ ! -f dist/merged.profdata ]; then
               echo "::error::Expected dist/merged.profdata from collect-pgo-profile job"
               exit 1
@@ -98,6 +94,10 @@ jobs:
             echo "use_pgo_bolt=true" >> "$GITHUB_OUTPUT"
             echo "pgo_profdata=dist/merged.profdata" >> "$GITHUB_OUTPUT"
             echo "Using pre-collected PGO profile from collect-pgo-profile job"
+          else
+            echo "use_pgo_bolt=false" >> "$GITHUB_OUTPUT"
+            echo "pgo_profdata=" >> "$GITHUB_OUTPUT"
+            echo "PGO disabled"
           fi
 
       - name: Determine build parameters
