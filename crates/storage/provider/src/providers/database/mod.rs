@@ -268,19 +268,21 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
-            self.db.tx_mut()?,
-            self.chain_spec.clone(),
-            self.static_file_provider.clone(),
-            self.prune_modes.clone(),
-            self.storage.clone(),
-            self.storage_settings.clone(),
-            self.rocksdb_provider.clone(),
-            self.changeset_cache.clone(),
-            self.runtime.clone(),
-            self.db.path(),
-        )
-        .with_minimum_pruning_distance(self.minimum_pruning_distance)))
+        Ok(DatabaseProviderRW(
+            DatabaseProvider::new_rw(
+                self.db.tx_mut()?,
+                self.chain_spec.clone(),
+                self.static_file_provider.clone(),
+                self.prune_modes.clone(),
+                self.storage.clone(),
+                self.storage_settings.clone(),
+                self.rocksdb_provider.clone(),
+                self.changeset_cache.clone(),
+                self.runtime.clone(),
+                self.db.path(),
+            )
+            .with_minimum_pruning_distance(self.minimum_pruning_distance),
+        ))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
