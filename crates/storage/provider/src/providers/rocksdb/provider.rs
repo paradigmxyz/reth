@@ -1361,6 +1361,8 @@ impl RocksDBProvider {
     ///
     /// Works in both read-only and read-write modes since it uses the provider's mode-agnostic
     /// raw iterator.
+    ///
+    /// Note: only sees committed data; uncommitted transaction writes are not visible.
     pub fn account_history_info(
         &self,
         address: Address,
@@ -1385,6 +1387,8 @@ impl RocksDBProvider {
     ///
     /// Works in both read-only and read-write modes since it uses the provider's mode-agnostic
     /// raw iterator.
+    ///
+    /// Note: only sees committed data; uncommitted transaction writes are not visible.
     pub fn storage_history_info(
         &self,
         address: Address,
@@ -1412,6 +1416,8 @@ impl RocksDBProvider {
     /// Generic history lookup using the provider's mode-agnostic raw iterator.
     ///
     /// Works in both read-only and read-write modes.
+    ///
+    /// Note: only sees committed data; uncommitted transaction writes are not visible.
     fn history_info<T>(
         &self,
         encoded_key: &[u8],
@@ -2933,6 +2939,39 @@ mod tests {
         // check the changeset at the first write block.
         let result = provider.account_history_info(address, 50, Some(100)).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(100));
+    }
+
+    /// Verifies that history lookups work on a read-only RocksDB provider.
+    /// This was the original bug — read-only mode panicked on `account_history_info`.
+    #[test]
+    fn test_account_history_info_read_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let address = Address::from([0x42; 20]);
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key = ShardedKey::new(address, u64::MAX);
+
+        // Write data with a read-write provider, then drop it.
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
+        }
+
+        // Reopen in read-only mode and verify the lookup succeeds (no panic).
+        let ro_provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+
+        let result = ro_provider.account_history_info(address, 200, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        let result = ro_provider.account_history_info(address, 50, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        let result = ro_provider.account_history_info(address, 400, None).unwrap();
+        assert_eq!(result, HistoryInfo::InPlainState);
     }
 
     #[test]
