@@ -595,12 +595,9 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 /// history pruning, then verifies that `eth_getBalance` / `eth_getTransactionCount` for
 /// pruned blocks returns an error, while queries within the retention window still work.
 ///
-/// `AccountHistory` enforces `MINIMUM_UNWIND_SAFE_DISTANCE` (10,064 blocks) as the minimum
-/// prune distance. The first few blocks contain transfers that change the sender's balance
-/// and nonce; the rest are empty. Once the chain exceeds the prune distance, the pruner
-/// removes account changesets for the earliest blocks.
+/// Uses a small configurable `minimum_distance` (5 blocks) so that the test only needs
+/// ~20 blocks instead of exceeding `MINIMUM_UNWIND_SAFE_DISTANCE` (10,064).
 #[tokio::test]
-#[ignore = "requires mining >10k blocks to exceed MINIMUM_UNWIND_SAFE_DISTANCE, too slow for CI"]
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -608,9 +605,9 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     let chain_id = chain_spec.chain().id();
 
     const TX_BLOCKS: u64 = 5;
-    const PRUNE_DISTANCE: u64 = 10_064;
+    const PRUNE_DISTANCE: u64 = 5;
     // Mine enough blocks so blocks 1..=TX_BLOCKS fall outside the retention window
-    const TOTAL_BLOCKS: u64 = PRUNE_DISTANCE + TX_BLOCKS + 5;
+    const TOTAL_BLOCKS: u64 = TX_BLOCKS + PRUNE_DISTANCE + 10;
 
     let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
@@ -618,11 +615,11 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         test_attributes_generator,
     )
     .with_storage_v2()
-    // Batch persistence to avoid per-block overhead over 10k blocks
-    .with_tree_config_modifier(|config| config.with_persistence_threshold(100))
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .with_node_config_modifier(|mut config| {
         config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
-        config.pruning.block_interval = Some(100);
+        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+        config.pruning.block_interval = Some(1);
         config
     })
     .build()
@@ -671,13 +668,10 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
         wait_for_pending_tx(&client, tx_hash).await;
         nodes[0].advance_block().await?;
-        if (nonce + 1) % 2000 == 0 {
-            tracing::info!(block = nonce + 1, total = TOTAL_BLOCKS, "Mining progress");
-        }
     }
 
     // Allow the pruner to finish processing
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Blocks 1-5 are now outside the retention window (tip - block > PRUNE_DISTANCE).
     // Historical account queries for pruned blocks should error.
@@ -693,8 +687,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     }
 
     // A block safely within the retention window should still be queryable.
-    // Block (TOTAL_BLOCKS - 100) is well within the PRUNE_DISTANCE window.
-    let safe_block = TOTAL_BLOCKS - 100;
+    let safe_block = TOTAL_BLOCKS - 1;
     let safe_hex = format!("0x{:x}", safe_block);
     let safe_balance: U256 = client.request("eth_getBalance", (sender, safe_hex.as_str())).await?;
     assert!(safe_balance > U256::ZERO, "Balance at unpruned block should be queryable");
