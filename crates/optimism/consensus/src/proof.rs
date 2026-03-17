@@ -5,13 +5,14 @@ use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
+use reth_mantle_forks::MantleHardforks;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     receipts: &[ReceiptWithBloom<&R>],
-    chain_spec: impl OpHardforks,
+    chain_spec: impl OpHardforks + MantleHardforks,
     timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
@@ -23,6 +24,9 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
                 let mut receipt = receipt.clone().map_receipt(|r| r.clone());
                 if let Some(receipt) = receipt.receipt.as_deposit_receipt_mut() {
                     receipt.deposit_nonce = None;
+                    if chain_spec.is_mantle_chain() {
+                        receipt.deposit_receipt_version = None;
+                    }
                 }
                 receipt
             })
@@ -39,7 +43,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     receipts: &[R],
-    chain_spec: impl OpHardforks,
+    chain_spec: impl OpHardforks + MantleHardforks,
     timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
@@ -51,6 +55,9 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
                 let mut r = (*r).clone();
                 if let Some(receipt) = r.as_deposit_receipt_mut() {
                     receipt.deposit_nonce = None;
+                    if chain_spec.is_mantle_chain() {
+                        receipt.deposit_receipt_version = None;
+                    }
                 }
                 r
             })
@@ -72,7 +79,8 @@ mod tests {
     use alloy_consensus::{Receipt, ReceiptWithBloom, TxReceipt};
     use alloy_primitives::{b256, bloom, hex, Address, Bytes, Log, LogData};
     use op_alloy_consensus::OpDepositReceipt;
-    use reth_optimism_chainspec::BASE_SEPOLIA;
+    use reth_mantle_forks::MANTLE_SEPOLIA_SKADI_TIMESTAMP;
+    use reth_optimism_chainspec::{BASE_SEPOLIA, MANTLE_SEPOLIA};
     use reth_optimism_primitives::OpReceipt;
 
     /// Tests that the receipt root is computed correctly for the regolith block.
@@ -323,6 +331,43 @@ mod tests {
         assert_eq!(
             root,
             b256!("0xfe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0")
+        );
+    }
+
+    /// Mantle excludes both `deposit_nonce` and `deposit_receipt_version` from receipt root
+    /// calculation (unlike non-Mantle OP chains where Canyon+ includes them). This test ensures
+    /// that regression does not re-introduce receipt root mismatch on Mantle.
+    #[test]
+    fn check_mantle_receipt_root_strips_deposit_receipt_version() {
+        let deposit_with_both = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 46913, logs: vec![] },
+            deposit_nonce: Some(4012991u64),
+            deposit_receipt_version: Some(1),
+        });
+        let deposit_stripped = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 46913, logs: vec![] },
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+        });
+
+        let timestamp = MANTLE_SEPOLIA_SKADI_TIMESTAMP;
+        let receipts_with_both: Vec<_> =
+            std::iter::once(&deposit_with_both).map(TxReceipt::with_bloom_ref).collect();
+        let receipts_stripped: Vec<_> =
+            std::iter::once(&deposit_stripped).map(TxReceipt::with_bloom_ref).collect();
+
+        let root_with_both = calculate_receipt_root_optimism(
+            &receipts_with_both,
+            MANTLE_SEPOLIA.as_ref(),
+            timestamp,
+        );
+        let root_stripped =
+            calculate_receipt_root_optimism(&receipts_stripped, MANTLE_SEPOLIA.as_ref(), timestamp);
+
+        assert_eq!(
+            root_with_both, root_stripped,
+            "Mantle must exclude both deposit_nonce and deposit_receipt_version from receipt root; \
+             roots should match"
         );
     }
 }

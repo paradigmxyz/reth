@@ -68,6 +68,9 @@ pub const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200; // Wed Jul 16 202
 /// Limb upgrade timestamp for Mantle Sepolia testnet
 pub const MANTLE_SEPOLIA_LIMB_TIMESTAMP: u64 = 1_764_745_200; // Wed Dec 03 2025 15:00:00 GMT+0800
 
+/// Arsia upgrade timestamp for Mantle Sepolia testnet
+pub const MANTLE_SEPOLIA_ARSIA_TIMESTAMP: u64 = 1_774_422_000; // Sun Mar 22 2026 15:00:00 GMT+0800
+
 /// Limb upgrade timestamp for Mantle mainnet
 pub const MANTLE_MAINNET_LIMB_TIMESTAMP: u64 = 1_768_374_000; // Wed Jan 14 2026 15:00:00 GMT+0800
 
@@ -123,7 +126,10 @@ impl MantleHardfork {
                 if timestamp < MANTLE_SEPOLIA_LIMB_TIMESTAMP {
                     return Some(Self::Skadi);
                 }
-                Some(Self::Limb)
+                if timestamp < MANTLE_SEPOLIA_ARSIA_TIMESTAMP {
+                    return Some(Self::Limb);
+                }
+                Some(Self::Arsia)
             }
             _ => None,
         }
@@ -142,6 +148,7 @@ impl MantleHardfork {
         vec![
             (Self::Skadi, ForkCondition::Timestamp(MANTLE_SEPOLIA_SKADI_TIMESTAMP)),
             (Self::Limb, ForkCondition::Timestamp(MANTLE_SEPOLIA_LIMB_TIMESTAMP)),
+            (Self::Arsia, ForkCondition::Timestamp(MANTLE_SEPOLIA_ARSIA_TIMESTAMP)),
         ]
     }
 
@@ -157,6 +164,11 @@ pub trait MantleHardforks: OpHardforks {
     /// Retrieves [`ForkCondition`] by a [`MantleHardfork`]. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn mantle_fork_activation(&self, fork: MantleHardfork) -> ForkCondition;
+
+    /// Returns `true` if this chain uses Mantle semantics.
+    /// Used e.g. for receipt root calculation where Mantle excludes both
+    /// `deposit_nonce` and `deposit_receipt_version` from the trie.
+    fn is_mantle_chain(&self) -> bool;
 
     /// Returns `true` if [`Skadi`](MantleHardfork::Skadi) is active at given block timestamp.
     fn is_skadi_active_at_timestamp(&self, timestamp: u64) -> bool {
@@ -280,6 +292,10 @@ impl MantleHardforks for MantleChainHardforks {
             return ForkCondition::Never;
         }
         self[fork]
+    }
+
+    fn is_mantle_chain(&self) -> bool {
+        true
     }
 }
 

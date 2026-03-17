@@ -359,6 +359,15 @@ impl MantleHardforks for OpChainSpec {
     fn mantle_fork_activation(&self, fork: MantleHardfork) -> ForkCondition {
         self.fork(fork)
     }
+
+    fn is_mantle_chain(&self) -> bool {
+        use reth_mantle_forks::{MANTLE_MAINNET_CHAIN_ID, MANTLE_SEPOLIA_CHAIN_ID};
+        let id = self.chain().id();
+        matches!(id, MANTLE_MAINNET_CHAIN_ID | MANTLE_SEPOLIA_CHAIN_ID) ||
+            self.mantle_fork_activation(MantleHardfork::Skadi) != ForkCondition::Never ||
+            self.mantle_fork_activation(MantleHardfork::Limb) != ForkCondition::Never ||
+            self.mantle_fork_activation(MantleHardfork::Arsia) != ForkCondition::Never
+    }
 }
 
 impl From<Genesis> for OpChainSpec {
@@ -1188,6 +1197,34 @@ mod tests {
                 vec![(MantleHardfork::Arsia.boxed(), BaseFeeParams::new(50, 6))].into()
             )
         );
+    }
+
+    #[test]
+    fn parse_custom_mantle_aligned_chain_is_marked_as_mantle() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 55003,
+        "bedrockBlock": 0,
+        "regolithTime": 10,
+        "mantleSkadiTime": 90,
+        "mantleArsiaTime": 100,
+        "mantleLimbTime": 110,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chain_spec: OpChainSpec = genesis.into();
+
+        assert!(chain_spec.is_mantle_chain());
+        assert!(chain_spec.is_skadi_active_at_timestamp(90));
+        assert!(chain_spec.is_arsia_active_at_timestamp(100));
+        assert!(chain_spec.is_limb_active_at_timestamp(110));
     }
 
     #[test]

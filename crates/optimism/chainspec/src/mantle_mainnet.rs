@@ -1,16 +1,11 @@
 //! Chain specification for the Mantle Mainnet network.
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
-use alloc::{sync::Arc, vec};
-use alloy_chains::Chain;
-use alloy_hardforks::Hardfork;
-use alloy_primitives::U256;
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
-use reth_mantle_forks::{
-    MantleHardfork, MANTLE_MAINNET_LIMB_TIMESTAMP, MANTLE_MAINNET_SKADI_TIMESTAMP,
+use crate::{
+    mantle::{configure_mantle_genesis, MantleGenesisInfo},
+    LazyLock, OpChainSpec,
 };
-use reth_optimism_forks::OpHardfork;
+use alloc::sync::Arc;
+use reth_mantle_forks::{MANTLE_MAINNET_LIMB_TIMESTAMP, MANTLE_MAINNET_SKADI_TIMESTAMP};
 use reth_primitives_traits::SealedHeader;
 
 /// Mantle Mainnet genesis hash
@@ -27,37 +22,17 @@ const MANTLE_MAINNET_GENESIS_HASH: alloy_primitives::B256 =
 
 /// The Mantle Mainnet spec with hardcoded Mantle hardfork timestamps
 pub static MANTLE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
-    // Create a minimal genesis configuration
-    // In a real deployment, this should come from the official Mantle genesis
     let genesis = create_mantle_mainnet_genesis();
-
-    // Build hardforks with hardcoded Mantle timestamps
-    let hardforks = create_mantle_mainnet_hardforks();
-
-    OpChainSpec {
-        inner: ChainSpec {
-            chain: Chain::from_id(5000), // Mantle Mainnet chain ID
-            genesis_header: SealedHeader::new(
-                make_op_genesis_header(&genesis, &hardforks),
-                MANTLE_MAINNET_GENESIS_HASH,
-            ),
-            genesis,
-            paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks,
-            base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-            prune_delete_limit: 10000,
-            ..Default::default()
-        },
-    }
-    .into()
+    let mut spec = OpChainSpec::from(genesis);
+    spec.inner.prune_delete_limit = 10000;
+    spec.inner.genesis_header =
+        SealedHeader::new(spec.inner.genesis_header.clone_header(), MANTLE_MAINNET_GENESIS_HASH);
+    spec.into()
 });
 
 /// Creates the Mantle mainnet genesis configuration
 fn create_mantle_mainnet_genesis() -> alloy_genesis::Genesis {
-    // This should ideally be loaded from the official Mantle genesis file
-    // For now, we create a minimal configuration
-
-    serde_json::from_str(
+    let mut genesis = serde_json::from_str(
         r#"
 {
     "commit": "0000000000000000000000000000000000000000",
@@ -169,61 +144,27 @@ fn create_mantle_mainnet_genesis() -> alloy_genesis::Genesis {
 }
     "#,
     )
-    .expect("Invalid Mantle Mainnet genesis JSON")
-}
+    .expect("Invalid Mantle Mainnet genesis JSON");
 
-/// Creates Mantle mainnet hardforks with hardcoded Mantle timestamps
-fn create_mantle_mainnet_hardforks() -> ChainHardforks {
-    let skadi_fork_condition = ForkCondition::Timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP);
-    let limb_fork_condition = ForkCondition::Timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP);
+    configure_mantle_genesis(
+        &mut genesis,
+        MantleGenesisInfo {
+            mantle_skadi_time: Some(MANTLE_MAINNET_SKADI_TIMESTAMP),
+            mantle_limb_time: Some(MANTLE_MAINNET_LIMB_TIMESTAMP),
+            mantle_arsia_time: None,
+        },
+    );
 
-    let hardforks = vec![
-        // Ethereum hardforks at block 0
-        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
-        // Paris (merge) at block 0 with TTD
-        (
-            EthereumHardfork::Paris.boxed(),
-            ForkCondition::TTD {
-                activation_block_number: 0,
-                total_difficulty: U256::ZERO,
-                fork_block: Some(0),
-            },
-        ),
-        // OP Stack hardforks
-        // Note: Mantle Mainnet only has Bedrock and Regolith enabled
-        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-        (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        // L1 hardforks mapped to Skadi timestamp (hardcoded)
-        (EthereumHardfork::Shanghai.boxed(), skadi_fork_condition),
-        (EthereumHardfork::Cancun.boxed(), skadi_fork_condition),
-        (EthereumHardfork::Prague.boxed(), skadi_fork_condition),
-        // L1 Osaka mapped to Limb timestamp
-        (EthereumHardfork::Osaka.boxed(), limb_fork_condition),
-        // Mantle-specific hardforks
-        (MantleHardfork::Skadi.boxed(), skadi_fork_condition),
-        (MantleHardfork::Limb.boxed(), limb_fork_condition),
-    ];
-
-    ChainHardforks::new(hardforks)
+    genesis
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::EthereumHardforks;
-    use reth_mantle_forks::MantleHardforks;
+    use alloy_hardforks::Hardfork;
+    use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, EthereumHardforks};
+    use reth_ethereum_forks::EthereumHardfork;
+    use reth_mantle_forks::{MantleHardfork, MantleHardforks};
 
     #[test]
     fn verify_mantle_mainnet_chain_id() {
@@ -263,5 +204,31 @@ mod tests {
 
         // Verify that Osaka is mapped to Limb timestamp
         assert!(spec.is_osaka_active_at_timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP));
+    }
+
+    #[test]
+    fn verify_mantle_aligned_base_fee_params() {
+        assert_eq!(
+            MANTLE_MAINNET.base_fee_params,
+            BaseFeeParamsKind::Variable(
+                vec![(MantleHardfork::Arsia.boxed(), BaseFeeParams::new(8, 2))].into()
+            )
+        );
+    }
+
+    #[test]
+    fn verify_builtin_matches_genesis_conversion_semantics() {
+        let expected = OpChainSpec::from(create_mantle_mainnet_genesis());
+        let builtin = MANTLE_MAINNET.clone();
+
+        assert_eq!(builtin.base_fee_params, expected.base_fee_params);
+        assert_eq!(
+            builtin.fork(EthereumHardfork::Shanghai),
+            expected.fork(EthereumHardfork::Shanghai)
+        );
+        assert_eq!(builtin.fork(EthereumHardfork::Osaka), expected.fork(EthereumHardfork::Osaka));
+        assert_eq!(builtin.fork(MantleHardfork::Skadi), expected.fork(MantleHardfork::Skadi));
+        assert_eq!(builtin.fork(MantleHardfork::Limb), expected.fork(MantleHardfork::Limb));
+        assert_eq!(builtin.fork(MantleHardfork::Arsia), expected.fork(MantleHardfork::Arsia));
     }
 }

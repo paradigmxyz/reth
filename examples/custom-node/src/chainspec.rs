@@ -124,4 +124,8 @@ impl MantleHardforks for CustomChainSpec {
     ) -> reth_ethereum::chainspec::ForkCondition {
         self.inner.mantle_fork_activation(fork)
     }
+
+    fn is_mantle_chain(&self) -> bool {
+        self.inner.is_mantle_chain()
+    }
 }

@@ -1,44 +1,24 @@
 //! Chain specification for the Mantle Sepolia network.
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
-use alloc::{sync::Arc, vec};
-use alloy_chains::Chain;
-use alloy_hardforks::Hardfork;
-use alloy_primitives::U256;
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
-use reth_mantle_forks::{MantleHardfork, MANTLE_SEPOLIA_CHAIN_ID};
-use reth_optimism_forks::OpHardfork;
-use reth_primitives_traits::SealedHeader;
-
-const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200;
-const MANTLE_SEPOLIA_LIMB_TIMESTAMP: u64 = 1_764_745_200;
-const MANTLE_SEPOLIA_ARSIA_TIMESTAMP: u64 = 1_774_422_000;
+use crate::{
+    mantle::{configure_mantle_genesis, MantleGenesisInfo},
+    LazyLock, OpChainSpec,
+};
+use alloc::sync::Arc;
+use reth_mantle_forks::{
+    MANTLE_SEPOLIA_ARSIA_TIMESTAMP, MANTLE_SEPOLIA_LIMB_TIMESTAMP, MANTLE_SEPOLIA_SKADI_TIMESTAMP,
+};
 
 /// The Mantle Sepolia spec with hardcoded Mantle hardfork timestamps.
 pub static MANTLE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     let genesis = create_mantle_sepolia_genesis();
-    let hardforks = create_mantle_sepolia_hardforks();
-    let genesis_header = make_op_genesis_header(&genesis, &hardforks);
-    let genesis_hash = genesis_header.hash_slow();
-
-    OpChainSpec {
-        inner: ChainSpec {
-            chain: Chain::from_id(MANTLE_SEPOLIA_CHAIN_ID),
-            genesis_header: SealedHeader::new(genesis_header, genesis_hash),
-            genesis,
-            paris_block_and_final_difficulty: Some((0, U256::ZERO)),
-            hardforks,
-            base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-            prune_delete_limit: 10000,
-            ..Default::default()
-        },
-    }
-    .into()
+    let mut spec = OpChainSpec::from(genesis);
+    spec.inner.prune_delete_limit = 10000;
+    spec.into()
 });
 
 fn create_mantle_sepolia_genesis() -> alloy_genesis::Genesis {
-    serde_json::from_str(
+    let mut genesis = serde_json::from_str(
         r#"
 {
     "commit": "0000000000000000000000000000000000000000",
@@ -150,70 +130,28 @@ fn create_mantle_sepolia_genesis() -> alloy_genesis::Genesis {
 }
     "#,
     )
-    .expect("Invalid Mantle Sepolia genesis JSON")
-}
+    .expect("Invalid Mantle Sepolia genesis JSON");
 
-fn create_mantle_sepolia_hardforks() -> ChainHardforks {
-    let skadi_fork_condition = ForkCondition::Timestamp(MANTLE_SEPOLIA_SKADI_TIMESTAMP);
-    let limb_fork_condition = ForkCondition::Timestamp(MANTLE_SEPOLIA_LIMB_TIMESTAMP);
-    let arsia_fork_condition = ForkCondition::Timestamp(MANTLE_SEPOLIA_ARSIA_TIMESTAMP);
+    configure_mantle_genesis(
+        &mut genesis,
+        MantleGenesisInfo {
+            mantle_skadi_time: Some(MANTLE_SEPOLIA_SKADI_TIMESTAMP),
+            mantle_limb_time: Some(MANTLE_SEPOLIA_LIMB_TIMESTAMP),
+            mantle_arsia_time: Some(MANTLE_SEPOLIA_ARSIA_TIMESTAMP),
+        },
+    );
 
-    let hardforks = vec![
-        // Ethereum hardforks at block 0
-        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
-        // Paris (merge) at block 0 with TTD
-        (
-            EthereumHardfork::Paris.boxed(),
-            ForkCondition::TTD {
-                activation_block_number: 0,
-                total_difficulty: U256::ZERO,
-                fork_block: Some(0),
-            },
-        ),
-        // OP Stack hardforks: Bedrock/Regolith are active from genesis, later OP forks activate
-        // together at Mantle's Arsia timestamp.
-        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-        (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        // L1 hardforks mapped to Mantle's Skadi timestamp
-        (EthereumHardfork::Shanghai.boxed(), skadi_fork_condition),
-        (EthereumHardfork::Cancun.boxed(), skadi_fork_condition),
-        (EthereumHardfork::Prague.boxed(), skadi_fork_condition),
-        (MantleHardfork::Skadi.boxed(), skadi_fork_condition),
-        // L1 hardforks mapped to Mantle's Limb timestamp
-        (EthereumHardfork::Osaka.boxed(), limb_fork_condition),
-        (MantleHardfork::Limb.boxed(), limb_fork_condition),
-        // OP hardforks mapped to Mantle's Arsia timestamp
-        (OpHardfork::Canyon.boxed(), arsia_fork_condition),
-        (OpHardfork::Ecotone.boxed(), arsia_fork_condition),
-        (OpHardfork::Fjord.boxed(), arsia_fork_condition),
-        (OpHardfork::Granite.boxed(), arsia_fork_condition),
-        (OpHardfork::Holocene.boxed(), arsia_fork_condition),
-        (OpHardfork::Isthmus.boxed(), arsia_fork_condition),
-        (OpHardfork::Jovian.boxed(), arsia_fork_condition),
-        (MantleHardfork::Arsia.boxed(), arsia_fork_condition),
-    ];
-
-    ChainHardforks::new(hardforks)
+    genesis
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::EthereumHardforks;
-    use reth_mantle_forks::MantleHardforks;
-    use reth_optimism_forks::OpHardforks;
+    use alloy_hardforks::Hardfork;
+    use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, EthereumHardforks};
+    use reth_ethereum_forks::EthereumHardfork;
+    use reth_mantle_forks::{MantleHardfork, MantleHardforks, MANTLE_SEPOLIA_CHAIN_ID};
+    use reth_optimism_forks::{OpHardfork, OpHardforks};
 
     #[test]
     fn verify_mantle_sepolia_chain_id() {
@@ -263,5 +201,33 @@ mod tests {
         assert!(spec.is_holocene_active_at_timestamp(MANTLE_SEPOLIA_ARSIA_TIMESTAMP));
         assert!(spec.is_jovian_active_at_timestamp(MANTLE_SEPOLIA_ARSIA_TIMESTAMP));
         assert!(!spec.is_canyon_active_at_timestamp(MANTLE_SEPOLIA_ARSIA_TIMESTAMP - 1));
+    }
+
+    #[test]
+    fn verify_mantle_aligned_base_fee_params() {
+        assert_eq!(
+            MANTLE_SEPOLIA.base_fee_params,
+            BaseFeeParamsKind::Variable(
+                vec![(MantleHardfork::Arsia.boxed(), BaseFeeParams::new(8, 2))].into()
+            )
+        );
+    }
+
+    #[test]
+    fn verify_builtin_matches_genesis_conversion_semantics() {
+        let expected = OpChainSpec::from(create_mantle_sepolia_genesis());
+        let builtin = MANTLE_SEPOLIA.clone();
+
+        assert_eq!(builtin.base_fee_params, expected.base_fee_params);
+        assert_eq!(
+            builtin.fork(EthereumHardfork::Shanghai),
+            expected.fork(EthereumHardfork::Shanghai)
+        );
+        assert_eq!(builtin.fork(EthereumHardfork::Osaka), expected.fork(EthereumHardfork::Osaka));
+        assert_eq!(builtin.fork(MantleHardfork::Skadi), expected.fork(MantleHardfork::Skadi));
+        assert_eq!(builtin.fork(MantleHardfork::Limb), expected.fork(MantleHardfork::Limb));
+        assert_eq!(builtin.fork(MantleHardfork::Arsia), expected.fork(MantleHardfork::Arsia));
+        assert_eq!(builtin.fork(OpHardfork::Holocene), expected.fork(OpHardfork::Holocene));
+        assert_eq!(builtin.fork(OpHardfork::Jovian), expected.fork(OpHardfork::Jovian));
     }
 }
