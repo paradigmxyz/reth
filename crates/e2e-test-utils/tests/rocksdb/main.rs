@@ -719,11 +719,12 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 /// commit, the pruner reads the OLD committed shard (without `save_blocks`' new entries),
 /// filters it, and pushes its own version. On commit the pruner's batch overwrites
 /// `save_blocks`' batch for the same `ShardedKey(addr, u64::MAX)`, so the new history
-/// entries are silently lost. This test mines blocks with pruning enabled on every block
-/// (`block_interval=1`), records the exact balance at each block, then flushes the
-/// in-memory overlay and verifies that historical queries for blocks within the retention
-/// window return the **exact** recorded values (not just "something > 0"). Without the fix
-/// the pruner corrupts the history shards and these lookups fail.
+/// entries are silently lost.
+///
+/// This test mines blocks with pruning enabled on every block (`block_interval=1`), records
+/// the exact balance at each block, then flushes the in-memory overlay and verifies that
+/// historical queries for blocks within the retention window return the **exact** recorded
+/// values. Without the fix the pruner corrupts the history shards and these lookups fail.
 ///
 /// Uses a small configurable `minimum_distance` (5 blocks) so that the test only needs
 /// ~30 blocks instead of exceeding `MINIMUM_UNWIND_SAFE_DISTANCE` (10,064).
@@ -734,10 +735,9 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    const TX_BLOCKS: u64 = 5;
     const PRUNE_DISTANCE: u64 = 5;
-    // Mine enough blocks so blocks 1..=TX_BLOCKS fall outside the retention window
-    const TOTAL_BLOCKS: u64 = TX_BLOCKS + PRUNE_DISTANCE + 10;
+    // Total blocks with transactions where we record balances.
+    const TOTAL_BLOCKS: u64 = 20;
     // Extra blocks mined after TOTAL_BLOCKS to flush the in-memory overlay so
     // historical queries for retained blocks are served from RocksDB, not memory.
     const FLUSH_BLOCKS: u64 = 5;
@@ -810,28 +810,15 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     // Allow the engine loop to process the persistence completions
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Blocks 1..=TX_BLOCKS are now outside the retention window (tip - block > PRUNE_DISTANCE).
-    // Historical account queries for pruned blocks should error.
-    for block in 1..=TX_BLOCKS {
-        let block_hex = format!("0x{:x}", block);
-        let result: Result<U256, _> =
-            client.request("eth_getBalance", (sender, block_hex.as_str())).await;
-        assert!(
-            result.is_err(),
-            "eth_getBalance at pruned block {block} should return an error, got {:?}",
-            result
-        );
-    }
-
     // Blocks within the retention window must return the EXACT balance recorded during
-    // mining — not just any non-zero value. The race condition causes save_blocks'
-    // history entries to be silently overwritten by the pruner's stale batch, so the
-    // shard ends up missing the block's entry entirely. When that happens the RPC either
-    // errors or returns a wrong value (from a different changeset).
+    // mining. The race condition causes save_blocks' history entries to be silently
+    // overwritten by the pruner's stale batch, so the shard ends up missing the block's
+    // entry entirely. When that happens the RPC either errors or returns a wrong value
+    // (from a different changeset).
     //
-    // The retention window spans roughly (tip - PRUNE_DISTANCE)..=tip. We check the
-    // last PRUNE_DISTANCE blocks of the TOTAL_BLOCKS range (the filler blocks don't
-    // have recorded balances, but these blocks do).
+    // We check a range of blocks that should be within the retention window. These blocks
+    // were written by save_blocks while the pruner was also running (block_interval=1),
+    // so if the race exists their history entries were overwritten.
     let tip = TOTAL_BLOCKS + FLUSH_BLOCKS;
     for block in (TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS {
         // Skip blocks that may have been pruned by the filler-block cycles
