@@ -1428,6 +1428,7 @@ mod rocksdb_tests {
 
         // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_snapshot = rocks_provider.snapshot();
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
@@ -1440,10 +1441,8 @@ mod rocksdb_tests {
                 .account_history_info(address, query.block_number, query.lowest_available)
                 .unwrap();
 
-            // RocksDB query via EitherReader
-            let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
-                EitherReader::RocksDB(rocks_provider.snapshot());
-            let rocks_result = rocks_reader
+            // RocksDB query via EitherReader — reuse snapshot for consistent view
+            let rocks_result = rocks_snapshot
                 .account_history_info(address, query.block_number, query.lowest_available)
                 .unwrap();
 
@@ -1518,6 +1517,7 @@ mod rocksdb_tests {
 
         // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_snapshot = rocks_provider.snapshot();
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
@@ -1535,10 +1535,8 @@ mod rocksdb_tests {
                 )
                 .unwrap();
 
-            // RocksDB query via EitherReader
-            let mut rocks_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
-                EitherReader::RocksDB(rocks_provider.snapshot());
-            let rocks_result = rocks_reader
+            // RocksDB query via snapshot — reuse for consistent view
+            let rocks_result = rocks_snapshot
                 .storage_history_info(
                     address,
                     storage_key,
