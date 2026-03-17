@@ -1,5 +1,5 @@
 use crate::{
-    either_writer::{RawRocksDBBatch, RocksBatchArg, RocksTxRefArg},
+    either_writer::{RawRocksDBBatch, RocksBatchArg, RocksDBRefArg},
     providers::RocksDBProvider,
 };
 use reth_storage_api::StorageSettingsCache;
@@ -25,20 +25,22 @@ pub trait RocksDBProviderFactory {
     /// full commit path.
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()>;
 
-    /// Executes a closure with a `RocksDB` transaction for reading.
+    /// Executes a closure with a `RocksDB` provider reference for reading.
     ///
-    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
-    /// On legacy MDBX-only nodes (where `any_in_rocksdb()` is false), this skips creating
-    /// the `RocksDB` transaction entirely, avoiding unnecessary overhead.
-    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    /// This helper encapsulates `RocksDB` access for read operations.
+    /// On legacy MDBX-only nodes (where `storage_v2` is false), this skips creating
+    /// the `RocksDB` provider entirely, avoiding unnecessary overhead.
+    ///
+    /// Unlike a transaction-based approach, this works in both read-only and read-write
+    /// modes since it uses the provider's mode-agnostic read methods directly.
+    fn with_rocksdb_provider<F, R>(&self, f: F) -> ProviderResult<R>
     where
         Self: StorageSettingsCache,
-        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
+        F: FnOnce(RocksDBRefArg<'_>) -> ProviderResult<R>,
     {
         if self.cached_storage_settings().storage_v2 {
             let rocksdb = self.rocksdb_provider();
-            let tx = rocksdb.tx();
-            return f(Some(&tx));
+            return f(Some(&rocksdb));
         }
         f(None)
     }
@@ -146,25 +148,29 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_settings_skip_rocksdb_tx_creation() {
+    fn test_legacy_settings_skip_rocksdb_provider() {
         let provider = TestProvider::new(StorageSettings::v1());
 
-        let result = provider.with_rocksdb_tx(|tx| {
-            assert!(tx.is_none(), "legacy settings should pass None tx");
+        let result = provider.with_rocksdb_provider(|rocksdb| {
+            assert!(rocksdb.is_none(), "legacy settings should pass None");
             Ok(42)
         });
 
         assert_eq!(result.unwrap(), 42);
-        assert_eq!(provider.tx_call_count(), 0, "should not create RocksDB tx for legacy settings");
+        assert_eq!(
+            provider.tx_call_count(),
+            0,
+            "should not create RocksDB provider for legacy settings"
+        );
     }
 
     #[test]
-    fn test_rocksdb_settings_create_tx() {
+    fn test_rocksdb_settings_create_provider() {
         let settings = StorageSettings::v2();
         let provider = TestProvider::new(settings);
 
-        let result = provider.with_rocksdb_tx(|tx| {
-            assert!(tx.is_some(), "rocksdb settings should pass Some tx");
+        let result = provider.with_rocksdb_provider(|rocksdb| {
+            assert!(rocksdb.is_some(), "rocksdb settings should pass Some provider");
             Ok(42)
         });
 
@@ -172,7 +178,7 @@ mod tests {
         assert_eq!(
             provider.tx_call_count(),
             1,
-            "should create RocksDB tx when any_in_rocksdb is true"
+            "should create RocksDB provider when storage_v2 is true"
         );
     }
 }
