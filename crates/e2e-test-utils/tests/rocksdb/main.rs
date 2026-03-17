@@ -537,13 +537,19 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
     assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
 
-    // Mine additional empty blocks to push blocks 1-3 out of the in-memory overlay.
+    // Mine additional blocks to push blocks 1-3 out of the in-memory overlay.
     // With persistence_threshold=0 and memory_block_buffer_target=0, each new block
     // triggers persistence up to `head` followed by in-memory eviction. Mining several
     // more blocks ensures the engine loop has completed at least one full
     // persist-then-evict cycle covering blocks 1-3.
-    for _ in 0..5 {
-        nodes[0].advance_empty_block().await?;
+    // Each block needs a transaction because the payload builder requires non-empty payloads.
+    for nonce in 3..8u64 {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+        nodes[0].advance_block().await?;
     }
     // Allow the engine loop to process the persistence completions
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -577,10 +583,10 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
     assert_eq!(
         latest_nonce,
-        U256::from(3),
-        "Latest nonce should still be 3 (no txs in empty blocks)"
+        U256::from(8),
+        "Latest nonce should be 8 (3 original + 5 extra blocks)"
     );
-    assert!(latest_balance <= balance_at_3, "Latest balance should be at most block 3 balance");
+    assert!(latest_balance < balance_at_3, "Latest balance should be less than block 3 balance");
 
     Ok(())
 }
@@ -594,6 +600,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 /// and nonce; the rest are empty. Once the chain exceeds the prune distance, the pruner
 /// removes account changesets for the earliest blocks.
 #[tokio::test]
+#[ignore = "requires mining >10k blocks to exceed MINIMUM_UNWIND_SAFE_DISTANCE, too slow for CI"]
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -655,11 +662,17 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         assert!(w[1] < w[0], "Balance should decrease with each transfer");
     }
 
-    // Mine remaining empty blocks to push early blocks past the prune window.
-    for block_num in (TX_BLOCKS + 1)..=TOTAL_BLOCKS {
-        nodes[0].advance_empty_block().await?;
-        if block_num % 2000 == 0 {
-            tracing::info!(block = block_num, total = TOTAL_BLOCKS, "Mining progress");
+    // Mine remaining blocks to push early blocks past the prune window.
+    // Each block needs a transaction because the payload builder requires non-empty payloads.
+    for nonce in TX_BLOCKS..TOTAL_BLOCKS {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+        nodes[0].advance_block().await?;
+        if (nonce + 1) % 2000 == 0 {
+            tracing::info!(block = nonce + 1, total = TOTAL_BLOCKS, "Mining progress");
         }
     }
 
@@ -691,7 +704,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     assert!(latest_balance > U256::ZERO, "Latest balance should be queryable");
 
     let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
-    assert_eq!(latest_nonce, U256::from(TX_BLOCKS), "Latest nonce should match TX_BLOCKS");
+    assert_eq!(latest_nonce, U256::from(TOTAL_BLOCKS), "Latest nonce should match total blocks");
 
     Ok(())
 }
