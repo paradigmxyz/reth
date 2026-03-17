@@ -1,7 +1,7 @@
 //! E2E tests for `RocksDB` provider functionality.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
@@ -449,6 +449,123 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     let mined_tx: Option<Transaction> =
         client.request("eth_getTransactionByHash", [tx_hash]).await?;
     assert_eq!(mined_tx.expect("mined tx").block_number, Some(1));
+
+    Ok(())
+}
+
+/// Historical account queries: verifies that `eth_getBalance` and `eth_getTransactionCount`
+/// return correct values at past block numbers after the account state has changed.
+///
+/// This test exercises the storage-aware historical state lookup path where balance and nonce
+/// must be read from changesets persisted to RocksDB rather than only from the latest state.
+#[tokio::test]
+async fn test_rocksdb_historical_account_queries() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
+
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_storage_v2()
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .build()
+    .await?;
+
+    assert_eq!(nodes.len(), 1);
+
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+    let sender: Address = signer.address();
+    let client = nodes[0].rpc_client().expect("RPC client");
+
+    // Query the sender's balance and nonce at genesis (block 0)
+    let genesis_balance: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
+    let genesis_nonce: U256 = client.request("eth_getTransactionCount", (sender, "0x0")).await?;
+    assert!(genesis_balance > U256::ZERO, "Sender should have genesis balance");
+    assert_eq!(genesis_nonce, U256::ZERO, "Sender nonce should be 0 at genesis");
+
+    // Mine block 1 with a transfer (nonce 0)
+    let raw_tx1 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 0).await;
+    let tx_hash1 = nodes[0].rpc.inject_tx(raw_tx1).await?;
+    wait_for_pending_tx(&client, tx_hash1).await;
+
+    let payload1 = nodes[0].advance_block().await?;
+    assert_eq!(payload1.block().number(), 1);
+
+    // Wait for persistence
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
+
+    // Record state after block 1
+    let balance_at_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
+    let nonce_at_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
+    assert!(balance_at_1 < genesis_balance, "Balance should decrease after transfer + gas");
+    assert_eq!(nonce_at_1, U256::from(1), "Nonce should be 1 after first tx");
+
+    // Mine block 2 with another transfer (nonce 1)
+    let raw_tx2 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await;
+    let tx_hash2 = nodes[0].rpc.inject_tx(raw_tx2).await?;
+    wait_for_pending_tx(&client, tx_hash2).await;
+
+    let payload2 = nodes[0].advance_block().await?;
+    assert_eq!(payload2.block().number(), 2);
+
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await;
+
+    // Record state after block 2
+    let balance_at_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
+    let nonce_at_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
+    assert!(balance_at_2 < balance_at_1, "Balance should decrease further after second tx");
+    assert_eq!(nonce_at_2, U256::from(2), "Nonce should be 2 after second tx");
+
+    // Mine block 3 with a third transfer (nonce 2)
+    let raw_tx3 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await;
+    let tx_hash3 = nodes[0].rpc.inject_tx(raw_tx3).await?;
+    wait_for_pending_tx(&client, tx_hash3).await;
+
+    let payload3 = nodes[0].advance_block().await?;
+    assert_eq!(payload3.block().number(), 3);
+
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
+
+    let balance_at_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
+    let nonce_at_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
+    assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
+    assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
+
+    // Now query historical state at each past block — the core of this test.
+    // After 3 blocks, querying block 0 should still return genesis values.
+    let hist_balance_0: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
+    let hist_nonce_0: U256 = client.request("eth_getTransactionCount", (sender, "0x0")).await?;
+    assert_eq!(
+        hist_balance_0, genesis_balance,
+        "Historical balance at block 0 should match genesis"
+    );
+    assert_eq!(hist_nonce_0, U256::ZERO, "Historical nonce at block 0 should be 0");
+
+    // Block 1 historical query
+    let hist_balance_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
+    let hist_nonce_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
+    assert_eq!(hist_balance_1, balance_at_1, "Historical balance at block 1 should match");
+    assert_eq!(hist_nonce_1, U256::from(1), "Historical nonce at block 1 should be 1");
+
+    // Block 2 historical query
+    let hist_balance_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
+    let hist_nonce_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
+    assert_eq!(hist_balance_2, balance_at_2, "Historical balance at block 2 should match");
+    assert_eq!(hist_nonce_2, U256::from(2), "Historical nonce at block 2 should be 2");
+
+    // "latest" should match block 3
+    let latest_balance: U256 = client.request("eth_getBalance", (sender, "latest")).await?;
+    let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
+    assert_eq!(latest_balance, balance_at_3, "Latest balance should match block 3");
+    assert_eq!(latest_nonce, U256::from(3), "Latest nonce should match block 3");
 
     Ok(())
 }
