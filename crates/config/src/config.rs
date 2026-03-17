@@ -547,7 +547,7 @@ pub struct PruneConfig {
 }
 
 /// Returns the default minimum pruning distance.
-fn default_minimum_pruning_distance() -> u64 {
+const fn default_minimum_pruning_distance() -> u64 {
     MINIMUM_UNWIND_SAFE_DISTANCE
 }
 
@@ -642,7 +642,9 @@ mod tests {
     use crate::PruneConfig;
     use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
-    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
+    use reth_prune_types::{
+        PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_UNWIND_SAFE_DISTANCE,
+    };
     use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
@@ -1112,6 +1114,7 @@ receipts = { distance = 16384 }
     fn test_prune_config_merge() {
         let mut config1 = PruneConfig {
             block_interval: 5,
+            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
@@ -1128,6 +1131,7 @@ receipts = { distance = 16384 }
 
         let config2 = PruneConfig {
             block_interval: 10,
+            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Distance(500)),
                 transaction_lookup: Some(PruneMode::Full),

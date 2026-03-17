@@ -1312,6 +1312,7 @@ mod tests {
                     bodies_distance: None,
                     receipts_log_filter: None,
                     bodies_before: None,
+                    minimum_distance: None,
                 },
                 ..NodeConfig::test()
             };

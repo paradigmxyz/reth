@@ -229,10 +229,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     NoopBodiesDownloader::default(),
                     NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
-                    prune_modes.clone(),
+                    config.prune.segments.clone(),
                     None,
                 ))
-                .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), config.prune.segments.clone()),
+                );
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;

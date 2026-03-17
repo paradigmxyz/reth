@@ -175,7 +175,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     ///
     /// This controls the minimum distance from tip required before pruning can occur.
     /// The default is [`MINIMUM_UNWIND_SAFE_DISTANCE`].
-    pub fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
         self
     }
