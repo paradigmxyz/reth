@@ -187,7 +187,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let prune_modes = config.prune.segments.clone();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
@@ -195,7 +194,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             rocksdb_provider,
             runtime,
         )?
-        .with_prune_modes(prune_modes.clone());
+        .with_prune_modes(config.prune.segments.clone())
+        .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&
