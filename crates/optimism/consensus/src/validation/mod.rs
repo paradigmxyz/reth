@@ -88,7 +88,7 @@ where
 /// - Compares the gas used in the block header to the actual gas usage after execution
 pub fn validate_block_post_execution<R: DepositReceipt>(
     header: impl BlockHeader,
-    chain_spec: impl OpHardforks + MantleHardforks,
+    chain_spec: impl MantleHardforks,
     result: &BlockExecutionResult<R>,
 ) -> Result<(), ConsensusError> {
     // Validate that the blob gas used is present and correctly computed if Jovian is active.
@@ -146,7 +146,7 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[R],
-    chain_spec: impl OpHardforks + MantleHardforks,
+    chain_spec: impl MantleHardforks,
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.

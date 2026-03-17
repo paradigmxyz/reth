@@ -6,13 +6,12 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_mantle_forks::MantleHardforks;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     receipts: &[ReceiptWithBloom<&R>],
-    chain_spec: impl OpHardforks + MantleHardforks,
+    chain_spec: impl MantleHardforks,
     timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
@@ -43,7 +42,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     receipts: &[R],
-    chain_spec: impl OpHardforks + MantleHardforks,
+    chain_spec: impl MantleHardforks,
     timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
