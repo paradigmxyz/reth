@@ -123,7 +123,7 @@ RETH_ARGS=(
 # Big blocks mode requires the testing API, skip-invalid-transactions, and
 # skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
 if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size 500 --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
+  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size max --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
 fi
 
 # Append per-label extra node args (baseline or feature)
