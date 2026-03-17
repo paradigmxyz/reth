@@ -112,7 +112,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     ///
     /// When given, all cached hashes matching the [`PrefixSet`] will be invalidated. When all but
     /// one of a branch's children match the prefix set then that remaining child's cached hash, if
-    /// any will also be invalidated. This allows for properly handling branch collapse situations,
+    /// any, will also be invalidated. This allows for properly handling branch collapse situations,
     /// where all but one child of a branch is deleted and the remaining child is required to be
     /// unrevealed in order to collapse the branch.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
