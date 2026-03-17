@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     hash::{Hash, Hasher},
+    io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -473,7 +474,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
 
-                    continue
+                    continue;
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
@@ -695,6 +696,17 @@ where
 /// Loads transactions from a file, decodes them from the JSON or RLP format, and
 /// inserts them into the transaction pool on node boot up.
 /// The file is removed after the transactions have been successfully processed.
+fn remove_transactions_backup_file(file_path: &Path) -> Result<(), TransactionsBackupError> {
+    match reth_fs_util::remove_file(file_path) {
+        Ok(()) => Ok(()),
+        Err(FsPathError::RemoveFile { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            // Another task/process may have removed it first.
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
 async fn load_and_reinsert_transactions<P>(
     pool: P,
     file_path: &Path,
@@ -703,14 +715,14 @@ where
     P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
-        return Ok(())
+        return Ok(());
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let pool_transactions: Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)> =
@@ -751,7 +763,7 @@ where
     .await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
-    reth_fs_util::remove_file(file_path)?;
+    remove_transactions_backup_file(file_path)?;
     Ok(())
 }
 
@@ -762,7 +774,7 @@ where
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
         trace!(target: "txpool", "no local transactions to save");
-        return
+        return;
     }
 
     let local_transactions = local_transactions
@@ -779,7 +791,7 @@ where
         Ok(data) => data,
         Err(err) => {
             warn!(target: "txpool", %err, txs_file=?file_path, "failed to serialize local transactions to json");
-            return
+            return;
         }
     };
 
@@ -834,7 +846,7 @@ pub async fn backup_local_transactions_task<P>(
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
-        return
+        return;
     };
 
     if let Err(err) = load_and_reinsert_transactions(pool.clone(), &transactions_path).await {
@@ -963,5 +975,27 @@ mod tests {
         let mut tracker = FinalizedBlockTracker::new(None);
         assert_eq!(tracker.update(None), None);
         assert_eq!(tracker.last_finalized_block, None);
+    }
+
+    #[test]
+    fn test_remove_transactions_backup_file_ignores_not_found() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let backup_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
+
+        assert!(remove_transactions_backup_file(&backup_path).is_ok());
+    }
+
+    #[test]
+    fn test_remove_transactions_backup_file_preserves_non_not_found_errors() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir_path = temp_dir.path().join("backup_dir");
+        std::fs::create_dir_all(&dir_path).unwrap();
+
+        let err = remove_transactions_backup_file(&dir_path).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionsBackupError::FsPath(FsPathError::RemoveFile { source, .. })
+                if source.kind() != io::ErrorKind::NotFound
+        ));
     }
 }
