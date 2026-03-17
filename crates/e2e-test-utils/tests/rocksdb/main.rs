@@ -457,7 +457,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 /// return correct values at past block numbers after the account state has changed.
 ///
 /// This test exercises the storage-aware historical state lookup path where balance and nonce
-/// must be read from changesets persisted to RocksDB rather than only from the latest state.
+/// must be read from changesets persisted to `RocksDB` rather than only from the latest state.
 #[tokio::test]
 async fn test_rocksdb_historical_account_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
