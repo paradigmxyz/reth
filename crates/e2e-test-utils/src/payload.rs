@@ -81,6 +81,31 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         }
     }
 
+    /// Wait until the best built payload is ready, accepting empty payloads.
+    ///
+    /// Unlike [`wait_for_built_payload`](Self::wait_for_built_payload), this does not require
+    /// the payload to contain transactions.
+    pub async fn wait_for_built_payload_maybe_empty(&self, payload_id: PayloadId) {
+        let start = std::time::Instant::now();
+        loop {
+            let payload =
+                self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
+            if payload.is_some() {
+                self.payload_builder
+                    .resolve_kind(payload_id, PayloadKind::Earliest)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                break;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(30),
+                "timed out waiting for payload for {payload_id}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
     /// Expects the next event to be a built payload event or panics
     pub async fn expect_built_payload(&mut self) -> eyre::Result<T::BuiltPayload> {
         let second_event = self.payload_event_stream.next().await.unwrap()?;

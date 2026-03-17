@@ -140,6 +140,19 @@ where
         Ok(payload)
     }
 
+    /// Advances the node forward one block, accepting empty payloads (no transactions required).
+    pub async fn advance_empty_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let eth_attr = self.payload.new_payload().await.unwrap();
+        self.payload.expect_attr_event(eth_attr.clone()).await?;
+        self.payload.wait_for_built_payload_maybe_empty(eth_attr.payload_id()).await;
+        let payload = self.payload.expect_built_payload().await?;
+
+        self.submit_payload(payload.clone()).await?;
+        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+
+        Ok(payload)
+    }
+
     /// Waits for block to be available on node.
     pub async fn wait_block(
         &self,
