@@ -712,22 +712,20 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     Ok(())
 }
 
-/// Exploits the race condition between `save_blocks` and `RocksDB` pruning described in
+/// Reproduces the race condition between `save_blocks` and `RocksDB` pruning described in
 /// <https://github.com/paradigmxyz/reth/pull/23081>.
 ///
-/// When `save_blocks` and the pruner both push to `pending_rocksdb_batches` before a single
-/// commit, the pruner reads the OLD committed shard (without `save_blocks`' new entries),
-/// filters it, and pushes its own version. On commit the pruner's batch overwrites
-/// `save_blocks`' batch for the same `ShardedKey(addr, u64::MAX)`, so the new history
-/// entries are silently lost.
+/// Both `save_blocks` and the pruner push to `pending_rocksdb_batches` before a single
+/// `commit()`. The pruner reads committed (stale) state that doesn't include `save_blocks`'
+/// new entry, filters it, and pushes its own batch. On commit the pruner's batch overwrites
+/// `save_blocks`' batch for the same `ShardedKey(addr, u64::MAX)`. Every cycle the new
+/// block's history entry is silently lost. After enough cycles the shard is completely empty.
 ///
-/// This test mines blocks with pruning enabled on every block (`block_interval=1`), records
-/// the exact balance at each block, then flushes the in-memory overlay and verifies that
-/// historical queries for blocks within the retention window return the **exact** recorded
-/// values. Without the fix the pruner corrupts the history shards and these lookups fail.
-///
-/// Uses a small configurable `minimum_distance` (5 blocks) so that the test only needs
-/// ~30 blocks instead of exceeding `MINIMUM_UNWIND_SAFE_DISTANCE` (10,064).
+/// This test mines blocks with account-history pruning (`block_interval=1`,
+/// `minimum_distance=5`), waits for persistence, then reads the `AccountsHistory` shard
+/// directly from `RocksDB`. Without the fix the shard is empty — all entries were
+/// overwritten by the pruner's stale batches. With the fix, entries for the most recent
+/// blocks survive.
 #[tokio::test]
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -736,11 +734,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     let chain_id = chain_spec.chain().id();
 
     const PRUNE_DISTANCE: u64 = 5;
-    // Total blocks with transactions where we record balances.
     const TOTAL_BLOCKS: u64 = 20;
-    // Extra blocks mined after TOTAL_BLOCKS to flush the in-memory overlay so
-    // historical queries for retained blocks are served from RocksDB, not memory.
-    const FLUSH_BLOCKS: u64 = 5;
 
     let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
@@ -765,15 +759,12 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     let sender: Address = signer.address();
     let client = nodes[0].rpc_client().expect("RPC client");
 
-    // Record genesis state
-    let genesis_balance: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
-    assert!(genesis_balance > U256::ZERO);
-
-    // Mine ALL blocks with one transfer each, recording the exact balance at every block.
-    // With block_interval=1 the pruner runs on every save_blocks call, so every cycle
-    // exercises the race: save_blocks writes a new history entry, and the pruner
-    // (if it reads stale committed state) overwrites it.
-    let mut balances = Vec::new();
+    // Mine TOTAL_BLOCKS blocks, each with a transfer from `sender`.
+    // Every block triggers save_blocks + pruner (block_interval=1).
+    // Once tip > PRUNE_DISTANCE + min_distance (= 10), account history pruning kicks in
+    // and the race fires: save_blocks writes a new history entry, the pruner reads the
+    // stale committed shard (without that entry) and overwrites it.
+    let mut last_tx_hash = B256::ZERO;
     for nonce in 0..TOTAL_BLOCKS {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
@@ -783,76 +774,38 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
 
         let payload = nodes[0].advance_block().await?;
         assert_eq!(payload.block().number(), nonce + 1);
-
-        let block_hex = format!("0x{:x}", nonce + 1);
-        let bal: U256 = client.request("eth_getBalance", (sender, block_hex.as_str())).await?;
-        balances.push(bal);
+        last_tx_hash = tx_hash;
     }
 
-    // Verify balances decreased monotonically
-    assert!(balances[0] < genesis_balance);
-    for w in balances.windows(2) {
-        assert!(w[1] < w[0], "Balance should decrease with each transfer");
-    }
+    // Wait for the last block to be fully persisted to RocksDB.
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, last_tx_hash).await;
 
-    // Mine extra filler blocks to advance the canonical head far enough that the
-    // engine tree's persistence + eviction cycle removes TOTAL_BLOCKS from the
-    // in-memory overlay. After this, historical queries hit RocksDB directly.
-    for nonce in TOTAL_BLOCKS..(TOTAL_BLOCKS + FLUSH_BLOCKS) {
-        let raw_tx =
-            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
-                .await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
-        wait_for_pending_tx(&client, tx_hash).await;
-        nodes[0].advance_block().await?;
-    }
+    // Read the AccountsHistory shard for `sender` directly from RocksDB.
+    // This is the data structure corrupted by the race — the RPC path doesn't
+    // expose the corruption because it can reconstruct state from MDBX changesets.
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let shards = rocksdb.account_history_shards(sender).unwrap();
+    let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
 
-    // Allow the engine loop to process the persistence completions
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Without the fix: every save_blocks cycle has its new entry overwritten by the
+    // pruner's stale batch. After ~10 cycles the shard is completely empty.
+    // With the fix: save_blocks commits first, pruner reads committed state that
+    // includes the new entry, so entries for recent blocks survive.
+    assert!(
+        !all_entries.is_empty(),
+        "AccountsHistory shard for sender is empty — save_blocks entries were overwritten \
+         by the pruner's stale RocksDB batch (save_blocks/pruner race, see PR #23081)"
+    );
 
-    // Blocks within the retention window must return the EXACT balance recorded during
-    // mining. The race condition causes save_blocks' history entries to be silently
-    // overwritten by the pruner's stale batch, so the shard ends up missing the block's
-    // entry entirely. When that happens the RPC either errors or returns a wrong value
-    // (from a different changeset).
-    //
-    // We check a range of blocks that should be within the retention window. These blocks
-    // were written by save_blocks while the pruner was also running (block_interval=1),
-    // so if the race exists their history entries were overwritten.
-    let tip = TOTAL_BLOCKS + FLUSH_BLOCKS;
-    for block in (TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS {
-        // Skip blocks that may have been pruned by the filler-block cycles
-        if tip.saturating_sub(block) > PRUNE_DISTANCE {
-            continue;
-        }
-        let block_hex = format!("0x{:x}", block);
-        let hist_balance: U256 = client
-            .request("eth_getBalance", (sender, block_hex.as_str()))
-            .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "eth_getBalance at retained block {block} failed (history entry lost \
-                         due to save_blocks/pruner race?): {e}"
-                )
-            });
-        let expected = balances[(block - 1) as usize];
-        assert_eq!(
-            hist_balance, expected,
-            "Historical balance at block {block} doesn't match recorded value. \
-             The pruner likely overwrote save_blocks' history entry for this block \
-             (save_blocks/pruner race — see PR #23081)."
-        );
-    }
-
-    // "latest" should work and reflect all transactions
-    let latest_balance: U256 = client.request("eth_getBalance", (sender, "latest")).await?;
-    assert!(latest_balance > U256::ZERO, "Latest balance should be queryable");
-
-    let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
-    assert_eq!(
-        latest_nonce,
-        U256::from(TOTAL_BLOCKS + FLUSH_BLOCKS),
-        "Latest nonce should match total blocks mined"
+    // The shard should contain entries for blocks within the retention window.
+    let expected_min = TOTAL_BLOCKS.saturating_sub(PRUNE_DISTANCE);
+    let recent_entries: Vec<u64> =
+        all_entries.iter().copied().filter(|&b| b > expected_min).collect();
+    assert!(
+        !recent_entries.is_empty(),
+        "AccountsHistory shard has no entries for recent blocks (> {expected_min}). \
+         Shard contents: {all_entries:?}. The pruner's stale batch overwrote save_blocks' \
+         entries (save_blocks/pruner race, see PR #23081)."
     );
 
     Ok(())
