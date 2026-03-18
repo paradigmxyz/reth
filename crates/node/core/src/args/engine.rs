@@ -3,8 +3,8 @@
 use clap::{builder::Resettable, Args};
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT,
+    DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS, DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -403,6 +403,25 @@ pub struct EngineArgs {
     )]
     pub state_root_task_timeout: Option<Duration>,
 
+    /// Maximum number of entries the persistence pruner may delete in a single run.
+    /// Limits MDBX dirty page accumulation to prevent OOM when the pruner runs for the
+    /// first time after startup on a large database.
+    ///
+    /// Set to 0 to disable the limit (unlimited).
+    #[arg(long = "engine.persistence-pruner-delete-limit", default_value_t = DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT)]
+    pub persistence_pruner_delete_limit: usize,
+
+    /// Timeout for the persistence pruner per run. Prevents a single prune from blocking
+    /// block persistence for too long.
+    ///
+    /// CAUTION: Account and Storage History segments treat this as a soft limit.
+    ///
+    /// Set to 0s to disable.
+    ///
+    /// --engine.persistence-pruner-timeout 30s
+    #[arg(long = "engine.persistence-pruner-timeout", value_parser = humantime::parse_duration)]
+    pub persistence_pruner_timeout: Option<Duration>,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -478,6 +497,8 @@ impl Default for EngineArgs {
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            persistence_pruner_delete_limit: DEFAULT_PERSISTENCE_PRUNER_DELETE_LIMIT,
+            persistence_pruner_timeout: None,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -510,7 +531,15 @@ impl EngineArgs {
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_enable_arena_sparse_trie(self.enable_arena_sparse_trie)
-            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()));
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_persistence_pruner_delete_limit(if self.persistence_pruner_delete_limit == 0 {
+                usize::MAX
+            } else {
+                self.persistence_pruner_delete_limit
+            })
+            .with_persistence_pruner_timeout(
+                self.persistence_pruner_timeout.filter(|d| !d.is_zero()),
+            );
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -569,6 +598,8 @@ mod tests {
             disable_sparse_trie_cache_pruning: true,
             enable_arena_sparse_trie: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            persistence_pruner_delete_limit: 100_000,
+            persistence_pruner_timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -610,6 +641,10 @@ mod tests {
             "--engine.enable-arena-sparse-trie",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.persistence-pruner-delete-limit",
+            "100000",
+            "--engine.persistence-pruner-timeout",
+            "30s",
         ])
         .args;
 
