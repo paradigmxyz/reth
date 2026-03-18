@@ -127,9 +127,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .into());
                     }
 
+                    let attributes = this.next_env_attributes(&parent)?;
+
                     let mut evm_env = this
                         .evm_config()
-                        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
+                        .next_evm_env(&parent, &attributes)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
 
@@ -205,7 +207,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let ctx = this
                         .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
+                        .context_for_next_block(&parent, attributes)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
                     let map_err = |e: EthApiError| -> Self::Error {

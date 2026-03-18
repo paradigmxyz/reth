@@ -1925,8 +1925,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.with_rocksdb_tx(|tx_ref| {
-            let mut reader = EitherReader::new_transaction_hash_numbers(self, tx_ref)?;
+        self.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_transaction_hash_numbers(self, rocksdb_ref)?;
             reader.get_transaction_hash_number(tx_hash)
         })
     }

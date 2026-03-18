@@ -4,7 +4,7 @@ use super::*;
 ///
 /// Two leaves whose first nibbles differ produce a branch root node.
 /// After `set_root` + `reveal_nodes`, `root()` must match the reference hash.
-pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
+pub(super) fn test_set_root_with_branch_node<T: SparseTrie>(new_trie: fn() -> T) {
     // Keys whose first nibbles differ → branch at root.
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x10; // first nibble = 1
@@ -14,7 +14,7 @@ pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
         BTreeMap::from([(key_a, U256::from(100)), (key_b, U256::from(200))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
     let root = trie.root();
     assert_eq!(root, harness.original_root());
 }
@@ -23,12 +23,12 @@ pub(super) fn test_set_root_with_branch_node<T: SparseTrie + Default>() {
 ///
 /// A single key-value pair produces a leaf root node. After `set_root` + `root()`,
 /// the hash must match the reference trie.
-pub(super) fn test_set_root_with_leaf_node<T: SparseTrie + Default>() {
+pub(super) fn test_set_root_with_leaf_node<T: SparseTrie>(new_trie: fn() -> T) {
     let storage: BTreeMap<B256, U256> = BTreeMap::from([(B256::ZERO, U256::from(42))]);
 
     let harness = SuiteTestHarness::new(storage);
     let root_node = harness.root_node();
-    let mut trie = T::default();
+    let mut trie = (new_trie)();
     trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
     let root = trie.root();
     assert_eq!(root, harness.original_root());
@@ -38,7 +38,7 @@ pub(super) fn test_set_root_with_leaf_node<T: SparseTrie + Default>() {
 ///
 /// Two keys sharing a long common prefix produce an extension root node.
 /// After `set_root` + `reveal_nodes`, `root()` must match the reference hash.
-pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
+pub(super) fn test_set_root_with_extension_node<T: SparseTrie>(new_trie: fn() -> T) {
     // Keys that share first byte 0xAB → extension root.
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0xAB;
@@ -49,7 +49,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
         BTreeMap::from([(key_a, U256::from(100)), (key_b, U256::from(200))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
     let root = trie.root();
     assert_eq!(root, harness.original_root());
 }
@@ -58,7 +58,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie + Default>() {
 ///
 /// When `set_root` is called with `retain_updates = true`, subsequent mutations
 /// should be tracked and `take_updates()` should return non-empty results.
-pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie + Default>() {
+pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie>(new_trie: fn() -> T) {
     // Build a trie with enough leaves to produce non-root branch nodes with hash children.
     // We need leaves sharing a prefix nibble so that intermediate branch nodes are created,
     // and enough entries that children are hashed (RLP ≥ 32 bytes).
@@ -71,7 +71,7 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie + Defau
     }
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Compute root once so branch hashes are cached.
     let _ = trie.root();
@@ -101,7 +101,9 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie + Defau
 ///
 /// When `set_root` is called with `retain_updates = false`, `take_updates()` should
 /// return an empty `SparseTrieUpdates` even after mutations.
-pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: SparseTrie + Default>() {
+pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x10;
     let mut key_b = B256::ZERO;
@@ -113,7 +115,7 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 
     let harness = SuiteTestHarness::new(storage);
     // retain_updates = false
-    let mut trie: T = harness.init_trie_fully_revealed(false);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // Modify a leaf.
     let changeset: BTreeMap<B256, U256> = BTreeMap::from([(key_a, U256::from(99))]);
@@ -135,8 +137,8 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 ///
 /// Setting the root to `TrieNodeV2::EmptyRoot` should leave the trie in its initial
 /// empty state, returning `EMPTY_ROOT_HASH` from `root()`.
-pub(super) fn test_set_root_with_empty_root<T: SparseTrie + Default>() {
-    let mut trie = T::default();
+pub(super) fn test_set_root_with_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut trie = (new_trie)();
     trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root should succeed");
     assert_eq!(trie.root(), EMPTY_ROOT_HASH);
 }

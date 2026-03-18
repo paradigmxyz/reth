@@ -81,7 +81,7 @@ pub mod clients {
         otterscan::OtterscanClient,
         reth::RethApiClient,
         reth_engine::RethEngineApiClient,
-        rpc::RpcApiServer,
+        rpc::RpcApiClient,
         testing::TestingApiClient,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
@@ -90,6 +90,6 @@ pub mod clients {
     };
     pub use reth_rpc_eth_api::{
         EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
-        L2EthApiExtServer,
+        L2EthApiExtClient,
     };
 }

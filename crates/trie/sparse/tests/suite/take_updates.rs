@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie + Default>() {
+pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x10;
     let mut key_b = B256::ZERO;
@@ -9,7 +11,7 @@ pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie + 
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(false);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     let updates = trie.take_updates();
     assert!(updates.updated_nodes.is_empty(), "updated_nodes should be empty when not tracking");
@@ -20,7 +22,7 @@ pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie + 
 ///
 /// After `take_updates()`, subsequent updates should be tracked independently in a fresh
 /// accumulator. updates1 reflects only the A mutation, updates2 reflects only the B mutation.
-pub(super) fn test_take_updates_resets_after_take<T: SparseTrie + Default>() {
+pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() -> T) {
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     for i in 0u8..16 {
         let mut key = B256::ZERO;
@@ -30,7 +32,7 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie + Default>() {
     }
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
     let _ = trie.root();
@@ -80,7 +82,9 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie + Default>() {
 /// (non-empty `BranchNodeMasks`). After removing one group entirely and modifying the
 /// other, `take_updates` should report real branches in `removed_nodes` and modified
 /// branches in `updated_nodes`, with the two sets mutually exclusive.
-pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie + Default>() {
+pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
     // 3-level branching under two groups:
     //
     // Group 0x1 (survives, gets modified):
@@ -122,7 +126,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     }
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
     let _ = trie.root();
@@ -200,7 +204,9 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
 ///   nibble 4, creating branch `[A,A,1,0]` (no short key) as a child of branch `[A,A,1]`. This
 ///   gives `[A,A,1]` non-empty `hash_mask`.
 /// - Changeset 2 removes both, collapsing `[A,A,1]` back to a leaf with empty masks.
-pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTrie + Default>() {
+pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
     let val = U256::from(1u64);
 
     let mut key_existing = B256::ZERO;
@@ -227,7 +233,7 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
         [(key_existing, val), (key_b, val), (key_other, val)].into_iter().collect();
 
     let harness = SuiteTestHarness::new(initial);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
     let _ = trie.root();
@@ -270,7 +276,9 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
 /// When a branch collapses (leaf removal) and then a new branch is created at the same path
 /// (leaf insertion), `take_updates` must not report the same path in both `updated_nodes` and
 /// `removed_nodes`. The insertion must win.
-pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: SparseTrie + Default>() {
+pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
     // 3 leaves sharing the first nibble → branch at nibble 0x0.
     let mut key_a = B256::ZERO;
     key_a.0[0] = 0x00;
@@ -283,7 +291,7 @@ pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: Sparse
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes.
     let _ = trie.root();

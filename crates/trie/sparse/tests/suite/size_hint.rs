@@ -5,7 +5,7 @@ use super::*;
 /// Builds a 5-leaf trie, records `size_hint`, adds 2 leaves, records again,
 /// removes 1 leaf, records again. Asserts s2 > s1 and s3 < s2 (monotonic
 /// relative to leaf count changes).
-pub(super) fn test_size_hint_reflects_leaf_count<T: SparseTrie + Default>() {
+pub(super) fn test_size_hint_reflects_leaf_count<T: SparseTrie>(new_trie: fn() -> T) {
     let key1 = B256::with_last_byte(0x10);
     let key2 = B256::with_last_byte(0x20);
     let key3 = B256::with_last_byte(0x30);
@@ -26,7 +26,7 @@ pub(super) fn test_size_hint_reflects_leaf_count<T: SparseTrie + Default>() {
 
     // Include new key targets so proofs cover them.
     let all_targets = vec![key1, key2, key3, key4, key5, new_key1, new_key2];
-    let mut trie: T = harness.init_trie_with_targets(&all_targets, false);
+    let mut trie: T = harness.init_trie_with_targets(&all_targets, false, new_trie);
 
     let s1 = trie.size_hint();
 
