@@ -1,8 +1,9 @@
 //! E2E tests for `RocksDB` provider functionality.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_rpc_types_eth::{Transaction, TransactionInput, TransactionReceipt, TransactionRequest};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
@@ -1162,6 +1163,184 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
          Expected {expected:?}, got {all_entries:?}. \
          The pruner's stale batch overwrote save_blocks' entries \
          (save_blocks/pruner race, see PR #23081)."
+    );
+
+    Ok(())
+}
+
+/// Mirrors [`test_rocksdb_account_history_pruning`] for the `StoragesHistory` table.
+///
+/// The same race condition between `save_blocks` and the pruner that affects
+/// `AccountsHistory` also affects `StoragesHistory`:
+///   - `write_storage_history` reads committed RocksDB state and pushes a batch.
+///   - `prune_storage_history_batch` also reads stale committed state and pushes its own batch.
+///   - On a single `commit()`, the pruner's batch overwrites `save_blocks`' batch for the same
+///     `StorageShardedKey(addr, slot, u64::MAX)`.
+///
+/// This test deploys a minimal contract that writes to storage slot 0 each block,
+/// then verifies that `StoragesHistory` contains entries for the full retention
+/// window. Without the fix the shard would be truncated — new entries silently
+/// lost every cycle.
+#[tokio::test]
+async fn test_rocksdb_storage_history_pruning() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
+
+    const PRUNE_DISTANCE: u64 = 5;
+    const TOTAL_BLOCKS: u64 = 20;
+
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_storage_v2()
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_node_config_modifier(|mut config| {
+        config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);
+        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+        config.pruning.block_interval = Some(1);
+        config
+    })
+    .build()
+    .await?;
+
+    assert_eq!(nodes.len(), 1);
+
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+    let client = nodes[0].rpc_client().expect("RPC client");
+
+    // Deploy a minimal contract that stores CALLDATA[0..32] into slot 0:
+    //   PUSH0         ; [0]
+    //   CALLDATALOAD  ; [calldata[0..32]]
+    //   PUSH0         ; [0, calldata[0..32]]
+    //   SSTORE        ; sstore(0, calldata[0..32])
+    //   STOP
+    // Bytecode: 5f355f5500
+    //
+    // Init code that deploys this runtime:
+    //   PUSH5 5f355f5500   ; push 5-byte runtime
+    //   PUSH0              ; offset 0 in memory
+    //   MSTORE             ; store at mem[0..32] (right-padded in 32 bytes)
+    //   PUSH1 0x05         ; size = 5
+    //   PUSH1 0x1b         ; offset = 27 (32 - 5)
+    //   PUSH0              ; destOffset = 0
+    //   CODECOPY           ; copy runtime to mem[0..5]
+    //   PUSH1 0x05         ; size = 5
+    //   PUSH0              ; offset = 0
+    //   RETURN             ; return mem[0..5]
+    //
+    // We can simplify: just use PUSH + MSTORE + RETURN pattern.
+    // Init code (hex):
+    //   645f355f5500  PUSH5 runtime_bytecode
+    //   5f            PUSH0 (memory offset for MSTORE, stores at 27..32)
+    //   52            MSTORE
+    //   6005          PUSH1 5 (size)
+    //   601b          PUSH1 27 (offset = 32-5)
+    //   f3            RETURN
+    let init_code = Bytes::from_static(&[
+        0x64, 0x5f, 0x35, 0x5f, 0x55, 0x00, // PUSH5 runtime
+        0x5f, // PUSH0
+        0x52, // MSTORE
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x1b, // PUSH1 27
+        0xf3, // RETURN
+    ]);
+
+    // Deploy in block 1 (nonce 0)
+    let deploy_tx = TransactionRequest {
+        nonce: Some(0),
+        value: Some(U256::ZERO),
+        to: Some(TxKind::Create),
+        gas: Some(100_000),
+        max_fee_per_gas: Some(1000e9 as u128),
+        max_priority_fee_per_gas: Some(20e9 as u128),
+        chain_id: Some(chain_id),
+        input: TransactionInput { input: None, data: Some(init_code) },
+        ..Default::default()
+    };
+    let signed_deploy = TransactionTestContext::sign_tx(signer.clone(), deploy_tx).await;
+    let deploy_bytes: Bytes = signed_deploy.encoded_2718().into();
+    let deploy_hash = nodes[0].rpc.inject_tx(deploy_bytes).await?;
+    wait_for_pending_tx(&client, deploy_hash).await;
+
+    let payload1 = nodes[0].advance_block().await?;
+    assert_eq!(payload1.block().number(), 1);
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await;
+
+    // Get the deployed contract address from the receipt
+    let receipt: Option<TransactionReceipt> =
+        client.request("eth_getTransactionReceipt", [deploy_hash]).await?;
+    let contract_address = receipt
+        .expect("deploy receipt should exist")
+        .contract_address
+        .expect("deploy should create a contract");
+
+    // The storage slot we track: slot 0, encoded as B256
+    let storage_slot = B256::ZERO;
+
+    // Mine TOTAL_BLOCKS - 1 more blocks (block 2..=TOTAL_BLOCKS), each calling the
+    // contract to write a new value to slot 0. This creates a storage changeset entry
+    // per block for (contract_address, slot 0).
+    let mut last_tx_hash = deploy_hash;
+    for nonce in 1..TOTAL_BLOCKS {
+        // calldata = abi encode the block number so each write is unique
+        let block_num = nonce + 1;
+        let calldata = B256::from(U256::from(block_num));
+
+        let call_tx = TransactionRequest {
+            nonce: Some(nonce),
+            value: Some(U256::ZERO),
+            to: Some(TxKind::Call(contract_address)),
+            gas: Some(50_000),
+            max_fee_per_gas: Some(1000e9 as u128),
+            max_priority_fee_per_gas: Some(20e9 as u128),
+            chain_id: Some(chain_id),
+            input: TransactionInput { input: None, data: Some(Bytes::from(calldata.0)) },
+            ..Default::default()
+        };
+        let signed_call = TransactionTestContext::sign_tx(signer.clone(), call_tx).await;
+        let call_bytes: Bytes = signed_call.encoded_2718().into();
+        let tx_hash = nodes[0].rpc.inject_tx(call_bytes).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+
+        let payload = nodes[0].advance_block().await?;
+        assert_eq!(payload.block().number(), block_num);
+        last_tx_hash = tx_hash;
+
+        // Let the persistence cycle complete before the next block
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // Wait for the last block to be fully persisted to RocksDB
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, last_tx_hash).await;
+
+    // Read StoragesHistory shard for (contract_address, slot 0) directly from RocksDB
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let shards = rocksdb.storage_history_shards(contract_address, storage_slot).unwrap();
+    let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+
+    // The contract has a storage write every block (1..=TOTAL_BLOCKS).
+    // With pruning distance=5, the retention window should be
+    // (TOTAL_BLOCKS - PRUNE_DISTANCE, TOTAL_BLOCKS] = blocks 16..=20.
+    //
+    // Block 1 (deploy) also writes to storage (constructor initialises slot layout),
+    // but it should be pruned. What matters is the recent blocks survive.
+    //
+    // Without the fix: the pruner overwrites save_blocks' entries each cycle,
+    // leaving only the very last block (or empty).
+    //
+    // With the fix: all blocks in the retention window are present.
+    let expected: Vec<u64> = ((TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS).collect();
+    assert_eq!(
+        all_entries, expected,
+        "StoragesHistory shard for contract slot 0 doesn't match expected retention window. \
+         Expected {expected:?}, got {all_entries:?}. \
+         The pruner's stale batch overwrote save_blocks' entries \
+         (save_blocks/pruner race for StorageHistory, see PR #23081)."
     );
 
     Ok(())
