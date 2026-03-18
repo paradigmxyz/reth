@@ -17,7 +17,7 @@ const BLOCK_26163047_HEADER_RECEIPTS_ROOT: B256 =
 /// The invalid receipt root observed in reth production logs.
 ///
 /// This root could NOT be reproduced from the receipt data available in the test using
-/// any combination of deposit_nonce / deposit_receipt_version / bloom encoding.
+/// any combination of `deposit_nonce` / `deposit_receipt_version` / bloom encoding.
 /// It was likely computed with different receipt data from a prior version of the code
 /// or chain state. We keep this constant for reference.
 const _INVALID_ROOT_FROM_RETH_LOG: B256 =
@@ -123,17 +123,17 @@ fn mantle_sepolia_block_26163047_receipt_root_from_rpc() {
 }
 
 /// Proves the fix is correct by demonstrating:
-/// 1. Receipts with deposit_nonce stripped → matches header receiptsRoot (geth behavior)
-/// 2. Receipts with deposit_nonce populated → produces WRONG root
-/// 3. `calculate_receipt_root_no_memo_optimism` with MANTLE_SEPOLIA correctly strips and matches
+/// 1. Receipts with `deposit_nonce` stripped → matches header `receiptsRoot` (geth behavior)
+/// 2. Receipts with `deposit_nonce` populated → produces WRONG root
+/// 3. `calculate_receipt_root_no_memo_optimism` with `MANTLE_SEPOLIA` correctly strips and matches
 ///
-/// Context (block_traces verified): revm and geth produce identical gas_used and state for
-/// block 26163047. The receipt root mismatch was caused by deposit_nonce inclusion in encoding.
+/// Context (`block_traces` verified): revm and geth produce identical `gas_used` and state for
+/// block 26163047. The receipt root mismatch was caused by `deposit_nonce` inclusion in encoding.
 ///
 /// The exact invalid root 0x8f66... from production logs could NOT be reproduced with the test
 /// receipt data under any (nonce, version, bloom) combination. It was likely computed from
 /// a different code version or chain state. The fix is still proven correct because
-/// stripping deposit_nonce is the ONLY way to match the header root.
+/// stripping `deposit_nonce` is the ONLY way to match the header root.
 #[test]
 fn proof_of_fix_deposit_nonce_must_be_stripped_for_mantle() {
     // These receipts have deposit_nonce=None (as geth strips it for receiptRoot).

@@ -204,14 +204,14 @@ fn log_receipt_root_mismatch_diagnostics<R: DepositReceipt>(
             receipt
         })
         .collect::<Vec<_>>();
-    let forced_strip_with_bloom = ordered_trie_root_with_encoder(
-        &forced_mantle_stripped,
-        |r, buf| r.with_bloom_ref().encode_2718(buf),
-    );
-    let forced_strip_rlp_encode = ordered_trie_root_with_encoder(
-        &forced_mantle_stripped,
-        |r, buf| r.rlp_encode_with_bloom(&r.bloom(), buf),
-    );
+    let forced_strip_with_bloom =
+        ordered_trie_root_with_encoder(&forced_mantle_stripped, |r, buf| {
+            r.with_bloom_ref().encode_2718(buf)
+        });
+    let forced_strip_rlp_encode =
+        ordered_trie_root_with_encoder(&forced_mantle_stripped, |r, buf| {
+            r.rlp_encode_with_bloom(&r.bloom(), buf)
+        });
 
     let receipt_diag = receipts
         .iter()

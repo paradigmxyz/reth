@@ -11,7 +11,10 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{
+    transaction::{Either, TxHashRef},
+    TxReceipt,
+};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -29,7 +32,7 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
@@ -715,6 +718,44 @@ where
         }
 
         if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
+            if matches!(
+                err,
+                ConsensusError::BodyReceiptRootDiff(_) | ConsensusError::BodyBloomLogDiff(_)
+            ) {
+                let tx_diagnostics = block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, tx)| format!("idx={idx} hash={}", tx.tx_hash()))
+                    .collect::<Vec<_>>();
+
+                let receipt_diagnostics = output
+                    .result
+                    .receipts
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, receipt)| {
+                        format!(
+                            "idx={idx} status={} cumulative_gas={} logs={}",
+                            receipt.status(),
+                            receipt.cumulative_gas_used(),
+                            receipt.logs().len()
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    block_hash = %block.hash(),
+                    block_number = block.number(),
+                    block_gas_used = output.result.gas_used,
+                    txs = ?tx_diagnostics,
+                    receipts = ?receipt_diagnostics,
+                    "Post-execution receipt/bloom validation failed"
+                );
+            }
+
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
