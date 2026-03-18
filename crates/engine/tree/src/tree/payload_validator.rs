@@ -1949,7 +1949,10 @@ where
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
+        let start = Instant::now();
+        let result = self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx);
+        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
+        result
     }
 
     fn validate_block(

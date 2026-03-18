@@ -636,9 +636,6 @@ where
             return Ok(TreeOutcome::new(status));
         }
 
-        // record pre-execution phase duration
-        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
-
         let status = if self.backfill_sync_state.is_idle() {
             self.try_insert_payload(payload)?
         } else {
