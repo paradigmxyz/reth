@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 #
-# Downloads the latest nightly snapshot into the schelk volume with
-# progress reporting to the GitHub PR comment.
+# Downloads the latest snapshot into the schelk volume using
+# `reth download` with progress reporting to the GitHub PR comment.
 #
-# Skips the download if the local ETag marker matches the remote one.
+# Skips the download if the manifest content hasn't changed since
+# the last successful download (checked via SHA-256 of the manifest).
 #
 # Usage: bench-reth-snapshot.sh [--check]
 #   --check   Only check if a download is needed; exits 0 if up-to-date, 1 if not.
 #
 # Required env:
 #   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
+#   BENCH_RETH_BINARY  – path to the reth binary (required for download, not --check)
 #   GITHUB_TOKEN       – token for GitHub API calls (only for download)
 #   BENCH_COMMENT_ID   – PR comment ID to update (optional)
 #   BENCH_REPO         – owner/repo (e.g. paradigmxyz/reth)
@@ -18,52 +20,64 @@
 #   BENCH_CONFIG       – config summary line
 set -euo pipefail
 
-BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous.tar.zst"
+MC="mc"
+BUCKET="minio/reth-snapshots"
+MANIFEST_PATH="reth-1-minimal-stable/manifest.json"
 DATADIR="$SCHELK_MOUNT/datadir"
-ETAG_FILE="$HOME/.reth-bench-snapshot-etag"
+HASH_FILE="$HOME/.reth-bench-snapshot-hash"
 
-# Get remote metadata via JSON for reliable parsing
-MC_STAT=$(mc stat --json "$BUCKET" 2>/dev/null || true)
-REMOTE_ETAG=$(echo "$MC_STAT" | jq -r '.etag // empty')
-if [ -z "$REMOTE_ETAG" ]; then
-  echo "::warning::Failed to get ETag from mc stat, will re-download"
-  REMOTE_ETAG="unknown-$(date +%s)"
+# Fetch manifest and compute content hash for reliable freshness check
+if ! REMOTE_HASH=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null | sha256sum | awk '{print $1}'); then
+  echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
+  exit 2
 fi
 
-LOCAL_ETAG=""
-[ -f "$ETAG_FILE" ] && LOCAL_ETAG=$(cat "$ETAG_FILE")
+LOCAL_HASH=""
+[ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
 
-if [ "$REMOTE_ETAG" = "$LOCAL_ETAG" ]; then
-  echo "Snapshot is up-to-date (ETag: ${REMOTE_ETAG})"
-  if [ "${1:-}" = "--check" ]; then
-    exit 0
-  fi
+if [ "$REMOTE_HASH" = "$LOCAL_HASH" ]; then
+  echo "Snapshot is up-to-date (manifest hash: ${REMOTE_HASH:0:16}…)"
   exit 0
 fi
 
-echo "Snapshot needs update (local: ${LOCAL_ETAG:-<none>}, remote: ${REMOTE_ETAG})"
+echo "Snapshot needs update (local: ${LOCAL_HASH:+${LOCAL_HASH:0:16}…}${LOCAL_HASH:-<none>}, remote: ${REMOTE_HASH:0:16}…)"
 if [ "${1:-}" = "--check" ]; then
+  exit 10
+fi
+
+: "${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set to the reth binary path}"
+RETH="$BENCH_RETH_BINARY"
+if [ ! -x "$RETH" ]; then
+  echo "::error::reth binary not found or not executable at $RETH"
   exit 1
 fi
 
-# Get compressed size for progress tracking
-TOTAL_BYTES=$(echo "$MC_STAT" | jq -r '.size // empty')
-if [ -z "$TOTAL_BYTES" ] || [ "$TOTAL_BYTES" = "0" ]; then
-  echo "::error::Failed to get snapshot size from mc stat"
+# Resolve the MinIO HTTP endpoint from the mc alias so reth can
+# fetch archives over HTTP (the manifest's embedded base_url points
+# to the cluster-internal address which is unreachable from runners).
+MINIO_ENDPOINT=$($MC alias list minio --json | jq -r '.URL')
+if [ -z "$MINIO_ENDPOINT" ] || [ "$MINIO_ENDPOINT" = "null" ]; then
+  echo "::error::Failed to resolve MinIO endpoint from mc alias"
   exit 1
 fi
-echo "Snapshot size: $TOTAL_BYTES bytes ($(numfmt --to=iec "$TOTAL_BYTES"))"
+BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/reth-1-minimal-stable"
+
+# Download manifest and replace base_url with the runner-reachable endpoint
+MANIFEST_TMP=$(mktemp --suffix=.json)
+trap 'rm -f -- "$MANIFEST_TMP"' EXIT
+$MC cat "${BUCKET}/${MANIFEST_PATH}" \
+  | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
 # Prepare mount
 mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"
+sudo chown -R "$(id -u):$(id -g)" "$DATADIR"
 
 update_comment() {
-  local pct="$1"
+  local status="$1"
   [ -z "${BENCH_COMMENT_ID:-}" ] && return 0
-  local status="Building binaries & downloading snapshot… ${pct}%"
   local body
   body="$(printf 'cc @%s\n\n🚀 Benchmark started! [View job](%s)\n\n⏳ **Status:** %s\n\n%s' \
     "$BENCH_ACTOR" "$BENCH_JOB_URL" "$status" "$BENCH_CONFIG")"
@@ -75,46 +89,24 @@ update_comment() {
     > /dev/null 2>&1 || true
 }
 
-# Track compressed bytes flowing through the pipe
-DL_BYTES_FILE=$(mktemp)
-echo 0 > "$DL_BYTES_FILE"
+update_comment "Downloading snapshot…"
 
-# Start progress reporter in background
-(
-  while true; do
-    sleep 10
-    CURRENT=$(cat "$DL_BYTES_FILE" 2>/dev/null || echo 0)
-    if [ "$TOTAL_BYTES" -gt 0 ]; then
-      PCT=$(( CURRENT * 100 / TOTAL_BYTES ))
-      [ "$PCT" -gt 100 ] && PCT=100
-      echo "Snapshot download: $(numfmt --to=iec "$CURRENT") / $(numfmt --to=iec "$TOTAL_BYTES") (${PCT}%)"
-      update_comment "$PCT"
-    fi
-  done
-) &
-PROGRESS_PID=$!
-trap 'kill $PROGRESS_PID 2>/dev/null || true; rm -f "$DL_BYTES_FILE"' EXIT
+# Download using reth download (manifest-path with rewritten base_url)
+"$RETH" download \
+  --manifest-path "$MANIFEST_TMP" \
+  -y \
+  --minimal \
+  --datadir "$DATADIR"
 
-# Download and extract; python byte counter tracks compressed bytes received
-mc cat "$BUCKET" | python3 -c "
-import sys
-count = 0
-while True:
-    data = sys.stdin.buffer.read(1048576)
-    if not data:
-        break
-    count += len(data)
-    sys.stdout.buffer.write(data)
-    with open('$DL_BYTES_FILE', 'w') as f:
-        f.write(str(count))
-" | pzstd -d -p 6 | sudo tar -xf - -C "$DATADIR"
-
-# Stop progress reporter
-kill $PROGRESS_PID 2>/dev/null || true
-wait $PROGRESS_PID 2>/dev/null || true
-
-update_comment "100"
+update_comment "Downloading snapshot… done"
 echo "Snapshot download complete"
+
+# Sanity check: verify expected directories exist
+if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
+  echo "::error::Snapshot download did not produce expected directory layout (missing db/ or static_files/)"
+  ls -la "$DATADIR" || true
+  exit 1
+fi
 
 # Promote the new snapshot to become the schelk baseline (virgin volume).
 # This copies changed blocks from scratch → virgin so that future
@@ -122,6 +114,6 @@ echo "Snapshot download complete"
 sync
 sudo schelk promote -y
 
-# Save ETag marker
-echo "$REMOTE_ETAG" > "$ETAG_FILE"
-echo "Snapshot promoted to schelk baseline (ETag: ${REMOTE_ETAG})"
+# Save manifest hash
+echo "$REMOTE_HASH" > "$HASH_FILE"
+echo "Snapshot promoted to schelk baseline (manifest hash: ${REMOTE_HASH:0:16}…)"

@@ -120,6 +120,11 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
+# Gate flag on binary support (older baselines may not have it)
+if "$BINARY" node --help 2>/dev/null | grep -q -- '--debug.startup-sync-state-idle'; then
+  RETH_ARGS+=(--debug.startup-sync-state-idle)
+fi
+
 # Big blocks mode requires the testing API, skip-invalid-transactions, and
 # skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
 if [ "$BIG_BLOCKS" = "true" ]; then
@@ -195,11 +200,29 @@ for i in $(seq 1 60); do
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
     > /dev/null 2>&1; then
-    echo "reth (${LABEL}) is ready after ${i}s"
+    echo "reth (${LABEL}) RPC is up after ${i}s"
     break
   fi
   if [ "$i" -eq 60 ]; then
     echo "::error::reth (${LABEL}) failed to start within 60s"
+    cat "$LOG"
+    exit 1
+  fi
+  sleep 1
+done
+
+# Wait for the pipeline to finish (eth_syncing returns false) so the
+# engine is in live mode and can accept newPayload calls.
+for i in $(seq 1 300); do
+  SYNC_RESULT=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null || true)
+  if [ -n "$SYNC_RESULT" ] && jq -e '.result == false' <<< "$SYNC_RESULT" > /dev/null 2>&1; then
+    echo "reth (${LABEL}) pipeline finished after ${i}s, engine is live"
+    break
+  fi
+  if [ "$i" -eq 300 ]; then
+    echo "::error::reth (${LABEL}) pipeline did not finish within 300s"
     cat "$LOG"
     exit 1
   fi
