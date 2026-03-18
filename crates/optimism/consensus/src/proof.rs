@@ -13,7 +13,7 @@ use reth_optimism_primitives::DepositReceipt;
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     receipts: &[ReceiptWithBloom<&R>],
     chain_spec: impl MantleHardforks,
-    timestamp: u64,
+    _timestamp: u64,
 ) -> B256 {
     // Mantle always excludes both deposit_nonce and deposit_receipt_version from the receiptRoot
     // calculation (not just during Regolith as on standard OP chains).
@@ -42,7 +42,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
 pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     receipts: &[R],
     chain_spec: impl MantleHardforks,
-    timestamp: u64,
+    _timestamp: u64,
 ) -> B256 {
     // Mantle always excludes both deposit_nonce and deposit_receipt_version from the receiptRoot
     // calculation (not just during Regolith as on standard OP chains).
