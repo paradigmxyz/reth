@@ -1172,7 +1172,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
 ///
 /// The same race condition between `save_blocks` and the pruner that affects
 /// `AccountsHistory` also affects `StoragesHistory`:
-///   - `write_storage_history` reads committed RocksDB state and pushes a batch.
+///   - `write_storage_history` reads committed `RocksDB` state and pushes a batch.
 ///   - `prune_storage_history_batch` also reads stale committed state and pushes its own batch.
 ///   - On a single `commit()`, the pruner's batch overwrites `save_blocks`' batch for the same
 ///     `StorageShardedKey(addr, slot, u64::MAX)`.
@@ -1271,6 +1271,9 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     assert_eq!(payload1.block().number(), 1);
     poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await;
 
+    // Let the persistence cycle complete before the next block (same cadence as the loop below)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
     // Get the deployed contract address from the receipt
     let receipt: Option<TransactionReceipt> =
         client.request("eth_getTransactionReceipt", [deploy_hash]).await?;
@@ -1278,6 +1281,14 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         .expect("deploy receipt should exist")
         .contract_address
         .expect("deploy should create a contract");
+
+    // Sanity check: verify the runtime bytecode is what we expect
+    let code: Bytes = client.request("eth_getCode", (contract_address, "latest")).await?;
+    assert_eq!(
+        code,
+        Bytes::from_static(&[0x5f, 0x35, 0x5f, 0x55, 0x00]),
+        "Deployed runtime should be PUSH0 CALLDATALOAD PUSH0 SSTORE STOP"
+    );
 
     // The storage slot we track: slot 0, encoded as B256
     let storage_slot = B256::ZERO;
@@ -1323,12 +1334,10 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     let shards = rocksdb.storage_history_shards(contract_address, storage_slot).unwrap();
     let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
 
-    // The contract has a storage write every block (1..=TOTAL_BLOCKS).
-    // With pruning distance=5, the retention window should be
+    // The contract has a storage write in blocks 2..=TOTAL_BLOCKS (the deploy in block 1
+    // only executes init code — no SSTORE — so block 1 has no StoragesHistory entry for
+    // slot 0). With pruning distance=5, the retention window should be
     // (TOTAL_BLOCKS - PRUNE_DISTANCE, TOTAL_BLOCKS] = blocks 16..=20.
-    //
-    // Block 1 (deploy) also writes to storage (constructor initialises slot layout),
-    // but it should be pruned. What matters is the recent blocks survive.
     //
     // Without the fix: the pruner overwrites save_blocks' entries each cycle,
     // leaving only the very last block (or empty).
