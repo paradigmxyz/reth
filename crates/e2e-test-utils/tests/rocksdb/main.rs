@@ -826,15 +826,15 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
             continue;
         }
         let block_hex = format!("0x{:x}", block);
-        let hist_balance: U256 =
-            client.request("eth_getBalance", (sender, block_hex.as_str())).await.unwrap_or_else(
-                |e| {
-                    panic!(
-                        "eth_getBalance at retained block {block} failed (history entry lost \
+        let hist_balance: U256 = client
+            .request("eth_getBalance", (sender, block_hex.as_str()))
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "eth_getBalance at retained block {block} failed (history entry lost \
                          due to save_blocks/pruner race?): {e}"
-                    )
-                },
-            );
+                )
+            });
         let expected = balances[(block - 1) as usize];
         assert_eq!(
             hist_balance, expected,
