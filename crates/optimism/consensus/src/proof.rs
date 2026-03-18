@@ -6,7 +6,6 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_mantle_forks::MantleHardforks;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 
 /// Calculates the receipt root for a header.
