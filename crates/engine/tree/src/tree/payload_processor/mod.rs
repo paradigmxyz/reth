@@ -494,6 +494,18 @@ where
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
 
+        // When prewarming is skipped, avoid spawning the blocking thread entirely.
+        // The cache will be saved inline after block validation succeeds.
+        if skip_prewarm {
+            return CacheTaskHandle {
+                saved_cache,
+                to_prewarm_task: None,
+                executed_tx_index,
+                execution_cache: Some(self.execution_cache.clone()),
+                block_hash: Some(env.hash),
+            };
+        }
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -517,9 +529,7 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking_named("prewarm", move || {
-                let mode = if skip_prewarm {
-                    PrewarmMode::Skipped
-                } else if let Some(bal) = bal {
+                let mode = if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
@@ -528,7 +538,13 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task), executed_tx_index }
+        CacheTaskHandle {
+            saved_cache,
+            to_prewarm_task: Some(to_prewarm_task),
+            executed_tx_index,
+            execution_cache: None,
+            block_hash: None,
+        }
     }
 
     /// Returns the cache for the given parent hash.
@@ -920,6 +936,13 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
+    /// Saves execution state into the cache inline when no prewarm thread was spawned.
+    ///
+    /// Call this only after block validation succeeds.
+    pub fn save_cache_inline(&mut self, execution_outcome: &BlockExecutionOutput<R>) {
+        self.prewarm_handle.save_cache_inline(execution_outcome);
+    }
+
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
         self.transactions.iter()
@@ -939,9 +962,38 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Execution cache for inline saving when no prewarm thread is spawned.
+    execution_cache: Option<PayloadExecutionCache>,
+    /// Block hash for cache keying when saving inline.
+    block_hash: Option<B256>,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
+    /// Saves execution state into the cache inline (no prewarm thread).
+    ///
+    /// Call this only after block validation succeeds and when no prewarm thread was spawned.
+    pub fn save_cache_inline(&mut self, execution_outcome: &BlockExecutionOutput<R>) {
+        let (Some(execution_cache), Some(hash)) =
+            (self.execution_cache.take(), self.block_hash.take())
+        else {
+            return;
+        };
+        let Some(saved_cache) = self.saved_cache.take() else {
+            return;
+        };
+        execution_cache.update_with_guard(|cached| {
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                *cached = None;
+                return;
+            }
+            new_cache.update_metrics();
+            *cached = Some(new_cache);
+        });
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.

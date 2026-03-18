@@ -778,6 +778,9 @@ where
 
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
+        } else {
+            // No prewarm thread was spawned — save the cache inline after validation succeeds.
+            handle.save_cache_inline(&*output);
         }
 
         // Create the overlay provider NOW, while we're on the engine loop thread and trie changeset
