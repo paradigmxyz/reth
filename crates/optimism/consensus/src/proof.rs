@@ -12,20 +12,17 @@ use reth_optimism_primitives::DepositReceipt;
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     receipts: &[ReceiptWithBloom<&R>],
     chain_spec: impl MantleHardforks,
-    timestamp: u64,
+    _timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
     // calculation, rather than removing them only during Regolith.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) {
+    if chain_spec.is_mantle_chain() {
         let receipts = receipts
             .iter()
             .map(|receipt| {
                 let mut receipt = receipt.clone().map_receipt(|r| r.clone());
                 if let Some(receipt) = receipt.receipt.as_deposit_receipt_mut() {
                     receipt.deposit_nonce = None;
-                    if chain_spec.is_mantle_chain() {
-                        receipt.deposit_receipt_version = None;
-                    }
                 }
                 receipt
             })
@@ -43,20 +40,17 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
 pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     receipts: &[R],
     chain_spec: impl MantleHardforks,
-    timestamp: u64,
+    _timestamp: u64,
 ) -> B256 {
     // Mantle should always exclude deposit_nonce and deposit_receipt_version from the receiptRoot
     // calculation, rather than removing them only during Regolith.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) {
+    if chain_spec.is_mantle_chain() {
         let receipts = receipts
             .iter()
             .map(|r| {
                 let mut r = (*r).clone();
                 if let Some(receipt) = r.as_deposit_receipt_mut() {
                     receipt.deposit_nonce = None;
-                    if chain_spec.is_mantle_chain() {
-                        receipt.deposit_receipt_version = None;
-                    }
                 }
                 r
             })

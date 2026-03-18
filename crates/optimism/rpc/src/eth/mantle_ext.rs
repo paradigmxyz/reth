@@ -4,7 +4,7 @@ use crate::{error::SequencerClientError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag, Encodable2718};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Bytes, Sealable, U256};
+use alloy_primitives::{Bytes, Sealable, TxKind, U256};
 use alloy_rpc_types_eth::TransactionRequest;
 use jsonrpsee::types::ErrorObject;
 use jsonrpsee_core::RpcResult;
@@ -55,6 +55,25 @@ const fn should_use_l1_legacy_path(
     max_priority_fee_per_gas: Option<u128>,
 ) -> bool {
     !has_base_fee && max_fee_per_gas.is_none() && max_priority_fee_per_gas.is_none()
+}
+
+fn ensure_create_kind_when_to_missing<T>(request: &mut T)
+where
+    T: AsRef<TransactionRequest> + AsMut<TransactionRequest>,
+{
+    if request.as_ref().to.is_none() {
+        request.as_mut().set_kind(TxKind::Create);
+    }
+}
+
+fn build_l1_fee_encoded_tx<T>(mut request: T) -> Result<Vec<u8>, ()>
+where
+    T: AsRef<TransactionRequest>
+        + AsMut<TransactionRequest>
+        + TryIntoSimTx<op_alloy_consensus::OpTxEnvelope>,
+{
+    ensure_create_kind_when_to_missing(&mut request);
+    request.try_into_sim_tx().map(|tx| tx.encoded_2718()).map_err(|_| ())
 }
 
 /// Mantle-specific `Eth` API extensions implementation.
@@ -354,16 +373,13 @@ where
                             // gas_price keeps None)
                         }
                     }
-                    op_req_l1
-                        .try_into_sim_tx()
-                        .map_err(|_| {
-                            ErrorObject::owned(
-                                -32000,
-                                "failed to build transaction for L1 fee",
-                                None::<()>,
-                            )
-                        })?
-                        .encoded_2718()
+                    build_l1_fee_encoded_tx(op_req_l1).map_err(|_| {
+                        ErrorObject::owned(
+                            -32000,
+                            "failed to build transaction for L1 fee",
+                            None::<()>,
+                        )
+                    })?
                 };
 
                 let l1_data_fee = l1_block_info
@@ -407,6 +423,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::TxKind;
+    use alloy_rpc_types_eth::TransactionInput;
+    use op_alloy_rpc_types::OpTransactionRequest;
 
     #[test]
     fn estimate_total_fee_gas_price_prefers_explicit_gas_price() {
@@ -447,5 +466,54 @@ mod tests {
         assert!(!should_use_l1_legacy_path(true, None, None));
         assert!(!should_use_l1_legacy_path(false, Some(1), None));
         assert!(!should_use_l1_legacy_path(false, None, Some(1)));
+    }
+
+    #[test]
+    fn build_l1_fee_encoded_tx_supports_contract_creation_requests() {
+        let request: OpTransactionRequest = TransactionRequest {
+            chain_id: Some(5000),
+            from: Some(alloy_primitives::address!("f39fd6e51aad88f6f4ce6ab8827279cfffb92266")),
+            gas: Some(100_000),
+            nonce: Some(0),
+            max_fee_per_gas: Some(10),
+            max_priority_fee_per_gas: Some(1),
+            input: TransactionInput::from(alloy_primitives::bytes!(
+                "600a600c600039600a6000f3602a60005260206000f3"
+            )),
+            ..Default::default()
+        }
+        .into();
+
+        let encoded = build_l1_fee_encoded_tx(request).expect("contract creation should encode");
+        assert!(!encoded.is_empty(), "encoded tx should not be empty");
+    }
+
+    #[test]
+    fn ensure_create_kind_only_when_to_is_missing() {
+        let mut create_request: OpTransactionRequest = TransactionRequest {
+            chain_id: Some(5000),
+            gas: Some(100_000),
+            nonce: Some(0),
+            max_fee_per_gas: Some(10),
+            max_priority_fee_per_gas: Some(1),
+            ..Default::default()
+        }
+        .into();
+        ensure_create_kind_when_to_missing(&mut create_request);
+        assert_eq!(create_request.as_ref().to, Some(TxKind::Create));
+
+        let to = alloy_primitives::address!("70997970c51812dc3a010c7d01b50e0d17dc79c8");
+        let mut call_request: OpTransactionRequest = TransactionRequest {
+            chain_id: Some(5000),
+            gas: Some(100_000),
+            nonce: Some(0),
+            max_fee_per_gas: Some(10),
+            max_priority_fee_per_gas: Some(1),
+            to: Some(TxKind::Call(to)),
+            ..Default::default()
+        }
+        .into();
+        ensure_create_kind_when_to_missing(&mut call_request);
+        assert_eq!(call_request.as_ref().to, Some(TxKind::Call(to)));
     }
 }

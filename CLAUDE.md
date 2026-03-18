@@ -33,7 +33,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 1. **Formatting**: Always use nightly rustfmt
    ```bash
-   cargo +nightly fmt --all
+   make lint
    ```
 
 2. **Linting**: Run clippy with all features
@@ -351,9 +351,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 
 5. **Run checks**:
    ```bash
-   cargo +nightly fmt --all
-   cargo clippy --all-features
-   cargo test -p reth-discv4
+   make lint
    ```
 
 6. **Commit with clear message**:

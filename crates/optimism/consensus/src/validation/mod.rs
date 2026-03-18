@@ -11,8 +11,8 @@ use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Bloom, Bytes, B256};
-use alloy_trie::EMPTY_ROOT_HASH;
+use alloy_primitives::{hex, Bloom, Bytes, B256};
+use alloy_trie::{root::ordered_trie_root_with_encoder, EMPTY_ROOT_HASH};
 use reth_consensus::ConsensusError;
 use reth_mantle_forks::MantleHardforks;
 use reth_optimism_forks::OpHardforks;
@@ -152,10 +152,22 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     // Calculate receipts root.
     let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let receipts_root =
-        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+        calculate_receipt_root_optimism(&receipts_with_bloom, &chain_spec, timestamp);
 
     // Calculate header logs bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+    if receipts_root != expected_receipts_root {
+        log_receipt_root_mismatch_diagnostics(
+            receipts,
+            &chain_spec,
+            timestamp,
+            receipts_root,
+            expected_receipts_root,
+            logs_bloom,
+            expected_logs_bloom,
+        );
+    }
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,
@@ -165,6 +177,94 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     )?;
 
     Ok(())
+}
+
+fn log_receipt_root_mismatch_diagnostics<R: DepositReceipt>(
+    receipts: &[R],
+    chain_spec: impl MantleHardforks,
+    timestamp: u64,
+    calculated_root: B256,
+    expected_root: B256,
+    calculated_logs_bloom: Bloom,
+    expected_logs_bloom: Bloom,
+) {
+    let raw_with_bloom_2718 =
+        ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf));
+    let raw_rlp_encode =
+        ordered_trie_root_with_encoder(receipts, |r, buf| r.rlp_encode_with_bloom(&r.bloom(), buf));
+
+    let forced_mantle_stripped = receipts
+        .iter()
+        .cloned()
+        .map(|mut receipt| {
+            if let Some(deposit) = receipt.as_deposit_receipt_mut() {
+                deposit.deposit_nonce = None;
+                deposit.deposit_receipt_version = None;
+            }
+            receipt
+        })
+        .collect::<Vec<_>>();
+    let forced_strip_with_bloom = ordered_trie_root_with_encoder(
+        &forced_mantle_stripped,
+        |r, buf| r.with_bloom_ref().encode_2718(buf),
+    );
+    let forced_strip_rlp_encode = ordered_trie_root_with_encoder(
+        &forced_mantle_stripped,
+        |r, buf| r.rlp_encode_with_bloom(&r.bloom(), buf),
+    );
+
+    let receipt_diag = receipts
+        .iter()
+        .enumerate()
+        .map(|(idx, receipt)| {
+            let mut encoded_with_bloom = Vec::new();
+            let mut encoded_rlp = Vec::new();
+            receipt.with_bloom_ref().encode_2718(&mut encoded_with_bloom);
+            receipt.rlp_encode_with_bloom(&receipt.bloom(), &mut encoded_rlp);
+
+            let deposit = receipt.as_deposit_receipt();
+            let topics = receipt
+                .logs()
+                .first()
+                .map(|log| {
+                    log.topics()
+                        .iter()
+                        .map(|topic| format!("{topic:#x}"))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            format!(
+                "idx={idx} ty=0x{:02x} status={} cumulative_gas={} logs={} deposit_nonce={:?} deposit_receipt_version={:?} first_log_topics={:?} encoded_with_bloom_2718=0x{} encoded_rlp=0x{}",
+                receipt.ty(),
+                receipt.status(),
+                receipt.cumulative_gas_used(),
+                receipt.logs().len(),
+                deposit.and_then(|d| d.deposit_nonce),
+                deposit.and_then(|d| d.deposit_receipt_version),
+                topics,
+                hex::encode(encoded_with_bloom),
+                hex::encode(encoded_rlp)
+            )
+        })
+        .collect::<Vec<_>>();
+
+    tracing::warn!(
+        target: "optimism::consensus",
+        block_timestamp = timestamp,
+        mantle_chain = chain_spec.is_mantle_chain(),
+        regolith_active = chain_spec.is_regolith_active_at_timestamp(timestamp),
+        calculated_root = %calculated_root,
+        expected_root = %expected_root,
+        calculated_logs_bloom = %calculated_logs_bloom,
+        expected_logs_bloom = %expected_logs_bloom,
+        raw_with_bloom_2718 = %raw_with_bloom_2718,
+        raw_rlp_encode = %raw_rlp_encode,
+        forced_strip_with_bloom = %forced_strip_with_bloom,
+        forced_strip_rlp_encode = %forced_strip_rlp_encode,
+        receipts = ?receipt_diag,
+        "Receipt root mismatch diagnostics"
+    );
 }
 
 /// Compare the calculated receipts root with the expected receipts root, also compare
