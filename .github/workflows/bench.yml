@@ -71,6 +71,11 @@ on:
         required: false
         default: "true"
         type: boolean
+      otlp:
+        description: "Export OTLP traces and logs"
+        required: false
+        default: "true"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -110,6 +115,7 @@ jobs:
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       abba: ${{ steps.args.outputs.abba }}
+      otlp: ${{ steps.args.outputs.otlp }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -151,6 +157,7 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
+              var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -177,10 +184,10 @@ jobs:
               const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'no-slack']);
-              const boolDefaultTrue = new Set(['reth_newPayload', 'abba']);
+              const boolDefaultTrue = new Set(['reth_newPayload', 'abba', 'otlp']);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -250,7 +257,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -270,6 +277,7 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = defaults.reth_newPayload;
               var abba = defaults.abba;
+              var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
@@ -308,6 +316,7 @@ jobs:
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('abba', abba);
+            core.setOutput('otlp', otlp);
 
       - name: Acknowledge request
         id: ack
@@ -375,6 +384,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
@@ -382,7 +393,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -417,6 +428,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
@@ -424,7 +437,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -494,11 +507,12 @@ jobs:
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
+      BENCH_OTLP: ${{ needs.reth-bench-ack.outputs.otlp }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
       BENCH_NO_SLACK: ${{ needs.reth-bench-ack.outputs.no-slack }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -559,6 +573,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = (process.env.BENCH_ABBA || 'true') !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = (process.env.BENCH_OTLP || 'true') !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
@@ -566,7 +582,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
