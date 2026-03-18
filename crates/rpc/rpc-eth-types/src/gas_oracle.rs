@@ -179,8 +179,9 @@ where
                 results.push(U256::ZERO);
             } else {
                 results.extend(block_values);
-                populated_blocks += 1;
             }
+
+            populated_blocks += 1;
 
             // break when we have enough populated blocks
             if populated_blocks >= self.oracle_config.blocks {
