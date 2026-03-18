@@ -18,7 +18,7 @@ use core::fmt;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
-use reth_db_api::{database::Database, models::StoredBlockBodyIndices, transaction::DbTx};
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
@@ -28,8 +28,8 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, NodePrimitivesProvider,
-    StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -349,12 +349,12 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// consistency. I.e. this MAY result in writes to the static files.
     #[instrument(err, skip(self))]
     pub fn check_consistency(&self) -> ProviderResult<(Option<u64>, Option<u64>)> {
-        let mut provider_ro = self.database_provider_ro()?;
-
-        // Healing can run long-lived read transactions (e.g. iterating changesets
-        // over millions of blocks). Disable the default timeout so MDBX doesn't
-        // kill the transaction mid-heal, which causes a crash loop on startup.
-        provider_ro.tx_mut().disable_long_read_transaction_safety();
+        let provider_ro = self
+            .database_provider_ro()?
+            // Healing can run long-lived read transactions (e.g., iterating changesets
+            // over millions of blocks). Disable the default timeout so MDBX doesn't
+            // kill the transaction mid-heal, which causes a crash loop on startup.
+            .disable_long_read_transaction_safety();
 
         // Step 1: heal file-level inconsistencies (no pruning)
         self.static_file_provider().check_file_consistency(&provider_ro)?;
