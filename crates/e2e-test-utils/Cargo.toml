@@ -45,7 +45,7 @@ revm.workspace = true
 tempfile.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
 url.workspace = true
 
 # ethereum

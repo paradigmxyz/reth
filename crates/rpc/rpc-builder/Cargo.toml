@@ -36,7 +36,7 @@ reth-chain-state.workspace = true
 reth-evm.workspace = true
 
 # rpc/net
-jsonrpsee = { workspace = true, features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server", "ws-client"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
 http.workspace = true

@@ -26,7 +26,7 @@ alloy-eips.workspace = true
 futures.workspace = true
 
 # misc
-jsonrpsee = { workspace = true, features = ["client", "async-client"] }
+jsonrpsee = { workspace = true, features = ["http-client", "async-client", "client-core"] }
 serde_json.workspace = true
 
 # assertions

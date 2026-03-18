@@ -44,11 +44,13 @@ serde_json.workspace = true
 
 [features]
 client = [
-    "jsonrpsee/client",
+    "jsonrpsee/http-client",
     "jsonrpsee/async-client",
+    "jsonrpsee/client-core",
+    "jsonrpsee/client-ws-transport-tls",
     "reth-rpc-eth-api/client",
 ]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }
+jsonrpsee = { workspace = true, features = ["http-client", "async-client", "client-core", "client-ws-transport-tls"] }

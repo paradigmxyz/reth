@@ -71,7 +71,7 @@ revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
-jsonrpsee.workspace = true
+jsonrpsee = { workspace = true, features = ["server"] }
 serde_json.workspace = true
 jsonrpsee-types.workspace = true
 
@@ -101,7 +101,7 @@ reth-db-api.workspace = true
 
 rand.workspace = true
 
-jsonrpsee = { workspace = true, features = ["client"] }
+jsonrpsee = { workspace = true, features = ["http-client", "async-client"] }
 
 [features]
 js-tracer = [

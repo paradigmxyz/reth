@@ -594,7 +594,7 @@ discv5 = "0.10"
 if-addrs = "0.14"
 
 # rpc
-jsonrpsee = "0.26.0"
+jsonrpsee = { version = "0.26.0", default-features = false }
 jsonrpsee-core = "0.26.0"
 jsonrpsee-server = "0.26.0"
 jsonrpsee-http-client = "0.26.0"
