@@ -170,8 +170,8 @@ jobs:
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ""
       BENCH_ACTOR: "nightly-regression"
-      BENCH_BLOCKS: "500"
-      BENCH_WARMUP_BLOCKS: "100"
+      BENCH_BLOCKS: "2000"
+      BENCH_WARMUP_BLOCKS: "500"
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
