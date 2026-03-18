@@ -759,11 +759,10 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     let sender: Address = signer.address();
     let client = nodes[0].rpc_client().expect("RPC client");
 
-    // Mine TOTAL_BLOCKS blocks, each with a transfer from `sender`.
-    // Every block triggers save_blocks + pruner (block_interval=1).
-    // Once tip > PRUNE_DISTANCE + min_distance (= 10), account history pruning kicks in
-    // and the race fires: save_blocks writes a new history entry, the pruner reads the
-    // stale committed shard (without that entry) and overwrites it.
+    // Mine blocks one at a time with a delay so each save_blocks + pruner cycle
+    // completes independently. The race fires every cycle (the pruner reads stale
+    // committed state that doesn't include save_blocks' pending batch), but processing
+    // one block at a time makes the outcome deterministic.
     let mut last_tx_hash = B256::ZERO;
     for nonce in 0..TOTAL_BLOCKS {
         let raw_tx =
@@ -775,37 +774,37 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         let payload = nodes[0].advance_block().await?;
         assert_eq!(payload.block().number(), nonce + 1);
         last_tx_hash = tx_hash;
+
+        // Let the persistence cycle (save_blocks → pruner → commit) complete before
+        // producing the next block, so each cycle processes exactly one block.
+        tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
     // Wait for the last block to be fully persisted to RocksDB.
     poll_tx_in_rocksdb(&nodes[0].inner.provider, last_tx_hash).await;
 
     // Read the AccountsHistory shard for `sender` directly from RocksDB.
-    // This is the data structure corrupted by the race — the RPC path doesn't
-    // expose the corruption because it can reconstruct state from MDBX changesets.
+    // This is the data structure corrupted by the race.
     let rocksdb = nodes[0].inner.provider.rocksdb_provider();
     let shards = rocksdb.account_history_shards(sender).unwrap();
     let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
 
-    // Without the fix: every save_blocks cycle has its new entry overwritten by the
-    // pruner's stale batch. After ~10 cycles the shard is completely empty.
-    // With the fix: save_blocks commits first, pruner reads committed state that
-    // includes the new entry, so entries for recent blocks survive.
-    assert!(
-        !all_entries.is_empty(),
-        "AccountsHistory shard for sender is empty — save_blocks entries were overwritten \
-         by the pruner's stale RocksDB batch (save_blocks/pruner race, see PR #23081)"
-    );
-
-    // The shard should contain entries for blocks within the retention window.
-    let expected_min = TOTAL_BLOCKS.saturating_sub(PRUNE_DISTANCE);
-    let recent_entries: Vec<u64> =
-        all_entries.iter().copied().filter(|&b| b > expected_min).collect();
-    assert!(
-        !recent_entries.is_empty(),
-        "AccountsHistory shard has no entries for recent blocks (> {expected_min}). \
-         Shard contents: {all_entries:?}. The pruner's stale batch overwrote save_blocks' \
-         entries (save_blocks/pruner race, see PR #23081)."
+    // The sender has a transfer in every block, so the shard should contain an entry
+    // for every block in the retention window: (TOTAL_BLOCKS - PRUNE_DISTANCE, TOTAL_BLOCKS].
+    //
+    // Without the fix: the pruner reads stale committed state each cycle, overwrites
+    // save_blocks' entry, and only the very last block survives (no subsequent pruner
+    // cycle to overwrite it). The shard ends up as just [TOTAL_BLOCKS].
+    //
+    // With the fix: save_blocks' batch is committed before the pruner reads, so the
+    // pruner sees the new entry and preserves it. All retained blocks are present.
+    let expected: Vec<u64> = ((TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS).collect();
+    assert_eq!(
+        all_entries, expected,
+        "AccountsHistory shard for sender doesn't match expected retention window. \
+         Expected {expected:?}, got {all_entries:?}. \
+         The pruner's stale batch overwrote save_blocks' entries \
+         (save_blocks/pruner race, see PR #23081)."
     );
 
     Ok(())
