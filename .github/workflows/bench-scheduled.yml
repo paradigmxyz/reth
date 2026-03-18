@@ -10,6 +10,8 @@
 on:
   schedule:
     - cron: "30 5 * * *" # 06:30 UTC daily
+  pull_request: # TODO: remove before merging — hack to test from branch
+    branches: [main]
   workflow_dispatch:
     inputs:
       force:
@@ -27,7 +29,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
 
-name: bench-nightly
+name: bench-scheduled
 
 permissions:
   contents: read
@@ -58,9 +60,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .nightly-state
-          key: bench-nightly-state-dummy
+          key: bench-scheduled-state-dummy
           restore-keys: |
-            bench-nightly-state-
+            bench-scheduled-state-
 
       - name: Resolve nightly refs
         id: refs
@@ -69,7 +71,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           FORCE="${{ inputs.force || 'false' }}"
-          .github/scripts/bench-nightly-refs.sh "$FORCE"
+          .github/scripts/bench-scheduled-refs.sh "$FORCE"
 
       - name: Alert on stale nightly
         if: steps.refs.outputs.is-stale == 'true'
@@ -154,12 +156,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Job 2: Run the benchmark
   # ---------------------------------------------------------------------------
-  bench-nightly:
+  bench-scheduled:
     needs: resolve-refs
     if: |
       needs.resolve-refs.outputs.should-skip != 'true' &&
       needs.resolve-refs.outputs.is-stale != 'true'
-    name: bench-nightly
+    name: bench-scheduled
     runs-on: [self-hosted, Linux, X64, available]
     timeout-minutes: 120
     env:
@@ -205,7 +207,7 @@ jobs:
               repo: context.repo.repo,
               run_id: context.runId,
             });
-            const job = jobs.jobs.find(j => j.name === 'bench-nightly');
+            const job = jobs.jobs.find(j => j.name === 'bench-scheduled');
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
@@ -534,7 +536,7 @@ jobs:
         if: "!cancelled()"
         uses: actions/upload-artifact@v7
         with:
-          name: bench-nightly-results
+          name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
 
       - name: Push charts
@@ -848,7 +850,7 @@ jobs:
   # Job 3: Save state on success
   # ---------------------------------------------------------------------------
   save-state:
-    needs: [resolve-refs, bench-nightly]
+    needs: [resolve-refs, bench-scheduled]
     if: success()
     name: save-state
     runs-on: ubuntu-latest
@@ -862,4 +864,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .nightly-state
-          key: bench-nightly-state-${{ needs.resolve-refs.outputs.feature-ref }}
+          key: bench-scheduled-state-${{ needs.resolve-refs.outputs.feature-ref }}
