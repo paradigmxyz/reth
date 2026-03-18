@@ -1406,6 +1406,79 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     );
 }
 
+/// Regression: subtrie emptied by deletes + `Touched` with a **blinded** sibling.
+///
+/// `check_subtrie_collapse_needs_proof` compared `num_removals` against the full
+/// `subtrie_updates.len()`, which included `Touched` entries. When `Touched` was
+/// present alongside removals, the lengths didn't match, so the function skipped
+/// the proof request for the blinded sibling. The subtrie was then emptied inline
+/// via `might_empty_subtrie`, and `maybe_collapse_or_remove_branch` hit the
+/// blinded sibling and panicked.
+pub(super) fn test_subtrie_collapse_touched_with_blinded_sibling<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Trie shape: root branch has children at nibbles 0xa and 0xc.
+    // Under 0xa there is a branch with children at 0xab (subtrie, 2 leaves) and
+    // 0xac (blinded — we never reveal it).
+    //
+    // We delete both 0xab leaves and also send Touched for a third 0xab key.
+    // After the subtrie empties, the branch at 0xa has a single child (0xac) that
+    // is blinded. The code must request a proof for it instead of panicking.
+    let mut key_ab1 = B256::ZERO;
+    key_ab1[0] = 0xAB;
+    key_ab1[31] = 0x11;
+    let mut key_ab2 = B256::ZERO;
+    key_ab2[0] = 0xAB;
+    key_ab2[31] = 0x22;
+    let mut key_ab3 = B256::ZERO;
+    key_ab3[0] = 0xAB;
+    key_ab3[31] = 0x33;
+    let mut key_ac1 = B256::ZERO;
+    key_ac1[0] = 0xAC;
+    key_ac1[31] = 0x44;
+    let mut key_cd1 = B256::ZERO;
+    key_cd1[0] = 0xCD;
+    key_cd1[31] = 0x01;
+
+    let value = U256::from(1u64);
+
+    let base_storage: BTreeMap<B256, U256> =
+        [(key_ab1, value), (key_ab2, value), (key_ac1, value), (key_cd1, value)]
+            .into_iter()
+            .collect();
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+    // Reveal only the 0xAB keys and 0xCD — leave 0xAC blinded.
+    let revealed_keys = vec![key_ab1, key_ab2, key_cd1];
+    let mut trie: T = harness.init_trie_with_targets(&revealed_keys, false, new_trie);
+
+    // Verify initial root matches.
+    let root = trie.root();
+    assert_eq!(root, harness.original_root(), "initial root mismatch");
+
+    // Delete both 0xAB leaves + Touched on a third 0xAB key (not in the trie).
+    // The combination of Touched + removals with a blinded sibling (0xAC) is the
+    // trigger for the bug.
+    let mut leaf_updates: B256Map<LeafUpdate> = [
+        (key_ab1, LeafUpdate::Changed(Vec::new())),
+        (key_ab2, LeafUpdate::Changed(Vec::new())),
+        (key_ab3, LeafUpdate::Touched),
+    ]
+    .into_iter()
+    .collect();
+
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+
+    // Root should match reference trie with ab1 and ab2 removed.
+    let mut expected_storage = base_storage;
+    expected_storage.remove(&key_ab1);
+    expected_storage.remove(&key_ab2);
+    let expected_harness = SuiteTestHarness::new(expected_storage);
+
+    let actual_root = trie.root();
+    assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
+}
+
 /// Regression: subtrie emptied by deletes mixed with `LeafUpdate::Touched`.
 ///
 /// When all `Changed` updates in a subtrie are removals and they would empty the subtrie,
