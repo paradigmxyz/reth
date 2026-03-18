@@ -4,7 +4,6 @@ use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
 use reth_era::common::file_ops::EraFileType;
-use reth_fs_util::FsPathError;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
@@ -137,7 +136,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    remove_file_ignore_not_found(entry.path())?;
+                    reth_fs_util::remove_file_if_exists(entry.path())?;
                 }
             }
         }
@@ -322,16 +321,6 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     }
 }
 
-fn remove_file_ignore_not_found(path: impl AsRef<Path>) -> eyre::Result<()> {
-    match reth_fs_util::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(FsPathError::RemoveFile { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-            Ok(())
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
 async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
     let mut hasher = Sha256::new();
 
@@ -377,26 +366,5 @@ mod tests {
         let actual_number = client.file_name_to_number(file_name);
 
         assert_eq!(actual_number, expected_number);
-    }
-
-    #[test]
-    fn test_remove_file_ignore_not_found() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("missing.era1");
-
-        assert!(remove_file_ignore_not_found(&path).is_ok());
-    }
-
-    #[test]
-    fn test_remove_file_ignore_not_found_preserves_other_errors() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("dir");
-        std::fs::create_dir_all(&path).unwrap();
-
-        let err = remove_file_ignore_not_found(&path).unwrap_err();
-        assert!(matches!(
-            err.downcast_ref::<FsPathError>(),
-            Some(FsPathError::RemoveFile { source, .. }) if source.kind() != io::ErrorKind::NotFound
-        ));
     }
 }

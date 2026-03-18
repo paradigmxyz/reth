@@ -1,7 +1,7 @@
 //! Generic `SparseTrie` test suite.
 //!
-//! Tests are written as generic functions `test_foo<T: SparseTrie + Default>()` and stamped out
-//! for every concrete implementation via the [`sparse_trie_tests`] macro.
+//! Tests are written as generic functions `test_foo<T: SparseTrie>(new_trie: fn() -> T)` and
+//! stamped out for every concrete implementation via the [`sparse_trie_tests`] macro.
 //!
 //! Tests are organized into modules by which `SparseTrie` method is the most likely root cause
 //! of failure for each test case:
@@ -117,13 +117,14 @@ impl SuiteTestHarness {
 
     /// Initializes a trie with the harness root node and reveals all proof nodes for the
     /// given target keys. Returns the initialized trie.
-    fn init_trie_with_targets<T: SparseTrie + Default>(
+    fn init_trie_with_targets<T: SparseTrie>(
         &self,
         target_keys: &[B256],
         retain_updates: bool,
+        new_trie: fn() -> T,
     ) -> T {
         let root_node = self.root_node();
-        let mut trie = T::default();
+        let mut trie = (new_trie)();
         trie.set_root(root_node.node, root_node.masks, retain_updates)
             .expect("set_root should succeed");
 
@@ -138,9 +139,13 @@ impl SuiteTestHarness {
     }
 
     /// Initializes a trie and reveals proofs for all keys in the base storage.
-    fn init_trie_fully_revealed<T: SparseTrie + Default>(&self, retain_updates: bool) -> T {
+    fn init_trie_fully_revealed<T: SparseTrie>(
+        &self,
+        retain_updates: bool,
+        new_trie: fn() -> T,
+    ) -> T {
         let keys: Vec<B256> = self.storage().keys().copied().collect();
-        self.init_trie_with_targets(&keys, retain_updates)
+        self.init_trie_with_targets(&keys, retain_updates, new_trie)
     }
 }
 
@@ -158,7 +163,7 @@ macro_rules! sparse_trie_tests {
             $(
                 #[test]
                 fn $test_fn() {
-                    super::$test_fn::<ParallelSparseTrie>();
+                    super::$test_fn(ParallelSparseTrie::default);
                 }
             )*
         }
@@ -169,7 +174,27 @@ macro_rules! sparse_trie_tests {
             $(
                 #[test]
                 fn $test_fn() {
-                    super::$test_fn::<ArenaParallelSparseTrie>();
+                    super::$test_fn(ArenaParallelSparseTrie::default);
+                }
+            )*
+        }
+
+        mod arena_parallel_sparse_trie_always_parallel {
+            use reth_trie_sparse::{ArenaParallelSparseTrie, ArenaParallelismThresholds};
+
+            $(
+                #[test]
+                fn $test_fn() {
+                    super::$test_fn(|| {
+                        ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                            ArenaParallelismThresholds {
+                                min_dirty_leaves: 1,
+                                min_revealed_nodes: 1,
+                                min_updates: 1,
+                                min_leaves_for_prune: 1,
+                            },
+                        )
+                    });
                 }
             )*
         }
@@ -245,6 +270,8 @@ sparse_trie_tests! {
     test_orphaned_value_update_falls_through_to_full_insertion,
     test_branch_collapse_updates_leaf_key_len_across_subtries,
     test_remove_leaf_does_not_reveal_blind_subtries,
+    test_branch_collapse_multi_empty_subtries_blinded_remaining,
+    test_subtrie_emptied_by_deletes_with_touched,
 
     // root
     test_root_empty_trie,
