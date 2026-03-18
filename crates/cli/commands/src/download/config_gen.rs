@@ -199,11 +199,7 @@ pub(crate) fn config_for_selections(
         }
 
         return Config {
-            prune: PruneConfig {
-                block_interval: PruneConfig::default().block_interval,
-                minimum_pruning_distance: PruneConfig::default().minimum_pruning_distance,
-                segments,
-            },
+            prune: PruneConfig { segments, ..Default::default() },
             static_files,
             ..Default::default()
         };

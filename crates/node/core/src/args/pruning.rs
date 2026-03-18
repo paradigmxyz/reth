@@ -228,7 +228,7 @@ impl PruningArgs {
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments,
-                ..Default::default()
+                minimum_pruning_distance: config.minimum_pruning_distance,
             }
         }
 
@@ -237,7 +237,7 @@ impl PruningArgs {
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: DefaultPruningValues::get_global().minimal_prune_modes.clone(),
-                ..Default::default()
+                minimum_pruning_distance: config.minimum_pruning_distance,
             }
         }
 
