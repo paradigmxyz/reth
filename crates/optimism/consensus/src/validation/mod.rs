@@ -233,16 +233,24 @@ fn log_receipt_root_mismatch_diagnostics<R: DepositReceipt>(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let log_diagnostics = receipt
+                .logs()
+                .iter()
+                .enumerate()
+                .map(|(log_idx, log)| format!("log_idx={log_idx} log={log:?}"))
+                .collect::<Vec<_>>();
 
             format!(
-                "idx={idx} ty=0x{:02x} status={} cumulative_gas={} logs={} deposit_nonce={:?} deposit_receipt_version={:?} first_log_topics={:?} encoded_with_bloom_2718=0x{} encoded_rlp=0x{}",
+                "idx={idx} ty=0x{:02x} status={} cumulative_gas={} logs={} receipt_bloom={} deposit_nonce={:?} deposit_receipt_version={:?} first_log_topics={:?} log_diagnostics={:?} encoded_with_bloom_2718=0x{} encoded_rlp=0x{}",
                 receipt.ty(),
                 receipt.status(),
                 receipt.cumulative_gas_used(),
                 receipt.logs().len(),
+                receipt.bloom(),
                 deposit.and_then(|d| d.deposit_nonce),
                 deposit.and_then(|d| d.deposit_receipt_version),
                 topics,
+                log_diagnostics,
                 hex::encode(encoded_with_bloom),
                 hex::encode(encoded_rlp)
             )

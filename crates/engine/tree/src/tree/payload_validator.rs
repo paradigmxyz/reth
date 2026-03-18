@@ -17,7 +17,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{Bloom, B256};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -640,6 +640,46 @@ where
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
         )?;
+        if tracing::enabled!(target: "engine::tree::payload_validator", tracing::Level::DEBUG) {
+            let receipt_diagnostics = output
+                .result
+                .receipts
+                .iter()
+                .enumerate()
+                .map(|(idx, receipt)| {
+                    let log_diagnostics = receipt
+                        .logs()
+                        .iter()
+                        .enumerate()
+                        .map(|(log_idx, log)| format!("log_idx={log_idx} log={log:?}"))
+                        .collect::<Vec<_>>();
+                    format!(
+                        "idx={idx} status={} cumulative_gas={} logs={} receipt_bloom={} log_diagnostics={:?}",
+                        receipt.status(),
+                        receipt.cumulative_gas_used(),
+                        receipt.logs().len(),
+                        receipt.bloom(),
+                        log_diagnostics
+                    )
+                })
+                .collect::<Vec<_>>();
+            let computed_logs_bloom = output
+                .result
+                .receipts
+                .iter()
+                .fold(Bloom::ZERO, |bloom, receipt| bloom | receipt.bloom());
+
+            debug!(
+                target: "engine::tree::payload_validator",
+                block_hash = %env.hash,
+                parent_hash = %env.parent_hash,
+                receipts_len = output.result.receipts.len(),
+                gas_used = output.result.gas_used,
+                computed_logs_bloom = %computed_logs_bloom,
+                receipts = ?receipt_diagnostics,
+                "Execution output receipts before consensus validation"
+            );
+        }
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
@@ -722,6 +762,12 @@ where
                 err,
                 ConsensusError::BodyReceiptRootDiff(_) | ConsensusError::BodyBloomLogDiff(_)
             ) {
+                let tx_hashes = block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .map(|tx| tx.tx_hash().to_string())
+                    .collect::<Vec<_>>();
                 let tx_diagnostics = block
                     .body()
                     .transactions()
@@ -736,20 +782,42 @@ where
                     .iter()
                     .enumerate()
                     .map(|(idx, receipt)| {
+                        let tx_hash = tx_hashes
+                            .get(idx)
+                            .map(String::as_str)
+                            .unwrap_or("<missing_tx_hash_for_receipt>");
+                        let log_diagnostics = receipt
+                            .logs()
+                            .iter()
+                            .enumerate()
+                            .map(|(log_idx, log)| format!("log_idx={log_idx} log={log:?}"))
+                            .collect::<Vec<_>>();
+
                         format!(
-                            "idx={idx} status={} cumulative_gas={} logs={}",
+                            "idx={idx} tx_hash={tx_hash} status={} cumulative_gas={} logs={} receipt_bloom={} log_diagnostics={:?}",
                             receipt.status(),
                             receipt.cumulative_gas_used(),
-                            receipt.logs().len()
+                            receipt.logs().len(),
+                            receipt.bloom(),
+                            log_diagnostics
                         )
                     })
                     .collect::<Vec<_>>();
+                let computed_logs_bloom = output
+                    .result
+                    .receipts
+                    .iter()
+                    .fold(Bloom::ZERO, |bloom, receipt| bloom | receipt.bloom());
+                let header_logs_bloom = block.header().logs_bloom();
 
                 warn!(
                     target: "engine::tree::payload_validator",
                     block_hash = %block.hash(),
                     block_number = block.number(),
                     block_gas_used = output.result.gas_used,
+                    header_receipts_root = %block.header().receipts_root(),
+                    header_logs_bloom = %header_logs_bloom,
+                    computed_logs_bloom = %computed_logs_bloom,
                     txs = ?tx_diagnostics,
                     receipts = ?receipt_diagnostics,
                     "Post-execution receipt/bloom validation failed"
