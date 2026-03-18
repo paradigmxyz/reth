@@ -201,6 +201,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         let net =
             NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key, Runtime::test())
                 .peer_config(config.peers_config_with_basic_nodes_from_file(None))
+                .sessions_config(config.sessions)
                 .external_ip_resolver(self.network.nat.clone())
                 .network_id(self.network.network_id)
                 .boot_nodes(boot_nodes.clone())

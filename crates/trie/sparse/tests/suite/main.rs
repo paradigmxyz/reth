@@ -271,6 +271,7 @@ sparse_trie_tests! {
     test_branch_collapse_updates_leaf_key_len_across_subtries,
     test_remove_leaf_does_not_reveal_blind_subtries,
     test_branch_collapse_multi_empty_subtries_blinded_remaining,
+    test_subtrie_collapse_touched_with_blinded_sibling,
     test_subtrie_emptied_by_deletes_with_touched,
 
     // root
