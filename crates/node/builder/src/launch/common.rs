@@ -66,8 +66,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    BlockHashReader, BlockNumReader, MetadataProvider, ProviderError, ProviderFactory,
+    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -510,6 +510,10 @@ where
         )?
         .with_prune_modes(self.prune_modes())
         .with_changeset_cache(changeset_cache);
+
+        // Node startup uses strict metadata parsing: invalid persisted storage settings
+        // should fail fast instead of silently falling back to legacy defaults.
+        let _ = factory.provider()?.strict_storage_settings()?;
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
