@@ -91,6 +91,7 @@ impl EngineApiMetrics {
         let (mut db, result) = self.metered(|| {
             let res = f();
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            eprintln!("gas_used={gas_used}");
             (gas_used, res)
         })?;
 

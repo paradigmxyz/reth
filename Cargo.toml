@@ -752,18 +752,18 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch."https://github.com/mantle-xyz/revm"]
-# revm = { path = "../revm/crates/revm" }
-# revm-bytecode = { path = "../revm/crates/bytecode" }
-# revm-state = { path = "../revm/crates/state" }
-# revm-primitives = { path = "../revm/crates/primitives" }
-# revm-interpreter = { path = "../revm/crates/interpreter" }
-# revm-inspector = { path = "../revm/crates/inspector" }
-# revm-context = { path = "../revm/crates/context" }
-# revm-context-interface = { path = "../revm/crates/context/interface" }
-# revm-database = { path = "../revm/crates/database" }
-# revm-database-interface = { path = "../revm/crates/database/interface" }
-# op-revm = { path = "../revm/crates/op-revm" }
+[patch."https://github.com/mantle-xyz/revm"]
+revm = { path = "../revm/crates/revm" }
+revm-bytecode = { path = "../revm/crates/bytecode" }
+revm-state = { path = "../revm/crates/state" }
+revm-primitives = { path = "../revm/crates/primitives" }
+revm-interpreter = { path = "../revm/crates/interpreter" }
+revm-inspector = { path = "../revm/crates/inspector" }
+revm-context = { path = "../revm/crates/context" }
+revm-context-interface = { path = "../revm/crates/context/interface" }
+revm-database = { path = "../revm/crates/database" }
+revm-database-interface = { path = "../revm/crates/database/interface" }
+op-revm = { path = "../revm/crates/op-revm" }
 
 # [patch."https://github.com/mantle-xyz/revm-inspectors"]
 # revm-inspectors = { path = "../revm-inspectors" }
