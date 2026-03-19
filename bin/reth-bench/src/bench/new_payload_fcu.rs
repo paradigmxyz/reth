@@ -1,14 +1,5 @@
 //! Runs the `reth bench` command, calling first newPayload for each block, then calling
 //! forkchoiceUpdated.
-//!
-//! Supports configurable waiting behavior:
-//! - **`--wait-time`**: Fixed sleep interval between blocks.
-//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
-//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence. Cannot be used with
-//!   `--reth-new-payload` because `reth_newPayload` already waits for persistence by default.
-//!
-//! Both options can be used together or independently.
 
 use crate::{
     bench::{
@@ -280,11 +271,6 @@ impl Command {
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
-        }
-
-        // Check if the spawned task encountered an error
-        if let Ok(error) = error_receiver.try_recv() {
-            return Err(error);
         }
 
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =

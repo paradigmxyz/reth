@@ -179,10 +179,13 @@ pub(crate) fn block_to_new_payload(
     no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     if let Some(rlp) = rlp {
-        let (wait_for_persistence, wait_for_caches) = reth_new_payload_waits(no_wait_for_persistence, no_wait_for_caches);
         return Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp), wait_for_persistence, wait_for_caches))?,
+            serde_json::to_value((
+                RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),
+                no_wait_for_persistence.then_some(false),
+                no_wait_for_caches.then_some(false),
+            ))?,
         ));
     }
     let block = block
@@ -200,29 +203,17 @@ pub(crate) fn block_to_new_payload(
         payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
 
     if reth_new_payload {
-        let (wait_for_persistence, wait_for_caches) = reth_new_payload_waits(no_wait_for_persistence, no_wait_for_caches);
         Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data), wait_for_persistence, wait_for_caches))?,
+            serde_json::to_value((
+                RethNewPayloadInput::ExecutionData(execution_data),
+                no_wait_for_persistence.then_some(false),
+                no_wait_for_caches.then_some(false),
+            ))?,
         ))
     } else {
         Ok((Some(version), params))
     }
-}
-
-/// Returns the `wait_for_persistence` and `wait_for_caches` parameter values for
-/// `reth_newPayload`.
-///
-/// When `no_*` is `true`, returns `Some(false)` to skip that wait.
-/// When `no_*` is `false`, returns `None` to use the server default (wait).
-pub(crate) fn reth_new_payload_waits(
-    no_wait_for_persistence: bool,
-    no_wait_for_caches: bool,
-) -> (Option<bool>, Option<bool>) {
-    (
-        no_wait_for_persistence.then_some(false),
-        no_wait_for_caches.then_some(false),
-    )
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an

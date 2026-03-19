@@ -8,7 +8,6 @@ use crate::{
     },
     valid_payload::{
         call_forkchoice_updated_with_reth, call_new_payload_with_reth, payload_to_new_payload,
-        reth_new_payload_waits,
     },
 };
 use alloy_eips::BlockNumberOrTag;
@@ -201,13 +200,12 @@ impl Command {
             )?;
 
             let (version, params) = if self.reth_new_payload {
-                let (wait_p, wait_c) = reth_new_payload_waits(self.no_wait_for_persistence, self.no_wait_for_caches);
                 (
                     None,
                     serde_json::to_value((
                         RethNewPayloadInput::ExecutionData(execution_data),
-                        wait_p,
-                        wait_c,
+                        self.no_wait_for_persistence.then_some(false),
+                        self.no_wait_for_caches.then_some(false),
                     ))?,
                 )
             } else {

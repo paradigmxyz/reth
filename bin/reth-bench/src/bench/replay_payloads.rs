@@ -1,16 +1,4 @@
 //! Command for replaying pre-generated payloads from disk.
-//!
-//! This command reads `ExecutionPayloadEnvelopeV4` files from a directory and replays them
-//! in sequence using `newPayload` followed by `forkchoiceUpdated`.
-//!
-//! Supports configurable waiting behavior:
-//! - **`--wait-time`**: Fixed sleep interval between blocks.
-//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
-//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence. Cannot be used with
-//!   `--reth-new-payload` because `reth_newPayload` already waits for persistence by default.
-//!
-//! Both options can be used together or independently.
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
@@ -22,9 +10,7 @@ use crate::{
             TotalGasOutput, TotalGasRow,
         },
     },
-    valid_payload::{
-        call_forkchoice_updated_with_reth, call_new_payload_with_reth, reth_new_payload_waits,
-    },
+    valid_payload::{call_forkchoice_updated_with_reth, call_new_payload_with_reth},
 };
 use alloy_primitives::B256;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -287,14 +273,12 @@ impl Command {
                         },
                     ),
                 };
-                let (wait_p, wait_c) =
-                    reth_new_payload_waits(self.no_wait_for_persistence, self.no_wait_for_caches);
                 (
                     None,
                     serde_json::to_value((
                         RethNewPayloadInput::ExecutionData(reth_data),
-                        wait_p,
-                        wait_c,
+                        self.no_wait_for_persistence.then_some(false),
+                        self.no_wait_for_caches.then_some(false),
                     ))?,
                 )
             } else {
