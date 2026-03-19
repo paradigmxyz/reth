@@ -58,6 +58,20 @@ pub struct Command {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
+
+    /// Skip waiting for in-flight persistence before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    no_wait_for_persistence: bool,
+
+    /// Skip waiting for execution cache and sparse trie locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
+    no_wait_for_caches: bool,
 }
 
 /// Mode for determining when to stop ramping.
@@ -186,7 +200,14 @@ impl Command {
             )?;
 
             let (version, params) = if self.reth_new_payload {
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?)
+                (
+                    None,
+                    serde_json::to_value((
+                        RethNewPayloadInput::ExecutionData(execution_data),
+                        self.no_wait_for_persistence.then_some(false),
+                        self.no_wait_for_caches.then_some(false),
+                    ))?,
+                )
             } else {
                 (Some(version), params)
             };

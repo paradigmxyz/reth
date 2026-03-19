@@ -1,13 +1,5 @@
 //! Runs the `reth bench` command, calling first newPayload for each block, then calling
 //! forkchoiceUpdated.
-//!
-//! Supports configurable waiting behavior:
-//! - **`--wait-time`**: Fixed sleep interval between blocks.
-//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
-//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
-//!   threshold. This ensures the benchmark doesn't outpace persistence.
-//!
-//! Both options can be used together or independently.
 
 use crate::{
     bench::{
@@ -16,9 +8,6 @@ use crate::{
         metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
-        },
-        persistence_waiter::{
-            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
     valid_payload::{
@@ -49,16 +38,6 @@ pub struct Command {
     /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
-
-    /// Wait for blocks to be persisted before sending the next batch.
-    ///
-    /// When enabled, waits for every Nth block to be persisted using the
-    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
-    /// doesn't outpace persistence.
-    ///
-    /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
-    wait_for_persistence: bool,
 
     /// Engine persistence threshold used for deciding when to wait for persistence.
     ///
@@ -107,46 +86,6 @@ impl Command {
         if let Some(duration) = self.wait_time {
             info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
-        if self.wait_for_persistence {
-            info!(
-                target: "reth-bench",
-                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
-                self.persistence_threshold + 1,
-                self.persistence_threshold
-            );
-        }
-
-        // Set up waiter based on configured options
-        // When both are set: wait at least wait_time, and also wait for persistence if needed
-        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), true) => {
-                let ws_url = derive_ws_rpc_url(
-                    self.benchmark.ws_rpc_url.as_deref(),
-                    &self.benchmark.engine_rpc_url,
-                )?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_duration_and_subscription(
-                    duration,
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
-            (None, true) => {
-                let ws_url = derive_ws_rpc_url(
-                    self.benchmark.ws_rpc_url.as_deref(),
-                    &self.benchmark.engine_rpc_url,
-                )?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_subscription(
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (None, false) => None,
-        };
 
         let BenchContext {
             benchmark_mode,
@@ -156,6 +95,8 @@ impl Command {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -258,8 +199,14 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) =
-                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
+            let (version, params) = block_to_new_payload(
+                block,
+                is_optimism,
+                rlp,
+                use_reth_namespace,
+                no_wait_for_persistence,
+                no_wait_for_caches,
+            )?;
             let start = Instant::now();
             let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params).await?;
@@ -317,18 +264,14 @@ impl Command {
                 warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
 
-            if let Some(w) = &mut waiter {
-                w.on_block(block_number).await?;
+            if let Some(wait_time) = self.wait_time {
+                tokio::time::sleep(wait_time).await;
             }
 
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
         }
-
-        // Drop waiter - we don't need to wait for final blocks to persist
-        // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(waiter);
 
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();

@@ -23,8 +23,8 @@ pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 /// Default [directives](Directive) for [`EnvFilter`] which:
 /// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
 ///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
-/// 2. Set `opentelemetry_*` crates log level to `WARN`, as `DEBUG` is too noisy.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
+/// 2. Set noisy crates like `opentelemetry_*`, `rustls`, and `tungstenite` to `WARN`.
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 11] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
@@ -34,6 +34,8 @@ const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "opentelemetry_sdk=warn",
     "opentelemetry-http=warn",
     "hyper_util::client::legacy::pool=off",
+    "rustls=warn",
+    "tungstenite=warn",
 ];
 
 /// Manages the collection of layers for a tracing subscriber.
