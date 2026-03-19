@@ -81,7 +81,7 @@ impl EngineApiMetrics {
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let _enter = span.enter();
-                trace!(target: "engine::tree", "Executing transaction");
+                warn!(target: "engine::tree", "Executing transaction", tx_hash=?tx.tx().tx_hash());
                 executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
