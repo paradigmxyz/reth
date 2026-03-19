@@ -82,13 +82,19 @@ pub struct BenchmarkArgs {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
 
-    /// Skip waiting for persistence and cache locks before processing.
+    /// Skip waiting for in-flight persistence before processing.
     ///
-    /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
-    /// `reth_newPayload` endpoint, causing it to execute the payload immediately
-    /// without waiting for in-flight persistence or cache updates.
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
+    /// to the `reth_newPayload` endpoint.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
-    pub no_wait: bool,
+    pub no_wait_for_persistence: bool,
+
+    /// Skip waiting for execution cache and sparse trie locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    pub no_wait_for_caches: bool,
 
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]

@@ -31,10 +31,12 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
     async fn reth_new_payload(
         &self,
         input: RethNewPayloadInput<Payload::ExecutionData>,
-        wait: Option<bool>,
+        wait_for_persistence: Option<bool>,
+        wait_for_caches: Option<bool>,
     ) -> RpcResult<RethPayloadStatus> {
-        let wait = wait.unwrap_or(true);
-        trace!(target: "rpc::engine", wait, "Serving reth_newPayload");
+        let wait_for_persistence = wait_for_persistence.unwrap_or(true);
+        let wait_for_caches = wait_for_caches.unwrap_or(true);
+        trace!(target: "rpc::engine", wait_for_persistence, wait_for_caches, "Serving reth_newPayload");
 
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
@@ -47,7 +49,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let (status, timings) = self
             .beacon_engine_handle
-            .reth_new_payload(payload, wait)
+            .reth_new_payload(payload, wait_for_persistence, wait_for_caches)
             .await
             .map_err(EngineApiError::from)?;
         Ok(RethPayloadStatus {

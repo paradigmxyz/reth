@@ -168,20 +168,21 @@ where
 ///
 /// Returns `(version, versioned_params, execution_data)`.
 ///
-/// When `no_wait` is `true` and using `reth_newPayload`, passes `wait: false` to skip
-/// persistence and cache waiting.
+/// When `no_wait_for_persistence` or `no_wait_for_caches` is `true` and using `reth_newPayload`,
+/// passes the corresponding `wait_for_*: false` to skip that wait.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
-    no_wait: bool,
+    no_wait_for_persistence: bool,
+    no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     if let Some(rlp) = rlp {
-        let wait = reth_new_payload_wait(no_wait);
+        let (wait_for_persistence, wait_for_caches) = reth_new_payload_waits(no_wait_for_persistence, no_wait_for_caches);
         return Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp), wait))?,
+            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp), wait_for_persistence, wait_for_caches))?,
         ));
     }
     let block = block
@@ -199,22 +200,29 @@ pub(crate) fn block_to_new_payload(
         payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
 
     if reth_new_payload {
-        let wait = reth_new_payload_wait(no_wait);
+        let (wait_for_persistence, wait_for_caches) = reth_new_payload_waits(no_wait_for_persistence, no_wait_for_caches);
         Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data), wait))?,
+            serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data), wait_for_persistence, wait_for_caches))?,
         ))
     } else {
         Ok((Some(version), params))
     }
 }
 
-/// Returns the `wait` parameter value for `reth_newPayload`.
+/// Returns the `wait_for_persistence` and `wait_for_caches` parameter values for
+/// `reth_newPayload`.
 ///
-/// When `no_wait` is `true`, returns `Some(false)` to skip waiting.
-/// When `no_wait` is `false`, returns `None` to use the server default (wait).
-pub(crate) fn reth_new_payload_wait(no_wait: bool) -> Option<bool> {
-    no_wait.then_some(false)
+/// When `no_*` is `true`, returns `Some(false)` to skip that wait.
+/// When `no_*` is `false`, returns `None` to use the server default (wait).
+pub(crate) fn reth_new_payload_waits(
+    no_wait_for_persistence: bool,
+    no_wait_for_caches: bool,
+) -> (Option<bool>, Option<bool>) {
+    (
+        no_wait_for_persistence.then_some(false),
+        no_wait_for_caches.then_some(false),
+    )
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an

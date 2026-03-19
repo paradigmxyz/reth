@@ -40,9 +40,9 @@ pub enum RethNewPayloadInput<ExecutionData> {
 /// (payload + sidecar) or an RLP-encoded block, optionally waiting for persistence and cache locks
 /// before processing.
 ///
-/// When `wait` is `true` (default), the endpoint waits for in-flight persistence and cache updates
-/// to complete before executing the payload, providing unbiased timing measurements. When `false`,
-/// the payload is executed immediately without waiting, behaving like a normal method call.
+/// By default, the endpoint waits for both in-flight persistence and cache updates to complete
+/// before executing the payload, providing unbiased timing measurements. Each can be independently
+/// disabled via `wait_for_persistence` and `wait_for_caches`.
 ///
 /// Responses include timing breakdowns with server-measured execution latency.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
@@ -51,14 +51,14 @@ pub trait RethEngineApi<ExecutionData> {
     /// Reth-specific newPayload that accepts either `ExecutionData` directly or an RLP-encoded
     /// block.
     ///
-    /// If `wait` is `true` (default when not provided), waits for persistence, execution cache,
-    /// and sparse trie locks before processing, providing unbiased timing breakdowns. If `false`,
-    /// executes the payload immediately without waiting.
+    /// `wait_for_persistence` (default `true`): waits for in-flight persistence to complete.
+    /// `wait_for_caches` (default `true`): waits for execution cache and sparse trie locks.
     #[method(name = "newPayload")]
     async fn reth_new_payload(
         &self,
         payload: RethNewPayloadInput<ExecutionData>,
-        wait: Option<bool>,
+        wait_for_persistence: Option<bool>,
+        wait_for_caches: Option<bool>,
     ) -> RpcResult<RethPayloadStatus>;
 
     /// Reth-specific forkchoiceUpdated that sends a regular forkchoice update with no payload

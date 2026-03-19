@@ -26,7 +26,7 @@ use crate::{
         },
     },
     valid_payload::{
-        call_forkchoice_updated_with_reth, call_new_payload_with_reth, reth_new_payload_wait,
+        call_forkchoice_updated_with_reth, call_new_payload_with_reth, reth_new_payload_waits,
     },
 };
 use alloy_primitives::B256;
@@ -149,13 +149,19 @@ pub struct Command {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 
-    /// Skip waiting for persistence and cache locks before processing.
+    /// Skip waiting for in-flight persistence before processing.
     ///
-    /// Only works with `--reth-new-payload`. When set, passes `wait: false` to the
-    /// `reth_newPayload` endpoint, causing it to execute the payload immediately
-    /// without waiting for in-flight persistence or cache updates.
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
+    /// to the `reth_newPayload` endpoint.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
-    no_wait: bool,
+    no_wait_for_persistence: bool,
+
+    /// Skip waiting for execution cache and sparse trie locks before processing.
+    ///
+    /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
+    /// to the `reth_newPayload` endpoint.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    no_wait_for_caches: bool,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
@@ -364,8 +370,8 @@ impl Command {
                         },
                     ),
                 };
-                let wait = reth_new_payload_wait(self.no_wait);
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data), wait))?)
+                let (wait_p, wait_c) = reth_new_payload_waits(self.no_wait_for_persistence, self.no_wait_for_caches);
+                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data), wait_p, wait_c))?)
             } else {
                 (
                     Some(EngineApiMessageVersion::V4),
