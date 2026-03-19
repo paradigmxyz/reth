@@ -149,12 +149,17 @@ pub struct NewPayloadTimings {
     /// Server-side execution latency.
     pub latency: Duration,
     /// Time spent waiting for persistence to complete.
-    /// `None` when no persistence was in-flight.
+    ///
+    /// `None` when wasn't asked to wait for persistence.
     pub persistence_wait: Option<Duration>,
     /// Time spent waiting for the execution cache lock.
-    pub execution_cache_wait: Duration,
-    /// Time spent waiting for the sparse trie lock.
-    pub sparse_trie_wait: Duration,
+    ///
+    /// `None` when wasn't asked to wait for execution cache.
+    pub execution_cache_wait: Option<Duration>,
+    /// Time spent waiting for the sparse trie cache lock.
+    ///
+    /// `None` when wasn't asked to wait for sparse trie cache.
+    pub sparse_trie_wait: Option<Duration>,
 }
 
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the

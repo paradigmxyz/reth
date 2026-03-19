@@ -1546,18 +1546,18 @@ where
                             }
                             BeaconEngineMessage::RethNewPayload {
                                 payload,
-                                wait_for_persistence: should_wait_persist,
-                                wait_for_caches: should_wait_caches,
+                                wait_for_persistence,
+                                wait_for_caches,
                                 tx,
                             } => {
                                 debug!(
                                     target: "engine::tree",
-                                    wait_for_persistence = should_wait_persist,
-                                    wait_for_caches = should_wait_caches,
+                                    wait_for_persistence,
+                                    wait_for_caches,
                                     "Processing reth_newPayload"
                                 );
 
-                                let persistence_wait = if should_wait_persist {
+                                let persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
                                         let (persistence_tx, persistence_rx) =
@@ -1582,16 +1582,16 @@ where
                                         let _ = self.on_persistence_complete(result, start_time);
                                         Some(wait_duration)
                                     } else {
-                                        None
+                                        Some(Duration::ZERO)
                                     }
                                 } else {
                                     None
                                 };
 
-                                let cache_wait = if should_wait_caches {
-                                    self.payload_validator.wait_for_caches()
+                                let cache_wait = if wait_for_caches {
+                                    Some(self.payload_validator.wait_for_caches())
                                 } else {
-                                    CacheWaitDurations::default()
+                                    None
                                 };
 
                                 let start = Instant::now();
@@ -1612,8 +1612,8 @@ where
                                 let timings = NewPayloadTimings {
                                     latency,
                                     persistence_wait,
-                                    execution_cache_wait: cache_wait.execution_cache,
-                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                    execution_cache_wait: cache_wait.map(|wait| wait.execution_cache),
+                                    sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
                                 if let Err(err) =
                                     tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
