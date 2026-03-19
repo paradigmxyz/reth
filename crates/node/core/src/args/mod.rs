@@ -78,7 +78,7 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 /// `StorageArgs` for configuring storage settings.
 mod storage;
-pub use storage::StorageArgs;
+pub use storage::{DefaultStorageValues, StorageArgs};
 
 mod error;
 pub mod types;

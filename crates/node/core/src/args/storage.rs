@@ -1,6 +1,42 @@
 //! clap [Args](clap::Args) for storage configuration
 
 use clap::Args;
+use std::sync::OnceLock;
+
+/// Global static storage defaults
+static STORAGE_DEFAULTS: OnceLock<DefaultStorageValues> = OnceLock::new();
+
+/// Default values for storage that can be customized
+///
+/// Global defaults can be set via [`DefaultStorageValues::try_init`].
+#[derive(Debug, Clone)]
+pub struct DefaultStorageValues {
+    v2: bool,
+}
+
+impl DefaultStorageValues {
+    /// Initialize the global storage defaults with this configuration
+    pub fn try_init(self) -> Result<(), Self> {
+        STORAGE_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global storage defaults
+    pub fn get_global() -> &'static Self {
+        STORAGE_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the default V2 storage layout flag
+    pub const fn with_v2(mut self, v: bool) -> Self {
+        self.v2 = v;
+        self
+    }
+}
+
+impl Default for DefaultStorageValues {
+    fn default() -> Self {
+        Self { v2: true }
+    }
+}
 
 /// Parameters for storage configuration.
 ///
@@ -16,13 +52,14 @@ pub struct StorageArgs {
     /// When set, new databases will be initialized with the V2 storage layout that
     /// separates hot and cold data. Existing databases always use the settings
     /// persisted in their metadata regardless of this flag.
-    #[arg(long = "storage.v2", default_value = "true", action = clap::ArgAction::Set)]
+    #[arg(long = "storage.v2", default_value_t = DefaultStorageValues::get_global().v2, action = clap::ArgAction::Set)]
     pub v2: bool,
 }
 
 impl Default for StorageArgs {
     fn default() -> Self {
-        Self { v2: true }
+        let defaults = DefaultStorageValues::get_global();
+        Self { v2: defaults.v2 }
     }
 }
 
