@@ -55,9 +55,9 @@ fi
 # Resolve the MinIO HTTP endpoint from the mc alias so reth can
 # fetch archives over HTTP (the manifest's embedded base_url points
 # to the cluster-internal address which is unreachable from runners).
-MINIO_ENDPOINT=$($MC alias list minio --json | jq -r '.URL')
-if [ -z "$MINIO_ENDPOINT" ] || [ "$MINIO_ENDPOINT" = "null" ]; then
-  echo "::error::Failed to resolve MinIO endpoint from mc alias"
+MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
+if [ -z "$MINIO_ENDPOINT" ]; then
+  echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
   exit 1
 fi
 BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/reth-1-minimal-stable"
