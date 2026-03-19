@@ -467,10 +467,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
-            let estimated_gas =
-                self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
-            let gas_limit = estimated_gas;
-            request.as_mut().set_gas_limit(gas_limit.to());
+            if request.as_ref().gas_limit().is_none() {
+                let estimated_gas =
+                    self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
+            }
 
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
