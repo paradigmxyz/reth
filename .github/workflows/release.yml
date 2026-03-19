@@ -227,14 +227,14 @@ jobs:
 
       - name: Upload artifact
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
           path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
 
       - name: Upload signature
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
           path: reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc
