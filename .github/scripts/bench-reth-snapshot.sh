@@ -11,7 +11,7 @@
 #
 # Required env:
 #   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
-#   BENCH_RETH_BINARY  – path to the reth binary (optional; auto-discovers if unset)
+#   BENCH_RETH_BINARY  – path to the reth binary
 #   GITHUB_TOKEN       – token for GitHub API calls (only for download)
 #   BENCH_COMMENT_ID   – PR comment ID to update (optional)
 #   BENCH_REPO         – owner/repo (e.g. paradigmxyz/reth)
@@ -46,14 +46,9 @@ if [ "${1:-}" = "--check" ]; then
   exit 10
 fi
 
-RETH="${BENCH_RETH_BINARY:-$(cd "$(dirname "$0")/../.." && pwd)/../reth-feature/target/profiling/reth}"
-# Binary may not exist yet if running in parallel with builds — wait up to 600s
-for _i in $(seq 1 600); do
-  [ -x "$RETH" ] && break
-  sleep 1
-done
+RETH="${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set}"
 if [ ! -x "$RETH" ]; then
-  echo "::error::reth binary not found or not executable at $RETH after 600s"
+  echo "::error::reth binary not found or not executable at $RETH"
   exit 1
 fi
 
