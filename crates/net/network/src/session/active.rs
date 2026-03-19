@@ -84,7 +84,43 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 /// Many small broadcast messages carrying a single tx hash each are equivalent in cost to one
 /// message carrying many hashes. This limit counts individual items (hashes, transactions, blocks)
 /// rather than messages, so that many small messages don't trigger aggressive drops unnecessarily.
-pub(super) const MAX_QUEUED_BROADCAST_ITEMS: usize = 4096;
+const MAX_QUEUED_BROADCAST_ITEMS: usize = 4096;
+
+/// Shared counter for in-flight broadcast items (tx hashes, transactions, blocks) across the
+/// bounded command channel, unbounded overflow channel, and session outgoing queue.
+///
+/// Wrapped in a newtype so the backing storage can be changed later (e.g. to track memory) without
+/// touching every call-site.
+#[derive(Debug, Clone)]
+pub(crate) struct BroadcastItemCounter(Arc<AtomicUsize>);
+
+impl BroadcastItemCounter {
+    /// Creates a new counter starting at zero.
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(AtomicUsize::new(0)))
+    }
+
+    /// Returns the current count.
+    pub(crate) fn get(&self) -> usize {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    /// Attempts to add `n` items. Returns `true` if under the limit, `false` if over (no change).
+    pub(crate) fn try_add(&self, n: usize) -> bool {
+        let prev = self.0.fetch_add(n, Ordering::Relaxed);
+        if prev >= MAX_QUEUED_BROADCAST_ITEMS {
+            self.0.fetch_sub(n, Ordering::Relaxed);
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Subtracts `n` items from the counter.
+    pub(crate) fn sub(&self, n: usize) {
+        self.0.fetch_sub(n, Ordering::Relaxed);
+    }
+}
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
@@ -111,8 +147,9 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) session_id: SessionId,
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand<N>>,
-    /// Overflow channel for broadcast messages that couldn't fit in the bounded command channel.
-    pub(crate) broadcast_overflow_rx: mpsc::UnboundedReceiver<PeerMessage<N>>,
+    /// Unbounded channel for commands that couldn't fit in the bounded channel (broadcast
+    /// overflow) and for disconnect commands that must never be dropped.
+    pub(crate) unbounded_rx: mpsc::UnboundedReceiver<SessionCommand<N>>,
     /// Sink to send messages to the [`SessionManager`](super::SessionManager).
     pub(crate) to_session_manager: MeteredPollSender<ActiveSessionMessage<N>>,
     /// A message that needs to be delivered to the session manager
@@ -642,10 +679,16 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // Drain broadcast overflow messages (sent when the bounded command channel was full)
-            while let Poll::Ready(Some(msg)) = this.broadcast_overflow_rx.poll_recv(cx) {
+            // Drain the unbounded channel (broadcast overflow + disconnect commands)
+            while let Poll::Ready(Some(cmd)) = this.unbounded_rx.poll_recv(cx) {
                 progress = true;
-                this.on_internal_peer_message(msg);
+                match cmd {
+                    SessionCommand::Message(msg) => this.on_internal_peer_message(msg),
+                    SessionCommand::Disconnect { reason } => {
+                        let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
+                        return this.try_disconnect(reason, cx)
+                    }
+                }
             }
 
             let deadline = this.request_deadline();
@@ -996,11 +1039,11 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     messages: VecDeque<OutgoingMessage<N>>,
     count: Gauge,
     /// Shared counter of buffered broadcast items for size-based backpressure.
-    broadcast_items: Arc<AtomicUsize>,
+    broadcast_items: BroadcastItemCounter,
 }
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
-    pub(crate) const fn new(metric: Gauge, broadcast_items: Arc<AtomicUsize>) -> Self {
+    pub(crate) const fn new(metric: Gauge, broadcast_items: BroadcastItemCounter) -> Self {
         Self { messages: VecDeque::new(), count: metric, broadcast_items }
     }
 
@@ -1014,7 +1057,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
             self.count.decrement(1);
             let items = msg.broadcast_item_count();
             if items > 0 {
-                self.broadcast_items.fetch_sub(items, Ordering::Relaxed);
+                self.broadcast_items.sub(items);
             }
         })
     }
@@ -1041,6 +1084,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 
 impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
     fn drop(&mut self) {
+        // Ensure gauge is decremented for any remaining items to avoid metric leak on teardown.
         let remaining = self.messages.len();
         if remaining > 0 {
             self.count.decrement(remaining as f64);
@@ -1160,7 +1204,7 @@ mod tests {
                 } => {
                     let (_to_session_tx, messages_rx) = mpsc::channel(10);
                     let (commands_to_session, commands_rx) = mpsc::channel(10);
-                    let (_broadcast_overflow_tx, broadcast_overflow_rx) = mpsc::unbounded_channel();
+                    let (_unbounded_tx, unbounded_rx) = mpsc::unbounded_channel();
                     let poll_sender = PollSender::new(self.active_session_tx.clone());
 
                     self.to_sessions.push(commands_to_session);
@@ -1172,7 +1216,7 @@ mod tests {
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
-                        broadcast_overflow_rx,
+                        unbounded_rx,
                         to_session_manager: MeteredPollSender::new(
                             poll_sender,
                             "network_active_session",
@@ -1183,7 +1227,7 @@ mod tests {
                         conn,
                         queued_outgoing: QueuedOutgoingMessages::new(
                             Gauge::noop(),
-                            Arc::new(AtomicUsize::new(0)),
+                            BroadcastItemCounter::new(),
                         ),
                         received_requests_from_remote: Default::default(),
                         internal_request_timeout_interval: tokio::time::interval(

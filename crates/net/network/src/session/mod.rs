@@ -35,10 +35,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize},
-        Arc,
-    },
+    sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -51,7 +48,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
-use crate::session::active::RANGE_UPDATE_INTERVAL;
+use crate::session::active::{BroadcastItemCounter, RANGE_UPDATE_INTERVAL};
 pub use conn::EthRlpxConnection;
 use handle::SessionCommandSender;
 pub use handle::{
@@ -526,7 +523,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 let (commands_tx, commands_rx) = mpsc::channel(self.session_command_buffer);
-                let (broadcast_overflow_tx, broadcast_overflow_rx) = mpsc::unbounded_channel();
+                let (unbounded_tx, unbounded_rx) = mpsc::unbounded_channel();
 
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
@@ -550,7 +547,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     interval
                 });
 
-                let broadcast_items = Arc::new(AtomicUsize::new(0));
+                // Shared counter of in-flight broadcast items. The session task must decrement
+                // this when it pops messages from the outgoing queue, and the
+                // `SessionCommandSender` increments it before enqueuing. This invariant ensures
+                // the `SessionManager` always has an accurate view of total buffered broadcast
+                // pressure for a peer.
+                let broadcast_items = BroadcastItemCounter::new();
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -559,7 +561,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     remote_capabilities: Arc::clone(&capabilities),
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
-                    broadcast_overflow_rx,
+                    unbounded_rx,
                     to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
@@ -567,7 +569,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     conn,
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
-                        Arc::clone(&broadcast_items),
+                        broadcast_items.clone(),
                     ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
@@ -593,11 +595,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     version,
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
-                    commands: SessionCommandSender::new(
-                        commands_tx,
-                        broadcast_overflow_tx,
-                        broadcast_items,
-                    ),
+                    commands: SessionCommandSender::new(commands_tx, unbounded_tx, broadcast_items),
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,
