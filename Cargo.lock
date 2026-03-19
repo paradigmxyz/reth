@@ -281,7 +281,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.25.2"
-source = "git+https://github.com/mantle-xyz/evm?branch=debug-reth-sepolia#c4daa6f77dc3786ded0de612db0b5917e4dae552"
+source = "git+https://github.com/mantle-xyz/evm?branch=debug-reth-sepolia#3dc5cfbe38e3ebe91e68a8c35fb3029d7b2cf16b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -397,7 +397,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.25.2"
-source = "git+https://github.com/mantle-xyz/evm?branch=debug-reth-sepolia#c4daa6f77dc3786ded0de612db0b5917e4dae552"
+source = "git+https://github.com/mantle-xyz/evm?branch=debug-reth-sepolia#3dc5cfbe38e3ebe91e68a8c35fb3029d7b2cf16b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2309,7 +2309,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3059,7 +3059,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3389,7 +3389,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4741,7 +4741,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5075,7 +5075,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5984,7 +5984,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6298,7 +6298,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "12.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "alloy-sol-types",
  "auto_impl",
@@ -7009,7 +7009,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.1",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11038,7 +11038,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "31.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11056,7 +11056,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "7.1.1"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "bitvec",
  "phf",
@@ -11067,7 +11067,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "11.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11083,7 +11083,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "12.0.1"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11098,7 +11098,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "9.0.5"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -11111,7 +11111,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.5"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "auto_impl",
  "either",
@@ -11123,7 +11123,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "12.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11141,7 +11141,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "12.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "auto_impl",
  "either",
@@ -11175,7 +11175,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "29.0.1"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11187,7 +11187,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "29.0.1"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11211,7 +11211,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.2"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11222,7 +11222,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.1.1"
-source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#8e093d748d02a59b3f07a2a558a2afe0cb2d59d5"
+source = "git+https://github.com/mantle-xyz/revm?branch=debug-reth-sepolia#51ecedead5fb406884ecdd47da3f3efd6bdb1269"
 dependencies = [
  "bitflags 2.10.0",
  "revm-bytecode",
@@ -11483,7 +11483,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12374,7 +12374,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13056,7 +13056,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "319c70195101a93f56db4c74733e272d720768e13471f400c78406a326b172b0"
 dependencies = [
  "cc",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -13303,9 +13303,9 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vergen"
-version = "9.0.6"
+version = "9.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2bf58be11fc9414104c6d3a2e464163db5ef74b12296bda593cac37b6e4777"
+checksum = "e0d2f179f8075b805a43a2a21728a46f0cc2921b3c58695b28fa8817e103cd9a"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.19.2",
@@ -13318,9 +13318,9 @@ dependencies = [
 
 [[package]]
 name = "vergen-git2"
-version = "1.0.7"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f6ee511ec45098eabade8a0750e76eec671e7fb2d9360c563911336bea9cac1"
+checksum = "d86bae87104cb2790cdee615c2bb54729804d307191732ab27b1c5357ea6ddc5"
 dependencies = [
  "anyhow",
  "derive_builder",
@@ -13589,7 +13589,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
