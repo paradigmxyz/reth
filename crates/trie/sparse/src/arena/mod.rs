@@ -1711,7 +1711,18 @@ impl ArenaParallelSparseTrie {
             .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()))
             .count() as u64;
 
-        if num_removals == 0 || num_removals as usize != subtrie_updates.len() {
+        // Touched is a no-op that doesn't alter trie structure, so it must be
+        // excluded when deciding whether "all updates are removals". This mirrors
+        // the `all_removals` / `might_empty_subtrie` filter in `update_leaves`.
+        // Without this, a batch of removals + Touched entries
+        // would fail the `num_removals != num_changed` check, skip the proof
+        // request for the blinded sibling, and later panic in
+        // `maybe_collapse_or_remove_branch` when the subtrie empties inline.
+        let num_changed =
+            subtrie_updates.iter().filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_))).count()
+                as u64;
+
+        if num_removals == 0 || num_removals != num_changed {
             return None;
         }
 
