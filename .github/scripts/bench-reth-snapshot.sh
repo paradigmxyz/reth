@@ -7,7 +7,7 @@
 # the last successful download (checked via SHA-256 of the manifest).
 #
 # Usage: bench-reth-snapshot.sh [--check]
-#   --check   Only check if a download is needed; exits 0 if up-to-date, 1 if not.
+#   --check   Only check if a download is needed; exits 0 if up-to-date, 10 if not.
 #
 # Required env:
 #   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
@@ -27,7 +27,7 @@ DATADIR="$SCHELK_MOUNT/datadir"
 HASH_FILE="$HOME/.reth-bench-snapshot-hash"
 
 # Fetch manifest and compute content hash for reliable freshness check
-MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>&1) || {
+MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
   echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
   exit 2
 }
@@ -67,10 +67,10 @@ if [ -z "$MINIO_ENDPOINT" ]; then
 fi
 BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/reth-1-minimal-stable"
 
-# Download manifest and replace base_url with the runner-reachable endpoint
+# Rewrite manifest's base_url with the runner-reachable endpoint
 MANIFEST_TMP=$(mktemp --suffix=.json)
 trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-$MC cat "${BUCKET}/${MANIFEST_PATH}" \
+echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
 # Prepare mount
@@ -78,6 +78,7 @@ mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"
+# reth download runs as current user (not root), needs write access
 sudo chown -R "$(id -u):$(id -g)" "$DATADIR"
 
 update_comment() {
