@@ -86,14 +86,14 @@ pub struct Command {
     ///
     /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
     /// to the `reth_newPayload` endpoint.
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     no_wait_for_persistence: bool,
 
     /// Skip waiting for execution cache and sparse trie locks before processing.
     ///
     /// Only works with `--reth-new-payload`. When set, passes `wait_for_caches: false`
     /// to the `reth_newPayload` endpoint.
-    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     no_wait_for_caches: bool,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
