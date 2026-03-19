@@ -1588,11 +1588,8 @@ where
                                     None
                                 };
 
-                                let cache_wait = if wait_for_caches {
-                                    Some(self.payload_validator.wait_for_caches())
-                                } else {
-                                    None
-                                };
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -1612,7 +1609,8 @@ where
                                 let timings = NewPayloadTimings {
                                     latency,
                                     persistence_wait,
-                                    execution_cache_wait: cache_wait.map(|wait| wait.execution_cache),
+                                    execution_cache_wait: cache_wait
+                                        .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
                                 if let Err(err) =

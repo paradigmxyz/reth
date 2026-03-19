@@ -21,9 +21,6 @@ use crate::{
             write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
             TotalGasOutput, TotalGasRow,
         },
-        persistence_waiter::{
-            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-        },
     },
     valid_payload::{
         call_forkchoice_updated_with_reth, call_new_payload_with_reth, reth_new_payload_waits,
@@ -39,7 +36,6 @@ use alloy_rpc_types_engine::{
 use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
-use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
 use reth_rpc_api::RethNewPayloadInput;
 use std::{
@@ -91,55 +87,6 @@ pub struct Command {
     /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
-
-    /// Wait for blocks to be persisted before sending the next batch.
-    ///
-    /// When enabled, waits for every Nth block to be persisted using the
-    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
-    /// doesn't outpace persistence.
-    ///
-    /// The subscription uses the regular RPC websocket endpoint (no JWT required).
-    ///
-    /// Cannot be used with `--reth-new-payload` because `reth_newPayload` already
-    /// waits for persistence by default.
-    #[arg(
-        long,
-        default_value = "false",
-        conflicts_with = "reth_new_payload",
-        verbatim_doc_comment
-    )]
-    wait_for_persistence: bool,
-
-    /// Engine persistence threshold used for deciding when to wait for persistence.
-    ///
-    /// The benchmark waits after every `(threshold + 1)` blocks. By default this
-    /// matches the engine's `DEFAULT_PERSISTENCE_THRESHOLD` (2), so waits occur
-    /// at blocks 3, 6, 9, etc.
-    #[arg(
-        long = "persistence-threshold",
-        value_name = "PERSISTENCE_THRESHOLD",
-        default_value_t = DEFAULT_PERSISTENCE_THRESHOLD,
-        verbatim_doc_comment
-    )]
-    persistence_threshold: u64,
-
-    /// Timeout for waiting on persistence at each checkpoint.
-    ///
-    /// Must be long enough to account for the persistence thread being blocked
-    /// by pruning after the previous save.
-    #[arg(
-        long = "persistence-timeout",
-        value_name = "PERSISTENCE_TIMEOUT",
-        value_parser = parse_duration,
-        default_value = "120s",
-        verbatim_doc_comment
-    )]
-    persistence_timeout: Duration,
-
-    /// Optional `WebSocket` RPC URL for persistence subscription.
-    /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
-    #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
-    ws_rpc_url: Option<String>,
 
     /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
@@ -203,43 +150,9 @@ impl Command {
         if let Some(duration) = self.wait_time {
             info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
-        if self.wait_for_persistence {
-            info!(
-                target: "reth-bench",
-                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
-                self.persistence_threshold + 1,
-                self.persistence_threshold
-            );
-        }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
         }
-
-        // Set up waiter based on configured options
-        // When both are set: wait at least wait_time, and also wait for persistence if needed
-        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), true) => {
-                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_duration_and_subscription(
-                    duration,
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
-            (None, true) => {
-                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
-                Some(PersistenceWaiter::with_subscription(
-                    sub,
-                    self.persistence_threshold,
-                    self.persistence_timeout,
-                ))
-            }
-            (None, false) => None,
-        };
 
         let mut metrics_scraper = MetricsScraper::maybe_new(self.metrics_url.clone());
 
@@ -317,6 +230,10 @@ impl Command {
 
             info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
 
+            if let Some(wait_time) = self.wait_time {
+                tokio::time::sleep(wait_time).await;
+            }
+
             parent_hash = payload.file.block_hash;
         }
 
@@ -370,8 +287,16 @@ impl Command {
                         },
                     ),
                 };
-                let (wait_p, wait_c) = reth_new_payload_waits(self.no_wait_for_persistence, self.no_wait_for_caches);
-                (None, serde_json::to_value((RethNewPayloadInput::ExecutionData(reth_data), wait_p, wait_c))?)
+                let (wait_p, wait_c) =
+                    reth_new_payload_waits(self.no_wait_for_persistence, self.no_wait_for_caches);
+                (
+                    None,
+                    serde_json::to_value((
+                        RethNewPayloadInput::ExecutionData(reth_data),
+                        wait_p,
+                        wait_c,
+                    ))?,
+                )
             } else {
                 (
                     Some(EngineApiMessageVersion::V4),
@@ -435,20 +360,12 @@ impl Command {
                 tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
 
-            if let Some(w) = &mut waiter {
-                w.on_block(block_number).await?;
-            }
-
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
             parent_hash = block_hash;
         }
-
-        // Drop waiter - we don't need to wait for final blocks to persist
-        // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(waiter);
 
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();

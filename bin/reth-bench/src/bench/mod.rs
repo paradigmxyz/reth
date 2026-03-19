@@ -16,7 +16,6 @@ pub(crate) mod metrics_scraper;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
-mod persistence_waiter;
 mod replay_payloads;
 mod send_invalid_payload;
 mod send_payload;
