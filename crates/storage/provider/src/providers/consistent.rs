@@ -1413,29 +1413,39 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         let mut database_end = range.end;
 
         if let Some(head_block) = &self.head_block {
-            database_end = head_block.anchor().number;
+            let first_in_memory_block = head_block.anchor().number.saturating_add(1);
+            database_end = database_end.min(first_in_memory_block);
 
-            for state in head_block.chain() {
-                let block_changesets = state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .to_plain_state_reverts()
-                    .storage
-                    .into_iter()
-                    .flatten()
-                    .flat_map(|revert: PlainStorageRevert| {
-                        revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let plain_key = B256::from(key.to_be_bytes());
-                            (
-                                BlockNumberAddress((state.number(), revert.address)),
-                                StorageEntry { key: plain_key, value: value.to_previous_value() },
-                            )
-                        })
-                    });
+            if range.end > first_in_memory_block {
+                for state in head_block
+                    .chain()
+                    .skip_while(|state| state.number() >= range.end)
+                    .take_while(|state| state.number() >= range.start)
+                {
+                    let block_changesets = state
+                        .block_ref()
+                        .execution_output
+                        .state
+                        .reverts
+                        .to_plain_state_reverts()
+                        .storage
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|revert: PlainStorageRevert| {
+                            revert.storage_revert.into_iter().map(move |(key, value)| {
+                                let plain_key = B256::from(key.to_be_bytes());
+                                (
+                                    BlockNumberAddress((state.number(), revert.address)),
+                                    StorageEntry {
+                                        key: plain_key,
+                                        value: value.to_previous_value(),
+                                    },
+                                )
+                            })
+                        });
 
-                changesets.extend(block_changesets);
+                    changesets.extend(block_changesets);
+                }
             }
         }
 
@@ -1585,24 +1595,33 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
         // Check which blocks in the range are in memory
         if let Some(head_block) = &self.head_block {
-            // the anchor is the end of the db range
-            database_end = head_block.anchor().number;
+            let first_in_memory_block = head_block.anchor().number.saturating_add(1);
+            database_end = database_end.min(first_in_memory_block);
 
-            for state in head_block.chain() {
-                // found block in memory, collect its changesets
-                let block_changesets = state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .to_plain_state_reverts()
-                    .accounts
-                    .into_iter()
-                    .flatten()
-                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+            if range.end > first_in_memory_block {
+                for state in head_block
+                    .chain()
+                    .skip_while(|state| state.number() >= range.end)
+                    .take_while(|state| state.number() >= range.start)
+                {
+                    // found block in memory, collect its changesets
+                    let block_changesets = state
+                        .block_ref()
+                        .execution_output
+                        .state
+                        .reverts
+                        .to_plain_state_reverts()
+                        .accounts
+                        .into_iter()
+                        .flatten()
+                        .map(|(address, info)| AccountBeforeTx {
+                            address,
+                            info: info.map(Into::into),
+                        });
 
-                for changeset in block_changesets {
-                    changesets.push((state.number(), changeset));
+                    for changeset in block_changesets {
+                        changesets.push((state.number(), changeset));
+                    }
                 }
             }
         }
@@ -2134,6 +2153,86 @@ mod tests {
     }
 
     #[test]
+    fn test_account_changesets_range_respects_requested_range() -> eyre::Result<()> {
+        use alloy_primitives::{Address, U256};
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+
+        let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
+
+        let address = Address::with_last_byte(1);
+        let account = reth_primitives_traits::Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+        };
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            database_blocks
+                .into_iter()
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                .collect(),
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, None, Some(account.into()), Default::default())],
+                    [
+                        Vec::new(),
+                        vec![(address, Some(Some(account.into())), Vec::new())],
+                    ],
+                    [],
+                ),
+                first_block: 0,
+                ..Default::default()
+            },
+            Default::default(),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        let in_mem_block = in_memory_blocks.first().unwrap();
+        let senders = in_mem_block.senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    in_mem_block.clone(),
+                    senders,
+                )),
+                execution_output: Arc::new(BlockExecutionOutput {
+                    state: BundleState::new(
+                        [(address, None, Some(account.into()), Default::default())],
+                        [[(address, Some(Some(account.into())), Vec::new())]],
+                        [],
+                    ),
+                    result: BlockExecutionResult {
+                        receipts: Default::default(),
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                }),
+                ..Default::default()
+            }],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        let consistent_provider = provider.consistent_provider()?;
+
+        let block_one_changesets = consistent_provider.account_changesets_range(1..=1)?;
+        let returned_blocks =
+            block_one_changesets.iter().map(|(block_number, _)| *block_number).collect::<Vec<_>>();
+
+        assert_eq!(returned_blocks, vec![1], "should only return the requested DB block");
+
+        Ok(())
+    }
+
+    #[test]
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
@@ -2228,6 +2327,98 @@ mod tests {
             db_key, mem_key,
             "DB and in-memory changesets should return the same key format (plain) for the same logical slot"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_storage_changesets_range_respects_requested_range() -> eyre::Result<()> {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+        use std::collections::HashMap;
+
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+
+        let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
+
+        let address = alloy_primitives::Address::with_last_byte(1);
+        let account = reth_primitives_traits::Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+        };
+        let slot = U256::from(0x42);
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            database_blocks
+                .into_iter()
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                .collect(),
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, None, Some(account.into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(100)));
+                        s
+                    })],
+                    vec![
+                        Vec::new(),
+                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                    ],
+                    [],
+                ),
+                first_block: 0,
+                ..Default::default()
+            },
+            Default::default(),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        let in_mem_block = in_memory_blocks.first().unwrap();
+        let senders = in_mem_block.senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    in_mem_block.clone(),
+                    senders,
+                )),
+                execution_output: Arc::new(BlockExecutionOutput {
+                    state: BundleState::new(
+                        [(address, None, Some(account.into()), {
+                            let mut s = HashMap::default();
+                            s.insert(slot, (U256::from(100), U256::from(200)));
+                            s
+                        })],
+                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
+                        [],
+                    ),
+                    result: BlockExecutionResult {
+                        receipts: Default::default(),
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                }),
+                ..Default::default()
+            }],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        let consistent_provider = provider.consistent_provider()?;
+
+        let block_one_changesets = consistent_provider.storage_changesets_range(1..=1)?;
+        let returned_blocks = block_one_changesets
+            .iter()
+            .map(|(block_address, _)| block_address.block_number())
+            .collect::<Vec<_>>();
+
+        assert_eq!(returned_blocks, vec![1], "should only return the requested DB block");
 
         Ok(())
     }
