@@ -235,24 +235,6 @@ where
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // Basic transfer optimization: try MIN_TRANSACTION_GAS (21000) first
-        // Reference: geth gasestimator.go:134-141
-        // If the tx is a simple transfer (call to an account with no code) we can
-        // shortcircuit. But simply returning MIN_TRANSACTION_GAS is dangerous because
-        // there might be additional field combos that bump the price up, so we try
-        // executing the function with the minimum gas limit to make sure.
-        if is_basic_transfer {
-            let mut min_tx_env = tx_env.clone();
-            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
-
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
-                res.result.is_success()
-            {
-                // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply buffer)
-                return Ok(U256::from(MIN_TRANSACTION_GAS));
-            }
-        }
-
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting Mantle gas estimation");
 
         // Execute the transaction with the highest possible gas limit
@@ -276,6 +258,23 @@ where
             // Propagate other results
             ethres => ethres?,
         };
+
+        // Basic transfer optimization: try MIN_TRANSACTION_GAS (21000) only after the hi-gas
+        // execution above has confirmed no L1 data fee issue (is_gas_too_low check). Placing
+        // this shortcut before the main execution would allow historical blocks with high L1
+        // costs to bypass the is_gas_too_low check and incorrectly return 21000.
+        // Reference: geth gasestimator.go:134-141
+        if is_basic_transfer && res.result.is_success() {
+            let mut min_tx_env = tx_env.clone();
+            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+
+            if let Ok(min_res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+                min_res.result.is_success()
+            {
+                // Return raw estimate (Mantle/op-geth IsMantleArsia does not apply buffer)
+                return Ok(U256::from(MIN_TRANSACTION_GAS));
+            }
+        }
 
         // Handle execution result
         // Reference: geth gasestimator.go:148-153

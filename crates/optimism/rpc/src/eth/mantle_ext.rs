@@ -49,12 +49,19 @@ fn l1_nonce_or_default(request_nonce: Option<u64>) -> u64 {
     request_nonce.unwrap_or(0)
 }
 
-const fn should_use_l1_legacy_path(
+fn should_use_l1_legacy_path(
     has_base_fee: bool,
+    gas_price: Option<u128>,
     max_fee_per_gas: Option<u128>,
     max_priority_fee_per_gas: Option<u128>,
 ) -> bool {
-    !has_base_fee && max_fee_per_gas.is_none() && max_priority_fee_per_gas.is_none()
+    // Use Legacy tx encoding for L1 fee when no EIP-1559 fee fields are present AND either:
+    // - the chain has no baseFee (pre-EIP-1559 chain), or
+    // - the caller explicitly provided gasPrice only (matches geth behaviour: when CallDefaults
+    //   sees gasPrice without maxFeePerGas/maxPriorityFeePerGas it builds a Legacy tx)
+    max_fee_per_gas.is_none()
+        && max_priority_fee_per_gas.is_none()
+        && (!has_base_fee || gas_price.is_some())
 }
 
 fn ensure_create_kind_when_to_missing<T>(request: &mut T)
@@ -329,6 +336,7 @@ where
         let has_base_fee = header.base_fee_per_gas().map_or(0, |g| g) > 0;
         let use_l1_legacy_path = should_use_l1_legacy_path(
             has_base_fee,
+            op_req.as_ref().gas_price,
             op_req.as_ref().max_fee_per_gas,
             op_req.as_ref().max_priority_fee_per_gas,
         );
