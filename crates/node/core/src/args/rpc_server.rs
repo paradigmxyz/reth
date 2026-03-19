@@ -653,7 +653,7 @@ pub struct RpcServerArgs {
     /// When enabled, consensus will not enforce the gas limit bound divisor check,
     /// allowing blocks to jump to an arbitrary gas limit without ramping up over
     /// thousands of empty blocks.
-    #[arg(long = "testing.skip-gas-limit-ramp-check", default_value_t = false)]
+    #[arg(long = "testing.skip-gas-limit-ramp-check", default_value_t = false, hide = true)]
     pub testing_skip_gas_limit_ramp_check: bool,
 
     /// Override the gas limit used by `testing_buildBlockV1`.
@@ -661,7 +661,7 @@ pub struct RpcServerArgs {
     /// When set, `testing_buildBlockV1` will use this value instead of inheriting
     /// the parent block's gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
-    #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT")]
+    #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
 
     /// Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
