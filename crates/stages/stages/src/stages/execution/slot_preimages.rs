@@ -206,6 +206,10 @@ fn inject_preimage_entry(
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
+    // Overwrite `Destroyed` entries with the actual DB value. revm marks slots as
+    // `Destroyed` for selfdestructed contracts when the original DB value is unknown
+    // (e.g. CREATE2'd contracts that never read the slot). `or_insert` alone would
+    // skip these, leaving `Destroyed` to resolve to zero via `to_previous_value()`.
     revert
         .storage
         .entry(plain_key)
