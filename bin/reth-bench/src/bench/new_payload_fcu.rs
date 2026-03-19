@@ -169,10 +169,10 @@ impl Command {
         let buffer_size = self.rpc_block_buffer_size;
 
         let mut blocks = Box::pin(
-            stream::iter(next_block..)
+            stream::iter((next_block..)
                 .take_while(|next_block| {
-                    futures::future::ready(benchmark_mode.contains(*next_block))
-                })
+                    benchmark_mode.contains(*next_block)
+                }))
                 .map(|next_block| {
                     let block_provider = block_provider.clone();
                     async move {
