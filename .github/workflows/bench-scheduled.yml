@@ -281,11 +281,16 @@ jobs:
       - name: Check if snapshot needs update
         id: snapshot-check
         run: |
-          if .github/scripts/bench-reth-snapshot.sh --check; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-          fi
+          set +e
+          .github/scripts/bench-reth-snapshot.sh --check
+          rc=$?
+          set -e
+          case "$rc" in
+            0)  echo "needed=false" >> "$GITHUB_OUTPUT" ;;
+            10) echo "needed=true"  >> "$GITHUB_OUTPUT" ;;
+            *)  echo "::error::Snapshot check failed (exit $rc)"
+                exit "$rc" ;;
+          esac
 
       - name: Prepare source dirs
         run: |
@@ -303,12 +308,11 @@ jobs:
           fi
           git -C ../reth-feature checkout "$FEATURE_REF"
 
-      - name: Build binaries and download snapshot in parallel
+      - name: Build binaries
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
-          SNAPSHOT_NEEDED: ${{ steps.snapshot-check.outputs.needed }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
@@ -318,20 +322,22 @@ jobs:
           .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "$FEATURE_REF" &
           PID_FEATURE=$!
 
-          PID_SNAPSHOT=
-          if [ "$SNAPSHOT_NEEDED" = "true" ]; then
-            .github/scripts/bench-reth-snapshot.sh &
-            PID_SNAPSHOT=$!
-          fi
-
           FAIL=0
           wait $PID_BASELINE || FAIL=1
           wait $PID_FEATURE || FAIL=1
-          [ -n "$PID_SNAPSHOT" ] && { wait $PID_SNAPSHOT || FAIL=1; }
           if [ $FAIL -ne 0 ]; then
-            echo "::error::One or more parallel tasks failed (builds / snapshot download)"
+            echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Download snapshot
+        id: snapshot-download
+        if: steps.snapshot-check.outputs.needed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/reth
+        run: .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -793,7 +799,8 @@ jobs:
             if (!token || !channel) return;
 
             const steps_status = [
-              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
