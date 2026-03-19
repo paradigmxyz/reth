@@ -88,7 +88,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let mut transactions = Vec::new();
+        let mut transactions = Vec::with_capacity(self.by_id.len());;
         {
             // short path if blob_fee is None in provided best transactions attributes
             if let Some(blob_fee_to_satisfy) =
