@@ -202,7 +202,7 @@ for i in $(seq 1 60); do
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
     > /dev/null 2>&1; then
-    echo "reth (${LABEL}) RPC is up after ${i}s"
+    echo "reth (${LABEL}) is ready after ${i}s"
     break
   fi
   if [ "$i" -eq 60 ]; then
