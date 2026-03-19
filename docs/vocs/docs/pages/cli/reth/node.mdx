@@ -914,6 +914,9 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
+      --prune.minimum-distance <BLOCKS>
+          Minimum pruning distance from the tip. This controls the safety margin for reorgs and manual unwinds
+
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.

@@ -815,14 +815,16 @@ impl DiscoveryArgs {
             SocketAddr::V6(addr) => Some(*addr.ip()),
         });
 
+        let mut discv5_config_builder =
+            reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
+                discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
+            ));
+        if discv5_addr.is_some() || discv5_addr_ipv6.is_some() || self.disable_nat {
+            discv5_config_builder.disable_enr_update();
+        }
         reth_discv5::Config::builder(rlpx_tcp_socket)
-            .discv5_config(
-                reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
-                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
-                ))
-                .build(),
-            )
+            .discv5_config(discv5_config_builder.build())
             .add_unsigned_boot_nodes(boot_nodes)
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)

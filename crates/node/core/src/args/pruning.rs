@@ -196,6 +196,11 @@ pub struct PruningArgs {
     /// pruned.
     #[arg(long = "prune.bodies.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
     pub bodies_before: Option<BlockNumber>,
+
+    /// Minimum pruning distance from the tip. This controls the safety margin for reorgs and
+    /// manual unwinds.
+    #[arg(long = "prune.minimum-distance", value_name = "BLOCKS")]
+    pub minimum_distance: Option<u64>,
 }
 
 impl PruningArgs {
@@ -220,7 +225,11 @@ impl PruningArgs {
                     .block_number()
                     .map(PruneMode::Before);
             }
-            config = PruneConfig { block_interval: config.block_interval, segments }
+            config = PruneConfig {
+                block_interval: config.block_interval,
+                segments,
+                minimum_pruning_distance: config.minimum_pruning_distance,
+            }
         }
 
         // If --minimal is set, use minimal storage mode with aggressive pruning.
@@ -228,12 +237,16 @@ impl PruningArgs {
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: DefaultPruningValues::get_global().minimal_prune_modes.clone(),
+                minimum_pruning_distance: config.minimum_pruning_distance,
             }
         }
 
         // Override with any explicitly set prune.* flags.
         if let Some(block_interval) = self.block_interval {
             config.block_interval = block_interval as usize;
+        }
+        if let Some(distance) = self.minimum_distance {
+            config.minimum_pruning_distance = distance;
         }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);

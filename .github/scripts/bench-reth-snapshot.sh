@@ -7,11 +7,11 @@
 # the last successful download (checked via SHA-256 of the manifest).
 #
 # Usage: bench-reth-snapshot.sh [--check]
-#   --check   Only check if a download is needed; exits 0 if up-to-date, 1 if not.
+#   --check   Only check if a download is needed; exits 0 if up-to-date, 10 if not.
 #
 # Required env:
 #   SCHELK_MOUNT       – schelk mount point (e.g. /reth-bench)
-#   BENCH_RETH_BINARY  – path to the reth binary (required for download, not --check)
+#   BENCH_RETH_BINARY  – path to the reth binary
 #   GITHUB_TOKEN       – token for GitHub API calls (only for download)
 #   BENCH_COMMENT_ID   – PR comment ID to update (optional)
 #   BENCH_REPO         – owner/repo (e.g. paradigmxyz/reth)
@@ -27,10 +27,11 @@ DATADIR="$SCHELK_MOUNT/datadir"
 HASH_FILE="$HOME/.reth-bench-snapshot-hash"
 
 # Fetch manifest and compute content hash for reliable freshness check
-if ! REMOTE_HASH=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null | sha256sum | awk '{print $1}'); then
+MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
   echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
   exit 2
-fi
+}
+REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
 
 LOCAL_HASH=""
 [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")
@@ -45,8 +46,7 @@ if [ "${1:-}" = "--check" ]; then
   exit 10
 fi
 
-: "${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set to the reth binary path}"
-RETH="$BENCH_RETH_BINARY"
+RETH="${BENCH_RETH_BINARY:?BENCH_RETH_BINARY must be set}"
 if [ ! -x "$RETH" ]; then
   echo "::error::reth binary not found or not executable at $RETH"
   exit 1
@@ -55,17 +55,17 @@ fi
 # Resolve the MinIO HTTP endpoint from the mc alias so reth can
 # fetch archives over HTTP (the manifest's embedded base_url points
 # to the cluster-internal address which is unreachable from runners).
-MINIO_ENDPOINT=$($MC alias list minio --json | jq -r '.URL')
-if [ -z "$MINIO_ENDPOINT" ] || [ "$MINIO_ENDPOINT" = "null" ]; then
-  echo "::error::Failed to resolve MinIO endpoint from mc alias"
+MINIO_ENDPOINT=$($MC alias list minio --json 2>/dev/null | jq -r '.URL // empty') || true
+if [ -z "$MINIO_ENDPOINT" ]; then
+  echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
   exit 1
 fi
 BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/reth-1-minimal-stable"
 
-# Download manifest and replace base_url with the runner-reachable endpoint
+# Rewrite manifest's base_url with the runner-reachable endpoint
 MANIFEST_TMP=$(mktemp --suffix=.json)
 trap 'rm -f -- "$MANIFEST_TMP"' EXIT
-$MC cat "${BUCKET}/${MANIFEST_PATH}" \
+echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
 # Prepare mount
@@ -73,6 +73,7 @@ mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"
+# reth download runs as current user (not root), needs write access
 sudo chown -R "$(id -u):$(id -g)" "$DATADIR"
 
 update_comment() {
