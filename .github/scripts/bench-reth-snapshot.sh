@@ -27,10 +27,11 @@ DATADIR="$SCHELK_MOUNT/datadir"
 HASH_FILE="$HOME/.reth-bench-snapshot-hash"
 
 # Fetch manifest and compute content hash for reliable freshness check
-if ! REMOTE_HASH=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null | sha256sum | awk '{print $1}'); then
+MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>&1) || {
   echo "::error::Failed to fetch snapshot manifest from ${BUCKET}/${MANIFEST_PATH}"
   exit 2
-fi
+}
+REMOTE_HASH=$(echo "$MANIFEST_CONTENT" | sha256sum | awk '{print $1}')
 
 LOCAL_HASH=""
 [ -f "$HASH_FILE" ] && LOCAL_HASH=$(cat "$HASH_FILE")

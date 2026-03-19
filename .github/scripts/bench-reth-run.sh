@@ -120,9 +120,10 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
-# Gate flag on binary support (older baselines may not have it)
+# Gate flag on binary support (older baselines may not have it).
+# Uses --help which exits immediately via clap without node init.
 SYNC_STATE_IDLE=false
-if "$BINARY" node --help 2>/dev/null | grep -q -- '--debug.startup-sync-state-idle'; then
+if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)
   SYNC_STATE_IDLE=true
 fi
