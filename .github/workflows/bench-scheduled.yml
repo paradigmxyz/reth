@@ -10,8 +10,6 @@
 on:
   schedule:
     - cron: "30 5 * * *" # 06:30 UTC daily
-  pull_request: # TODO: remove before merging — hack to test from branch
-    branches: [main]
   workflow_dispatch:
     inputs:
       force:
