@@ -762,17 +762,10 @@ where
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
-                current_hash = block.recovered_block().parent_hash();
-                current_number -= 1;
-                new_chain.push(block);
-            } else {
-                warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
-                // This should never happen as we're walking back a chain that should connect to
-                // the canonical chain
-                return Ok(None)
-            }
+            let block = self.tree_executed_block_by_hash(current_hash)?;
+            current_hash = block.recovered_block().parent_hash();
+            current_number -= 1;
+            new_chain.push(block);
         }
 
         // If we have reached the current canonical head by walking back from the target, then we
@@ -807,15 +800,9 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
-                current_hash = block.recovered_block().parent_hash();
-                new_chain.push(block);
-            } else {
-                // This shouldn't happen as we've already walked this path
-                warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.tree_executed_block_by_hash(current_hash)?;
+            current_hash = block.recovered_block().parent_hash();
+            new_chain.push(block);
         }
         new_chain.reverse();
         old_chain.reverse();
@@ -2066,6 +2053,18 @@ where
         } else {
             self.provider.is_known(hash)
         }
+    }
+
+    /// Return an in-memory [`ExecutedBlock`] by hash.
+    ///
+    /// This is used when a caller has already established the block must exist in `TreeState`.
+    #[inline]
+    fn tree_executed_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
+        self.state
+            .tree_state
+            .executed_block_by_hash(hash)
+            .cloned()
+            .ok_or(ProviderError::BlockHashNotFound(hash))
     }
 
     /// Return sealed block header from in-memory state or database by hash.
