@@ -2,7 +2,7 @@
 
 use crate::{
     bench::{
-        context::{retry_rpc_fetch, BenchContext},
+        context::BenchContext,
         metrics_scraper::MetricsScraper,
         output::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
@@ -63,7 +63,6 @@ impl Command {
         }
 
         let buffer_size = self.rpc_block_buffer_size;
-        let rpc_block_fetch_retries = self.benchmark.rpc_block_fetch_retries;
 
         // Use a oneshot channel to propagate errors from the spawned task
         let (error_sender, mut error_receiver) = tokio::sync::oneshot::channel();
@@ -71,21 +70,12 @@ impl Command {
 
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block = match retry_rpc_fetch(
-                    || async {
-                        block_provider
-                            .get_block_by_number(next_block.into())
-                            .full()
-                            .await
-                            .wrap_err_with(|| {
-                                format!("Failed to fetch block by number {next_block}")
-                            })?
-                            .ok_or_eyre("Block not found")
-                    },
-                    rpc_block_fetch_retries,
-                    "Failed to fetch block from RPC",
-                )
-                .await
+                let block = match block_provider
+                    .get_block_by_number(next_block.into())
+                    .full()
+                    .await
+                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"))
+                    .and_then(|b| b.ok_or_eyre("Block not found"))
                 {
                     Ok(block) => block,
                     Err(e) => {
@@ -96,17 +86,10 @@ impl Command {
                 };
 
                 let rlp = if rlp_blocks {
-                    match retry_rpc_fetch(
-                        || async {
-                            block_provider
-                                .debug_get_raw_block(next_block.into())
-                                .await
-                                .wrap_err_with(|| format!("Failed to fetch raw block {next_block}"))
-                        },
-                        rpc_block_fetch_retries,
-                        "Failed to fetch raw block from RPC",
-                    )
-                    .await
+                    match block_provider
+                        .debug_get_raw_block(next_block.into())
+                        .await
+                        .wrap_err_with(|| format!("Failed to fetch raw block {next_block}"))
                     {
                         Ok(rlp) => Some(rlp),
                         Err(e) => {

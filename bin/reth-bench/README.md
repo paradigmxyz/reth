@@ -36,8 +36,8 @@ The `new-payload-fcu` command supports two optional waiting modes that can be us
 - `--wait-for-persistence`: Waits for blocks to be persisted using the `reth_subscribePersistedBlock` subscription
 
 Both `new-payload-fcu` and `new-payload-only` support `--rpc-block-fetch-retries <RETRIES>`
-to control how many times block fetches are retried after an RPC failure. The default is `0`
-(fail immediately). Use `--rpc-block-fetch-retries forever` to keep retrying indefinitely.
+to control how many times block fetches are retried after an RPC failure. The default is `10`.
+Use `--rpc-block-fetch-retries forever` to keep retrying indefinitely.
 
 When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
 

@@ -73,11 +73,11 @@ pub struct BenchmarkArgs {
 
     /// Number of retries for fetching blocks from `--rpc-url` after a failure.
     ///
-    /// Use `0` to fail immediately (default), or `forever` to never stop retrying.
+    /// Use `0` to fail immediately, or `forever` to never stop retrying.
     #[arg(
         long = "rpc-block-fetch-retries",
         value_name = "RETRIES",
-        default_value = "0",
+        default_value = "10",
         value_parser = parse_rpc_block_fetch_retries,
         verbatim_doc_comment
     )]
@@ -99,25 +99,25 @@ pub struct BenchmarkArgs {
 /// Retry strategy for fetching blocks from the benchmark RPC provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RpcBlockFetchRetries {
-    /// Retry up to `u64` times after the first failed attempt.
-    Finite(u64),
+    /// Retry up to `u32` times after the first failed attempt.
+    Finite(u32),
     /// Retry forever.
     Forever,
 }
 
 impl RpcBlockFetchRetries {
-    /// Returns `true` if another retry should be attempted.
-    pub const fn should_retry(self, retries_used: u64) -> bool {
+    /// Returns the maximum number of retries for the `RetryBackoffLayer`.
+    pub const fn as_max_retries(self) -> u32 {
         match self {
-            Self::Finite(max_retries) => retries_used < max_retries,
-            Self::Forever => true,
+            Self::Finite(n) => n,
+            Self::Forever => u32::MAX,
         }
     }
 }
 
 impl Default for RpcBlockFetchRetries {
     fn default() -> Self {
-        Self::Finite(0)
+        Self::Finite(10)
     }
 }
 
@@ -134,7 +134,7 @@ impl FromStr for RpcBlockFetchRetries {
         }
 
         let retries = s
-            .parse::<u64>()
+            .parse::<u32>()
             .map_err(|_| format!("invalid retry value {s:?}, expected a number or 'forever'"))?;
         Ok(Self::Finite(retries))
     }

@@ -9,44 +9,8 @@ use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
-use reth_node_core::args::{BenchmarkArgs, RpcBlockFetchRetries};
-use std::{future::Future, time::Duration};
-use tracing::{info, warn};
-
-/// Runs an RPC fetch operation with retry behavior controlled by
-/// [`RpcBlockFetchRetries`].
-pub(crate) async fn retry_rpc_fetch<T, F, Fut>(
-    mut operation: F,
-    retries: RpcBlockFetchRetries,
-    context: &'static str,
-) -> eyre::Result<T>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = eyre::Result<T>>,
-{
-    let mut retries_used = 0u64;
-
-    loop {
-        match operation().await {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                if !retries.should_retry(retries_used) {
-                    return Err(error)
-                }
-
-                retries_used += 1;
-                warn!(
-                    target: "reth-bench",
-                    retries_used,
-                    retry_mode = ?retries,
-                    %error,
-                    "{context}; retrying"
-                );
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-    }
-}
+use reth_node_core::args::BenchmarkArgs;
+use tracing::info;
 
 /// This is intended to be used by benchmarks that replay blocks from an RPC.
 ///
@@ -96,8 +60,9 @@ impl BenchContext {
                     .and_then(|t| t.as_http_error())
                     .is_some_and(|e| e.status == 502)
             });
+        let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new_with_policy(10, 800, u64::MAX, retry_policy))
+            .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
@@ -161,67 +126,33 @@ impl BenchContext {
 
         // If `--to` are not provided, we will run the benchmark continuously,
         // starting at the latest block.
-        let latest_block = retry_rpc_fetch(
-            || async {
-                block_provider
-                    .get_block_by_number(BlockNumberOrTag::Latest)
-                    .full()
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from RPC"))
-            },
-            bench_args.rpc_block_fetch_retries,
-            "Failed to fetch latest block from RPC",
-        )
-        .await?;
+        let latest_block = block_provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .full()
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from RPC"))?;
         let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number());
 
         let first_block = match benchmark_mode {
             BenchMode::Continuous(start) => {
-                retry_rpc_fetch(
-                    || async {
-                        block_provider.get_block_by_number(start.into()).full().await?.ok_or_else(
-                            || {
-                                eyre::eyre!(
-                                    "Failed to fetch block {} from RPC for continuous mode",
-                                    start
-                                )
-                            },
-                        )
-                    },
-                    bench_args.rpc_block_fetch_retries,
-                    "Failed to fetch first block for continuous mode",
-                )
-                .await?
+                block_provider.get_block_by_number(start.into()).full().await?.ok_or_else(|| {
+                    eyre::eyre!("Failed to fetch block {} from RPC for continuous mode", start)
+                })?
             }
-            BenchMode::Range(ref mut range) => {
-                match range.next() {
-                    Some(block_number) => {
-                        retry_rpc_fetch(
-                            || async {
-                                // fetch first block in range
-                                block_provider
-                                    .get_block_by_number(block_number.into())
-                                    .full()
-                                    .await?
-                                    .ok_or_else(|| {
-                                        eyre::eyre!(
-                                            "Failed to fetch block {} from RPC",
-                                            block_number
-                                        )
-                                    })
-                            },
-                            bench_args.rpc_block_fetch_retries,
-                            "Failed to fetch first block in range",
-                        )
-                        .await?
-                    }
-                    None => {
-                        return Err(eyre::eyre!(
-                            "Benchmark mode range is empty, please provide a larger range"
-                        ));
-                    }
+            BenchMode::Range(ref mut range) => match range.next() {
+                Some(block_number) => block_provider
+                    .get_block_by_number(block_number.into())
+                    .full()
+                    .await?
+                    .ok_or_else(|| {
+                        eyre::eyre!("Failed to fetch block {} from RPC", block_number)
+                    })?,
+                None => {
+                    return Err(eyre::eyre!(
+                        "Benchmark mode range is empty, please provide a larger range"
+                    ));
                 }
-            }
+            },
         };
 
         let next_block = first_block.header.number + 1;
