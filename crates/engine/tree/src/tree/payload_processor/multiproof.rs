@@ -134,6 +134,12 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+    /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
+    /// results). Excludes the final wait after the channel is closed.
+    pub sparse_trie_idle_time_seconds: Histogram,
+    /// Histogram for hashing task idle time in seconds (waiting for messages from execution).
+    /// Excludes the final wait after the channel is closed.
+    pub hashing_task_idle_time_seconds: Histogram,
 
     /// Number of account leaf updates applied without needing a new proof (cache hits).
     pub sparse_trie_account_cache_hits: Histogram,
