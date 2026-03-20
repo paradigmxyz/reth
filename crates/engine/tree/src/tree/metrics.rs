@@ -1,5 +1,4 @@
 use crate::tree::MeteredStateHook;
-use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
@@ -16,7 +15,7 @@ use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
-use tracing::{debug_span, warn};
+use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -79,9 +78,9 @@ impl EngineApiMetrics {
             for tx in transactions {
                 let tx = tx?;
                 let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                    debug_span!(target: "engine::tree", "execute tx");
                 let _enter = span.enter();
-                warn!(target: "engine::tree", tx_hash=?tx.tx().tx_hash(), "Executing transaction");
+                trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
@@ -91,7 +90,6 @@ impl EngineApiMetrics {
         let (mut db, result) = self.metered(|| {
             let res = f();
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
-            eprintln!("gas_used={gas_used}");
             (gas_used, res)
         })?;
 
