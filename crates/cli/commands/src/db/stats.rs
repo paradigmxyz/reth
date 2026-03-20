@@ -13,10 +13,11 @@ use reth_node_builder::{NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter}
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
-    RocksDBProviderFactory,
+    RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_static_file_types::SegmentRangeInclusive;
 use std::time::Duration;
+use tracing::warn;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -50,6 +51,16 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
+        if !self.skip_consistency_checks {
+            if let Err(err) = tool
+                .provider_factory
+                .static_file_provider()
+                .check_consistency(&tool.provider_factory.provider()?)
+            {
+                warn!(target: "reth::cli", %err, "Static file consistency check failed");
+            }
+        }
+
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
             println!("{checksum_report}");
