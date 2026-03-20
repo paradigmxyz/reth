@@ -33,6 +33,10 @@ pub(crate) struct BenchContext {
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
     pub(crate) rlp_blocks: bool,
+    /// Whether to skip waiting for persistence (pass `wait_for_persistence: false`).
+    pub(crate) no_wait_for_persistence: bool,
+    /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
+    pub(crate) no_wait_for_caches: bool,
 }
 
 impl BenchContext {
@@ -139,25 +143,32 @@ impl BenchContext {
                     eyre::eyre!("Failed to fetch block {} from RPC for continuous mode", start)
                 })?
             }
-            BenchMode::Range(ref mut range) => match range.next() {
-                Some(block_number) => block_provider
-                    .get_block_by_number(block_number.into())
-                    .full()
-                    .await?
-                    .ok_or_else(|| {
-                        eyre::eyre!("Failed to fetch block {} from RPC", block_number)
-                    })?,
-                None => {
-                    return Err(eyre::eyre!(
-                        "Benchmark mode range is empty, please provide a larger range"
-                    ));
+            BenchMode::Range(ref mut range) => {
+                match range.next() {
+                    Some(block_number) => {
+                        // fetch first block in range
+                        block_provider
+                            .get_block_by_number(block_number.into())
+                            .full()
+                            .await?
+                            .ok_or_else(|| {
+                                eyre::eyre!("Failed to fetch block {} from RPC", block_number)
+                            })?
+                    }
+                    None => {
+                        return Err(eyre::eyre!(
+                            "Benchmark mode range is empty, please provide a larger range"
+                        ));
+                    }
                 }
-            },
+            }
         };
 
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
         let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait_for_persistence = bench_args.no_wait_for_persistence;
+        let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
             auth_provider,
             block_provider,
@@ -166,6 +177,8 @@ impl BenchContext {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
         })
     }
 }

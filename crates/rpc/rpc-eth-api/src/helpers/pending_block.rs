@@ -318,7 +318,8 @@ pub trait LoadPendingBlock:
 
                 // There's only limited amount of blob space available per block, so we need to
                 // check if the EIP-4844 can still fit in the block
-                if let Some(tx_blob_gas) = tx.blob_gas_used() &&
+                let tx_blob_gas = tx.blob_gas_used();
+                if let Some(tx_blob_gas) = tx_blob_gas &&
                     sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
                 {
                     // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -335,7 +336,7 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let gas_used = match builder.execute_transaction(tx.clone()) {
+                let gas_used = match builder.execute_transaction(tx) {
                     Ok(gas_used) => gas_used,
                     Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                         error,
@@ -360,7 +361,7 @@ pub trait LoadPendingBlock:
                 };
 
                 // add to the total blob gas used if the transaction successfully executed
-                if let Some(tx_blob_gas) = tx.blob_gas_used() {
+                if let Some(tx_blob_gas) = tx_blob_gas {
                     sum_blob_gas_used += tx_blob_gas;
 
                     // if we've reached the max data gas per block, we can skip blob txs entirely

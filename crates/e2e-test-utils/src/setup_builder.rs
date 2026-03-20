@@ -96,6 +96,11 @@ where
         self
     }
 
+    /// Sets the pruning arguments for the test nodes.
+    pub fn with_pruning(self, pruning: reth_node_core::args::PruningArgs) -> Self {
+        self.with_node_config_modifier(move |config| config.with_pruning(pruning.clone()))
+    }
+
     /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
     /// indices, etc. to `RocksDB` and changesets/senders to static files.
     pub fn with_storage_v2(self) -> Self {

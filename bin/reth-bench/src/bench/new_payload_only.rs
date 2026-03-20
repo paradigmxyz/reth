@@ -52,6 +52,8 @@ impl Command {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -70,13 +72,12 @@ impl Command {
 
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block = match block_provider
+                let block_res = block_provider
                     .get_block_by_number(next_block.into())
                     .full()
                     .await
-                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"))
-                    .and_then(|b| b.ok_or_eyre("Block not found"))
-                {
+                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
+                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
                         tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
@@ -86,18 +87,14 @@ impl Command {
                 };
 
                 let rlp = if rlp_blocks {
-                    match block_provider
-                        .debug_get_raw_block(next_block.into())
-                        .await
-                        .wrap_err_with(|| format!("Failed to fetch raw block {next_block}"))
-                    {
-                        Ok(rlp) => Some(rlp),
-                        Err(e) => {
-                            tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}: {e}");
-                            let _ = error_sender.send(e);
-                            break;
-                        }
-                    }
+                    let Ok(rlp) = block_provider.debug_get_raw_block(next_block.into()).await
+                    else {
+                        tracing::error!(target: "reth-bench", "Failed to fetch raw block {next_block}");
+                        let _ = error_sender
+                            .send(eyre::eyre!("Failed to fetch raw block {next_block}"));
+                        break;
+                    };
+                    Some(rlp)
                 } else {
                     None
                 };
@@ -127,8 +124,14 @@ impl Command {
 
             debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
-            let (version, params) =
-                block_to_new_payload(block, is_optimism, rlp, use_reth_namespace)?;
+            let (version, params) = block_to_new_payload(
+                block,
+                is_optimism,
+                rlp,
+                use_reth_namespace,
+                no_wait_for_persistence,
+                no_wait_for_caches,
+            )?;
 
             let start = Instant::now();
             let server_timings =

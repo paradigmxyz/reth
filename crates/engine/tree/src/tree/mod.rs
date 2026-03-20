@@ -791,15 +791,10 @@ where
         // If the canonical chain is ahead of the new chain,
         // gather all blocks until new head number.
         while current_canonical_number > current_number {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-                current_canonical_number -= 1;
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
+            current_canonical_number -= 1;
         }
 
         // Both new and old chain pointers are now at the same height.
@@ -808,14 +803,9 @@ where
         // Walk both chains from specified hashes at same height until
         // a common ancestor (fork block) is reached.
         while old_hash != current_hash {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
             {
@@ -942,36 +932,22 @@ where
         let new_head_hash = canonical_header.hash();
         let new_head_number = canonical_header.number();
 
-        // Try to load the canonical ancestor's block
-        match self.canonical_block_by_hash(new_head_hash)? {
-            Some(executed_block) => {
-                // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![executed_block],
-                    old: old_blocks,
-                });
+        // Load the canonical ancestor's block
+        let executed_block = self.canonical_block_by_hash(new_head_hash)?;
+        // Perform the reorg to properly handle the unwind
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
 
-                // CRITICAL: Update the canonical head after the reorg
-                // This ensures get_canonical_head() returns the correct block
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+        // CRITICAL: Update the canonical head after the reorg
+        // This ensures get_canonical_head() returns the correct block
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-                debug!(
-                    target: "engine::tree",
-                    block_number = new_head_number,
-                    block_hash = ?new_head_hash,
-                    "Successfully loaded canonical ancestor into memory via reorg"
-                );
-            }
-            None => {
-                // Fallback: update header only if block cannot be found
-                warn!(
-                    target: "engine::tree",
-                    block_hash = ?new_head_hash,
-                    "Could not find canonical ancestor block, updating header only"
-                );
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
-            }
-        }
+        debug!(
+            target: "engine::tree",
+            block_number = new_head_number,
+            block_hash = ?new_head_hash,
+            "Successfully loaded canonical ancestor into memory via reorg"
+        );
 
         Ok(())
     }
@@ -997,18 +973,17 @@ where
             return Ok(());
         }
 
-        // Try to load the block from storage
-        if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
-            self.canonical_in_memory_state
-                .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
+        // Load the block from storage
+        let executed_block = self.canonical_block_by_hash(block_hash)?;
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
-            debug!(
-                target: "engine::tree",
-                block_number,
-                block_hash = ?block_hash,
-                "Added canonical block to in-memory state"
-            );
-        }
+        debug!(
+            target: "engine::tree",
+            block_number,
+            block_hash = ?block_hash,
+            "Added canonical block to in-memory state"
+        );
 
         Ok(())
     }
@@ -1569,58 +1544,52 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                // Before processing the new payload, we wait for persistence and
-                                // cache updates to complete. We do it in parallel, spawning
-                                // persistence and cache update wait tasks with Tokio, so that we
-                                // can get an unbiased breakdown on how long did every step take.
-                                //
-                                // If we first wait for persistence, and only then for cache
-                                // updates, we will offset the cache update waits by the duration of
-                                // persistence, which is incorrect.
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx = if let Some((rx, start_time, _action)) =
-                                    pending_persistence
-                                {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
-                                    self.runtime.spawn_blocking_named("wait-persist", move || {
-                                        let start = Instant::now();
-                                        let result =
-                                            rx.recv().expect("persistence state channel closed");
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                    Some(persistence_rx)
-                                } else {
-                                    None
-                                };
-
-                                let cache_wait = self.payload_validator.wait_for_caches();
-
-                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
-                                {
-                                    let (result, start_time, wait_duration) = persistence_rx
-                                        .recv()
-                                        .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(result, start_time);
-                                    Some(wait_duration)
-                                } else {
-                                    None
-                                };
-
+                            BeaconEngineMessage::RethNewPayload {
+                                payload,
+                                wait_for_persistence,
+                                wait_for_caches,
+                                tx,
+                            } => {
                                 debug!(
                                     target: "engine::tree",
-                                    ?persistence_wait,
-                                    execution_cache_wait = ?cache_wait.execution_cache,
-                                    sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Persistence finished and caches updated for reth_newPayload"
+                                    wait_for_persistence,
+                                    wait_for_caches,
+                                    "Processing reth_newPayload"
                                 );
+
+                                let persistence_wait = if wait_for_persistence {
+                                    let pending_persistence = self.persistence_state.rx.take();
+                                    if let Some((rx, start_time, _action)) = pending_persistence {
+                                        let (persistence_tx, persistence_rx) =
+                                            std::sync::mpsc::channel();
+                                        self.runtime.spawn_blocking_named(
+                                            "wait-persist",
+                                            move || {
+                                                let start = Instant::now();
+                                                let result = rx
+                                                    .recv()
+                                                    .expect("persistence state channel closed");
+                                                let _ = persistence_tx.send((
+                                                    result,
+                                                    start_time,
+                                                    start.elapsed(),
+                                                ));
+                                            },
+                                        );
+                                        let (result, start_time, wait_duration) = persistence_rx
+                                            .recv()
+                                            .expect("persistence result channel closed");
+                                        let _ = self.on_persistence_complete(result, start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        Some(Duration::ZERO)
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -1640,8 +1609,9 @@ where
                                 let timings = NewPayloadTimings {
                                     latency,
                                     persistence_wait,
-                                    execution_cache_wait: cache_wait.execution_cache,
-                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                    execution_cache_wait: cache_wait
+                                        .map(|wait| wait.execution_cache),
+                                    sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
                                 if let Err(err) =
                                     tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
@@ -2029,11 +1999,11 @@ where
     /// pruned for a given block, this operation will return an error. On archive nodes, it
     /// can retrieve any block.
     #[instrument(level = "debug", target = "engine::tree", skip(self))]
-    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
+    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(Some(block.clone()))
+            return Ok(block.clone())
         }
 
         let (block, senders) = self
@@ -2075,11 +2045,22 @@ where
             },
         });
 
-        Ok(Some(ExecutedBlock::new(
+        Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output,
             trie_data,
-        )))
+        ))
+    }
+
+    /// Returns `true` if a block with the given hash is known, either in memory or in the
+    /// database. This is a lightweight existence check that avoids constructing a full
+    /// [`SealedHeader`].
+    fn has_block_by_hash(&self, hash: B256) -> ProviderResult<bool> {
+        if self.state.tree_state.contains_hash(&hash) {
+            Ok(true)
+        } else {
+            self.provider.is_known(hash)
+        }
     }
 
     /// Return sealed block header from in-memory state or database by hash.
@@ -2126,7 +2107,7 @@ where
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        if self.sealed_header_by_hash(parent_hash)?.is_some() {
+        if self.has_block_by_hash(parent_hash)? {
             return Ok(Some(parent_hash))
         }
 
@@ -2140,7 +2121,7 @@ where
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_block.is_none() && self.sealed_header_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.has_block_by_hash(current_hash)? {
                 return Ok(Some(current_hash))
             }
         }
@@ -2807,7 +2788,7 @@ where
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
         // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
             convert_to_block(self, input)?;
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
         }

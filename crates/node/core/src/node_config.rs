@@ -373,14 +373,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
     /// Returns the effective storage settings for this node.
     ///
-    /// Always returns [`StorageSettings::v2()`] — v2 storage is the default for
-    /// new nodes. Existing nodes retain whatever settings are persisted in their
-    /// database metadata (checked during genesis init).
-    ///
+    /// Determined by the `--storage.v2` flag (defaults to `true`).
     /// Existing databases retain whatever settings are persisted in their
     /// metadata (checked during genesis init).
     pub const fn storage_settings(&self) -> StorageSettings {
-        StorageSettings::v2()
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::v1()
+        }
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

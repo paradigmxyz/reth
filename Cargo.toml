@@ -10,7 +10,6 @@ exclude = [".github/"]
 [workspace]
 members = [
     "bin/reth-bench/",
-    "bin/reth-bench-compare/",
     "bin/reth/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
@@ -324,7 +323,6 @@ reth = { path = "bin/reth" }
 reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
-reth-bench-compare = { path = "bin/reth-bench-compare" }
 reth-chain-state = { path = "crates/chain-state" }
 reth-chainspec = { path = "crates/chainspec", default-features = false }
 reth-cli = { path = "crates/cli/cli" }
@@ -444,7 +442,6 @@ revm-state = { version = "10.0.0", default-features = false }
 revm-primitives = { version = "22.1.0", default-features = false }
 revm-interpreter = { version = "34.0.0", default-features = false }
 revm-database-interface = { version = "10.0.0", default-features = false }
-op-revm = { version = "17.0.0", default-features = false }
 revm-inspectors = "0.36.0"
 
 # eth
@@ -539,8 +536,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
 shlex = "1.3"
-# https://github.com/orlp/slotmap/pull/148
-slotmap = { git = "https://github.com/DaniPopes/slotmap.git", branch = "dani/shrink-methods" }
+slotmap = "1"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
 strum_macros = "0.27"
