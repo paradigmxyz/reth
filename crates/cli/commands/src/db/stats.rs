@@ -51,14 +51,13 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
-        if !self.skip_consistency_checks {
-            if let Err(err) = tool
+        if !self.skip_consistency_checks
+            && let Err(err) = tool
                 .provider_factory
                 .static_file_provider()
                 .check_consistency(&tool.provider_factory.provider()?)
-            {
-                warn!(target: "reth::cli", %err, "Static file consistency check failed");
-            }
+        {
+            warn!(target: "reth::cli", %err, "Static file consistency check failed");
         }
 
         if self.checksum {
