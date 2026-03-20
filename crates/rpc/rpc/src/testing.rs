@@ -49,12 +49,14 @@ pub struct TestingApi<Eth, Evm> {
     evm_config: Evm,
     /// If true, skip invalid transactions instead of failing.
     skip_invalid_transactions: bool,
+    /// If set, override the parent block's gas limit in `testing_buildBlockV1`.
+    gas_limit_override: Option<u64>,
 }
 
 impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// Create a new testing API handler.
     pub const fn new(eth_api: Eth, evm_config: Evm) -> Self {
-        Self { eth_api, evm_config, skip_invalid_transactions: false }
+        Self { eth_api, evm_config, skip_invalid_transactions: false, gas_limit_override: None }
     }
 
     /// Enable skipping invalid transactions instead of failing.
@@ -62,6 +64,13 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// skipped.
     pub const fn with_skip_invalid_transactions(mut self) -> Self {
         self.skip_invalid_transactions = true;
+        self
+    }
+
+    /// Override the gas limit used by `testing_buildBlockV1` instead of inheriting from the
+    /// parent block.
+    pub const fn with_gas_limit_override(mut self, gas_limit: u64) -> Self {
+        self.gas_limit_override = Some(gas_limit);
         self
     }
 }
@@ -80,6 +89,7 @@ where
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
+        let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
@@ -105,7 +115,7 @@ where
                     timestamp: request.payload_attributes.timestamp,
                     suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
                     prev_randao: request.payload_attributes.prev_randao,
-                    gas_limit: parent.gas_limit(),
+                    gas_limit: gas_limit_override.unwrap_or_else(|| parent.gas_limit()),
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),

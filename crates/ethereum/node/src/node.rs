@@ -293,6 +293,7 @@ where
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
+        let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -313,6 +314,9 @@ where
                 );
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();
+                }
+                if let Some(gas_limit) = testing_gas_limit_override {
+                    testing_api = testing_api.with_gas_limit_override(gas_limit);
                 }
                 container
                     .modules
@@ -563,7 +567,10 @@ where
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        Ok(Arc::new(
+            EthBeaconConsensus::new(ctx.chain_spec())
+                .with_skip_gas_limit_ramp_check(ctx.config().rpc.testing_skip_gas_limit_ramp_check),
+        ))
     }
 }
 

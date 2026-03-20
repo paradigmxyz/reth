@@ -472,7 +472,6 @@ def main():
     parser.add_argument("--feature-ref", "--branch-sha", "--feature-sha", default=None, help="Feature commit SHA")
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
     parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
-    parser.add_argument("--gas-ramp-blocks", type=int, default=0, help="Number of gas ramp blocks (big blocks mode)")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
@@ -554,7 +553,6 @@ def main():
     summary = {
         "blocks": paired_stats["blocks"],
         "big_blocks": args.big_blocks,
-        "gas_ramp_blocks": args.gas_ramp_blocks,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,

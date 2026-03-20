@@ -128,9 +128,10 @@ if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-i
   SYNC_STATE_IDLE=true
 fi
 
-# Big blocks mode requires the testing API and skip-invalid-transactions
+# Big blocks mode requires the testing API, skip-invalid-transactions, and
+# skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
 if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions)
+  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size max --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
 fi
 
 # Append per-label extra node args (baseline or feature)
@@ -202,7 +203,7 @@ for i in $(seq 1 60); do
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
     > /dev/null 2>&1; then
-    echo "reth (${LABEL}) is ready after ${i}s"
+    echo "reth (${LABEL}) RPC is up after ${i}s"
     break
   fi
   if [ "$i" -eq 60 ]; then
@@ -250,12 +251,8 @@ if [ -n "${BENCH_WAIT_TIME:-}" ]; then
 fi
 
 if [ "$BIG_BLOCKS" = "true" ]; then
-  # Big blocks mode: replay pre-generated payloads with gas ramp
+  # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
-  # Count gas ramp blocks for reporting
-  GAS_RAMP_COUNT=$(find "$BIG_BLOCKS_DIR/gas-ramp-dir" -name '*.json' | wc -l)
-  echo "$GAS_RAMP_COUNT" > "$OUTPUT_DIR/gas_ramp_blocks.txt"
-  echo "Gas ramp blocks: $GAS_RAMP_COUNT"
 
   # Start tracy-capture so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then
@@ -268,7 +265,6 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
     "${EXTRA_BENCH_ARGS[@]}" \
-    --gas-ramp-dir "$BIG_BLOCKS_DIR/gas-ramp-dir" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
