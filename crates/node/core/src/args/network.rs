@@ -805,7 +805,7 @@ impl DiscoveryArgs {
             ..
         } = self;
 
-        let has_discv5_addr_args =  discv5_addr.is_some() || discv5_addr_ipv6.is_some();
+        let has_discv5_addr_args = discv5_addr.is_some() || discv5_addr_ipv6.is_some();
 
         // Use rlpx address if none given
         let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
