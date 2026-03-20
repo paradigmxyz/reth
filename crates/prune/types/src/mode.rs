@@ -41,21 +41,29 @@ impl PruneMode {
         segment: PruneSegment,
         purpose: PrunePurpose,
     ) -> Result<Option<(BlockNumber, Self)>, PruneSegmentError> {
-        let min_blocks = segment.min_blocks();
+        self.prune_target_block_with_min(tip, segment, purpose, None)
+    }
+
+    /// Like [`prune_target_block`](Self::prune_target_block), but accepts an optional
+    /// `min_blocks_override` that replaces the segment's default minimum.
+    pub fn prune_target_block_with_min(
+        &self,
+        tip: BlockNumber,
+        segment: PruneSegment,
+        purpose: PrunePurpose,
+        min_blocks_override: Option<u64>,
+    ) -> Result<Option<(BlockNumber, Self)>, PruneSegmentError> {
+        let min_blocks = min_blocks_override.unwrap_or_else(|| segment.min_blocks());
         let result = match self {
             Self::Full if min_blocks == 0 => Some((tip, *self)),
             // For segments with min_blocks > 0, Full mode behaves like Distance(min_blocks)
             Self::Full if min_blocks <= tip => Some((tip - min_blocks, *self)),
             Self::Full => None, // Nothing to prune yet
             Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            Self::Distance(distance) if *distance >= segment.min_blocks() => {
-                Some((tip - distance, *self))
-            }
+            Self::Distance(distance) if *distance >= min_blocks => Some((tip - distance, *self)),
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
             Self::Before(n) if *n > tip => None, // Nothing to prune yet
-            Self::Before(n) => {
-                (tip - n >= segment.min_blocks()).then(|| ((*n).saturating_sub(1), *self))
-            }
+            Self::Before(n) => (tip - n >= min_blocks).then(|| ((*n).saturating_sub(1), *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)

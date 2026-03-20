@@ -112,6 +112,14 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
+      --storage.v2 <V2>
+          Enable V2 (hot/cold) storage layout for new databases.
+
+          When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
+
+          [default: true]
+          [possible values: true, false]
+
   <STAGE>
           Possible values:
           - headers:         The headers stage within the pipeline

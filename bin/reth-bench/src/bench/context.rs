@@ -33,6 +33,10 @@ pub(crate) struct BenchContext {
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
     pub(crate) rlp_blocks: bool,
+    /// Whether to skip waiting for persistence (pass `wait_for_persistence: false`).
+    pub(crate) no_wait_for_persistence: bool,
+    /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
+    pub(crate) no_wait_for_caches: bool,
 }
 
 impl BenchContext {
@@ -162,6 +166,8 @@ impl BenchContext {
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
         let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait_for_persistence = bench_args.no_wait_for_persistence;
+        let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
             auth_provider,
             block_provider,
@@ -170,6 +176,8 @@ impl BenchContext {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
         })
     }
 }

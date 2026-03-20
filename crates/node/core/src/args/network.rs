@@ -805,6 +805,8 @@ impl DiscoveryArgs {
             ..
         } = self;
 
+        let has_discv5_addr_args = discv5_addr.is_some() || discv5_addr_ipv6.is_some();
+
         // Use rlpx address if none given
         let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
             SocketAddr::V4(addr) => Some(*addr.ip()),
@@ -820,7 +822,9 @@ impl DiscoveryArgs {
                 discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
                 discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
             ));
-        if discv5_addr.is_some() || discv5_addr_ipv6.is_some() || self.disable_nat {
+
+        if has_discv5_addr_args || self.disable_nat {
+            // disable native enr update if addresses manually set or nat disabled
             discv5_config_builder.disable_enr_update();
         }
         reth_discv5::Config::builder(rlpx_tcp_socket)

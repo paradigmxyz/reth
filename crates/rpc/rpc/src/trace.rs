@@ -603,12 +603,14 @@ where
                 block_id,
                 Some(block.clone()),
                 StorageInspector::default,
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
+                    let unique_loads = ctx.inspector.unique_loads();
+                    let warm_loads = ctx.inspector.warm_loads();
                     let trace = TransactionStorageAccess {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        storage_access: ctx.inspector.accessed_slots().clone(),
-                        unique_loads: ctx.inspector.unique_loads(),
-                        warm_loads: ctx.inspector.warm_loads(),
+                        storage_access: ctx.take_inspector().into_accessed_slots(),
+                        unique_loads,
+                        warm_loads,
                     };
                     Ok(trace)
                 },
