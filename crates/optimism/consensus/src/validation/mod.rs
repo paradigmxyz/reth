@@ -158,12 +158,10 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
 
     if receipts_root != expected_receipts_root {
-        let deposit_count =
-            receipts.iter().filter(|r| r.as_deposit_receipt().is_some()).count();
-        let has_deposit_nonce = receipts.iter().any(|r| {
-            r.as_deposit_receipt()
-                .map_or(false, |d| d.deposit_nonce.is_some())
-        });
+        let deposit_count = receipts.iter().filter(|r| r.as_deposit_receipt().is_some()).count();
+        let has_deposit_nonce = receipts
+            .iter()
+            .any(|r| r.as_deposit_receipt().is_some_and(|d| d.deposit_nonce.is_some()));
         tracing::warn!(
             target: "optimism::consensus",
             block_timestamp = timestamp,

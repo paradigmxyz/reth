@@ -49,7 +49,7 @@ fn l1_nonce_or_default(request_nonce: Option<u64>) -> u64 {
     request_nonce.unwrap_or(0)
 }
 
-fn should_use_l1_legacy_path(
+const fn should_use_l1_legacy_path(
     has_base_fee: bool,
     gas_price: Option<u128>,
     max_fee_per_gas: Option<u128>,
@@ -59,9 +59,9 @@ fn should_use_l1_legacy_path(
     // - the chain has no baseFee (pre-EIP-1559 chain), or
     // - the caller explicitly provided gasPrice only (matches geth behaviour: when CallDefaults
     //   sees gasPrice without maxFeePerGas/maxPriorityFeePerGas it builds a Legacy tx)
-    max_fee_per_gas.is_none()
-        && max_priority_fee_per_gas.is_none()
-        && (!has_base_fee || gas_price.is_some())
+    max_fee_per_gas.is_none() &&
+        max_priority_fee_per_gas.is_none() &&
+        (!has_base_fee || gas_price.is_some())
 }
 
 fn ensure_create_kind_when_to_missing<T>(request: &mut T)
@@ -368,6 +368,15 @@ where
                         if use_l1_legacy_path {
                             let gp = request.gas_price.unwrap_or(0);
                             r.set_gas_price(gp);
+                            // Clear chain_id so the Legacy tx encodes with v=27
+                            // (pre-EIP-155) instead of v=chain_id*2+35 (EIP-155).
+                            // geth's ToTransaction() leaves V/R/S nil (RLP 0x80
+                            // each = 3 bytes total). With chain_id set reth would
+                            // encode v as a multi-byte integer (e.g. chain_id=5000
+                            // → v=10035 → 3 RLP bytes), adding 2 extra bytes to
+                            // the encoded tx, which changes FastLZ size and thus
+                            // the L1 data fee.
+                            r.chain_id = None;
                             // Leave max_fee_per_gas and max_priority_fee_per_gas as None so
                             // build_typed_tx produces Legacy
                         } else {
@@ -470,10 +479,14 @@ mod tests {
 
     #[test]
     fn should_use_l1_legacy_path_only_without_base_fee_and_eip1559_fields() {
-        assert!(should_use_l1_legacy_path(false, None, None));
-        assert!(!should_use_l1_legacy_path(true, None, None));
-        assert!(!should_use_l1_legacy_path(false, Some(1), None));
-        assert!(!should_use_l1_legacy_path(false, None, Some(1)));
+        // no base_fee, no gas_price, no EIP-1559 fields → Legacy
+        assert!(should_use_l1_legacy_path(false, None, None, None));
+        // has base_fee, no gas_price → NOT Legacy (EIP-1559 default)
+        assert!(!should_use_l1_legacy_path(true, None, None, None));
+        // max_fee_per_gas set → NOT Legacy
+        assert!(!should_use_l1_legacy_path(false, None, Some(1), None));
+        // max_priority_fee_per_gas set → NOT Legacy
+        assert!(!should_use_l1_legacy_path(false, None, None, Some(1)));
     }
 
     #[test]
@@ -494,6 +507,91 @@ mod tests {
 
         let encoded = build_l1_fee_encoded_tx(request).expect("contract creation should encode");
         assert!(!encoded.is_empty(), "encoded tx should not be empty");
+    }
+
+    /// Regression test: Legacy tx for L1 fee must NOT include `chain_id` in the
+    /// signature v value.  When `chain_id` is present, alloy encodes
+    /// v = `chain_id`*2 + 35 (EIP-155) which adds extra bytes compared to geth
+    /// (geth leaves V/R/S nil → 0x80 each).  Clearing `chain_id` produces
+    /// v = 27 (pre-EIP-155, 1 byte in RLP), matching geth's byte length.
+    #[test]
+    fn legacy_l1_fee_encoded_tx_has_no_chain_id_in_signature() {
+        // Simulate what estimate_total_fee does in the Legacy path:
+        // 1. Start with a request that has chain_id (injected earlier in the flow)
+        // 2. Set gas_price (Legacy) and clear chain_id
+        let mut request: OpTransactionRequest = TransactionRequest {
+            chain_id: Some(5000), // injected by estimate_total_fee
+            from: Some(alloy_primitives::address!("f39fd6e51aad88f6f4ce6ab8827279cfffb92266")),
+            gas: Some(GETH_MANTLE_RPC_GAS_CAP),
+            nonce: Some(0),
+            gas_price: Some(1_000_000_000), // Legacy: gasPrice only
+            to: Some(TxKind::Call(alloy_primitives::Address::ZERO)),
+            input: TransactionInput::from(alloy_primitives::bytes!(
+                "000102030405060708090a0b0c0d0e0f"
+            )),
+            ..Default::default()
+        }
+        .into();
+
+        // Clear chain_id as the fix does
+        request.as_mut().chain_id = None;
+
+        let encoded_no_chain =
+            build_l1_fee_encoded_tx(request).expect("legacy tx should encode without chain_id");
+
+        // Now build the same request WITH chain_id to show the difference
+        let request_with_chain: OpTransactionRequest = TransactionRequest {
+            chain_id: Some(5000),
+            from: Some(alloy_primitives::address!("f39fd6e51aad88f6f4ce6ab8827279cfffb92266")),
+            gas: Some(GETH_MANTLE_RPC_GAS_CAP),
+            nonce: Some(0),
+            gas_price: Some(1_000_000_000),
+            to: Some(TxKind::Call(alloy_primitives::Address::ZERO)),
+            input: TransactionInput::from(alloy_primitives::bytes!(
+                "000102030405060708090a0b0c0d0e0f"
+            )),
+            ..Default::default()
+        }
+        .into();
+
+        let encoded_with_chain = build_l1_fee_encoded_tx(request_with_chain)
+            .expect("legacy tx should encode with chain_id");
+
+        // The encoding WITHOUT chain_id must be shorter (v=27 is 1 byte vs
+        // v=chain_id*2+35=10035 which is 3 bytes in RLP, plus the RLP list
+        // header may also grow).
+        assert!(
+            encoded_no_chain.len() < encoded_with_chain.len(),
+            "Legacy tx without chain_id ({} bytes) should be shorter than with chain_id ({} bytes) \
+             due to EIP-155 v encoding overhead",
+            encoded_no_chain.len(),
+            encoded_with_chain.len(),
+        );
+
+        // Verify v byte: without chain_id, the v value should be 27 (0x1b),
+        // which is the pre-EIP-155 recovery id.  The v byte sits just after
+        // the last data field in the RLP list.
+        // For Legacy RLP: [nonce, gasPrice, gasLimit, to, value, data, v, r, s]
+        // v=27 encodes as single byte 0x1b.
+        assert!(
+            encoded_no_chain.windows(1).any(|w| w == [0x1b]),
+            "encoded legacy tx without chain_id should contain v=27 (0x1b)"
+        );
+        // With chain_id=5000, v=10035=0x2733.
+        assert!(
+            encoded_with_chain.windows(2).any(|w| w == [0x27, 0x33]),
+            "encoded legacy tx with chain_id should contain v=10035 (0x2733)"
+        );
+    }
+
+    /// Verify the Legacy path properly matches geth's `should_use_l1_legacy_path`
+    /// when gasPrice is explicitly set alongside a chain that has baseFee.
+    #[test]
+    fn should_use_l1_legacy_path_with_explicit_gas_price_and_base_fee() {
+        // gasPrice set, no EIP-1559 fields, chain has baseFee → Legacy
+        assert!(should_use_l1_legacy_path(true, Some(1_000_000_000), None, None));
+        // gasPrice set, maxFeePerGas also set → NOT Legacy (EIP-1559 takes precedence)
+        assert!(!should_use_l1_legacy_path(true, Some(1_000_000_000), Some(2_000_000_000), None));
     }
 
     #[test]

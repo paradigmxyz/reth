@@ -1,4 +1,4 @@
-use alloc::vec;
+use alloc::{borrow::ToOwned, vec};
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::U256;

@@ -77,8 +77,7 @@ impl EngineApiMetrics {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx");
+                let span = debug_span!(target: "engine::tree", "execute tx");
                 let _enter = span.enter();
                 trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;
