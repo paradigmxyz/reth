@@ -40,7 +40,6 @@ dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 once_cell.workspace = true
 quanta = { workspace = true, optional = true }
-serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 
 # required by reth-codecs
@@ -81,7 +80,6 @@ std = [
     "alloy-primitives/std",
     "revm-primitives/std",
     "serde?/std",
-    "serde_with?/std",
     "alloy-rlp/std",
     "bytes/std",
     "derive_more/std",
