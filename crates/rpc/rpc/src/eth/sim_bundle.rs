@@ -42,6 +42,29 @@ const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
 /// Maximum payout cost
 const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 
+fn rebuild_sim_bundle_logs<I>(
+    bundle_body: &[BundleItem],
+    tx_logs: &mut I,
+) -> Result<Vec<SimBundleLogs>, EthApiError>
+where
+    I: Iterator<Item = Vec<alloy_rpc_types_eth::Log>>,
+{
+    bundle_body
+        .iter()
+        .map(|item| match item {
+            BundleItem::Tx { .. } => tx_logs
+                .next()
+                .map(|tx_logs| SimBundleLogs { tx_logs: Some(tx_logs), bundle_logs: None })
+                .ok_or(EthApiError::InternalEthError),
+            BundleItem::Bundle { bundle } => Ok(SimBundleLogs {
+                tx_logs: None,
+                bundle_logs: Some(rebuild_sim_bundle_logs(&bundle.bundle_body, tx_logs)?),
+            }),
+            BundleItem::Hash { .. } => Err(EthApiError::InternalEthError),
+        })
+        .collect()
+}
+
 /// A flattened representation of a bundle item containing transaction and associated metadata.
 #[derive(Clone, Debug)]
 pub struct FlattenedBundleItem<T> {
@@ -258,7 +281,7 @@ where
                 let mut total_gas_used = 0;
                 let mut total_profit = U256::ZERO;
                 let mut refundable_value = U256::ZERO;
-                let mut body_logs: Vec<SimBundleLogs> = Vec::new();
+                let mut tx_logs = Vec::new();
 
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
                 let mut log_index = 0;
@@ -308,11 +331,10 @@ where
                     // Update coinbase balance before next tx
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
-                    // Collect logs if requested
-                    // TODO: since we are looping over iteratively, we are not collecting bundle
-                    // logs. We should collect bundle logs when we are processing the bundle items.
+                    // Collect tx logs in execution order and fold them back into the original
+                    // nested bundle structure after execution completes.
                     if logs {
-                        let tx_logs = result
+                        let tx_logs_for_item = result
                             .into_logs()
                             .into_iter()
                             .map(|inner| {
@@ -330,9 +352,7 @@ where
                                 full_log
                             })
                             .collect();
-                        let sim_bundle_logs =
-                            SimBundleLogs { tx_logs: Some(tx_logs), bundle_logs: None };
-                        body_logs.push(sim_bundle_logs);
+                        tx_logs.push(tx_logs_for_item);
                     }
 
                     // Apply state changes
@@ -391,6 +411,18 @@ where
                     total_profit / U256::from(total_gas_used)
                 } else {
                     U256::ZERO
+                };
+
+                let body_logs = if logs {
+                    let mut tx_logs = tx_logs.into_iter();
+                    let body_logs = rebuild_sim_bundle_logs(&request.bundle_body, &mut tx_logs)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    if tx_logs.next().is_some() {
+                        return Err(EthApiError::InternalEthError.into());
+                    }
+                    body_logs
+                } else {
+                    Vec::new()
                 };
 
                 Ok(SimBundleResponse {
@@ -494,4 +526,82 @@ pub enum EthSimBundleError {
     /// Thrown when a bundle simulation returns negative profit
     #[error("bundle simulation returned negative profit")]
     NegativeProfit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use alloy_rpc_types_eth::Log;
+    use alloy_rpc_types_mev::ProtocolVersion;
+
+    fn tx_item() -> BundleItem {
+        BundleItem::Tx { tx: Bytes::default(), can_revert: false }
+    }
+
+    fn nested_bundle(bundle_body: Vec<BundleItem>) -> BundleItem {
+        BundleItem::Bundle {
+            bundle: MevSendBundle::new(1, None, ProtocolVersion::V0_1, bundle_body),
+        }
+    }
+
+    fn test_log(log_index: u64) -> Log {
+        Log { log_index: Some(log_index), ..Default::default() }
+    }
+
+    #[test]
+    fn rebuilds_nested_bundle_logs() {
+        let bundle = MevSendBundle::new(
+            1,
+            None,
+            ProtocolVersion::V0_1,
+            vec![
+                tx_item(),
+                nested_bundle(vec![tx_item(), nested_bundle(vec![tx_item()])]),
+                tx_item(),
+            ],
+        );
+        let mut tx_logs =
+            vec![vec![test_log(0)], vec![], vec![test_log(1), test_log(2)], vec![test_log(3)]]
+                .into_iter();
+
+        let logs = rebuild_sim_bundle_logs(&bundle.bundle_body, &mut tx_logs).unwrap();
+
+        assert_eq!(
+            logs,
+            vec![
+                SimBundleLogs { tx_logs: Some(vec![test_log(0)]), bundle_logs: None },
+                SimBundleLogs {
+                    tx_logs: None,
+                    bundle_logs: Some(vec![
+                        SimBundleLogs { tx_logs: Some(vec![]), bundle_logs: None },
+                        SimBundleLogs {
+                            tx_logs: None,
+                            bundle_logs: Some(vec![SimBundleLogs {
+                                tx_logs: Some(vec![test_log(1), test_log(2)]),
+                                bundle_logs: None,
+                            }]),
+                        },
+                    ]),
+                },
+                SimBundleLogs { tx_logs: Some(vec![test_log(3)]), bundle_logs: None },
+            ]
+        );
+        assert!(tx_logs.next().is_none());
+    }
+
+    #[test]
+    fn rebuild_bundle_logs_errors_on_missing_tx_logs() {
+        let bundle = MevSendBundle::new(
+            1,
+            None,
+            ProtocolVersion::V0_1,
+            vec![tx_item(), nested_bundle(vec![tx_item()])],
+        );
+        let mut tx_logs = vec![vec![test_log(0)]].into_iter();
+
+        let err = rebuild_sim_bundle_logs(&bundle.bundle_body, &mut tx_logs).unwrap_err();
+
+        assert!(matches!(err, EthApiError::InternalEthError));
+    }
 }
