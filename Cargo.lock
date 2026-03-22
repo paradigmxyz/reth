@@ -8749,6 +8749,7 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
+ "alloy-rlp",
  "arbitrary",
  "bincode",
  "derive_more",

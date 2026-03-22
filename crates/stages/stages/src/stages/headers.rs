@@ -55,7 +55,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     sync_gap: Option<HeaderSyncGap<Downloader::Header>>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
-    /// ETL collector with `BlockNumber` -> `BincodeSealedHeader`
+    /// ETL collector with `BlockNumber` -> `RLP-encoded SealedHeader`
     header_collector: Collector<BlockNumber, Bytes>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,

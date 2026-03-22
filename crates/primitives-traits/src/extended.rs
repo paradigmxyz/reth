@@ -355,41 +355,6 @@ mod op {
     }
 }
 
-#[cfg(feature = "serde-bincode-compat")]
-mod serde_bincode_compat {
-    use super::*;
-    use crate::serde_bincode_compat::SerdeBincodeCompat;
-
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[derive(Debug)]
-    pub enum ExtendedRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
-        BuiltIn(B::BincodeRepr<'a>),
-        Other(T::BincodeRepr<'a>),
-    }
-
-    impl<B, T> SerdeBincodeCompat for Extended<B, T>
-    where
-        B: SerdeBincodeCompat + core::fmt::Debug,
-        T: SerdeBincodeCompat + core::fmt::Debug,
-    {
-        type BincodeRepr<'a> = ExtendedRepr<'a, B, T>;
-
-        fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            match self {
-                Self::BuiltIn(tx) => ExtendedRepr::BuiltIn(tx.as_repr()),
-                Self::Other(tx) => ExtendedRepr::Other(tx.as_repr()),
-            }
-        }
-
-        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            match repr {
-                ExtendedRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
-                ExtendedRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
-            }
-        }
-    }
-}
-
 #[cfg(feature = "reth-codec")]
 use alloy_primitives::bytes::Buf;
 

@@ -121,16 +121,7 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
     "dashmap?/arbitrary",
 ]
-serde-bincode-compat = [
-    "serde",
-    "serde_with",
-    "alloy-consensus/serde-bincode-compat",
-    "alloy-eips/serde-bincode-compat",
-    "op-alloy-consensus?/serde",
-    "op-alloy-consensus?/serde-bincode-compat",
-    "alloy-genesis/serde-bincode-compat",
-    "alloy-rpc-types-eth?/serde-bincode-compat",
-]
+serde-bincode-compat = []
 serde = [
     "dep:serde",
     "alloy-consensus/serde",

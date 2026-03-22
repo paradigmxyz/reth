@@ -96,8 +96,8 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     ///
-    /// This enum mirrors [`super::ExExNotification`] but uses borrowed [`Chain`] types
-    /// instead of `Arc<Chain>` for bincode compatibility.
+    /// This enum mirrors [`super::ExExNotification`] but uses [`Chain`] wrapper types
+    /// instead of `Arc<Chain>` for serialization compatibility.
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(bound = "")]
     #[expect(clippy::large_enum_variant)]
@@ -195,8 +195,6 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, ExExNotification};
-        use arbitrary::Arbitrary;
-        use rand::Rng;
         use reth_execution_types::Chain;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
@@ -214,19 +212,15 @@ pub(super) mod serde_bincode_compat {
                 notification: ExExNotification,
             }
 
-            let mut bytes = [0u8; 1024];
-            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 notification: ExExNotification::ChainReorged {
                     old: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![RecoveredBlock::default()],
                         Default::default(),
                         BTreeMap::new(),
                     )),
                     new: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![RecoveredBlock::default()],
                         Default::default(),
                         BTreeMap::new(),
                     )),
