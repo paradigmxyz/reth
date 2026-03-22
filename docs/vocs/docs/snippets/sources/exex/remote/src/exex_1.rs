@@ -24,7 +24,7 @@ impl RemoteExEx for ExExService {
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
+    reth::cli::Cli::parse_args().run(async move |builder, _| {
         let server = Server::builder()
             .add_service(RemoteExExServer::new(ExExService {}))
             .serve("[::1]:10000".parse().unwrap());

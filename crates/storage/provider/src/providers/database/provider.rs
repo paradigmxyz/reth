@@ -205,7 +205,6 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Path to the database directory.
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
-    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
     /// Commit order for database operations.
     commit_order: CommitOrder,
@@ -238,6 +237,12 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+
+    /// Sets the minimum pruning distance.
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.minimum_pruning_distance = distance;
+        self
     }
 }
 
@@ -323,12 +328,10 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
         self.rocksdb_provider.clone()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
         self.pending_rocksdb_batches.lock().push(batch);
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
         for batch in batches {
@@ -455,16 +458,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     where
         F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
     {
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = self.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
 
         let (result, raw_batch) = f(rocksdb_batch)?;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if let Some(batch) = raw_batch {
             self.set_pending_rocksdb_batch(batch);
         }
@@ -503,7 +501,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
-    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
@@ -557,20 +554,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             nums
         };
 
-        let mut timings = metrics::SaveBlocksTimings { block_count, ..Default::default() };
+        let mut timings =
+            metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
         let mut sf_result = None;
-        #[cfg(all(unix, feature = "rocksdb"))]
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
@@ -591,7 +585,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // RocksDB writes
-            #[cfg(all(unix, feature = "rocksdb"))]
             if rocksdb_enabled {
                 s.spawn(|_| {
                     let _guard = span.enter();
@@ -713,7 +706,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Collect results from spawned tasks
         timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if rocksdb_enabled {
             timings.rocksdb = rocksdb_result.ok_or_else(|| {
                 ProviderError::Database(reth_db_api::DatabaseError::Other(
@@ -1940,8 +1932,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.with_rocksdb_tx(|tx_ref| {
-            let mut reader = EitherReader::new_transaction_hash_numbers(self, tx_ref)?;
+        self.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_transaction_hash_numbers(self, rocksdb_ref)?;
             reader.get_transaction_hash_number(tx_hash)
         })
     }
@@ -3271,11 +3263,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
         if self.cached_storage_settings().storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
-                self.pending_rocksdb_batches.lock().push(batch);
-            }
+            let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
+            self.pending_rocksdb_batches.lock().push(batch);
         } else {
             // Unwind the account history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
@@ -3331,12 +3320,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batch =
-                    self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
-                self.pending_rocksdb_batches.lock().push(batch);
-            }
+            let batch =
+                self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
+            self.pending_rocksdb_batches.lock().push(batch);
         } else {
             // Unwind the storage history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
@@ -3693,7 +3679,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
         if storage_settings.storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
                     batch.append_account_history_shard(address, blocks)?;
@@ -3704,7 +3689,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             self.insert_account_history_index(account_transitions)?;
         }
         if storage_settings.storage_v2 {
-            #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
                     batch.append_storage_history_shard(address, key, blocks)?;
@@ -3841,12 +3825,9 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
             self.tx.commit()?;
 
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-                for batch in batches {
-                    self.rocksdb_provider.commit_batch(batch)?;
-                }
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
             }
 
             self.static_file_provider.commit()?;
@@ -3858,15 +3839,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.static_file_provider.finalize()?;
             timings.sf = start.elapsed();
 
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let start = Instant::now();
-                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-                for batch in batches {
-                    self.rocksdb_provider.commit_batch(batch)?;
-                }
-                timings.rocksdb = start.elapsed();
+            let start = Instant::now();
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
             }
+            timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
@@ -4940,7 +4918,7 @@ mod tests {
     }
 
     fn run_save_blocks_and_verify(mode: StorageMode) {
-        use alloy_primitives::map::HashMap;
+        use alloy_primitives::map::{FbBuildHasher, HashMap};
 
         let factory = create_test_provider_factory();
 
@@ -4992,7 +4970,8 @@ mod tests {
                     ..Default::default()
                 };
 
-                let storage: HashMap<U256, (U256, U256)> = (1..=slots_per_account as u64)
+                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
+                    slots_per_account as u64)
                     .map(|s| {
                         (
                             U256::from(s + acct_idx as u64 * 100),
@@ -5134,28 +5113,24 @@ mod tests {
                 }
             }
 
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                let rocksdb = factory.rocksdb_provider();
-                for block_num in 1..=num_blocks {
-                    for acct_idx in 0..accounts_per_block {
-                        let address =
-                            Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
-                        let shards = rocksdb.account_history_shards(address).unwrap();
+            let rocksdb = factory.rocksdb_provider();
+            for block_num in 1..=num_blocks {
+                for acct_idx in 0..accounts_per_block {
+                    let address = Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
+                    let shards = rocksdb.account_history_shards(address).unwrap();
+                    assert!(
+                        !shards.is_empty(),
+                        "v2: RocksDB AccountsHistory missing for block {block_num} acct {acct_idx}"
+                    );
+
+                    for s in 1..=slots_per_account as u64 {
+                        let slot = U256::from(s + acct_idx as u64 * 100);
+                        let slot_key = B256::from(slot);
+                        let shards = rocksdb.storage_history_shards(address, slot_key).unwrap();
                         assert!(
                             !shards.is_empty(),
-                            "v2: RocksDB AccountsHistory missing for block {block_num} acct {acct_idx}"
+                            "v2: RocksDB StoragesHistory missing for block {block_num} acct {acct_idx} slot {s}"
                         );
-
-                        for s in 1..=slots_per_account as u64 {
-                            let slot = U256::from(s + acct_idx as u64 * 100);
-                            let slot_key = B256::from(slot);
-                            let shards = rocksdb.storage_history_shards(address, slot_key).unwrap();
-                            assert!(
-                                !shards.is_empty(),
-                                "v2: RocksDB StoragesHistory missing for block {block_num} acct {acct_idx} slot {s}"
-                            );
-                        }
                     }
                 }
             }
@@ -5366,7 +5341,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn test_unwind_storage_history_indices_v2() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());

@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_rlp::Decodable;
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
@@ -14,9 +15,7 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
-use reth_primitives_traits::{
-    serde_bincode_compat, FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader,
-};
+use reth_primitives_traits::{FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider,
     StaticFileProviderFactory,
@@ -127,10 +126,10 @@ where
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
-            let sealed_header: SealedHeader<Downloader::Header> =
-                bincode::deserialize::<serde_bincode_compat::SealedHeader<'_, _>>(&header_buf)
-                    .map_err(|err| StageError::Fatal(Box::new(err)))?
-                    .into();
+            let sealed_header: SealedHeader<Downloader::Header> = SealedHeader::new_unhashed(
+                Decodable::decode(&mut header_buf.as_slice())
+                    .map_err(|err| StageError::Fatal(Box::new(err)))?,
+            );
 
             let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
@@ -246,15 +245,8 @@ where
                         let header_number = header.number();
 
                         self.hash_collector.insert(header.hash(), header_number)?;
-                        self.header_collector.insert(
-                            header_number,
-                            Bytes::from(
-                                bincode::serialize(&serde_bincode_compat::SealedHeader::from(
-                                    &header,
-                                ))
-                                .map_err(|err| StageError::Fatal(Box::new(err)))?,
-                            ),
-                        )?;
+                        self.header_collector
+                            .insert(header_number, Bytes::from(alloy_rlp::encode(&*header)))?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.

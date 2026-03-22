@@ -18,9 +18,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
-    mem::size_of,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -56,8 +54,17 @@ const fn fixed_cache_key_size_with_value<K>(value: usize) -> usize {
     raw_size.div_ceil(FIXED_CACHE_ALIGNMENT) * FIXED_CACHE_ALIGNMENT
 }
 
-/// Size in bytes of a single code cache entry.
-const CODE_CACHE_ENTRY_SIZE: usize = fixed_cache_key_size_with_value::<Address>(MAX_CODE_SIZE);
+/// Estimated average bytecode size for cache budget calculation.
+///
+/// The fixed-cache stores `Option<Bytecode>` inline (pointer-sized), but each cached contract
+/// also holds bytecode on the heap. For budget estimation we use 8 KiB, which is close to the
+/// observed mainnet average (~7 KiB). Using `MAX_CODE_SIZE` (48 KiB) overestimates by ~7x,
+/// yielding only 4096 entries for a 228 MB code-cache budget when 16384 fit comfortably.
+const ESTIMATED_AVG_CODE_SIZE: usize = 8 * 1024;
+
+/// Size in bytes of a single code cache entry (inline metadata + estimated heap).
+const CODE_CACHE_ENTRY_SIZE: usize =
+    fixed_cache_key_size_with_value::<Address>(ESTIMATED_AVG_CODE_SIZE);
 
 /// Size in bytes of a single storage cache entry.
 const STORAGE_CACHE_ENTRY_SIZE: usize =
@@ -94,6 +101,10 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// Optional cache statistics for detailed block logging. Only tracked when slow block
+    /// threshold is configured.
+    cache_stats: Option<Arc<CacheStats>>,
 }
 
 impl<S> CachedStateProvider<S> {
@@ -104,7 +115,7 @@ impl<S> CachedStateProvider<S> {
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self { state_provider, caches, metrics, cache_stats: None }
     }
 }
 
@@ -115,14 +126,28 @@ impl<S> CachedStateProvider<S, true> {
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self { state_provider, caches, metrics, cache_stats: None }
     }
 }
 
-/// Metrics for the cached state provider, showing hits / misses / size for each cache.
-///
-/// This struct combines both the provider-level metrics (hits/misses tracked by the provider)
-/// and the fixed-cache internal stats (collisions, size, capacity).
+impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
+    /// Enables cache statistics tracking for detailed block logging.
+    pub fn with_cache_stats(mut self, stats: Option<Arc<CacheStats>>) -> Self {
+        self.cache_stats = stats;
+        self
+    }
+}
+
+/// Represents the status of a key in the cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CachedStatus<T> {
+    /// The key is not in the cache (or was invalidated). The value was recalculated.
+    NotCached(T),
+    /// The key exists in cache and has a specific value.
+    Cached(T),
+}
+
+/// Metrics for the cached state provider, showing hits / misses for each cache
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub struct CachedStateMetrics {
@@ -208,6 +233,73 @@ impl CachedStateMetrics {
     pub(crate) fn record_cache_creation(&self, duration: Duration) {
         self.execution_cache_created_total.increment(1);
         self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
+    }
+}
+
+/// Cache hit/miss statistics for detailed block logging.
+#[derive(Debug, Default)]
+pub struct CacheStats {
+    /// Account cache hits
+    account_hits: AtomicUsize,
+    /// Account cache misses
+    account_misses: AtomicUsize,
+    /// Storage cache hits
+    storage_hits: AtomicUsize,
+    /// Storage cache misses
+    storage_misses: AtomicUsize,
+    /// Code cache hits
+    code_hits: AtomicUsize,
+    /// Code cache misses
+    code_misses: AtomicUsize,
+}
+
+impl CacheStats {
+    pub(crate) fn record_account_hit(&self) {
+        self.account_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_account_miss(&self) {
+        self.account_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn account_hits(&self) -> usize {
+        self.account_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn account_misses(&self) -> usize {
+        self.account_misses.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_storage_hit(&self) {
+        self.storage_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_storage_miss(&self) {
+        self.storage_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn storage_hits(&self) -> usize {
+        self.storage_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn storage_misses(&self) -> usize {
+        self.storage_misses.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_code_hit(&self) {
+        self.code_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_code_miss(&self) {
+        self.code_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn code_hits(&self) -> usize {
+        self.code_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn code_misses(&self) -> usize {
+        self.code_misses.load(Ordering::Relaxed)
     }
 }
 
@@ -306,25 +398,34 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
-                CachedStatus::NotCached(value) | CachedStatus::Cached(value) => Ok(value),
+                // During prewarm we only record stats (not prometheus metrics)
+                CachedStatus::NotCached(value) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_account_miss();
+                    }
+                    Ok(value)
+                }
+                CachedStatus::Cached(value) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_account_hit();
+                    }
+                    Ok(value)
+                }
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_account_hit();
+            }
             Ok(account)
         } else {
             self.metrics.account_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_account_miss();
+            }
             self.state_provider.basic_account(address)
         }
     }
-}
-
-/// Represents the status of a key in the cache.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CachedStatus<T> {
-    /// The key is not in the cache (or was invalidated). The value was recalculated.
-    NotCached(T),
-    /// The key exists in cache and has a specific value.
-    Cached(T),
 }
 
 impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
@@ -337,17 +438,31 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
-                CachedStatus::NotCached(value) | CachedStatus::Cached(value) => {
-                    // The slot that was never written to is indistinguishable from a slot
-                    // explicitly set to zero. We return `None` in both cases.
+                // During prewarm we only record stats (not prometheus metrics)
+                CachedStatus::NotCached(value) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_storage_miss();
+                    }
+                    Ok(Some(value).filter(|v| !v.is_zero()))
+                }
+                CachedStatus::Cached(value) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_storage_hit();
+                    }
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
             self.metrics.storage_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_storage_hit();
+            }
             Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
             self.metrics.storage_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_storage_miss();
+            }
             self.state_provider.storage(account, storage_key)
         }
     }
@@ -359,13 +474,31 @@ impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvi
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
-                CachedStatus::NotCached(code) | CachedStatus::Cached(code) => Ok(code),
+                // During prewarm we only record stats (not prometheus metrics)
+                CachedStatus::NotCached(code) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_code_miss();
+                    }
+                    Ok(code)
+                }
+                CachedStatus::Cached(code) => {
+                    if let Some(stats) = &self.cache_stats {
+                        stats.record_code_hit();
+                    }
+                    Ok(code)
+                }
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_code_hit();
+            }
             Ok(code)
         } else {
             self.metrics.code_cache_misses.increment(1);
+            if let Some(stats) = &self.cache_stats {
+                stats.record_code_miss();
+            }
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }
@@ -707,7 +840,8 @@ impl ExecutionCache {
                 }
 
                 self.0.account_cache.remove(addr);
-                continue
+                self.0.account_stats.decrement_size();
+                continue;
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -837,8 +971,10 @@ impl SavedCache {
         self.caches.update_metrics(&self.metrics);
     }
 
-    /// Clears all caches, resetting them to empty state.
-    pub(crate) fn clear(&self) {
+    /// Clears all caches, resetting them to empty state,
+    /// and updates the hash of the block this cache belongs to.
+    pub(crate) fn clear_with_hash(&mut self, hash: B256) {
+        self.hash = hash;
         self.caches.clear();
     }
 }
@@ -1084,5 +1220,21 @@ mod tests {
         // Verify only addr1 was removed
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
+    }
+
+    #[test]
+    fn test_code_cache_capacity_with_default_budget() {
+        // Default cross-block cache is 4 GB; code gets 5.56% = ~228 MB.
+        let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
+        let code_budget = (total_cache_size * 556) / 10000; // 228 MB
+
+        let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
+
+        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
+        // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.
+        assert_eq!(
+            capacity, 16384,
+            "code cache should have 16384 entries with default 4 GB budget"
+        );
     }
 }

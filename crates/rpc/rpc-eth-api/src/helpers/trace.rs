@@ -265,16 +265,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         async move {
-            let block = async {
-                if block.is_some() {
-                    return Ok(block)
-                }
-                self.recovered_block(block_id).await
-            };
-
-            let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;
+            let block =
+                if block.is_some() { block } else { self.recovered_block(block_id).await? };
 
             let Some(block) = block else { return Ok(None) };
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             if block.body().transactions().is_empty() {
                 // nothing to trace

@@ -75,7 +75,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)
                 .await?
@@ -92,7 +92,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)
                     .await?
@@ -123,7 +123,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 )));
             }
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id_or_latest(block_id).await?;
 
                 let mut result = HashMap::with_capacity(requests.len());
@@ -168,7 +168,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
@@ -192,7 +192,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         async move {
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(block_id).await?;
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
@@ -219,7 +219,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(block_id).await?;
             let account = state
                 .basic_account(&address)
@@ -393,7 +393,7 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .state_at_block_id_or_latest(block_id)
@@ -439,7 +439,7 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)
                 .await?

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::CompactU256,
+    models::{BlockNumberAddress, CompactU256},
     table::Decompress,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -12,12 +12,13 @@ use reth_etl::Collector;
 use reth_primitives_traits::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
-    EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
-    StorageHashingCheckpoint, UnwindInput, UnwindOutput,
+    BlockRangeOutput, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
+    StageError, StageId, StorageHashingCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     sync::mpsc::{self, Receiver},
 };
@@ -42,6 +43,9 @@ pub struct StorageHashingStage {
     pub clean_threshold: u64,
     /// The maximum number of slots to process before committing during unwind.
     pub commit_threshold: u64,
+    /// The maximum number of changeset entries to process before committing. The stage commits
+    /// after either `commit_threshold` blocks or `commit_entries` entries, whichever comes first.
+    pub commit_entries: u64,
     /// ETL configuration
     pub etl_config: EtlConfig,
 }
@@ -52,6 +56,7 @@ impl StorageHashingStage {
         Self {
             clean_threshold: config.clean_threshold,
             commit_threshold: config.commit_threshold,
+            commit_entries: config.commit_entries,
             etl_config,
         }
     }
@@ -62,6 +67,7 @@ impl Default for StorageHashingStage {
         Self {
             clean_threshold: 500_000,
             commit_threshold: 100_000,
+            commit_entries: 30_000_000,
             etl_config: EtlConfig::default(),
         }
     }
@@ -93,14 +99,18 @@ where
             return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 
-        let (from_block, to_block) = input.next_block_range().into_inner();
+        // Use the total remaining range to decide clean vs incremental.
+        let total_range = input.target() - input.checkpoint().block_number;
+        let from_block = input.next_block();
 
-        // if there are more blocks then threshold it is faster to go over Plain state and hash all
-        // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
-        // genesis accounts are not in changeset, along with their storages.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
-            // clear table, load all accounts and hash it
+        if total_range > self.clean_threshold || from_block == 1 {
+            // if there are more blocks than threshold it is faster to go over Plain state and
+            // hash all storage otherwise take changesets aggregate the sets and apply
+            // hashing to HashedStorages table. Also, if we start from genesis, we need to
+            // hash from scratch, as genesis accounts are not in changeset, along with their
+            // storages.
+
+            // clear table, load all entries and hash them
             tx.clear::<tables::HashedStorages>()?;
 
             let mut storage_cursor = tx.cursor_read::<tables::PlainStorageState>()?;
@@ -158,26 +168,58 @@ where
                     },
                 )?;
             }
+
+            let checkpoint = StageCheckpoint::new(input.target())
+                .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
+                    progress: stage_checkpoint_progress(provider)?,
+                    ..Default::default()
+                });
+
+            Ok(ExecOutput { checkpoint, done: true })
         } else {
-            // Aggregate all changesets and make list of storages that have been
-            // changed.
-            let lists = provider.changed_storages_with_range(from_block..=to_block)?;
-            // iterate over plain state and get newest storage value.
-            // Assumption we are okay with is that plain state represent
-            // `previous_stage_progress` state.
-            let storages = provider.plain_state_storages(lists)?;
+            // Stream changesets entry-by-entry, bounded by both block count
+            // (commit_threshold) and entry count (commit_entries), whichever comes first.
+            let BlockRangeOutput { block_range, is_final_range } =
+                input.next_block_range_with_threshold(self.commit_threshold);
+            let (from_block, to_block) = block_range.into_inner();
+
+            let mut changeset_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+            let mut changed: BTreeMap<Address, BTreeSet<B256>> = BTreeMap::new();
+            let mut total_entries = 0u64;
+            let mut last_block = from_block;
+
+            for entry in
+                changeset_cursor.walk_range(BlockNumberAddress::range(from_block..=to_block))?
+            {
+                let (BlockNumberAddress((block_number, address)), storage_entry) = entry?;
+
+                // Check the entry limit only at block boundaries so we never
+                // checkpoint mid-block (which would skip the remaining entries
+                // for that block on the next invocation).
+                if block_number != last_block && total_entries >= self.commit_entries {
+                    break;
+                }
+
+                last_block = block_number;
+                changed.entry(address).or_default().insert(storage_entry.key);
+                total_entries += 1;
+            }
+
+            let storages = provider.plain_state_storages(changed)?;
             provider.insert_storage_for_hashing(storages)?;
+
+            let exhausted = total_entries < self.commit_entries;
+            let done = exhausted && is_final_range;
+            let progress_block = if exhausted { to_block } else { last_block };
+
+            let checkpoint = StageCheckpoint::new(progress_block)
+                .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
+                    progress: stage_checkpoint_progress(provider)?,
+                    ..Default::default()
+                });
+
+            Ok(ExecOutput { checkpoint, done })
         }
-
-        // We finished the hashing stage, no future iterations is expected for the same block range,
-        // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.target())
-            .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
-                progress: stage_checkpoint_progress(provider)?,
-                ..Default::default()
-            });
-
-        Ok(ExecOutput { checkpoint, done: true })
     }
 
     /// Unwind the stage.
@@ -323,6 +365,7 @@ mod tests {
         db: TestStageDB,
         commit_threshold: u64,
         clean_threshold: u64,
+        commit_entries: u64,
         etl_config: EtlConfig,
     }
 
@@ -332,6 +375,7 @@ mod tests {
                 db: TestStageDB::default(),
                 commit_threshold: 1000,
                 clean_threshold: 1000,
+                commit_entries: u64::MAX,
                 etl_config: EtlConfig::default(),
             }
         }
@@ -348,6 +392,7 @@ mod tests {
             Self::S {
                 commit_threshold: self.commit_threshold,
                 clean_threshold: self.clean_threshold,
+                commit_entries: self.commit_entries,
                 etl_config: self.etl_config.clone(),
             }
         }

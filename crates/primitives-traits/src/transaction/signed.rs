@@ -1,6 +1,6 @@
 //! API of a signed transaction.
 
-use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use alloc::fmt;
 use alloy_consensus::{
     transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
@@ -14,8 +14,8 @@ use core::hash::Hash;
 pub use alloy_consensus::crypto::RecoveryError;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
-impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
+pub trait FullSignedTx: SignedTransaction + MaybeCompact {}
+impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact {}
 
 /// A signed transaction.
 ///
@@ -154,5 +154,9 @@ mod op {
 
     impl SignedTransaction for OpPooledTransaction {}
 
-    impl SignedTransaction for OpTxEnvelope {}
+    impl SignedTransaction for OpTxEnvelope {
+        fn is_system_tx(&self) -> bool {
+            self.is_system_transaction()
+        }
+    }
 }

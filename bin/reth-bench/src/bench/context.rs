@@ -7,7 +7,7 @@ use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
-use alloy_transport::layers::RetryBackoffLayer;
+use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
@@ -33,6 +33,10 @@ pub(crate) struct BenchContext {
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
     pub(crate) rlp_blocks: bool,
+    /// Whether to skip waiting for persistence (pass `wait_for_persistence: false`).
+    pub(crate) no_wait_for_persistence: bool,
+    /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
+    pub(crate) no_wait_for_caches: bool,
 }
 
 impl BenchContext {
@@ -53,9 +57,16 @@ impl BenchContext {
             }
         }
 
-        // set up alloy client for blocks
+        // set up alloy client for blocks, retrying on 429/503 (default) and 502
+        let retry_policy =
+            RateLimitRetryPolicy::default().or(|err: &alloy_transport::TransportError| -> bool {
+                err.as_transport_err()
+                    .and_then(|t| t.as_http_error())
+                    .is_some_and(|e| e.status == 502)
+            });
+        let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
@@ -88,9 +99,11 @@ impl BenchContext {
 
         // Computes the block range for the benchmark.
         //
-        // - If `--advance` is provided, fetches the latest block and sets:
+        // - If `--advance` is provided, fetches the latest block from the engine and sets:
         //     - `from = head + 1`
         //     - `to = head + advance`
+        // - If only `--to` is provided, fetches the latest block from the engine and sets:
+        //     - `from = head`
         // - Otherwise, uses the values from `--from` and `--to`.
         let (from, to) = if let Some(advance) = bench_args.advance {
             if advance == 0 {
@@ -103,6 +116,14 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
             let head_number = head_block.header.number;
             (Some(head_number), Some(head_number + advance))
+        } else if bench_args.from.is_none() && bench_args.to.is_some() {
+            let head_block = auth_provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
+            let head_number = head_block.header.number;
+            info!(target: "reth-bench", "No --from provided, derived from engine head: {}", head_number);
+            (Some(head_number), bench_args.to)
         } else {
             (bench_args.from, bench_args.to)
         };
@@ -114,7 +135,7 @@ impl BenchContext {
             .full()
             .await?
             .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from RPC"))?;
-        let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number())?;
+        let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number());
 
         let first_block = match benchmark_mode {
             BenchMode::Continuous(start) => {
@@ -146,6 +167,8 @@ impl BenchContext {
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
         let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait_for_persistence = bench_args.no_wait_for_persistence;
+        let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
             auth_provider,
             block_provider,
@@ -154,6 +177,8 @@ impl BenchContext {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
         })
     }
 }

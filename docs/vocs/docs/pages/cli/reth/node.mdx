@@ -520,7 +520,7 @@ Gas Price Oracle:
       --gpo.ignoreprice <IGNORE_PRICE>
           Gas Price below which gpo will ignore transactions
 
-          [default: 2]
+          [default: 0]
 
       --gpo.maxprice <MAX_PRICE>
           Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
@@ -914,6 +914,9 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
+      --prune.minimum-distance <BLOCKS>
+          Minimum pruning distance from the tip. This controls the safety margin for reorgs and manual unwinds
+
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
@@ -986,15 +989,24 @@ Engine:
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
 
-      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
-          Sparse trie prune depth
+      --engine.sparse-trie-max-hot-slots <SPARSE_TRIE_MAX_HOT_SLOTS>
+          LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles
 
-          [default: 4]
+          [default: 1500]
 
-      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
-          Maximum number of storage tries to retain after sparse trie pruning
+      --engine.sparse-trie-max-hot-accounts <SPARSE_TRIE_MAX_HOT_ACCOUNTS>
+          LFU hot-account capacity: max account addresses retained across sparse trie prune cycles
 
-          [default: 100]
+          [default: 1000]
+
+      --engine.slow-block-threshold <DURATION>
+          Configure the slow block logging threshold in milliseconds.
+
+          When set, blocks that take longer than this threshold to execute will be logged with detailed metrics including timing, state operations, and cache statistics.
+
+          Set to 0 to log all blocks (useful for debugging/profiling).
+
+          When not set, slow block logging is disabled (default).
 
       --engine.disable-sparse-trie-cache-pruning
           Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
@@ -1043,14 +1055,13 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
+      --storage.v2 <V2>
+          Enable V2 (hot/cold) storage layout for new databases.
 
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
+          When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
 
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
+          [default: true]
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>

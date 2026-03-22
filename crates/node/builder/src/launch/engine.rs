@@ -81,6 +81,7 @@ impl EngineNodeLauncher {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
+            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
@@ -102,7 +103,7 @@ impl EngineNodeLauncher {
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory with changeset cache
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone()).await?
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone(), rocksdb_provider).await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -241,6 +242,7 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            ctx.task_executor().clone(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -256,11 +258,11 @@ impl EngineNodeLauncher {
 
         ctx.task_executor().spawn_critical_task(
             "events task",
-            Box::pin(node::handle_events(
+            node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            )),
+            ),
         );
 
         let RpcHandle {
@@ -292,7 +294,7 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        let consensus_engine = async move {
+        let consensus_engine = move |mut on_graceful_shutdown| async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 // network_handle's sync state is already initialized at Syncing
@@ -370,12 +372,25 @@ impl EngineNodeLauncher {
                             );
                         }
                     }
+                    _guard = &mut on_graceful_shutdown => {
+                        // Shutdown signal received.
+                        // Send Terminate so the engine OS thread can exit cleanly before we
+                        // drop the orchestrator.
+                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
+                        let (done_tx, done_rx) = oneshot::channel();
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                        let _ = done_rx.await;
+                        break;
+                    }
                 }
             }
 
             let _ = exit.send(res);
         };
-        ctx.task_executor().spawn_critical_task("consensus engine", Box::pin(consensus_engine));
+        ctx.task_executor()
+            .spawn_critical_with_graceful_shutdown_signal("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
@@ -402,10 +417,7 @@ impl EngineNodeLauncher {
         ctx.spawn_ethstats(engine_events_for_ethstats).await?;
 
         let handle = NodeHandle {
-            node_exit_future: NodeExitFuture::new(
-                async { rx.await? },
-                full_node.config.debug.terminate,
-            ),
+            node_exit_future: NodeExitFuture::new(async { rx.await? }),
             node: full_node,
         };
 

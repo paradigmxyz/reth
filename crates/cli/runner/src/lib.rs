@@ -71,7 +71,12 @@ impl CliRunner {
     ) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>>,
-        E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
@@ -81,8 +86,8 @@ impl CliRunner {
             run_until_ctrl_c(command(context)),
         ));
 
-        if command_res.is_err() {
-            error!(target: "reth::cli", "shutting down due to error");
+        if let Err(err) = &command_res {
+            error!(target: "reth::cli", %err, "shutting down due to error");
         } else {
             debug!(target: "reth::cli", "shutting down gracefully");
             // after the command has finished or exit signal was received we shutdown the
@@ -105,7 +110,12 @@ impl CliRunner {
     ) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>> + Send + 'static,
-        E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
@@ -122,8 +132,8 @@ impl CliRunner {
             ),
         ));
 
-        if command_res.is_err() {
-            error!(target: "reth::cli", "shutting down due to error");
+        if let Err(err) = &command_res {
+            error!(target: "reth::cli", %err, "shutting down due to error");
         } else {
             debug!(target: "reth::cli", "shutting down gracefully");
             self.runtime.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);

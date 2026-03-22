@@ -1,15 +1,9 @@
 //! Configuration for peering.
 
-use std::{
-    collections::HashSet,
-    io::{self, ErrorKind},
-    path::Path,
-    time::Duration,
-};
+use std::{collections::HashSet, time::Duration};
 
 use reth_net_banlist::{BanList, IpFilter};
 use reth_network_peers::{NodeRecord, TrustedPeer};
-use tracing::info;
 
 use crate::{peers::PersistedPeerInfo, BackoffKind, ReputationChangeWeights};
 
@@ -22,7 +16,7 @@ pub const DEFAULT_MAX_COUNT_PEERS_INBOUND: u32 = 30;
 /// Maximum number of available slots for concurrent outgoing dials.
 ///
 /// This restricts how many outbound dials can be performed concurrently.
-pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 15;
+pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 30;
 
 /// A temporary timeout for ips on incoming connection attempts.
 pub const INBOUND_IP_THROTTLE_DURATION: Duration = Duration::from_secs(30);
@@ -311,16 +305,16 @@ impl PeersConfig {
     #[cfg(feature = "serde")]
     pub fn with_basic_nodes_from_file(
         mut self,
-        optional_file: Option<impl AsRef<Path>>,
-    ) -> Result<Self, io::Error> {
+        optional_file: Option<impl AsRef<std::path::Path>>,
+    ) -> Result<Self, std::io::Error> {
         let Some(file_path) = optional_file else { return Ok(self) };
         let raw = match std::fs::read_to_string(file_path.as_ref()) {
             Ok(contents) => contents,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(self),
             Err(e) => return Err(e),
         };
 
-        info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
+        tracing::info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
 
         // Try the new format first, fall back to legacy Vec<NodeRecord>
         let peers: Vec<PersistedPeerInfo> = serde_json::from_str(&raw)
@@ -330,9 +324,9 @@ impl PeersConfig {
                     nodes.into_iter().map(PersistedPeerInfo::from_node_record).collect(),
                 )
             })
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        info!(target: "net::peers", count = peers.len(), "Loaded persisted peers");
+        tracing::info!(target: "net::peers", count = peers.len(), "Loaded persisted peers");
         self.persisted_peers = peers;
         Ok(self)
     }

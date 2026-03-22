@@ -107,6 +107,10 @@ def compute_stats(combined: list[dict]) -> dict:
             mgas_s_values.append(r["gas_used"] / lat_s / 1_000_000)
     mean_mgas_s = sum(mgas_s_values) / len(mgas_s_values) if mgas_s_values else 0
 
+    total_latencies_ms = [r["total_latency_us"] / 1_000 for r in combined]
+    wall_clock_s = sum(total_latencies_ms) / 1_000
+    mean_total_lat_ms = sum(total_latencies_ms) / n
+
     return {
         "n": n,
         "mean_ms": mean_lat,
@@ -115,6 +119,8 @@ def compute_stats(combined: list[dict]) -> dict:
         "p90_ms": percentile(sorted_lat, 90),
         "p99_ms": percentile(sorted_lat, 99),
         "mean_mgas_s": mean_mgas_s,
+        "wall_clock_s": wall_clock_s,
+        "mean_total_lat_ms": mean_total_lat_ms,
     }
 
 
@@ -139,13 +145,14 @@ def compute_wait_stats(combined: list[dict], field: str) -> dict:
 
 def _paired_data(
     baseline: list[dict], feature: list[dict]
-) -> tuple[list[tuple[float, float]], list[float], list[float]]:
+) -> tuple[list[tuple[float, float]], list[float], list[float], list[float]]:
     """Match blocks and return paired latencies and per-block diffs.
 
     Returns:
         pairs: list of (baseline_ms, feature_ms) tuples
         lat_diffs_ms: list of feature − baseline latency diffs in ms
         mgas_diffs: list of feature − baseline Mgas/s diffs
+        total_lat_diffs_ms: list of feature − baseline total latency diffs in ms
     """
     baseline_by_block = {r["block_number"]: r for r in baseline}
     feature_by_block = {r["block_number"]: r for r in feature}
@@ -154,6 +161,7 @@ def _paired_data(
     pairs = []
     lat_diffs_ms = []
     mgas_diffs = []
+    total_lat_diffs_ms = []
     for bn in common_blocks:
         b = baseline_by_block[bn]
         f = feature_by_block[bn]
@@ -168,7 +176,10 @@ def _paired_data(
                 f["gas_used"] / f_lat_s / 1_000_000
                 - b["gas_used"] / b_lat_s / 1_000_000
             )
-    return pairs, lat_diffs_ms, mgas_diffs
+        total_lat_diffs_ms.append(
+            f["total_latency_us"] / 1_000 - b["total_latency_us"] / 1_000
+        )
+    return pairs, lat_diffs_ms, mgas_diffs, total_lat_diffs_ms
 
 
 def compute_paired_stats(
@@ -183,12 +194,14 @@ def compute_paired_stats(
     all_pairs = []
     all_lat_diffs = []
     all_mgas_diffs = []
+    all_total_lat_diffs = []
     blocks_per_pair = []
     for baseline, feature in zip(baseline_runs, feature_runs):
-        pairs, lat_diffs, mgas_diffs = _paired_data(baseline, feature)
+        pairs, lat_diffs, mgas_diffs, total_lat_diffs = _paired_data(baseline, feature)
         all_pairs.extend(pairs)
         all_lat_diffs.extend(lat_diffs)
         all_mgas_diffs.extend(mgas_diffs)
+        all_total_lat_diffs.extend(total_lat_diffs)
         blocks_per_pair.append(len(pairs))
 
     if not all_lat_diffs:
@@ -227,6 +240,11 @@ def compute_paired_stats(
     mgas_se = std_mgas_diff / math.sqrt(len(all_mgas_diffs)) if all_mgas_diffs else 0.0
     mgas_ci = T_CRITICAL * mgas_se
 
+    mean_total_diff = sum(all_total_lat_diffs) / len(all_total_lat_diffs) if all_total_lat_diffs else 0.0
+    std_total_diff = stddev(all_total_lat_diffs, mean_total_diff) if len(all_total_lat_diffs) > 1 else 0.0
+    total_se = std_total_diff / math.sqrt(len(all_total_lat_diffs)) if all_total_lat_diffs else 0.0
+    wall_clock_ci_ms = T_CRITICAL * total_se
+
     return {
         "n": n,
         "mean_diff_ms": mean_diff,
@@ -239,6 +257,7 @@ def compute_paired_stats(
         "p99_ci_ms": (p99_boot[hi] - p99_boot[lo]) / 2,
         "mean_mgas_diff": mean_mgas_diff,
         "mgas_ci": mgas_ci,
+        "wall_clock_ci_ms": wall_clock_ci_ms,
         "blocks": max(blocks_per_pair),
     }
 
@@ -265,6 +284,10 @@ def fmt_ms(v: float) -> str:
 
 def fmt_mgas(v: float) -> str:
     return f"{v:.2f}"
+
+
+def fmt_s(v: float) -> str:
+    return f"{v:.2f}s"
 
 
 def significance(pct: float, ci_pct: float, lower_is_better: bool) -> str:
@@ -304,6 +327,7 @@ def compute_changes(
         ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
         ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
         ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
+        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
     ]
     changes = {}
     for name, stat_key, ci_key, base_key, lower_is_better in metrics:
@@ -326,6 +350,7 @@ def generate_comparison_table(
     baseline_name: str,
     feature_name: str,
     feature_sha: str,
+    big_blocks: bool = False,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -335,6 +360,7 @@ def generate_comparison_table(
 
     mean_pct = pct(run1["mean_ms"], run2["mean_ms"])
     gas_pct = pct(run1["mean_mgas_s"], run2["mean_mgas_s"])
+    wall_pct = pct(run1["wall_clock_s"], run2["wall_clock_s"])
 
     p50_pct = pct(run1["p50_ms"], run2["p50_ms"])
     p90_pct = pct(run1["p90_ms"], run2["p90_ms"])
@@ -348,6 +374,7 @@ def generate_comparison_table(
     # CI as a percentage of baseline mean
     lat_ci_pct = paired["ci_ms"] / run1["mean_ms"] * 100.0 if run1["mean_ms"] > 0 else 0.0
     mgas_ci_pct = paired["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
+    wall_ci_pct = paired["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
 
     base_url = f"https://github.com/{repo}/commit"
     baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
@@ -362,8 +389,9 @@ def generate_comparison_table(
         f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, lower_is_better=True)} |",
         f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, lower_is_better=True)} |",
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False)} |",
+        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True)} |",
         "",
-        f"*{n} blocks*",
+        f"*{n} {'big blocks' if big_blocks else 'blocks'}*",
     ]
     return "\n".join(lines)
 
@@ -394,6 +422,7 @@ def generate_markdown(
     summary: dict, comparison_table: str,
     wait_time_tables: list[str] | None = None,
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
+    grafana_url: str | None = None,
 ) -> str:
     """Generate a markdown comment body."""
     lines = ["## Benchmark Results", ""]
@@ -413,6 +442,9 @@ def generate_markdown(
                 lines.append(table)
                 lines.append("")
         lines.append("</details>")
+    if grafana_url:
+        lines.append("")
+        lines.append(f"**[Grafana Dashboard]({grafana_url})**")
     return "\n".join(lines)
 
 
@@ -439,6 +471,8 @@ def main():
     parser.add_argument("--feature-name", "--branch-name", default=None, help="Feature branch name")
     parser.add_argument("--feature-ref", "--branch-sha", "--feature-sha", default=None, help="Feature commit SHA")
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
+    parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
+    parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
     if len(args.baseline_csv) != len(args.feature_csv):
@@ -487,6 +521,7 @@ def main():
         baseline_name=baseline_name,
         feature_name=feature_name,
         feature_sha=feature_sha,
+        big_blocks=args.big_blocks,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
@@ -517,6 +552,7 @@ def main():
 
     summary = {
         "blocks": paired_stats["blocks"],
+        "big_blocks": args.big_blocks,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,
@@ -542,6 +578,7 @@ def main():
         repo=args.repo,
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
+        grafana_url=args.grafana_url,
     )
 
     with open(args.output_markdown, "w") as f:

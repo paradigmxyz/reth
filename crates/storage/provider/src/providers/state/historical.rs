@@ -18,7 +18,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
@@ -27,7 +29,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStorageProof, DatabaseStorageRoot,
 };
 
 use std::fmt::Debug;
@@ -46,10 +48,6 @@ type DbStorageProof<'a, TX, A> = StorageProof<
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 type DbProof<'a, TX, A> = Proof<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
-    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
->;
-type DbTrieWitness<'a, TX, A> = TrieWitness<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
@@ -158,8 +156,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_accounts_history(self.provider, rocksdb_ref)?;
             reader.account_history_info(
                 address,
                 self.block_number,
@@ -183,8 +181,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_storages_history(self.provider, rocksdb_ref)?;
             reader.storage_history_info(
                 address,
                 lookup_key,
@@ -524,9 +522,23 @@ impl<
         reth_trie_db::with_adapter!(self.provider, |A| {
             let mut input = input;
             input.prepend(self.revert_state()?.into());
-            <DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)
-                .map_err(ProviderError::from)
-                .map(|hm| hm.into_values().collect())
+            let nodes_sorted = input.nodes.into_sorted();
+            let state_sorted = input.state.into_sorted();
+            TrieWitness::new(
+                InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    &nodes_sorted,
+                ),
+                HashedPostStateCursorFactory::new(
+                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                    &state_sorted,
+                ),
+            )
+            .with_prefix_sets_mut(input.prefix_sets)
+            .always_include_root_node()
+            .compute(target)
+            .map_err(ProviderError::from)
+            .map(|hm| hm.into_values().collect())
         })
     }
 }
@@ -1156,7 +1168,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn history_provider_get_storage_hashed_state() {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;

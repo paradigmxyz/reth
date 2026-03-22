@@ -46,7 +46,7 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-stages-types = { workspace = true, optional = true }
+reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-tasks.workspace = true
@@ -87,6 +87,8 @@ tokio-stream.workspace = true
 reqwest.workspace = true
 url.workspace = true
 metrics.workspace = true
+blake3.workspace = true
+rayon.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -108,7 +110,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
 
 [features]
-default = []
 arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
@@ -127,12 +128,9 @@ arbitrary = [
     "reth-trie-common?/test-utils",
     "reth-codecs/arbitrary",
     "reth-prune-types/arbitrary",
-    "reth-stages-types?/arbitrary",
+    "reth-stages-types/arbitrary",
     "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
-
-rocksdb = ["reth-db-common/rocksdb", "reth-stages/rocksdb", "reth-provider/rocksdb", "reth-prune/rocksdb"]
-edge = ["rocksdb"]

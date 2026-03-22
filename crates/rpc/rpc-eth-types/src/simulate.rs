@@ -47,6 +47,9 @@ pub enum EthSimulateError {
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Number of simulated blocks exceeds the configured client limit.
+    #[error("too many blocks")]
+    TooManyBlocks,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
@@ -97,12 +100,6 @@ pub enum EthSimulateError {
     /// Max init code size exceeded.
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
-    /// `MovePrecompileToAddress` referenced itself in replacement.
-    #[error("MovePrecompileToAddress referenced itself")]
-    PrecompileSelfReference,
-    /// Multiple `MovePrecompileToAddress` referencing the same address.
-    #[error("Multiple MovePrecompileToAddress referencing the same address")]
-    PrecompileDuplicateAddress,
     /// Attempted to move a non-precompile address.
     #[error("account {0} is not a precompile")]
     NotAPrecompile(Address),
@@ -120,11 +117,9 @@ impl EthSimulateError {
             Self::BlockGasLimitExceeded => -38015,
             Self::BlockNumberInvalid { .. } => -38020,
             Self::BlockTimestampInvalid { .. } => -38021,
-            Self::PrecompileSelfReference => -38022,
-            Self::PrecompileDuplicateAddress => -38023,
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
-            Self::GasLimitReached => -38026,
+            Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::NotAPrecompile(_) => -32000,
         }
     }
@@ -141,29 +136,10 @@ impl ToRpcError for EthSimulateError {
 /// This function processes `movePrecompileToAddress` entries from the state overrides and
 /// moves precompiles from their original addresses to new addresses. The original address
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
-///
-/// # Validation
-///
-/// - The source address must be a precompile (exists in the precompiles map)
-/// - Moving multiple precompiles to the same destination is allowed
-/// - Self-references (moving to the same address) are not explicitly forbidden here since that
-///   would be a no-op
-///
-/// # Arguments
-///
-/// * `state_overrides` - The state overrides containing potential `movePrecompileToAddress` entries
-/// * `precompiles` - Mutable reference to the EVM's precompiles map
-///
-/// # Returns
-///
-/// Returns `Ok(())` on success, or an `EthSimulateError::NotAPrecompile` if a source address
-/// is not a precompile.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     precompiles: &mut PrecompilesMap,
 ) -> Result<(), EthSimulateError> {
-    use alloy_evm::precompiles::DynPrecompile;
-
     let moves: Vec<_> = state_overrides
         .iter()
         .filter_map(|(source, account_override)| {
@@ -171,37 +147,11 @@ pub fn apply_precompile_overrides(
         })
         .collect();
 
-    if moves.is_empty() {
-        return Ok(());
-    }
-
-    for (source, _) in &moves {
-        if precompiles.get(source).is_none() {
-            return Err(EthSimulateError::NotAPrecompile(*source));
-        }
-    }
-
-    let mut extracted: Vec<(Address, Address, DynPrecompile)> = Vec::with_capacity(moves.len());
-
-    for (source, dest) in moves {
-        if source == dest {
-            continue;
-        }
-
-        let mut found_precompile: Option<DynPrecompile> = None;
-        precompiles.apply_precompile(&source, |existing| {
-            found_precompile = existing;
-            None
-        });
-
-        if let Some(precompile) = found_precompile {
-            extracted.push((source, dest, precompile));
-        }
-    }
-
-    for (_, dest, precompile) in extracted {
-        precompiles.apply_precompile(&dest, |_| Some(precompile));
-    }
+    precompiles.move_precompiles(moves).map_err(
+        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
+            EthSimulateError::NotAPrecompile(addr)
+        },
+    )?;
 
     Ok(())
 }
@@ -354,7 +304,7 @@ where
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
-            ExecutionResult::Halt { reason, gas_used } => {
+            ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
                 #[allow(clippy::needless_update)]
                 SimCallResult {
@@ -364,13 +314,13 @@ where
                         code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: Vec::new(),
                     status: false,
                     ..Default::default()
                 }
             }
-            ExecutionResult::Revert { output, gas_used } => {
+            ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
                 #[allow(clippy::needless_update)]
                 SimCallResult {
@@ -380,19 +330,19 @@ where
                         code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     status: false,
                     logs: Vec::new(),
                     ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } =>
+            ExecutionResult::Success { output, gas, logs, .. } =>
             {
                 #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output.into_data(),
                     error: None,
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: logs
                         .into_iter()
                         .map(|log| {

@@ -136,7 +136,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    reth_fs_util::remove_file(entry.path())?;
+                    reth_fs_util::remove_file_if_exists(entry.path())?;
                 }
             }
         }

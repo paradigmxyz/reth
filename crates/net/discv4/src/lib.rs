@@ -691,12 +691,9 @@ impl Discv4Service {
     /// own ID in the DHT. This introduces the local node to the other nodes
     /// in the DHT and populates its routing table with the closest proven neighbours.
     ///
-    /// This is similar to adding all bootnodes via [`Self::add_node`], but does not fire a
-    /// [`DiscoveryUpdate::Added`] event for the given bootnodes. So boot nodes don't appear in the
-    /// update stream, which is usually desirable, since bootnodes should not be connected to.
-    ///
-    /// If adding the configured bootnodes should result in a [`DiscoveryUpdate::Added`], see
-    /// [`Self::add_all_nodes`].
+    /// This inserts the configured bootnodes into the routing table and pings them. Once the
+    /// endpoint proof succeeds (pong received), a [`DiscoveryUpdate::Added`] event is emitted,
+    /// same as with [`Self::add_node`].
     ///
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
