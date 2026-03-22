@@ -10080,7 +10080,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
- "bincode",
  "eyre",
  "futures-util",
  "itertools 0.14.0",
