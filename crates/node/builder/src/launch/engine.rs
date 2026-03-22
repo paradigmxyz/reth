@@ -372,7 +372,7 @@ impl EngineNodeLauncher {
                             );
                         }
                     }
-                    _ = &mut on_graceful_shutdown => {
+                    _guard = &mut on_graceful_shutdown => {
                         // Shutdown signal received.
                         // Send Terminate so the engine OS thread can exit cleanly before we
                         // drop the orchestrator.
@@ -390,7 +390,7 @@ impl EngineNodeLauncher {
             let _ = exit.send(res);
         };
         ctx.task_executor()
-            .spawn_critical_with_shutdown_signal("consensus engine", consensus_engine);
+            .spawn_critical_with_graceful_shutdown_signal("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
