@@ -5,18 +5,16 @@ use crate::{
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
-use alloy_network::Network;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionInfo};
 use core::error;
 use dyn_clone::DynClone;
-use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, TxEnvFor};
+use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, SpecFor, TxEnvFor};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
 };
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
-use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
@@ -444,7 +442,7 @@ pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
 
 impl<TxReq, Evm> TxEnvConverter<TxReq, Evm> for ()
 where
-    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, BlockEnvFor<Evm>>,
+    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, SpecFor<Evm>, BlockEnvFor<Evm>>,
     Evm: ConfigureEvm,
 {
     type Error = TxReq::Err;
@@ -484,10 +482,16 @@ where
 }
 
 /// Conversion into transaction RPC response failed.
-#[derive(Debug, Clone, Error)]
-#[error("Failed to convert transaction into RPC response: {0}")]
-pub struct TransactionConversionError(String);
+#[derive(Debug, thiserror::Error)]
+pub enum TransactionConversionError {
+    /// Required fields are missing from the transaction request.
+    #[error("Failed to convert transaction into RPC response: {0}")]
+    FromTxReq(String),
 
+    /// Other conversion errors.
+    #[error("{0}")]
+    Other(String),
+}
 /// Generic RPC response object converter for `Evm` and network `Network`.
 ///
 /// The main purpose of this struct is to provide an implementation of [`RpcConvert`] for generic
@@ -826,7 +830,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|e| TransactionConversionError(e.to_string()))?)
+            .map_err(|e| TransactionConversionError::FromTxReq(e.to_string()))?)
     }
 
     fn tx_env(
@@ -867,40 +871,8 @@ pub mod op {
     use super::*;
     use alloy_consensus::SignableTransaction;
     use alloy_signer::Signature;
-    use op_alloy_consensus::{
-        transaction::{OpDepositInfo, OpTransactionInfo},
-        OpTxEnvelope,
-    };
+    use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
     use op_alloy_rpc_types::OpTransactionRequest;
-    use reth_optimism_primitives::DepositReceipt;
-    use reth_primitives_traits::SignedTransaction;
-    use reth_storage_api::{errors::ProviderError, ReceiptProvider};
-
-    /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
-    /// a deposit.
-    pub fn try_into_op_tx_info<Tx, T>(
-        provider: &T,
-        tx: &Tx,
-        tx_info: TransactionInfo,
-    ) -> Result<OpTransactionInfo, ProviderError>
-    where
-        Tx: op_alloy_consensus::OpTransaction + SignedTransaction,
-        T: ReceiptProvider<Receipt: DepositReceipt>,
-    {
-        let deposit_meta = if tx.is_deposit() {
-            provider.receipt_by_hash(*tx.tx_hash())?.and_then(|receipt| {
-                receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
-                    deposit_receipt_version: receipt.deposit_receipt_version,
-                    deposit_nonce: receipt.deposit_nonce,
-                })
-            })
-        } else {
-            None
-        }
-        .unwrap_or_default();
-
-        Ok(OpTransactionInfo::new(tx_info, deposit_meta))
-    }
 
     impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
         for op_alloy_rpc_types::Transaction<T>
@@ -927,115 +899,6 @@ pub mod op {
             let signature = Signature::new(Default::default(), Default::default(), false);
 
             Ok(tx.into_signed(signature).into())
-        }
-    }
-}
-
-/// Trait for converting network transaction responses to primitive transaction types.
-pub trait TryFromTransactionResponse<N: Network> {
-    /// The error type returned if the conversion fails.
-    type Error: core::error::Error + Send + Sync + Unpin;
-
-    /// Converts a network transaction response to a primitive transaction type.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Self)` on successful conversion, or `Err(Self::Error)` if the conversion fails.
-    fn from_transaction_response(
-        transaction_response: N::TransactionResponse,
-    ) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-impl TryFromTransactionResponse<alloy_network::Ethereum>
-    for reth_ethereum_primitives::TransactionSigned
-{
-    type Error = Infallible;
-
-    fn from_transaction_response(transaction_response: Transaction) -> Result<Self, Self::Error> {
-        Ok(transaction_response.into_inner().into())
-    }
-}
-
-#[cfg(feature = "op")]
-impl TryFromTransactionResponse<op_alloy_network::Optimism>
-    for reth_optimism_primitives::OpTransactionSigned
-{
-    type Error = Infallible;
-
-    fn from_transaction_response(
-        transaction_response: op_alloy_rpc_types::Transaction,
-    ) -> Result<Self, Self::Error> {
-        Ok(transaction_response.inner.into_inner())
-    }
-}
-
-#[cfg(test)]
-mod transaction_response_tests {
-    use super::*;
-    use alloy_consensus::{transaction::Recovered, EthereumTxEnvelope, Signed, TxLegacy};
-    use alloy_network::Ethereum;
-    use alloy_primitives::{Address, Signature, B256, U256};
-    use alloy_rpc_types_eth::Transaction;
-
-    #[test]
-    fn test_ethereum_transaction_conversion() {
-        let signed_tx = Signed::new_unchecked(
-            TxLegacy::default(),
-            Signature::new(U256::ONE, U256::ONE, false),
-            B256::ZERO,
-        );
-        let envelope = EthereumTxEnvelope::Legacy(signed_tx);
-
-        let tx_response = Transaction {
-            inner: Recovered::new_unchecked(envelope, Address::ZERO),
-            block_hash: None,
-            block_number: None,
-            transaction_index: None,
-            effective_gas_price: None,
-        };
-
-        let result = <reth_ethereum_primitives::TransactionSigned as TryFromTransactionResponse<
-            Ethereum,
-        >>::from_transaction_response(tx_response);
-        assert!(result.is_ok());
-    }
-
-    #[cfg(feature = "op")]
-    mod op {
-        use super::*;
-
-        #[test]
-        fn test_optimism_transaction_conversion() {
-            use op_alloy_consensus::OpTxEnvelope;
-            use op_alloy_network::Optimism;
-            use reth_optimism_primitives::OpTransactionSigned;
-
-            let signed_tx = Signed::new_unchecked(
-                TxLegacy::default(),
-                Signature::new(U256::ONE, U256::ONE, false),
-                B256::ZERO,
-            );
-            let envelope = OpTxEnvelope::Legacy(signed_tx);
-
-            let inner_tx = Transaction {
-                inner: Recovered::new_unchecked(envelope, Address::ZERO),
-                block_hash: None,
-                block_number: None,
-                transaction_index: None,
-                effective_gas_price: None,
-            };
-
-            let tx_response = op_alloy_rpc_types::Transaction {
-                inner: inner_tx,
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            };
-
-            let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
-
-            assert!(result.is_ok());
         }
     }
 }

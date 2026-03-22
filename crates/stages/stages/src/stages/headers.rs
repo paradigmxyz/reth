@@ -14,7 +14,9 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{
+    serde_bincode_compat, FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader,
+};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider,
     StaticFileProviderFactory,
@@ -82,6 +84,14 @@ where
             header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
             is_etl_ready: false,
         }
+    }
+
+    /// Clear all ETL state. Called on error paths to prevent buffer pollution on retry.
+    fn clear_etl_state(&mut self) {
+        self.sync_gap = None;
+        self.hash_collector.clear();
+        self.header_collector.clear();
+        self.is_etl_ready = false;
     }
 
     /// Write downloaded headers to storage from ETL.
@@ -256,7 +266,7 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    self.sync_gap = None;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::DetachedHead {
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
@@ -264,7 +274,7 @@ where
                     }))
                 }
                 None => {
-                    self.sync_gap = None;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::ChannelClosed))
                 }
             }
@@ -322,7 +332,7 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.sync_gap.take();
+        self.clear_etl_state();
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
@@ -333,8 +343,9 @@ where
                 (input.unwind_to + 1)..,
             )?;
         provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unfinalized_headers_unwound =
-            provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let unfinalized_headers_unwound = provider.tx_ref().unwind_table_by_num::<tables::Headers<
+            HeaderTy<Provider::Primitives>,
+        >>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block

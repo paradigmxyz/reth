@@ -2,20 +2,20 @@
 
 The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are queued up and stored within the Reth pipeline. In the default configuration, the pipeline runs the following stages in order:
 
+- EraStage (optional, for ERA1 import)
 - HeaderStage
 - BodyStage
 - SenderRecoveryStage
 - ExecutionStage
 - PruneSenderRecoveryStage (if pruning for sender recovery is enabled)
-- MerkleUnwindStage
+- MerkleStage (unwind)
 - AccountHashingStage
 - StorageHashingStage
-- MerkleExecuteStage
-- MerkleChangeSets
+- MerkleStage (execute)
 - TransactionLookupStage
 - IndexStorageHistoryStage
 - IndexAccountHistoryStage
-- PruneStage (execute)
+- PruneStage
 - FinishStage
 
 
@@ -23,7 +23,20 @@ When the node is first started, a new `Pipeline` is initialized and all of the s
 
 Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the changes to the database if there was an issue during the stage execution.
 
-To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood when a stage is executed, starting with `HeaderStage`.
+To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood when a stage is executed, starting with `EraStage`.
+
+<br>
+
+
+## EraStage
+
+The `EraStage` is an optional stage that imports pre-merge historical block data from [ERA1 files](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md). ERA1 is a standardized format for storing Ethereum's historical chain data, allowing nodes to quickly bootstrap by importing pre-synced data instead of downloading it from peers.
+
+When enabled, the `EraStage` reads block headers and bodies from ERA1 files (either from a local directory or downloaded from a remote HTTP host) and writes them directly to static files. This provides a faster alternative to downloading historical data over P2P, especially useful for syncing the pre-merge portion of the chain.
+
+The stage processes ERA1 files sequentially, extracting headers and bodies from genesis up to the last pre-merge block. Note that receipts are not included in ERA1 files and will be generated later during the `ExecutionStage`.
+
+If no ERA1 source is configured or all ERA1 data has been imported, the stage simply passes through, allowing subsequent stages to continue with P2P-based syncing.
 
 <br>
 
@@ -97,12 +110,6 @@ The `AccountHashingStage` handles the computation of account state hashes. It pr
 ## StorageHashingStage
 
 The `StorageHashingStage` is responsible for computing hashes of contract storage. Similar to the `AccountHashingStage`, it processes storage slots of smart contracts and generates cryptographic hashes that are used in the state trie. This stage ensures that contract storage can be efficiently verified and proven.
-
-<br>
-
-## MerkleChangeSets
-
-The `MerkleChangeSets` stage consolidates and finalizes Merkle-related change sets after the `MerkleStage` execution mode has run, ensuring consistent trie updates and checkpoints.
 
 <br>
 

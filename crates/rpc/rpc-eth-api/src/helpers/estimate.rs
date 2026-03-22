@@ -12,7 +12,7 @@ use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
-    db::State,
+    db::{bal::EvmDatabaseError, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -42,6 +42,7 @@ pub trait EstimateCall: Call {
     ///
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
+    ///  - `disable_fee_charge` is set to `true`
     ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
@@ -61,6 +62,10 @@ pub trait EstimateCall: Call {
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
+
+        // Disable additional fee charges (e.g. L2 operator fees) for gas estimation,
+        // consistent with `prepare_call_env` for `eth_call`.
+        evm_env.cfg_env.disable_fee_charge = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
@@ -165,14 +170,14 @@ pub trait EstimateCall: Call {
                 return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
                     gas_limit: tx_env.gas_limit(),
                 }
-                .into_eth_err())
+                .into_eth_err());
             }
             // Propagate other results (successful or other errors).
             ethres => ethres?,
         };
 
         let gas_refund = match res.result {
-            ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
+            ExecutionResult::Success { gas, .. } => gas.final_refunded(),
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
@@ -186,7 +191,7 @@ pub trait EstimateCall: Call {
                 } else {
                     // the transaction did revert
                     Err(Self::Error::from_revert(output))
-                }
+                };
             }
         };
 
@@ -296,7 +301,7 @@ pub trait EstimateCall: Call {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
                 EstimateCall::estimate_gas_with(&this, evm_env, request, state, state_override)
             })
@@ -313,7 +318,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();

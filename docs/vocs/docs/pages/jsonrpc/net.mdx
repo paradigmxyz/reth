@@ -8,7 +8,7 @@ The `net` API provides information about the networking component of the node.
 
 ## `net_listening`
 
-Returns a `bool` indicating whether or not the node is listening for network connections.
+Returns a `bool` indicating whether or not the node is listening for network connections. Currently, Reth always returns `true`.
 
 | Client | Method invocation                           |
 | ------ | ------------------------------------------- |
@@ -23,7 +23,7 @@ Returns a `bool` indicating whether or not the node is listening for network con
 
 ## `net_peerCount`
 
-Returns the number of peers connected to the node.
+Returns the number of peers connected to the node as a hex-encoded quantity. Only established connections are counted.
 
 | Client | Method invocation                           |
 | ------ | ------------------------------------------- |
@@ -33,12 +33,12 @@ Returns the number of peers connected to the node.
 
 ```js
 // > {"jsonrpc":"2.0","id":1,"method":"net_peerCount","params":[]}
-{"jsonrpc":"2.0","id":1,"result":10}
+{"jsonrpc":"2.0","id":1,"result":"0xa"}
 ```
 
 ## `net_version`
 
-Returns the network ID (e.g. 1 for mainnet)
+Returns the network ID (e.g. "1" for mainnet) as a string corresponding to the chain ID.
 
 | Client | Method invocation                         |
 | ------ | ----------------------------------------- |
@@ -48,5 +48,5 @@ Returns the network ID (e.g. 1 for mainnet)
 
 ```js
 // > {"jsonrpc":"2.0","id":1,"method":"net_version","params":[]}
-{"jsonrpc":"2.0","id":1,"result":1}
+{"jsonrpc":"2.0","id":1,"result":"1"}
 ```

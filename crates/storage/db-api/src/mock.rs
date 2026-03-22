@@ -16,7 +16,7 @@ use crate::{
     DatabaseError,
 };
 use core::ops::Bound;
-use std::{collections::BTreeMap, ops::RangeBounds};
+use std::{collections::BTreeMap, ops::RangeBounds, path::PathBuf};
 
 /// Mock database implementation for testing and development.
 ///
@@ -49,6 +49,10 @@ impl Database for DatabaseMock {
     /// The mock transaction doesn't actually perform any database operations.
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(TxMock::default())
+    }
+
+    fn path(&self) -> PathBuf {
+        PathBuf::default()
     }
 }
 
@@ -92,10 +96,10 @@ impl DbTx for TxMock {
 
     /// Commits the transaction.
     ///
-    /// **Mock behavior**: Always returns `Ok(true)`, indicating successful commit.
+    /// **Mock behavior**: Always returns `Ok(())`, indicating successful commit.
     /// No actual data is persisted since this is a mock implementation.
-    fn commit(self) -> Result<bool, DatabaseError> {
-        Ok(true)
+    fn commit(self) -> Result<(), DatabaseError> {
+        Ok(())
     }
 
     /// Aborts the transaction.
@@ -293,6 +297,18 @@ impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
     /// Moves to the next duplicate entry.
     /// **Mock behavior**: Always returns `None`.
     fn next_dup(&mut self) -> PairResult<T> {
+        Ok(None)
+    }
+
+    /// Moves to the previous duplicate entry.
+    /// **Mock behavior**: Always returns `None`.
+    fn prev_dup(&mut self) -> PairResult<T> {
+        Ok(None)
+    }
+
+    /// Moves to the last duplicate entry.
+    /// **Mock behavior**: Always returns `None`.
+    fn last_dup(&mut self) -> ValueOnlyResult<T> {
         Ok(None)
     }
 

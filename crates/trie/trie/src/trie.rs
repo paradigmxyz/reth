@@ -18,7 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, Span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -601,7 +601,7 @@ where
     pub fn root(self) -> Result<B256, StorageRootError> {
         match self.calculate(false)? {
             StorageRootProgress::Complete(root, _, _) => Ok(root),
-            StorageRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+            StorageRootProgress::Progress(..) => unreachable!(), // update retention is disabled
         }
     }
 
@@ -610,8 +610,8 @@ where
     /// # Returns
     ///
     /// The storage root, number of walked entries and trie updates
-    /// for a given address if requested.
-    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address))]
+    /// for a given address if requested.
+    #[instrument(skip_all, level = "trace", target = "trie::storage_root", name = "storage_trie", fields(addr = %self.hashed_address, storage_root))]
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
         trace!(target: "trie::storage_root", "calculating storage root");
 
@@ -620,6 +620,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
+            Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
             return Ok(StorageRootProgress::Complete(
                 EMPTY_ROOT_HASH,
                 0,
@@ -695,6 +696,7 @@ where
         }
 
         let root = hash_builder.root();
+        Span::current().record("storage_root", format!("{root:?}"));
 
         let removed_keys = storage_node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys);
@@ -726,6 +728,8 @@ pub enum TrieType {
     State,
     /// Storage trie type.
     Storage,
+    /// Custom trie type. Can be used in ExEx.
+    Custom(&'static str),
 }
 
 impl TrieType {
@@ -734,6 +738,7 @@ impl TrieType {
         match self {
             Self::State => "state",
             Self::Storage => "storage",
+            Self::Custom(s) => s,
         }
     }
 }

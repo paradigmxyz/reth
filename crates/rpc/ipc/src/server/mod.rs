@@ -248,7 +248,7 @@ where
     }
 }
 
-impl std::fmt::Debug for IpcServer {
+impl<HttpMiddleware, RpcMiddleware> std::fmt::Debug for IpcServer<HttpMiddleware, RpcMiddleware> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
             .field("endpoint", &self.endpoint)
@@ -532,9 +532,8 @@ async fn to_ipc_service<S, T>(
                break
             }
             item = rx_item.next() => {
-                if let Some(item) = item {
-                    conn.push_back(item.to_string());
-                }
+                let Some(item) = item else { break };
+                conn.push_back(item.to_string());
             }
             _ = &mut stopped => {
                 // shutdown
@@ -763,11 +762,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 pub fn dummy_name() -> String {
     use rand::Rng;
     let num: u64 = rand::rng().random();
-    if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{num}")
-    } else {
-        format!(r"/tmp/my-uds-{num}")
-    }
+    format!(r"/tmp/my-uds-{num}")
 }
 
 #[cfg(test)]

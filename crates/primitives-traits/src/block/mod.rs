@@ -268,6 +268,11 @@ pub trait TestBlock: Block<Header: crate::test_utils::TestHeader> {
         crate::header::test_utils::TestHeader::set_block_number(self.header_mut(), number);
     }
 
+    /// Updates the block timestamp.
+    fn set_timestamp(&mut self, timestamp: u64) {
+        crate::header::test_utils::TestHeader::set_timestamp(self.header_mut(), timestamp);
+    }
+
     /// Updates the block state root.
     fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         crate::header::test_utils::TestHeader::set_state_root(self.header_mut(), state_root);

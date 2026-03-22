@@ -23,8 +23,8 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
@@ -41,7 +41,7 @@ use reth_ethereum::{
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
             rpc::{PayloadValidatorBuilder, RpcAddOns},
-            BuilderContext, Node, NodeAdapter, NodeBuilder,
+            BuilderContext, Node, NodeAdapter, NodeBuilder, PayloadBuilderConfig,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::{
@@ -54,7 +54,7 @@ use reth_ethereum::{
     primitives::{Block, Recovered, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
-    tasks::TaskManager,
+    tasks::Runtime,
     EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
@@ -181,6 +181,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Custom engine validator
@@ -349,7 +350,8 @@ where
                 ctx.provider().clone(),
                 pool,
                 evm_config,
-                EthereumBuilderConfig::new(),
+                EthereumBuilderConfig::new()
+                    .with_extra_data(ctx.payload_builder_config().extra_data()),
             ),
         };
         Ok(payload_builder)
@@ -401,9 +403,9 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
+    let runtime = Runtime::test();
 
-    // create optimism genesis with canyon at block 2
+    // create genesis with canyon at block 2
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -417,7 +419,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         .launch_node(MyCustomNode::default())
         .await
         .unwrap();

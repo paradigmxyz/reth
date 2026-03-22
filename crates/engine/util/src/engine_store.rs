@@ -77,7 +77,8 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, .. } |
+            BeaconEngineMessage::RethNewPayload { payload, .. } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
@@ -107,7 +108,7 @@ impl EngineMessageStore {
                 tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
             }
         }
-        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
+        Ok(filenames_by_ts.into_values().flatten())
     }
 }
 

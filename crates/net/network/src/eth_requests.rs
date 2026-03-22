@@ -6,11 +6,13 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69,
+    BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
+    NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -169,7 +171,7 @@ where
 
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = block.into_body();
                 total_bytes += body.length();
@@ -217,6 +219,82 @@ where
         let _ = response.send(Ok(Receipts69(receipts)));
     }
 
+    /// Handles partial responses for [`GetReceipts70`] queries.
+    ///
+    /// This will adhere to the soft limit but allow filling the last vec partially.
+    fn on_receipts70_request(
+        &self,
+        _peer_id: PeerId,
+        request: GetReceipts70,
+        response: oneshot::Sender<RequestResult<Receipts70<C::Receipt>>>,
+    ) {
+        self.metrics.eth_receipts_requests_received_total.increment(1);
+
+        let GetReceipts70 { first_block_receipt_index, block_hashes } = request;
+
+        let mut receipts = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut last_block_incomplete = false;
+
+        for (idx, hash) in block_hashes.into_iter().enumerate() {
+            if idx >= MAX_RECEIPTS_SERVE {
+                break
+            }
+
+            let Some(mut block_receipts) =
+                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
+            else {
+                break
+            };
+
+            if idx == 0 && first_block_receipt_index > 0 {
+                let skip = first_block_receipt_index as usize;
+                if skip >= block_receipts.len() {
+                    block_receipts.clear();
+                } else {
+                    block_receipts.drain(0..skip);
+                }
+            }
+
+            let block_size = block_receipts.length();
+
+            if total_bytes + block_size <= SOFT_RESPONSE_LIMIT {
+                total_bytes += block_size;
+                receipts.push(block_receipts);
+                continue;
+            }
+
+            let mut partial_block = Vec::new();
+            for receipt in block_receipts {
+                let receipt_size = receipt.length();
+                if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
+                    break;
+                }
+                total_bytes += receipt_size;
+                partial_block.push(receipt);
+            }
+
+            receipts.push(partial_block);
+            last_block_incomplete = true;
+            break;
+        }
+
+        let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
+    }
+
+    /// Handles [`GetBlockAccessLists`] queries.
+    ///
+    /// For now this returns one empty BAL per requested hash.
+    fn on_block_access_lists_request(
+        &self,
+        _peer_id: PeerId,
+        request: GetBlockAccessLists,
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    ) {
+        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
+        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+    }
+
     #[inline]
     fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
     where
@@ -226,7 +304,7 @@ where
         let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
-        for hash in request.0 {
+        for hash in request {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
@@ -284,6 +362,12 @@ where
                     }
                     IncomingEthRequest::GetReceipts69 { peer_id, request, response } => {
                         this.on_receipts69_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetReceipts70 { peer_id, request, response } => {
+                        this.on_receipts70_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetBlockAccessLists { peer_id, request, response } => {
+                        this.on_block_access_lists_request(peer_id, request, response)
                     }
                 }
             },
@@ -358,5 +442,27 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetReceipts,
         /// The channel sender for the response containing Receipts69.
         response: oneshot::Sender<RequestResult<Receipts69<N::Receipt>>>,
+    },
+    /// Request Receipts from the peer using eth/70.
+    ///
+    /// The response should be sent through the channel.
+    GetReceipts70 {
+        /// The ID of the peer to request receipts from.
+        peer_id: PeerId,
+        /// The specific receipts requested including the `firstBlockReceiptIndex`.
+        request: GetReceipts70,
+        /// The channel sender for the response containing Receipts70.
+        response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
+    },
+    /// Request Block Access Lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists {
+        /// The ID of the peer to request block access lists from.
+        peer_id: PeerId,
+        /// The requested block hashes.
+        request: GetBlockAccessLists,
+        /// The channel sender for the response containing block access lists.
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
 }

@@ -149,20 +149,9 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
             self.to_tx_compact(&mut tx_buf);
 
             buf.put_slice(
-                &{
-                    #[cfg(feature = "std")]
-                    {
-                        reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
-                            let mut compressor = compressor.borrow_mut();
-                            compressor.compress(&tx_buf)
-                        })
-                    }
-                    #[cfg(not(feature = "std"))]
-                    {
-                        let mut compressor = reth_zstd_compressors::create_tx_compressor();
-                        compressor.compress(&tx_buf)
-                    }
-                }
+                &reth_zstd_compressors::with_tx_compressor(|compressor| {
+                    compressor.compress(&tx_buf)
+                })
                 .expect("Failed to compress"),
             );
             tx_bits
@@ -188,27 +177,12 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
         let (transaction, buf) = if zstd_bit != 0 {
-            #[cfg(feature = "std")]
-            {
-                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                    let mut decompressor = decompressor.borrow_mut();
-                    let decompressed = decompressor.decompress(buf);
-
-                    let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
-                    let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
-
-                    (tx, buf)
-                })
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
+            reth_zstd_compressors::with_tx_decompressor(|decompressor| {
                 let decompressed = decompressor.decompress(buf);
                 let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
                 let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
-
                 (tx, buf)
-            }
+            })
         } else {
             let (tx_type, buf) = T::TxType::from_compact(buf, tx_bits);
             Self::from_tx_compact(buf, tx_type, signature)

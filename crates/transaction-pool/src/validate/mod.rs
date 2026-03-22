@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives_traits::{Recovered, SealedBlock};
+use reth_primitives_traits::{Block, Recovered, SealedBlock};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
@@ -21,10 +21,7 @@ pub use eth::*;
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
-pub use constants::{
-    DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
-};
-use reth_primitives_traits::Block;
+pub use constants::{DEFAULT_MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -174,6 +171,9 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 
+    /// The block type used for new head block notifications.
+    type Block: Block;
+
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
     ///
@@ -212,7 +212,8 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// See also [`Self::validate_transaction`].
     fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         futures_util::future::join_all(
             transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
@@ -227,28 +228,24 @@ pub trait TransactionValidator: Debug + Send + Sync {
     fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
-        futures_util::future::join_all(futures)
+        self.validate_transactions(transactions.into_iter().map(move |tx| (origin, tx)))
     }
 
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
-    }
+    fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
 where
     A: TransactionValidator,
-    B: TransactionValidator<Transaction = A::Transaction>,
+    B: TransactionValidator<Transaction = A::Transaction, Block = A::Block>,
 {
     type Transaction = A::Transaction;
+    type Block = A::Block;
 
     async fn validate_transaction(
         &self,
@@ -263,7 +260,8 @@ where
 
     async fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         match self {
             Self::Left(v) => v.validate_transactions(transactions).await,
@@ -271,21 +269,7 @@ where
         }
     }
 
-    async fn validate_transactions_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        match self {
-            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
-            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
-        }
-    }
-
-    fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
-    where
-        Bl: Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),
@@ -385,6 +369,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.max_fee_per_gas()
     }
 
+    /// Returns the EIP-1559 Max priority fee the caller is willing to pay, or `None` for
+    /// non-EIP-1559 transactions.
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.transaction.max_priority_fee_per_gas()
+    }
+
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
@@ -465,9 +455,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         //
         // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
         let price_bump = price_bumps.price_bump(self.tx_type());
+        let required_bumped_fee =
+            |existing_fee: u128| existing_fee.saturating_mul(100 + price_bump).div_ceil(100);
 
         // Check if the max fee per gas is underpriced.
-        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
+        if maybe_replacement.max_fee_per_gas() < required_bumped_fee(self.max_fee_per_gas()) {
             return true
         }
 
@@ -480,7 +472,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         if existing_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas <
-                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+                required_bumped_fee(existing_max_priority_fee_per_gas)
         {
             return true
         }
@@ -490,8 +482,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             // This enforces that blob txs can only be replaced by blob txs
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if replacement_max_blob_fee_per_gas <
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            if replacement_max_blob_fee_per_gas < required_bumped_fee(existing_max_blob_fee_per_gas)
             {
                 return true
             }

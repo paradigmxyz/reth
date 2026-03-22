@@ -19,10 +19,10 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -98,6 +98,19 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
             .collect()
     }
 
+    async fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        transactions
+            .into_iter()
+            .map(|(_, transaction)| {
+                let hash = *transaction.hash();
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+            })
+            .collect()
+    }
+
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {
         None
     }
@@ -153,6 +166,14 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
         vec![]
+    }
+
+    fn append_pooled_transaction_elements(
+        &self,
+        _tx_hashes: &[TxHash],
+        _limit: GetPooledTransactionLimit,
+        _out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
     }
 
     fn get_pooled_transaction_element(
@@ -223,6 +244,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     fn remove_transactions_by_sender(
         &self,
         _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn prune_transactions(
+        &self,
+        _hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
@@ -308,7 +336,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         Default::default()
     }
 
@@ -349,6 +377,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         Ok(None)
     }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -362,6 +397,7 @@ pub struct MockTransactionValidator<T> {
 
 impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
+    type Block = reth_ethereum_primitives::Block;
 
     async fn validate_transaction(
         &self,
@@ -398,7 +434,7 @@ impl<T> MockTransactionValidator<T> {
     pub fn no_propagate_local() -> Self {
         Self { propagate_local: false, return_invalid: false, _marker: Default::default() }
     }
-    /// Creates a new [`MockTransactionValidator`] that always return a invalid outcome.
+    /// Creates a new [`MockTransactionValidator`] that always returns an invalid outcome.
     pub fn return_invalid() -> Self {
         Self { propagate_local: false, return_invalid: true, _marker: Default::default() }
     }

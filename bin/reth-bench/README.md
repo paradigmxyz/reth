@@ -31,6 +31,18 @@ Otherwise, running `make maxperf` at the root of the repo should be sufficient f
 `reth-bench` contains different commands to benchmark different patterns of engine API calls.
 The `reth-bench new-payload-fcu` command is the most representative of ethereum mainnet live sync, alternating between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
 
+The `new-payload-fcu` command supports two optional waiting modes that can be used together or independently:
+- `--wait-time <duration>`: Fixed sleep interval between blocks (e.g., `--wait-time 100ms` or `--wait-time 400` for 400ms)
+- `--wait-for-persistence`: Waits for blocks to be persisted using the `reth_subscribePersistedBlock` subscription
+
+Both `new-payload-fcu` and `new-payload-only` support `--rpc-block-fetch-retries <RETRIES>`
+to control how many times block fetches are retried after an RPC failure. The default is `10`.
+Use `--rpc-block-fetch-retries forever` to keep retrying indefinitely.
+
+When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
+
+By default, the WebSocket URL for persistence subscriptions is derived from `--engine-rpc-url` (converting to ws:// on port 8546). Use `--ws-rpc-url` to override this.
+
 Below is an overview of how to run a benchmark:
 
 ### Setup
@@ -65,7 +77,7 @@ make profiling
 
 If the purpose of the benchmark is to obtain `jemalloc` memory profiles that can then be analyzed by `jeprof`, it should be compiled with the `profiling` profile and the `jemalloc-prof` feature:
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jemalloc-prof,asm-keccak"
+RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jemalloc-prof"
 ```
 
 > [!NOTE]
@@ -74,13 +86,13 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jem
 Finally, if the purpose of the benchmark is to profile the node when `snmalloc` is configured as the default allocator, it would be built with the following
 command:
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak"
+RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak,min-debug-logs"
 ```
 
 ### Run the Benchmark:
 First, start the reth node. Here is an example that runs `reth` compiled with the `profiling` profile, runs `samply`, and configures `reth` to run with metrics enabled:
 ```bash
-samply record -p 3001 target/profiling/reth node --metrics localhost:9001 --authrpc.jwt-secret <jwt_file_path>
+samply record -p 3001 target/profiling/reth node --metrics localhost:9001 --authrpc.jwtsecret <jwt_file_path>
 ```
 
 ```bash
@@ -143,5 +155,5 @@ To reproduce the benchmark, first re-set the node to the block that the benchmar
 - **RPC Configuration**: The RPC endpoints should be accessible and configured correctly, specifically the RPC endpoint must support `eth_getBlockByNumber` and support fetching full transactions. The benchmark will make one RPC query per block as fast as possible, so ensure the RPC endpoint does not rate limit or block requests after a certain volume.
 - **Reproducibility**: Ensure that the node is at the same state before attempting to retry a benchmark. The `new-payload-fcu` command specifically will commit to the database, so the node must be rolled back using `reth stage unwind` to reproducibly retry benchmarks.
 - **Profiling tools**: If you are collecting CPU profiles, tools like [`samply`](https://github.com/mstange/samply) and [`perf`](https://perf.wiki.kernel.org/index.php/Main_Page) can be useful for analyzing node performance.
-- **Benchmark Data**: `reth-bench` additionally contains a `--benchmark.output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
+- **Benchmark Data**: `reth-bench` additionally contains a `--output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
 - **Platform Information**: To ensure accurate and reproducible benchmarking, document the platform details, including hardware specifications, OS version, and any other relevant information before publishing any benchmarks.

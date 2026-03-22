@@ -1,10 +1,12 @@
 #![cfg(feature = "otlp")]
 
-//! Provides a tracing layer for `OpenTelemetry` that exports spans to an OTLP endpoint.
+//! Provides tracing layers for `OpenTelemetry` that export spans, logs, and metrics to an OTLP
+//! endpoint.
 //!
-//! This module simplifies the integration of `OpenTelemetry` tracing with OTLP export in Rust
-//! applications. It allows for easily capturing and exporting distributed traces to compatible
-//! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
+//! This module simplifies the integration of `OpenTelemetry` with OTLP export in Rust
+//! applications. It allows for easily capturing and exporting distributed traces, logs,
+//! and metrics to compatible backends like Jaeger, Zipkin, or any other
+//! OpenTelemetry-compatible system.
 
 use clap::ValueEnum;
 use eyre::ensure;
@@ -24,6 +26,7 @@ use url::Url;
 // Otlp http endpoint is expected to end with this path.
 // See also <https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_traces_endpoint>.
 const HTTP_TRACE_ENDPOINT: &str = "/v1/traces";
+const HTTP_LOGS_ENDPOINT: &str = "/v1/logs";
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
@@ -60,6 +63,42 @@ where
 
     let tracer = tracer_provider.tracer(otlp_config.service_name);
     Ok(tracing_opentelemetry::layer().with_tracer(tracer))
+}
+
+/// Creates a tracing layer that exports logs to an OTLP endpoint.
+///
+/// This layer bridges logs emitted via the `tracing` crate to `OpenTelemetry` logs.
+#[cfg(feature = "otlp-logs")]
+pub fn log_layer(
+    otlp_config: OtlpLogsConfig,
+) -> eyre::Result<
+    opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge<
+        opentelemetry_sdk::logs::SdkLoggerProvider,
+        opentelemetry_sdk::logs::SdkLogger,
+    >,
+> {
+    use opentelemetry_otlp::LogExporter;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+
+    let resource = build_resource(otlp_config.service_name.clone());
+
+    let log_builder = LogExporter::builder();
+
+    let log_exporter = match otlp_config.protocol {
+        OtlpProtocol::Http => {
+            log_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
+        }
+        OtlpProtocol::Grpc => {
+            log_builder.with_tonic().with_endpoint(otlp_config.endpoint.as_str()).build()?
+        }
+    };
+
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(log_exporter)
+        .build();
+
+    Ok(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logger_provider))
 }
 
 /// Configuration for OTLP trace export.
@@ -115,6 +154,43 @@ impl OtlpConfig {
     }
 }
 
+/// Configuration for OTLP logs export.
+#[derive(Debug, Clone)]
+pub struct OtlpLogsConfig {
+    /// Service name for log identification
+    service_name: String,
+    /// Otlp endpoint URL
+    endpoint: Url,
+    /// Transport protocol, HTTP or gRPC
+    protocol: OtlpProtocol,
+}
+
+impl OtlpLogsConfig {
+    /// Creates a new OTLP logs configuration.
+    pub fn new(
+        service_name: impl Into<String>,
+        endpoint: Url,
+        protocol: OtlpProtocol,
+    ) -> eyre::Result<Self> {
+        Ok(Self { service_name: service_name.into(), endpoint, protocol })
+    }
+
+    /// Returns the service name.
+    pub fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
+    /// Returns the OTLP endpoint URL.
+    pub const fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
+
+    /// Returns the transport protocol.
+    pub const fn protocol(&self) -> OtlpProtocol {
+        self.protocol
+    }
+}
+
 // Builds OTLP resource with service information.
 fn build_resource(service_name: impl Into<Value>) -> Resource {
     Resource::builder()
@@ -145,23 +221,35 @@ pub enum OtlpProtocol {
 }
 
 impl OtlpProtocol {
-    /// Validate and correct the URL to match protocol requirements.
+    /// Validate and correct the URL to match protocol requirements for traces.
     ///
     /// For HTTP: Ensures the path ends with `/v1/traces`, appending it if necessary.
     /// For gRPC: Ensures the path does NOT include `/v1/traces`.
     pub fn validate_endpoint(&self, url: &mut Url) -> eyre::Result<()> {
+        self.validate_endpoint_with_path(url, HTTP_TRACE_ENDPOINT)
+    }
+
+    /// Validate and correct the URL to match protocol requirements for logs.
+    ///
+    /// For HTTP: Ensures the path ends with `/v1/logs`, appending it if necessary.
+    /// For gRPC: Ensures the path does NOT include `/v1/logs`.
+    pub fn validate_logs_endpoint(&self, url: &mut Url) -> eyre::Result<()> {
+        self.validate_endpoint_with_path(url, HTTP_LOGS_ENDPOINT)
+    }
+
+    fn validate_endpoint_with_path(&self, url: &mut Url, http_path: &str) -> eyre::Result<()> {
         match self {
             Self::Http => {
-                if !url.path().ends_with(HTTP_TRACE_ENDPOINT) {
+                if !url.path().ends_with(http_path) {
                     let path = url.path().trim_end_matches('/');
-                    url.set_path(&format!("{}{}", path, HTTP_TRACE_ENDPOINT));
+                    url.set_path(&format!("{}{}", path, http_path));
                 }
             }
             Self::Grpc => {
                 ensure!(
-                    !url.path().ends_with(HTTP_TRACE_ENDPOINT),
+                    !url.path().ends_with(http_path),
                     "OTLP gRPC endpoint should not include {} path, got: {}",
-                    HTTP_TRACE_ENDPOINT,
+                    http_path,
                     url
                 );
             }

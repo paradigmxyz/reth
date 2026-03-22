@@ -4,7 +4,7 @@ use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching prune checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PruneCheckpointReader: Send + Sync {
+pub trait PruneCheckpointReader: Send {
     /// Fetch the prune checkpoint for the given segment.
     fn get_prune_checkpoint(
         &self,
@@ -17,7 +17,7 @@ pub trait PruneCheckpointReader: Send + Sync {
 
 /// The trait for updating prune checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PruneCheckpointWriter: Send + Sync {
+pub trait PruneCheckpointWriter {
     /// Save prune checkpoint.
     fn save_prune_checkpoint(
         &self,

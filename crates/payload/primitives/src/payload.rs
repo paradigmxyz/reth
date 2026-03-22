@@ -40,6 +40,11 @@ pub trait ExecutionPayload:
     /// Returns `None` for pre-Shanghai blocks.
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
 
+    /// Returns the access list included in this payload.
+    ///
+    /// Returns `None` for pre-Amsterdam blocks.
+    fn block_access_list(&self) -> Option<&Bytes>;
+
     /// Returns the beacon block root associated with this payload.
     ///
     /// Returns `None` for pre-merge payloads.
@@ -53,6 +58,9 @@ pub trait ExecutionPayload:
 
     /// Returns the (optional) inclusion list for the block.
     fn inclusion_list(&self) -> Option<&Vec<Bytes>>;
+
+    /// Returns the number of transactions in the payload.
+    fn transaction_count(&self) -> usize;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -72,6 +80,10 @@ impl ExecutionPayload for ExecutionData {
         self.payload.withdrawals()
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
+
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.sidecar.parent_beacon_block_root()
     }
@@ -86,6 +98,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         self.sidecar.inclusion_list_transactions()
+    }
+
+    fn transaction_count(&self) -> usize {
+        self.payload.as_v1().transactions.len()
     }
 }
 
@@ -187,6 +203,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
         self.payload.as_v2().map(|p| &p.withdrawals)
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
+
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.sidecar.parent_beacon_block_root()
     }
@@ -202,6 +222,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     // TODO Pelle: Impl the OP payloads
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         None
+    }
+
+    fn transaction_count(&self) -> usize {
+        self.payload.as_v1().transactions.len()
     }
 }
 

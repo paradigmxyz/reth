@@ -38,6 +38,9 @@ pub mod proof_v2;
 /// Trie witness generation.
 pub mod witness;
 
+/// Trie changeset computation.
+pub mod changesets;
+
 /// The implementation of the Merkle Patricia Trie.
 mod trie;
 pub use trie::{StateRoot, StorageRoot, TrieType};

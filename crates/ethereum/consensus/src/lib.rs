@@ -15,13 +15,16 @@ use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use reth_consensus::{
+    Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom, TransactionRoot,
+};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_gas_limit,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_block_pre_execution, validate_body_against_header, validate_header_base_fee,
-    validate_header_extra_data, validate_header_gas,
+    validate_block_pre_execution, validate_block_pre_execution_with_tx_root,
+    validate_body_against_header, validate_header_base_fee, validate_header_extra_data,
+    validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
@@ -40,12 +43,18 @@ pub struct EthBeaconConsensus<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
     /// Maximum allowed extra data size in bytes
     max_extra_data_size: usize,
+    /// When true, skips the gas limit change validation between parent and child blocks.
+    skip_gas_limit_ramp_check: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
+        Self {
+            chain_spec,
+            max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE,
+            skip_gas_limit_ramp_check: false,
+        }
     }
 
     /// Returns the maximum allowed extra data size.
@@ -56,6 +65,12 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
     /// Sets the maximum allowed extra data size and returns the updated instance.
     pub const fn with_max_extra_data_size(mut self, size: usize) -> Self {
         self.max_extra_data_size = size;
+        self
+    }
+
+    /// Disables the gas limit change validation between parent and child blocks.
+    pub const fn with_skip_gas_limit_ramp_check(mut self, skip: bool) -> Self {
+        self.skip_gas_limit_ramp_check = skip;
         self
     }
 
@@ -74,8 +89,15 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
+        validate_block_post_execution(
+            block,
+            &self.chain_spec,
+            &result.receipts,
+            &result.requests,
+            receipt_root_bloom,
+        )
     }
 }
 
@@ -84,18 +106,24 @@ where
     B: Block,
     ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks + Debug + Send + Sync,
 {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &B::Body,
         header: &SealedHeader<B::Header>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ConsensusError> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
         validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_block_pre_execution_with_tx_root(
+        &self,
+        block: &SealedBlock<B>,
+        transaction_root: Option<TransactionRoot>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_pre_execution_with_tx_root(block, &self.chain_spec, transaction_root)
     }
 }
 
@@ -189,7 +217,9 @@ where
 
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
-        validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+        if !self.skip_gas_limit_ramp_check {
+            validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+        }
 
         validate_against_parent_eip1559_base_fee(
             header.header(),
@@ -226,12 +256,14 @@ mod tests {
     #[test]
     fn test_valid_gas_limit_increase() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
-        let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
+        let child = header_with_gas_limit(parent.gas_limit + 5);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Ok(())
-        );
+        assert!(validate_against_parent_gas_limit(
+            &child,
+            &parent,
+            &ChainSpec::<Header>::default()
+        )
+        .is_ok());
     }
 
     #[test]
@@ -239,10 +271,11 @@ mod tests {
         let parent = header_with_gas_limit(MINIMUM_GAS_LIMIT);
         let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidMinimum { child_gas_limit }
+                if child_gas_limit == child.gas_limit
+        ));
     }
 
     #[test]
@@ -252,13 +285,11 @@ mod tests {
             parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1,
         );
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidIncrease { parent_gas_limit, child_gas_limit }
+                if parent_gas_limit == parent.gas_limit && child_gas_limit == child.gas_limit
+        ));
     }
 
     #[test]
@@ -266,10 +297,12 @@ mod tests {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(parent.gas_limit - 5);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Ok(())
-        );
+        assert!(validate_against_parent_gas_limit(
+            &child,
+            &parent,
+            &ChainSpec::<Header>::default()
+        )
+        .is_ok());
     }
 
     #[test]
@@ -279,13 +312,11 @@ mod tests {
             parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1,
         );
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidDecrease { parent_gas_limit, child_gas_limit }
+                if parent_gas_limit == parent.gas_limit && child_gas_limit == child.gas_limit
+        ));
     }
 
     #[test]
@@ -300,9 +331,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
-            Ok(())
-        );
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
     }
 }

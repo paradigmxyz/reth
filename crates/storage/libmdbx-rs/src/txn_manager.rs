@@ -4,7 +4,7 @@ use crate::{
     CommitLatency,
 };
 use std::{
-    ptr,
+    fmt, ptr,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
 
@@ -17,6 +17,18 @@ pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
     Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
+}
+
+impl fmt::Debug for TxnManagerMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Begin { parent, flags, sender: _ } => {
+                f.debug_struct("Begin").field("parent", parent).field("flags", flags).finish()
+            }
+            Self::Abort { tx, sender: _ } => f.debug_struct("Abort").field("tx", tx).finish(),
+            Self::Commit { tx, sender: _ } => f.debug_struct("Commit").field("tx", tx).finish(),
+        }
+    }
 }
 
 /// Manages transactions by doing two things:
@@ -55,9 +67,14 @@ impl TxnManager {
         let task = move || {
             let env = env;
             loop {
-                match rx.recv() {
+                let msg = rx.recv();
+                tracing::debug!(target: "libmdbx::txn", ?msg, "txn-mngr received");
+                match msg {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "begin", flags)
+                                    .entered();
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             let res = mdbx_result(unsafe {
                                 ffi::mdbx_txn_begin_ex(
@@ -72,14 +89,18 @@ impl TxnManager {
                             sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
                             sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "commit").entered();
                             sender
                                 .send({
                                     let mut latency = CommitLatency::new();
                                     mdbx_result(unsafe {
-                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
+                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdbx_commit_latency())
                                     })
                                     .map(|v| (v, latency))
                                 })
@@ -90,7 +111,7 @@ impl TxnManager {
                 }
             }
         };
-        std::thread::Builder::new().name("mdbx-rs-txn-manager".to_string()).spawn(task).unwrap();
+        std::thread::Builder::new().name("mdbx-rs-txn-mgr".to_string()).spawn(task).unwrap();
     }
 
     pub(crate) fn send_message(&self, message: TxnManagerMessage) {

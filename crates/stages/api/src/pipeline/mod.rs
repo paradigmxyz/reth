@@ -316,7 +316,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         let _locked_sf_producer = self.static_file_producer.lock();
 
         let mut provider_rw =
-            self.provider_factory.database_provider_rw()?.disable_long_read_transaction_safety();
+            self.provider_factory.unwind_provider_rw()?.disable_long_read_transaction_safety();
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -378,7 +378,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             });
                         }
 
-                        // update finalized block if needed
+                        // update finalized and safe block if needed
                         let last_saved_finalized_block_number =
                             provider_rw.last_finalized_block_number()?;
 
@@ -392,11 +392,21 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
+                        let last_saved_safe_block_number = provider_rw.last_safe_block_number()?;
+
+                        if last_saved_safe_block_number.is_none() ||
+                            Some(checkpoint.block_number) < last_saved_safe_block_number
+                        {
+                            provider_rw.save_safe_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
+
                         provider_rw.commit()?;
 
                         stage.post_unwind_commit()?;
 
-                        provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw = self.provider_factory.unwind_provider_rw()?;
                     }
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });

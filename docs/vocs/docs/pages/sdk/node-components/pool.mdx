@@ -23,6 +23,7 @@ graph TD
     SubPools --> Pending[Pending Pool]
     SubPools --> Queued[Queued Pool]
     SubPools --> Base[Base Fee Pool]
+    SubPools --> Blob[Blob Pool]
     
     Pool --> Ordering[Transaction Ordering]
     Pool --> Listeners[Event Listeners]
@@ -49,6 +50,7 @@ Transactions are ordered by their effective tip per gas to maximize block reward
 - **Pending**: Transactions ready for inclusion (correct nonce)
 - **Queued**: Future transactions (nonce gap exists)
 - **Base Fee**: Transactions priced below current base fee
+- **Blob**: Blob transactions that currently do not meet base fee and/or blob fee requirements
 
 ### Pool Maintenance
 The pool requires periodic maintenance to:

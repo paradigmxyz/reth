@@ -48,6 +48,7 @@ impl InvalidHeaderCache {
         // if we get here, the entry has been hit too many times, so we evict it
         self.headers.remove(hash);
         self.metrics.hit_evictions.increment(1);
+        self.metrics.count.set(self.headers.len() as f64);
         None
     }
 

@@ -260,6 +260,17 @@ pub fn remove_file(path: impl AsRef<Path>) -> Result<()> {
     fs::remove_file(path).map_err(|err| FsPathError::remove_file(err, path))
 }
 
+/// Removes a file at the given path, ignoring the error if the file does not exist
+/// (`ErrorKind::NotFound`).
+pub fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<()> {
+    match remove_file(&path) {
+        Err(FsPathError::RemoveFile { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            Ok(())
+        }
+        result => result,
+    }
+}
+
 /// Wrapper for `std::fs::create_dir_all`
 pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
@@ -319,9 +330,6 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
-    #[cfg(windows)]
-    use std::os::windows::fs::OpenOptionsExt;
-
     let mut tmp_path = file_path.to_path_buf();
     tmp_path.set_extension("tmp");
 
@@ -350,17 +358,6 @@ where
 
     // fsync() directory
     if let Some(parent) = file_path.parent() {
-        #[cfg(windows)]
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
-            .open(parent)
-            .map_err(|err| FsPathError::open(err, parent))?
-            .sync_all()
-            .map_err(|err| FsPathError::fsync(err, parent))?;
-
-        #[cfg(not(windows))]
         OpenOptions::new()
             .read(true)
             .open(parent)

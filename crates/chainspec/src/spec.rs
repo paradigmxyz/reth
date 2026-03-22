@@ -10,7 +10,14 @@ use crate::{
     sepolia::SEPOLIA_PARIS_BLOCK,
     EthChainSpec,
 };
-use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -23,7 +30,7 @@ use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
     eip7892::BlobScheduleBlobParams,
 };
-use alloy_genesis::Genesis;
+use alloy_genesis::{ChainConfig, Genesis};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
@@ -32,10 +39,7 @@ use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
-use reth_network_peers::{
-    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
-    NodeRecord,
-};
+use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
@@ -73,6 +77,8 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .then_some(EMPTY_REQUESTS_HASH);
 
     Header {
+        number: genesis.number.unwrap_or_default(),
+        parent_hash: genesis.parent_hash.unwrap_or_default(),
         gas_limit: genesis.gas_limit,
         difficulty: genesis.difficulty,
         nonce: genesis.nonce.into(),
@@ -240,6 +246,113 @@ pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
+/// Creates a [`ChainConfig`] from the given chain, hardforks, deposit contract address, and blob
+/// schedule.
+pub fn create_chain_config(
+    chain: Option<Chain>,
+    hardforks: &ChainHardforks,
+    deposit_contract_address: Option<Address>,
+    blob_schedule: BTreeMap<String, BlobParams>,
+) -> ChainConfig {
+    // Helper to extract block number from a hardfork condition
+    let block_num = |fork: EthereumHardfork| hardforks.fork(fork).block_number();
+
+    // Helper to extract timestamp from a hardfork condition
+    let timestamp = |fork: EthereumHardfork| -> Option<u64> {
+        match hardforks.fork(fork) {
+            ForkCondition::Timestamp(t) => Some(t),
+            _ => None,
+        }
+    };
+
+    // Extract TTD from Paris fork
+    let (terminal_total_difficulty, terminal_total_difficulty_passed) =
+        match hardforks.fork(EthereumHardfork::Paris) {
+            ForkCondition::TTD { total_difficulty, .. } => (Some(total_difficulty), true),
+            _ => (None, false),
+        };
+
+    // Check if DAO fork is supported (it has an activation block)
+    let dao_fork_support = hardforks.fork(EthereumHardfork::Dao) != ForkCondition::Never;
+
+    #[allow(clippy::needless_update)]
+    ChainConfig {
+        chain_id: chain.map(|c| c.id()).unwrap_or(0),
+        homestead_block: block_num(EthereumHardfork::Homestead),
+        dao_fork_block: block_num(EthereumHardfork::Dao),
+        dao_fork_support,
+        eip150_block: block_num(EthereumHardfork::Tangerine),
+        eip155_block: block_num(EthereumHardfork::SpuriousDragon),
+        eip158_block: block_num(EthereumHardfork::SpuriousDragon),
+        byzantium_block: block_num(EthereumHardfork::Byzantium),
+        constantinople_block: block_num(EthereumHardfork::Constantinople),
+        petersburg_block: block_num(EthereumHardfork::Petersburg),
+        istanbul_block: block_num(EthereumHardfork::Istanbul),
+        muir_glacier_block: block_num(EthereumHardfork::MuirGlacier),
+        berlin_block: block_num(EthereumHardfork::Berlin),
+        london_block: block_num(EthereumHardfork::London),
+        arrow_glacier_block: block_num(EthereumHardfork::ArrowGlacier),
+        gray_glacier_block: block_num(EthereumHardfork::GrayGlacier),
+        merge_netsplit_block: None,
+        shanghai_time: timestamp(EthereumHardfork::Shanghai),
+        cancun_time: timestamp(EthereumHardfork::Cancun),
+        prague_time: timestamp(EthereumHardfork::Prague),
+        osaka_time: timestamp(EthereumHardfork::Osaka),
+        bpo1_time: timestamp(EthereumHardfork::Bpo1),
+        bpo2_time: timestamp(EthereumHardfork::Bpo2),
+        bpo3_time: timestamp(EthereumHardfork::Bpo3),
+        bpo4_time: timestamp(EthereumHardfork::Bpo4),
+        bpo5_time: timestamp(EthereumHardfork::Bpo5),
+        terminal_total_difficulty,
+        terminal_total_difficulty_passed,
+        ethash: None,
+        clique: None,
+        parlia: None,
+        extra_fields: Default::default(),
+        deposit_contract_address,
+        blob_schedule,
+        ..Default::default()
+    }
+}
+
+/// Returns a [`ChainConfig`] for the current Ethereum mainnet chain.
+pub fn mainnet_chain_config() -> ChainConfig {
+    let hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
+    let blob_schedule = blob_params_to_schedule(&MAINNET.blob_params, &hardforks);
+    create_chain_config(
+        Some(Chain::mainnet()),
+        &hardforks,
+        Some(MAINNET_DEPOSIT_CONTRACT.address),
+        blob_schedule,
+    )
+}
+
+/// Converts the given [`BlobScheduleBlobParams`] into blobs schedule.
+pub fn blob_params_to_schedule(
+    params: &BlobScheduleBlobParams,
+    hardforks: &ChainHardforks,
+) -> BTreeMap<String, BlobParams> {
+    let mut schedule = BTreeMap::new();
+    schedule.insert("cancun".to_string(), params.cancun);
+    schedule.insert("prague".to_string(), params.prague);
+    schedule.insert("osaka".to_string(), params.osaka);
+
+    // Map scheduled entries back to bpo fork names by matching timestamps
+    let bpo_forks = EthereumHardfork::bpo_variants();
+    for (timestamp, blob_params) in &params.scheduled {
+        for bpo_fork in bpo_forks {
+            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
+                fork_ts == *timestamp
+            {
+                schedule.insert(bpo_fork.name().to_lowercase(), *blob_params);
+                break;
+            }
+        }
+    }
+
+    schedule
+}
+
 /// A wrapper around [`BaseFeeParams`] that allows for specifying constant or dynamic EIP-1559
 /// parameters based on the active [Hardfork].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -346,6 +459,18 @@ impl ChainSpec {
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
     }
+
+    /// Map a chain ID to a known chain spec, if available.
+    pub fn from_chain_id(chain_id: u64) -> Option<Arc<Self>> {
+        match NamedChain::try_from(chain_id).ok()? {
+            NamedChain::Mainnet => Some(MAINNET.clone()),
+            NamedChain::Sepolia => Some(SEPOLIA.clone()),
+            NamedChain::Holesky => Some(HOLESKY.clone()),
+            NamedChain::Hoodi => Some(HOODI.clone()),
+            NamedChain::Dev => Some(DEV.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl<H: BlockHeader> ChainSpec<H> {
@@ -413,7 +538,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                     }
                 }
 
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+                bf_params.first().map(|(_, params)| *params).unwrap_or_else(BaseFeeParams::ethereum)
             }
         }
     }
@@ -490,10 +615,18 @@ impl<H: BlockHeader> ChainSpec<H> {
     }
 
     /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
-    /// hardforks.
+    /// schedulable hardforks (i.e., all forks are `ForkCondition::Never`).
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
+        // Skip Never-condition forks (like Eip7805 before it's scheduled) since they
+        // have no meaningful fork ID.
+        let (_, cond) = self
+            .hardforks
+            .forks_iter()
+            .filter(|(_, cond)| !matches!(cond, ForkCondition::Never))
+            .last()
+            .expect("chainspec must have at least one schedulable hardfork");
+        self.fork_id(&self.satisfy(cond))
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -652,15 +785,6 @@ impl<H: BlockHeader> ChainSpec<H> {
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
             C::Hoodi => Some(hoodi_nodes()),
-            // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
-            C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
-            C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
-                Some(op_testnet_nodes())
-            }
-
-            // fallback for optimism chains
-            chain if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
-            chain if chain.is_optimism() => Some(op_nodes()),
             _ => None,
         }
     }
@@ -739,15 +863,9 @@ impl From<Genesis> for ChainSpec {
                             // those networks we use the activation
                             // blocks of those networks
                             match genesis.config.chain_id {
-                                1 => {
-                                    if ttd == MAINNET_PARIS_TTD {
-                                        return Some(MAINNET_PARIS_BLOCK)
-                                    }
-                                }
-                                11155111 => {
-                                    if ttd == SEPOLIA_PARIS_TTD {
-                                        return Some(SEPOLIA_PARIS_BLOCK)
-                                    }
+                                1 if ttd == MAINNET_PARIS_TTD => return Some(MAINNET_PARIS_BLOCK),
+                                11155111 if ttd == SEPOLIA_PARIS_TTD => {
+                                    return Some(SEPOLIA_PARIS_BLOCK)
                                 }
                                 _ => {}
                             };
@@ -857,7 +975,7 @@ impl<H: BlockHeader> EthereumHardforks for ChainSpec<H> {
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ChainSpecProvider: Debug + Send + Sync {
+pub trait ChainSpecProvider: Debug + Send {
     /// The chain spec type.
     type ChainSpec: EthChainSpec + 'static;
 
@@ -937,9 +1055,16 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Dao at genesis.
+    pub fn dao_activated(mut self) -> Self {
+        self = self.frontier_activated();
+        self.hardforks.insert(EthereumHardfork::Dao, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Homestead at genesis.
     pub fn homestead_activated(mut self) -> Self {
-        self = self.frontier_activated();
+        self = self.dao_activated();
         self.hardforks.insert(EthereumHardfork::Homestead, ForkCondition::Block(0));
         self
     }
@@ -986,9 +1111,16 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Muir Glacier at genesis.
+    pub fn muirglacier_activated(mut self) -> Self {
+        self = self.istanbul_activated();
+        self.hardforks.insert(EthereumHardfork::MuirGlacier, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Berlin at genesis.
     pub fn berlin_activated(mut self) -> Self {
-        self = self.istanbul_activated();
+        self = self.muirglacier_activated();
         self.hardforks.insert(EthereumHardfork::Berlin, ForkCondition::Block(0));
         self
     }
@@ -1000,9 +1132,23 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Arrow Glacier at genesis.
+    pub fn arrowglacier_activated(mut self) -> Self {
+        self = self.london_activated();
+        self.hardforks.insert(EthereumHardfork::ArrowGlacier, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Gray Glacier at genesis.
+    pub fn grayglacier_activated(mut self) -> Self {
+        self = self.arrowglacier_activated();
+        self.hardforks.insert(EthereumHardfork::GrayGlacier, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Paris at genesis.
     pub fn paris_activated(mut self) -> Self {
-        self = self.london_activated();
+        self = self.grayglacier_activated();
         self.hardforks.insert(
             EthereumHardfork::Paris,
             ForkCondition::TTD {

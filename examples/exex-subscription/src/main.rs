@@ -1,6 +1,6 @@
 //! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{map::AddressMap, Address, U256};
 use futures::TryStreamExt;
 use jsonrpsee::{
     core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
@@ -9,7 +9,6 @@ use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
-use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
@@ -97,8 +96,8 @@ async fn my_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     mut subscription_requests: mpsc::UnboundedReceiver<SubscriptionRequest>,
 ) -> eyre::Result<()> {
-    let mut subscriptions: HashMap<Address, Vec<mpsc::UnboundedSender<StorageDiff>>> =
-        HashMap::new();
+    let mut subscriptions: AddressMap<Vec<mpsc::UnboundedSender<StorageDiff>>> =
+        AddressMap::default();
 
     loop {
         tokio::select! {
@@ -162,7 +161,7 @@ async fn my_exex<Node: FullNodeComponents>(
 }
 
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(|builder, _| async move {
+    reth_ethereum::cli::Cli::parse_args().run(async move |builder, _| {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
         let rpc = StorageWatcherRpc::new(subscriptions_tx);
 

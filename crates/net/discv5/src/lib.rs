@@ -77,7 +77,7 @@ pub struct Discv5 {
     metrics: Discv5Metrics,
     /// Returns the _local_ [`NodeRecord`] this service was started with.
     // Note: we must track this separately because the `discv5::Discv5` does not necessarily
-    // provide this via it's [`local_enr`](discv5::Discv5::local_ner()) This is intended for
+    // provide this via its [`local_enr`](discv5::Discv5::local_enr()). This is intended for
     // obtaining the port this service was launched at
     local_node_record: NodeRecord,
 }
@@ -580,7 +580,7 @@ pub fn spawn_populate_kbuckets_bg(
     let metrics = metrics.discovered_peers;
     let mut kbucket_index = MAX_KBUCKET_INDEX;
     let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
-    task::spawn(Box::pin(async move {
+    task::spawn(async move {
         // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
         // log2distance from local node
         for i in (0..bootstrap_lookup_countdown).rev() {
@@ -622,7 +622,7 @@ pub fn spawn_populate_kbuckets_bg(
 
             tokio::time::sleep(lookup_interval).await;
         }
-    }));
+    });
 }
 
 /// Gets the next lookup target, based on which bucket is currently being targeted.

@@ -151,13 +151,16 @@ impl Discovery {
         self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
     }
 
-    /// Updates the `eth:ForkId` field in discv4.
+    /// Updates the `eth:ForkId` field in discv4/discv5.
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry
             discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
-        // todo: update discv5 enr
+        if let Some(discv5) = &self.discv5 {
+            discv5
+                .encode_and_set_eip868_in_local_enr(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
+        }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
@@ -237,7 +240,7 @@ impl Discovery {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
-                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node, fork_id))
             }
             DiscoveryUpdate::Removed(peer_id) => {
                 self.discovered_nodes.remove(&peer_id);
@@ -294,6 +297,20 @@ impl Discovery {
             if self.queued_events.is_empty() {
                 return Poll::Pending
             }
+        }
+    }
+}
+
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.terminate();
+        }
+        if let Some(handle) = self._discv4_service.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self._dns_disc_service.take() {
+            handle.abort();
         }
     }
 }

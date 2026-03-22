@@ -65,7 +65,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
     }
 }
 
-/// A [`PayloadJobGenerator`] for testing purposes
+/// A [`PayloadJob`] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
     attr: EthPayloadBuilderAttributes,

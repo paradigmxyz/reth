@@ -2,10 +2,7 @@ use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
 use linked_hash_set::LinkedHashSet;
 use secp256k1::SecretKey;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// A sync-able tree
 pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
@@ -17,8 +14,6 @@ pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
     root_updated: Instant,
     /// The state of the tree sync progress.
     sync_state: SyncState,
-    /// Links contained in this tree
-    resolved_links: HashMap<String, LinkEntry<K>>,
     /// Unresolved links of the tree
     unresolved_links: LinkedHashSet<String>,
     /// Unresolved nodes of the tree
@@ -34,7 +29,6 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             link,
             root_updated: Instant::now(),
             sync_state: SyncState::Pending,
-            resolved_links: Default::default(),
             unresolved_links: Default::default(),
             unresolved_nodes: Default::default(),
         }
@@ -47,10 +41,6 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
 
     pub(crate) const fn link(&self) -> &LinkEntry<K> {
         &self.link
-    }
-
-    pub(crate) const fn resolved_links_mut(&mut self) -> &mut HashMap<String, LinkEntry<K>> {
-        &mut self.resolved_links
     }
 
     pub(crate) fn extend_children(

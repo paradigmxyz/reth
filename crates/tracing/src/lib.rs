@@ -32,8 +32,7 @@
 //!  }
 //!  ```
 //!
-//!  This example sets up a tracer with JSON format logging for journald and terminal-friendly
-//! format  for file logging.
+//! This example sets up a tracer with JSON format logging to stdout.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -48,14 +47,28 @@ pub use tracing;
 pub use tracing_appender;
 pub use tracing_subscriber;
 
+#[cfg(feature = "tracy")]
+tracy_client::register_demangler!();
+
 // Re-export our types
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
+pub use log_handle::{
+    install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
+    LogFilterReloadHandle,
+};
 pub use test_tracer::TestTracer;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use super::throttle::*;
+}
 
 mod formatter;
 mod layers;
+pub mod log_handle;
 mod test_tracer;
+mod throttle;
 
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -70,42 +83,75 @@ pub struct RethTracer {
     stdout: LayerInfo,
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
+    samply: Option<LayerInfo>,
+    #[cfg(feature = "tracy")]
+    tracy: Option<LayerInfo>,
+    /// When true, the stdout filter is wrapped in a reload layer so log levels
+    /// can be changed at runtime via RPC (`debug_verbosity`, `debug_vmodule`).
+    enable_reload: bool,
 }
 
 impl RethTracer {
-    ///  Constructs a new `Tracer` with default settings.
+    /// Constructs a new `Tracer` with default settings.
     ///
-    ///  Initializes with default stdout layer configuration.
-    ///  Journald and file layers are not set by default.
+    /// Initializes with default stdout layer configuration.
+    /// Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None }
+        Self {
+            stdout: LayerInfo::default(),
+            journald: None,
+            file: None,
+            samply: None,
+            #[cfg(feature = "tracy")]
+            tracy: None,
+            enable_reload: false,
+        }
     }
 
-    ///  Sets a custom configuration for the stdout layer.
+    /// Sets a custom configuration for the stdout layer.
     ///
-    ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the stdout layer.
+    /// # Arguments
+    /// * `config` - The `LayerInfo` to use for the stdout layer.
     pub fn with_stdout(mut self, config: LayerInfo) -> Self {
         self.stdout = config;
         self
     }
 
-    ///  Sets the journald layer filter.
+    /// Sets the journald layer filter.
     ///
-    ///  # Arguments
-    ///  * `filter` - The `filter` to use for the journald layer.
+    /// # Arguments
+    /// * `filter` - The `filter` to use for the journald layer.
     pub fn with_journald(mut self, filter: String) -> Self {
         self.journald = Some(filter);
         self
     }
 
-    ///  Sets the file layer configuration and associated file info.
+    /// Sets the file layer configuration and associated file info.
     ///
     ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the file layer.
-    ///  * `file_info` - The `FileInfo` containing details about the log file.
+    /// * `config` - The `LayerInfo` to use for the file layer.
+    /// * `file_info` - The `FileInfo` containing details about the log file.
     pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
         self.file = Some((config, file_info));
+        self
+    }
+
+    /// Sets the samply layer configuration.
+    pub fn with_samply(mut self, config: LayerInfo) -> Self {
+        self.samply = Some(config);
+        self
+    }
+
+    /// Sets the tracy layer configuration.
+    #[cfg(feature = "tracy")]
+    pub fn with_tracy(mut self, config: LayerInfo) -> Self {
+        self.tracy = Some(config);
+        self
+    }
+
+    /// Enables runtime log filter reloading via RPC (`debug_verbosity`, `debug_vmodule`).
+    pub const fn with_reload(mut self, enable: bool) -> Self {
+        self.enable_reload = enable;
         self
     }
 }
@@ -181,10 +227,10 @@ pub trait Tracer: Sized {
     fn init(self) -> eyre::Result<Option<WorkerGuard>> {
         self.init_with_layers(Layers::new())
     }
+
     /// Initialize the logging configuration with additional custom layers.
     ///
-    /// This method allows for more customized setup by accepting pre-configured
-    /// `Layers` which can be further customized before initialization.
+    /// This is the primary method that implementors must provide.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured `Layers` instance to use for initialization
@@ -196,37 +242,46 @@ pub trait Tracer: Sized {
 }
 
 impl Tracer for RethTracer {
-    ///  Initializes the logging system based on the configured layers.
-    ///
-    ///  This method sets up the global tracing subscriber with the specified
-    ///  stdout, journald, and file layers.
-    ///
-    ///  The default layer is stdout.
-    ///
-    ///  # Returns
-    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    ///  or an `Err` in case of an error during initialization.
     fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
-        layers.stdout(
+        // Configure stdout layer - reloadable if requested for runtime log level changes
+        if let Some(handle) = layers.stdout(
             self.stdout.format,
             self.stdout.default_directive.parse()?,
             &self.stdout.filters,
             self.stdout.color,
-        )?;
+            self.enable_reload,
+        )? {
+            install_log_handle(handle);
+        }
 
         if let Some(config) = self.journald {
             layers.journald(&config)?;
         }
 
         let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
+            let (guard, handle) =
+                layers.file(config.format, &config.filters, file_info, self.enable_reload)?;
+            if let Some(handle) = handle {
+                install_log_handle(handle);
+            }
+            Some(guard)
         } else {
             None
         };
 
+        if let Some(config) = self.samply {
+            layers.samply(config)?;
+        }
+
+        #[cfg(feature = "tracy")]
+        if let Some(config) = self.tracy {
+            layers.tracy(config)?;
+        }
+
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
+
         Ok(file_guard)
     }
 }

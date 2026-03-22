@@ -39,13 +39,12 @@ enum Subcommands {
 #[derive(Debug, Clone, Copy, Subcommand)]
 #[clap(rename_all = "snake_case")]
 pub enum SetCommand {
-    /// Store receipts in static files instead of the database
-    ReceiptsInStaticFiles {
-        #[clap(action(ArgAction::Set))]
-        value: bool,
-    },
-    /// Store transaction senders in static files instead of the database
-    TransactionSendersInStaticFiles {
+    /// Enable or disable v2 storage layout
+    ///
+    /// When enabled, uses static files for receipts/senders/changesets and RocksDB for
+    /// history indices and transaction hashes. When disabled, uses v1/legacy layout (everything in
+    /// MDBX).
+    V2 {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
@@ -88,28 +87,18 @@ impl Command {
             println!("No storage settings found, creating new settings.");
         }
 
-        let mut settings @ StorageSettings {
-            receipts_in_static_files: _,
-            transaction_senders_in_static_files: _,
-        } = settings.unwrap_or_else(StorageSettings::legacy);
+        let mut settings @ StorageSettings { storage_v2: _ } =
+            settings.unwrap_or_else(StorageSettings::v1);
 
         // Update the setting based on the key
         match cmd {
-            SetCommand::ReceiptsInStaticFiles { value } => {
-                if settings.receipts_in_static_files == value {
-                    println!("receipts_in_static_files is already set to {}", value);
+            SetCommand::V2 { value } => {
+                if settings.storage_v2 == value {
+                    println!("storage_v2 is already set to {}", value);
                     return Ok(());
                 }
-                settings.receipts_in_static_files = value;
-                println!("Set receipts_in_static_files = {}", value);
-            }
-            SetCommand::TransactionSendersInStaticFiles { value } => {
-                if settings.transaction_senders_in_static_files == value {
-                    println!("transaction_senders_in_static_files is already set to {}", value);
-                    return Ok(());
-                }
-                settings.transaction_senders_in_static_files = value;
-                println!("Set transaction_senders_in_static_files = {}", value);
+                settings.storage_v2 = value;
+                println!("Set storage_v2 = {}", value);
             }
         }
 

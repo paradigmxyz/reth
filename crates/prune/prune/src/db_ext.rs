@@ -1,14 +1,33 @@
 use crate::PruneLimiter;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
-    table::{Table, TableRow},
-    transaction::DbTxMut,
+    table::{DupSort, Table, TableRow},
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
-pub(crate) trait DbTxPruneExt: DbTxMut {
+/// Result of a single prune step in [`DbTxPruneExt::prune_table_with_range_step`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PruneStepResult {
+    /// `true` if the walker is finished, `false` if it may have more data to prune.
+    done: bool,
+    /// `true` if the current entry was deleted, `false` if it was skipped.
+    deleted: bool,
+}
+
+pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
+    /// Clear the entire table in a single operation.
+    ///
+    /// This is much faster than iterating entry-by-entry for `PruneMode::Full`.
+    /// Returns the number of entries that were in the table.
+    fn clear_table<T: Table>(&self) -> Result<usize, DatabaseError> {
+        let count = self.entries::<T>()?;
+        <Self as DbTxMut>::clear::<T>(self)?;
+        Ok(count)
+    }
+
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
@@ -81,25 +100,26 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
                 break false
             }
 
-            let done = self.prune_table_with_range_step(
+            let result = self.prune_table_with_range_step(
                 &mut walker,
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )?;
 
-            if done {
+            if result.deleted {
+                deleted_entries += 1;
+            }
+
+            if result.done {
                 break true
             }
-            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
     }
 
     /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
@@ -110,22 +130,72 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
+    ) -> Result<PruneStepResult, DatabaseError> {
+        let Some(res) = walker.next() else {
+            return Ok(PruneStepResult { done: true, deleted: false })
+        };
 
         let row = res?;
 
-        if !skip_filter(&row) {
+        if skip_filter(&row) {
+            Ok(PruneStepResult { done: false, deleted: false })
+        } else {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
+            Ok(PruneStepResult { done: false, deleted: true })
         }
+    }
 
-        Ok(false)
+    /// Prune a DUPSORT table for the specified key range.
+    ///
+    /// Returns number of rows pruned.
+    #[expect(unused)]
+    fn prune_dupsort_table_with_range<T: DupSort>(
+        &self,
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limiter: &mut PruneLimiter,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> Result<(usize, bool), DatabaseError> {
+        let starting_entries = self.entries::<T>()?;
+        let mut cursor = self.cursor_dup_write::<T>()?;
+        let mut walker = cursor.walk_range(keys)?;
+
+        let done = loop {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break false
+            }
+
+            let Some(res) = walker.next() else { break true };
+            let row = res?;
+
+            walker.delete_current_duplicates()?;
+            limiter.increment_deleted_entries_count();
+            delete_callback(row);
+        };
+
+        debug!(
+            target: "providers::db",
+            table=?T::NAME,
+            cursor_current=?cursor.current(),
+            "done walking",
+        );
+
+        let ending_entries = self.entries::<T>()?;
+
+        Ok((starting_entries - ending_entries, done))
     }
 }
 
-impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut {}
+impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 
 #[cfg(test)]
 mod tests {

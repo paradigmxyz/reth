@@ -2,7 +2,7 @@
 
 use reth_metrics::{metrics::Counter, Metrics};
 
-/// Transaction pool metrics
+/// Payload builder metrics
 #[derive(Metrics)]
 #[metrics(scope = "payloads")]
 pub(crate) struct PayloadBuilderMetrics {

@@ -14,8 +14,8 @@ pub mod app;
 pub mod chainspec;
 pub mod interface;
 
-pub use app::CliApp;
-pub use interface::{Cli, Commands};
+pub use app::{CliApp, ExtendedCommand};
+pub use interface::{Cli, Commands, NoSubCmd};
 
 #[cfg(test)]
 mod test {
@@ -25,7 +25,7 @@ mod test {
     use reth_cli_commands::NodeCommand;
 
     #[test]
-    #[ignore = "reth cmd will print op-reth output if optimism feature enabled"]
+    #[ignore = "reth cmd output differs when optimism feature enabled"]
     fn parse_dev() {
         let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();

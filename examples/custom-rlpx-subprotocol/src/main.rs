@@ -22,6 +22,7 @@ use reth_ethereum::{
         NetworkConfig, NetworkManager, NetworkProtocols,
     },
     node::{builder::NodeHandle, EthereumNode},
+    tasks::Runtime,
 };
 use subprotocol::{
     connection::CustomCommand,
@@ -34,7 +35,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
+    reth_ethereum::cli::Cli::parse_args().run(async move |builder, _args| {
         // launch the node
         let NodeHandle { node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;
@@ -50,7 +51,7 @@ fn main() -> eyre::Result<()> {
         let secret_key = rng_secret_key();
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
-        let net_cfg = NetworkConfig::builder(secret_key)
+        let net_cfg = NetworkConfig::builder(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
@@ -61,7 +62,7 @@ fn main() -> eyre::Result<()> {
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();
-        node.task_executor.spawn(subnetwork);
+        node.task_executor.spawn_task(subnetwork);
 
         // connect the launched node to the subnetwork
         node.network.peers_handle().add_peer(subnetwork_peer_id, subnetwork_peer_addr);

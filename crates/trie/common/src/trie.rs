@@ -1,37 +1,57 @@
 //! Types related to sparse trie nodes and masks.
 
 use crate::Nibbles;
+use alloy_primitives::map::HashMap;
 use alloy_trie::{nodes::TrieNode, TrieMask};
 
-/// Struct for passing around branch node mask information.
+/// Branch node masks containing `hash_mask` and `tree_mask`.
 ///
-/// Branch nodes can have up to 16 children (one for each nibble).
-/// The masks represent which children are stored in different ways:
-/// - `hash_mask`: Indicates which children are stored as hashes in the database
-/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
-///
-/// These masks are essential for efficient trie traversal and serialization, as they
-/// determine how nodes should be encoded and stored on disk.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct TrieMasks {
-    /// Branch node hash mask, if any.
-    ///
-    /// When a bit is set, the corresponding child node's hash is stored in the trie.
-    ///
-    /// This mask enables selective hashing of child nodes.
-    pub hash_mask: Option<TrieMask>,
-    /// Branch node tree mask, if any.
-    ///
-    /// When a bit is set, the corresponding child subtree is stored in the database.
-    pub tree_mask: Option<TrieMask>,
+/// Consolidates `hash_mask` and `tree_mask` into a single struct, reducing `HashMap` overhead
+/// when storing masks by path. Instead of two separate `HashMap<Nibbles, TrieMask>`,
+/// we use a single `HashMap<Nibbles, BranchNodeMasks>`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BranchNodeMasks {
+    /// Hash mask indicating which children are stored as hashes.
+    pub hash_mask: TrieMask,
+    /// Tree mask indicating which children are complete subtrees.
+    pub tree_mask: TrieMask,
 }
 
-impl TrieMasks {
-    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub const fn none() -> Self {
-        Self { hash_mask: None, tree_mask: None }
+impl BranchNodeMasks {
+    /// Creates masks from optional hash and tree masks.
+    ///
+    /// Returns `None` if both masks are `None`, otherwise defaults missing masks to empty.
+    pub fn from_optional(hash_mask: Option<TrieMask>, tree_mask: Option<TrieMask>) -> Option<Self> {
+        match (hash_mask, tree_mask) {
+            (Some(h), Some(t)) => Some(Self { hash_mask: h, tree_mask: t }),
+            (Some(h), None) => Some(Self { hash_mask: h, tree_mask: TrieMask::default() }),
+            (None, Some(t)) => Some(Self { hash_mask: TrieMask::default(), tree_mask: t }),
+            (None, None) => None,
+        }
+    }
+
+    /// Returns true if both interior masks are empty.
+    pub const fn is_empty(&self) -> bool {
+        self.hash_mask.is_empty() && self.tree_mask.is_empty()
+    }
+
+    /// Updates this set of masks for `nibble` based on that child's mask bits.
+    pub const fn set_child_bits(&mut self, nibble: u8, hash_mask_bit: bool, tree_mask_bit: bool) {
+        if hash_mask_bit {
+            self.hash_mask.set_bit(nibble);
+        } else {
+            self.hash_mask.unset_bit(nibble);
+        }
+        if tree_mask_bit {
+            self.tree_mask.set_bit(nibble);
+        } else {
+            self.tree_mask.unset_bit(nibble);
+        }
     }
 }
+
+/// Map from nibble path to branch node masks.
+pub type BranchNodeMasksMap = HashMap<Nibbles, BranchNodeMasks>;
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,5 +61,6 @@ pub struct ProofTrieNode {
     /// The node itself.
     pub node: TrieNode,
     /// Tree and hash masks for the node, if known.
-    pub masks: TrieMasks,
+    /// Both masks are always set together (from database branch nodes).
+    pub masks: Option<BranchNodeMasks>,
 }

@@ -9,7 +9,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 ///
 /// This trait also supports fetching block hashes and block numbers from a [`BlockHashOrNumber`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockNumReader: BlockHashReader + Send + Sync {
+pub trait BlockNumReader: BlockHashReader + Send {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> ProviderResult<ChainInfo>;
 

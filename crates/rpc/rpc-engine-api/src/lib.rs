@@ -12,6 +12,9 @@
 /// The Engine API implementation.
 mod engine_api;
 
+/// Reth-specific engine API extensions.
+mod reth_engine_api;
+
 /// Engine API capabilities.
 pub mod capabilities;
 pub use capabilities::EngineCapabilities;
@@ -24,6 +27,7 @@ mod metrics;
 
 pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::*;
+pub use reth_engine_api::RethEngineApi;
 
 // re-export server trait for convenience
 pub use reth_rpc_api::EngineApiServer;

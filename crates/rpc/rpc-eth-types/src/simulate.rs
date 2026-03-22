@@ -6,9 +6,11 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
+use alloy_evm::precompiles::PrecompilesMap;
 use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    state::StateOverride,
     BlockTransactionsKind,
 };
 use jsonrpsee_types::ErrorObject;
@@ -23,9 +25,21 @@ use reth_storage_api::noop::NoopProvider;
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind},
+    primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
+
+/// Error code for execution reverted in `eth_simulateV1`.
+///
+/// Consistent with `eth_call` revert error code.
+///
+/// <https://github.com/ethereum/execution-apis/pull/748>
+pub const SIMULATE_REVERT_CODE: i32 = 3;
+
+/// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
 
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
@@ -33,16 +47,80 @@ pub enum EthSimulateError {
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Number of simulated blocks exceeds the configured client limit.
+    #[error("too many blocks")]
+    TooManyBlocks,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Block number in sequence did not increase.
+    #[error("block numbers must be in order: {got} <= {parent}")]
+    BlockNumberInvalid {
+        /// The block number that was provided.
+        got: u64,
+        /// The parent block number.
+        parent: u64,
+    },
+    /// Block timestamp in sequence did not increase.
+    #[error("block timestamps must be in order: {got} <= {parent}")]
+    BlockTimestampInvalid {
+        /// The block timestamp that was provided.
+        got: u64,
+        /// The parent block timestamp.
+        parent: u64,
+    },
+    /// Transaction nonce is too low.
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
+    NonceTooLow {
+        /// Transaction nonce.
+        tx: u64,
+        /// Current state nonce.
+        state: u64,
+    },
+    /// Transaction nonce is too high.
+    #[error("nonce too high")]
+    NonceTooHigh,
+    /// Transaction's baseFeePerGas is too low.
+    #[error("max fee per gas less than block base fee")]
+    BaseFeePerGasTooLow,
+    /// Not enough gas provided to pay for intrinsic gas.
+    #[error("intrinsic gas too low")]
+    IntrinsicGasTooLow,
+    /// Insufficient funds to pay for gas fees and value.
+    #[error("insufficient funds for gas * price + value: have {balance} want {cost}")]
+    InsufficientFunds {
+        /// Transaction cost.
+        cost: U256,
+        /// Sender balance.
+        balance: U256,
+    },
+    /// Sender is not an EOA.
+    #[error("sender is not an EOA")]
+    SenderNotEOA,
+    /// Max init code size exceeded.
+    #[error("max initcode size exceeded")]
+    MaxInitCodeSizeExceeded,
+    /// Attempted to move a non-precompile address.
+    #[error("account {0} is not a precompile")]
+    NotAPrecompile(Address),
 }
 
 impl EthSimulateError {
-    const fn error_code(&self) -> i32 {
+    /// Returns the JSON-RPC error code for a `eth_simulateV1` error.
+    pub const fn error_code(&self) -> i32 {
         match self {
+            Self::NonceTooLow { .. } => -38010,
+            Self::NonceTooHigh => -38011,
+            Self::BaseFeePerGasTooLow => -38012,
+            Self::IntrinsicGasTooLow => -38013,
+            Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
-            Self::GasLimitReached => -38026,
+            Self::BlockNumberInvalid { .. } => -38020,
+            Self::BlockTimestampInvalid { .. } => -38021,
+            Self::SenderNotEOA => -38024,
+            Self::MaxInitCodeSizeExceeded => -38025,
+            Self::TooManyBlocks | Self::GasLimitReached => -38026,
+            Self::NotAPrecompile(_) => -32000,
         }
     }
 }
@@ -51,6 +129,31 @@ impl ToRpcError for EthSimulateError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         rpc_err(self.error_code(), self.to_string(), None)
     }
+}
+
+/// Applies precompile move overrides from state overrides to the EVM's precompiles map.
+///
+/// This function processes `movePrecompileToAddress` entries from the state overrides and
+/// moves precompiles from their original addresses to new addresses. The original address
+/// is cleared (precompile removed) and the precompile is installed at the destination address.
+pub fn apply_precompile_overrides(
+    state_overrides: &StateOverride,
+    precompiles: &mut PrecompilesMap,
+) -> Result<(), EthSimulateError> {
+    let moves: Vec<_> = state_overrides
+        .iter()
+        .filter_map(|(source, account_override)| {
+            account_override.move_precompile_to.map(|dest| (*source, dest))
+        })
+        .collect();
+
+    precompiles.move_precompiles(moves).map_err(
+        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
+            EthSimulateError::NotAPrecompile(addr)
+        },
+    )?;
+
+    Ok(())
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
@@ -65,7 +168,7 @@ pub fn execute_transactions<S, T>(
     calls: Vec<RpcTxReq<T::Network>>,
     default_gas_limit: u64,
     chain_id: u64,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -89,7 +192,7 @@ where
             builder.evm().block().basefee(),
             chain_id,
             builder.evm_mut().db_mut(),
-            tx_resp_builder,
+            converter,
         )?;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
@@ -117,7 +220,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
     block_base_fee_per_gas: u64,
     chain_id: u64,
     db: &mut DB,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
@@ -175,9 +278,8 @@ where
         }
     }
 
-    let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx)
-        .map_err(|e| EthApiError::other(e.into()))?;
+    let tx =
+        converter.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }
@@ -187,7 +289,7 @@ pub fn build_simulated_block<Err, T>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
     results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
     txs_kind: BlockTransactionsKind,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
 where
     Err: std::error::Error
@@ -202,53 +304,65 @@ where
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
-            ExecutionResult::Halt { reason, gas_used } => {
+            ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
+                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_VM_ERROR_CODE,
+                        ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: Vec::new(),
                     status: false,
+                    ..Default::default()
                 }
             }
-            ExecutionResult::Revert { output, gas_used } => {
+            ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
+                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_REVERT_CODE,
+                        ..SimulateError::invalid_params()
                     }),
-                    gas_used,
+                    gas_used: gas.used(),
                     status: false,
                     logs: Vec::new(),
+                    ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_data: output.into_data(),
-                error: None,
-                gas_used,
-                logs: logs
-                    .into_iter()
-                    .map(|log| {
-                        log_index += 1;
-                        alloy_rpc_types_eth::Log {
-                            inner: log,
-                            log_index: Some(log_index - 1),
-                            transaction_index: Some(index as u64),
-                            transaction_hash: Some(*tx.tx_hash()),
-                            block_number: Some(block.header().number()),
-                            block_timestamp: Some(block.header().timestamp()),
-                            ..Default::default()
-                        }
-                    })
-                    .collect(),
-                status: true,
-            },
+            ExecutionResult::Success { output, gas, logs, .. } =>
+            {
+                #[allow(clippy::needless_update)]
+                SimCallResult {
+                    return_data: output.into_data(),
+                    error: None,
+                    gas_used: gas.used(),
+                    logs: logs
+                        .into_iter()
+                        .map(|log| {
+                            log_index += 1;
+                            alloy_rpc_types_eth::Log {
+                                inner: log,
+                                log_index: Some(log_index - 1),
+                                transaction_index: Some(index as u64),
+                                transaction_hash: Some(*tx.tx_hash()),
+                                block_hash: Some(block.hash()),
+                                block_number: Some(block.header().number()),
+                                block_timestamp: Some(block.header().timestamp()),
+                                ..Default::default()
+                            }
+                        })
+                        .collect(),
+                    status: true,
+                    ..Default::default()
+                }
+            }
         };
 
         calls.push(call);
@@ -256,8 +370,8 @@ where
 
     let block = block.into_rpc_block(
         txs_kind,
-        |tx, tx_info| tx_resp_builder.fill(tx, tx_info),
-        |header, size| tx_resp_builder.convert_header(header, size),
+        |tx, tx_info| converter.fill(tx, tx_info),
+        |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
 }

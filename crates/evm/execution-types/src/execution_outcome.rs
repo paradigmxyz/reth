@@ -1,7 +1,11 @@
 use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{
+    logs_bloom,
+    map::{AddressMap, B256Map, HashMap},
+    Address, BlockNumber, Bloom, Log, B256, U256,
+};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
@@ -10,14 +14,13 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
+pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,7 +147,12 @@ impl<T> ExecutionOutcome<T> {
         bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        let mut value = Self {
+            bundle,
+            first_block,
+            receipts: Vec::with_capacity(results.len()),
+            requests: Vec::with_capacity(results.len()),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -244,6 +252,14 @@ impl<T> ExecutionOutcome<T> {
         &self.receipts[index]
     }
 
+    /// Returns an iterator over receipt slices, one per block.
+    ///
+    /// This is a more ergonomic alternative to `receipts()` that yields slices
+    /// instead of requiring indexing into a nested `Vec<Vec<T>>`.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &[T]> + '_ {
+        self.receipts.iter().map(|v| v.as_slice())
+    }
+
     /// Is execution outcome empty.
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
@@ -337,7 +353,7 @@ impl<T> ExecutionOutcome<T> {
     /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts  and receipts are not updated.
+    /// Reverts and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
@@ -391,11 +407,11 @@ impl ExecutionOutcome {
     /// Returns the ethereum receipt root for all recorded receipts.
     ///
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::calculate_receipt_root_no_memo,
         )
     }
 }
@@ -601,12 +617,12 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::default();
+        let mut state_init: BundleStateInit = AddressMap::default();
         state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 
-        // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
+        // Create an AddressMap for account reverts and insert initial data
+        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
         revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
@@ -929,10 +945,20 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

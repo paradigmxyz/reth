@@ -268,9 +268,6 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     }
                     DnsEntry::Link(link_entry) => {
                         if kind.is_link() {
-                            if let Some(tree) = self.trees.get_mut(&link) {
-                                tree.resolved_links_mut().insert(hash, link_entry.clone());
-                            }
                             self.sync_tree_with_link(link_entry)
                         } else {
                             debug!(target: "disc::dns",%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");

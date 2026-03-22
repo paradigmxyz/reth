@@ -95,17 +95,33 @@ pub(super) mod serde_bincode_compat {
     ///     notification: ExExNotification<N>,
     /// }
     /// ```
+    ///
+    /// This enum mirrors [`super::ExExNotification`] but uses borrowed [`Chain`] types
+    /// instead of `Arc<Chain>` for bincode compatibility.
     #[derive(Debug, Serialize, Deserialize)]
-    #[expect(missing_docs)]
     #[serde(bound = "")]
     #[expect(clippy::large_enum_variant)]
     pub enum ExExNotification<'a, N>
     where
         N: NodePrimitives,
     {
-        ChainCommitted { new: Chain<'a, N> },
-        ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
-        ChainReverted { old: Chain<'a, N> },
+        /// Chain got committed without a reorg, and only the new chain is returned.
+        ChainCommitted {
+            /// The new chain after commit.
+            new: Chain<'a, N>,
+        },
+        /// Chain got reorged, and both the old and the new chains are returned.
+        ChainReorged {
+            /// The old chain before reorg.
+            old: Chain<'a, N>,
+            /// The new chain after reorg.
+            new: Chain<'a, N>,
+        },
+        /// Chain got reverted, and only the old chain is returned.
+        ChainReverted {
+            /// The old chain before reversion.
+            old: Chain<'a, N>,
+        },
     }
 
     impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
@@ -185,7 +201,7 @@ pub(super) mod serde_bincode_compat {
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
-        use std::sync::Arc;
+        use std::{collections::BTreeMap, sync::Arc};
 
         #[test]
         fn test_exex_notification_bincode_roundtrip() {
@@ -206,13 +222,13 @@ pub(super) mod serde_bincode_compat {
                         vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                             .unwrap()],
                         Default::default(),
-                        None,
+                        BTreeMap::new(),
                     )),
                     new: Arc::new(Chain::new(
                         vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                             .unwrap()],
                         Default::default(),
-                        None,
+                        BTreeMap::new(),
                     )),
                 },
             };

@@ -253,7 +253,7 @@ where
 {
     // Ensure next payload is valid.
     let next_block =
-        payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
+        payload_validator.convert_payload_to_block(next_payload).map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash();

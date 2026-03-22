@@ -5,17 +5,16 @@ use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
+use crossbeam_channel::Sender;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 use std::{
-    collections::HashSet,
     fmt::Display,
-    sync::mpsc::Sender,
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -307,7 +306,7 @@ pub enum FromEngine<Req, B: Block> {
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<RecoveredBlock<B>>),
+    DownloadedBlocks(Vec<SealedBlock<B>>),
 }
 
 impl<Req: Display, B: Block> Display for FromEngine<Req, B> {
@@ -341,7 +340,7 @@ pub enum RequestHandlerEvent<T> {
 #[derive(Debug)]
 pub enum DownloadRequest {
     /// Download the given set of blocks.
-    BlockSet(HashSet<B256>),
+    BlockSet(B256Set),
     /// Download the given range of blocks.
     BlockRange(B256, u64),
 }
@@ -349,6 +348,6 @@ pub enum DownloadRequest {
 impl DownloadRequest {
     /// Returns a [`DownloadRequest`] for a single block.
     pub fn single_block(hash: B256) -> Self {
-        Self::BlockSet(HashSet::from([hash]))
+        Self::BlockSet(B256Set::from_iter([hash]))
     }
 }

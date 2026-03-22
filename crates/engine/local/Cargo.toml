@@ -32,9 +32,7 @@ futures-util.workspace = true
 # misc
 eyre.workspace = true
 tracing.workspace = true
-
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
-reth-optimism-chainspec = { workspace = true, optional = true }
 
 [lints]
 workspace = true
@@ -42,7 +40,6 @@ workspace = true
 [features]
 op = [
     "dep:op-alloy-rpc-types-engine",
-    "dep:reth-optimism-chainspec",
     "reth-payload-primitives/op",
     "reth-primitives-traits/op",
 ]

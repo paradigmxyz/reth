@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::{map::AddressSet, Address};
 use reth_transaction_pool::{PoolTransaction, ValidPoolTransaction};
 
 /// Iterator that returns transactions for the block building process in the order they should be
@@ -19,8 +19,11 @@ pub trait PayloadTransactions {
         ctx: (),
     ) -> Option<Self::Transaction>;
 
-    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
-    /// because this transaction won't be included in the block.
+    /// Marks the transaction identified by `sender` and `nonce` as invalid for this iterator.
+    ///
+    /// Implementations must ensure that subsequent transactions returned from this iterator do not
+    /// depend on this transaction. For example, they may choose to stop yielding any further
+    /// transactions from this sender in the current iteration.
     fn mark_invalid(&mut self, sender: Address, nonce: u64);
 }
 
@@ -46,13 +49,16 @@ impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
 
 /// Wrapper struct that allows to convert `BestTransactions` (used in tx pool) to
 /// `PayloadTransactions` (used in block composition).
+///
+/// Note: `mark_invalid` for this type filters out all further transactions from the given sender
+/// in the current iteration, mirroring the semantics of `BestTransactions::mark_invalid`.
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where
     T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    invalid: HashSet<Address>,
+    invalid: AddressSet,
     best: I,
 }
 
@@ -97,7 +103,7 @@ mod tests {
         BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
         PayloadTransactionsFixed,
     };
-    use alloy_primitives::{map::HashSet, Address};
+    use alloy_primitives::{map::AddressSet, Address};
     use reth_transaction_pool::{
         pool::{BestTransactionsWithPrioritizedSenders, PendingPool},
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
@@ -163,10 +169,10 @@ mod tests {
                 BestPayloadTransactions::new(priority_pool.best()),
                 Some(100),
                 BestPayloadTransactions::new(BestTransactionsWithPrioritizedSenders::new(
-                    HashSet::from([address_a]),
+                    AddressSet::from_iter([address_a]),
                     200,
                     BestTransactionsWithPrioritizedSenders::new(
-                        HashSet::from([address_b]),
+                        AddressSet::from_iter([address_b]),
                         200,
                         pool.best(),
                     ),

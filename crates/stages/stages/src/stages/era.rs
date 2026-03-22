@@ -195,7 +195,7 @@ where
             }
 
             era::save_stage_checkpoints(
-                &provider,
+                provider,
                 input.checkpoint().block_number,
                 height,
                 height,

@@ -20,14 +20,15 @@
 //! The [`PersistenceState`] tracks ongoing persistence operations and coordinates
 //! between the main execution thread and background persistence workers.
 
+use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use std::time::Instant;
-use tokio::sync::oneshot;
+use crossbeam_channel::Receiver as CrossbeamReceiver;
+use reth_primitives_traits::FastInstant as Instant;
 use tracing::trace;
 
 /// The state of the persistence task.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct PersistenceState {
     /// Hash and number of the last block persisted.
     ///
@@ -36,7 +37,7 @@ pub struct PersistenceState {
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
-        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
+        Option<(CrossbeamReceiver<PersistenceResult>, Instant, CurrentPersistenceAction)>,
 }
 
 impl PersistenceState {
@@ -50,7 +51,7 @@ impl PersistenceState {
     pub(crate) fn start_remove(
         &mut self,
         new_tip_num: u64,
-        rx: oneshot::Receiver<Option<BlockNumHash>>,
+        rx: CrossbeamReceiver<PersistenceResult>,
     ) {
         self.rx =
             Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
@@ -60,7 +61,7 @@ impl PersistenceState {
     pub(crate) fn start_save(
         &mut self,
         highest: BlockNumHash,
-        rx: oneshot::Receiver<Option<BlockNumHash>>,
+        rx: CrossbeamReceiver<PersistenceResult>,
     ) {
         self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
     }

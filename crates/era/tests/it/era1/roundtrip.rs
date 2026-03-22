@@ -6,6 +6,9 @@
 //! - Re-encoding and recompressing the data
 //! - Writing the data back to a new file
 //! - Confirming that all original data is preserved throughout the process
+//!
+//! Only a couple of era1 files are downloaded from <https://era.ithaca.xyz/era1/> for mainnet
+//! and <https://era.ithaca.xyz/sepolia-era1/> for sepolia to keep the tests efficient.
 
 use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptEnvelope};
 use reth_era::{
@@ -27,7 +30,7 @@ use std::io::Cursor;
 use crate::{EraTestDownloader, MAINNET, SEPOLIA};
 
 // Helper function to test roundtrip compression/encoding for a specific file
-async fn test_file_roundtrip(
+async fn test_era1_file_roundtrip(
     downloader: &EraTestDownloader,
     filename: &str,
     network: &str,
@@ -252,27 +255,27 @@ async fn test_file_roundtrip(
     Ok(())
 }
 
-#[test_case::test_case("mainnet-00000-5ec1ffb8.era1"; "era_mainnet_0")]
-#[test_case::test_case("mainnet-00151-e322efe1.era1"; "era_mainnet_151")]
-#[test_case::test_case("mainnet-01367-d7efc68f.era1"; "era_mainnet_1367")]
-#[test_case::test_case("mainnet-01895-3f81607c.era1"; "era_mainnet_1895")]
+#[test_case::test_case("mainnet-00000-5ec1ffb8.era1"; "era1_roundtrip_mainnet_0")]
+#[test_case::test_case("mainnet-00151-e322efe1.era1"; "era1_roundtrip_mainnet_151")]
+#[test_case::test_case("mainnet-01367-d7efc68f.era1"; "era1_roundtrip_mainnet_1367")]
+#[test_case::test_case("mainnet-01895-3f81607c.era1"; "era1_roundtrip_mainnet_1895")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_mainnet(filename: &str) -> eyre::Result<()> {
     let downloader = EraTestDownloader::new().await?;
-    test_file_roundtrip(&downloader, filename, MAINNET).await
+    test_era1_file_roundtrip(&downloader, filename, MAINNET).await
 }
 
-#[test_case::test_case("sepolia-00000-643a00f7.era1"; "era_sepolia_0")]
-#[test_case::test_case("sepolia-00074-0e81003c.era1"; "era_sepolia_74")]
-#[test_case::test_case("sepolia-00173-b6924da5.era1"; "era_sepolia_173")]
-#[test_case::test_case("sepolia-00182-a4f0a8a1.era1"; "era_sepolia_182")]
+#[test_case::test_case("sepolia-00000-643a00f7.era1"; "era1_roundtrip_sepolia_0")]
+#[test_case::test_case("sepolia-00074-0e81003c.era1"; "era1_roundtrip_sepolia_74")]
+#[test_case::test_case("sepolia-00173-b6924da5.era1"; "era1_roundtrip_sepolia_173")]
+#[test_case::test_case("sepolia-00182-a4f0a8a1.era1"; "era1_roundtrip_sepolia_182")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_sepolia(filename: &str) -> eyre::Result<()> {
     let downloader = EraTestDownloader::new().await?;
 
-    test_file_roundtrip(&downloader, filename, SEPOLIA).await?;
+    test_era1_file_roundtrip(&downloader, filename, SEPOLIA).await?;
 
     Ok(())
 }

@@ -1,8 +1,12 @@
-use crate::{BlockNumber, Compression};
+use crate::{find_fixed_range, BlockNumber, Compression};
 use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
-use core::{ops::RangeInclusive, str::FromStr};
-use serde::{Deserialize, Serialize};
+use core::{
+    ops::{Range, RangeInclusive},
+    str::FromStr,
+};
+use reth_stages_types::StageId;
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{EnumIs, EnumString};
 
 #[derive(
@@ -14,11 +18,12 @@ use strum::{EnumIs, EnumString};
     Hash,
     Ord,
     PartialOrd,
-    Deserialize,
-    Serialize,
     EnumString,
     derive_more::Display,
     EnumIs,
+    Serialize,
+    Deserialize,
+    fixed_map::Key,
 )]
 #[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -33,6 +38,29 @@ pub enum StaticFileSegment {
     Receipts,
     /// Static File segment responsible for the `TransactionSenders` table.
     TransactionSenders,
+    /// Static File segment responsible for the `AccountChangeSets` table.
+    ///
+    /// Account changeset static files append block-by-block changesets sorted by address.
+    /// For example, a changeset static file for three blocks, with two changes each, would be
+    /// organized with six rows, as follows:
+    ///
+    /// Block 1:
+    /// * address 0xaa, account info
+    /// * address 0xbb, account info
+    ///
+    /// Block 2:
+    /// * address 0xaa, account info
+    /// * address 0xcc, account info
+    ///
+    /// Block 3:
+    /// * address 0xbb, account info
+    /// * address 0xcc, account info
+    AccountChangeSets,
+    /// Static File segment responsible for the `StorageChangeSets` table.
+    ///
+    /// Storage changeset static files append block-by-block changesets sorted by address and
+    /// storage slot.
+    StorageChangeSets,
 }
 
 impl StaticFileSegment {
@@ -48,13 +76,37 @@ impl StaticFileSegment {
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
             Self::TransactionSenders => "transaction-senders",
+            Self::AccountChangeSets => "account-change-sets",
+            Self::StorageChangeSets => "storage-change-sets",
+        }
+    }
+
+    /// Returns a short string representation of the segment.
+    ///
+    /// Linux threads have a length limit of 15 characters: <https://man7.org/linux/man-pages/man3/pthread_setname_np.3.html#DESCRIPTION>.
+    pub const fn as_short_str(&self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::Transactions => "transactions",
+            Self::Receipts => "receipts",
+            Self::TransactionSenders => "tx-senders",
+            Self::AccountChangeSets => "account-changes",
+            Self::StorageChangeSets => "storage-changes",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts, Self::TransactionSenders].into_iter()
+        [
+            Self::Headers,
+            Self::Transactions,
+            Self::Receipts,
+            Self::TransactionSenders,
+            Self::AccountChangeSets,
+            Self::StorageChangeSets,
+        ]
+        .into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -66,7 +118,11 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions | Self::Receipts | Self::TransactionSenders => 1,
+            Self::Transactions |
+            Self::Receipts |
+            Self::TransactionSenders |
+            Self::AccountChangeSets |
+            Self::StorageChangeSets => 1,
         }
     }
 
@@ -128,7 +184,15 @@ impl StaticFileSegment {
     pub const fn is_tx_based(&self) -> bool {
         match self {
             Self::Receipts | Self::Transactions | Self::TransactionSenders => true,
-            Self::Headers => false,
+            Self::Headers | Self::AccountChangeSets | Self::StorageChangeSets => false,
+        }
+    }
+
+    /// Returns `true` if the segment is change-based.
+    pub const fn is_change_based(&self) -> bool {
+        match self {
+            Self::AccountChangeSets | Self::StorageChangeSets => true,
+            Self::Receipts | Self::Transactions | Self::Headers | Self::TransactionSenders => false,
         }
     }
 
@@ -136,13 +200,72 @@ impl StaticFileSegment {
     pub const fn is_block_based(&self) -> bool {
         match self {
             Self::Headers => true,
-            Self::Receipts | Self::Transactions | Self::TransactionSenders => false,
+            Self::Receipts |
+            Self::Transactions |
+            Self::TransactionSenders |
+            Self::AccountChangeSets |
+            Self::StorageChangeSets => false,
+        }
+    }
+
+    /// Returns `true` if the segment is either block or change based. This should be used to ensure
+    /// that the user header contains a block range or a max block
+    pub const fn is_block_or_change_based(&self) -> bool {
+        self.is_block_based() || self.is_change_based()
+    }
+
+    /// Maps this segment to the [`StageId`] responsible for it.
+    pub const fn to_stage_id(&self) -> StageId {
+        match self {
+            Self::Headers => StageId::Headers,
+            Self::Transactions => StageId::Bodies,
+            Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {
+                StageId::Execution
+            }
+            Self::TransactionSenders => StageId::SenderRecovery,
         }
     }
 }
 
+/// A changeset offset, also with the number of elements in the offset for convenience
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+pub struct ChangesetOffset {
+    /// Offset for the row for this block
+    offset: u64,
+
+    /// Number of changes in this changeset
+    num_changes: u64,
+}
+
+impl ChangesetOffset {
+    /// Creates a new changeset offset.
+    pub const fn new(offset: u64, num_changes: u64) -> Self {
+        Self { offset, num_changes }
+    }
+
+    /// Returns the start offset for the row for this block
+    pub const fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the number of changes in this changeset
+    pub const fn num_changes(&self) -> u64 {
+        self.num_changes
+    }
+
+    /// Returns a range corresponding to the changes.
+    pub const fn changeset_range(&self) -> Range<u64> {
+        self.offset..(self.offset + self.num_changes)
+    }
+
+    /// Increments the number of changes by 1.
+    pub const fn increment_num_changes(&mut self) {
+        self.num_changes += 1;
+    }
+}
+
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
     /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
@@ -155,6 +278,95 @@ pub struct SegmentHeader {
     tx_range: Option<SegmentRangeInclusive>,
     /// Segment type
     segment: StaticFileSegment,
+    /// List of offsets, for where each block's changeset starts.
+    changeset_offsets_len: u64,
+}
+
+struct SegmentHeaderVisitor;
+
+impl<'de> Visitor<'de> for SegmentHeaderVisitor {
+    type Value = SegmentHeader;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("a header struct with 4 or 5 fields")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        // First 4 fields are always present in both old and new format
+        let expected_block_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+        let block_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+
+        let tx_range =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+
+        let segment: StaticFileSegment =
+            seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
+
+        let changeset_offsets_len = if segment.is_change_based() {
+            // Try to read the 5th field (changeset_offsets_len)
+            match seq.next_element::<u64>()? {
+                Some(len) => len,
+                None => {
+                    return Err(serde::de::Error::custom(
+                        "changeset_offsets_len should exist for changeset static files",
+                    ))
+                }
+            }
+        } else {
+            0
+        };
+
+        Ok(SegmentHeader {
+            expected_block_range,
+            block_range,
+            tx_range,
+            segment,
+            changeset_offsets_len,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SegmentHeader {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Tell the deserializer we're expecting a struct
+        // The field names are for formats that use them
+        // Bincode ignores these and just uses the sequence order
+        const FIELDS: &[&str] =
+            &["expected_block_range", "block_range", "tx_range", "segment", "changeset_offsets"];
+
+        deserializer.deserialize_struct("SegmentHeader", FIELDS, SegmentHeaderVisitor)
+    }
+}
+
+impl Serialize for SegmentHeader {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We serialize an extra field, the changeset offsets, for change-based segments
+        let len = if self.segment.is_change_based() { 5 } else { 4 };
+
+        let mut state = serializer.serialize_struct("SegmentHeader", len)?;
+        state.serialize_field("expected_block_range", &self.expected_block_range)?;
+        state.serialize_field("block_range", &self.block_range)?;
+        state.serialize_field("tx_range", &self.tx_range)?;
+        state.serialize_field("segment", &self.segment)?;
+
+        if self.segment.is_change_based() {
+            state.serialize_field("changeset_offsets", &self.changeset_offsets_len)?;
+        }
+
+        state.end()
+    }
 }
 
 impl SegmentHeader {
@@ -165,7 +377,7 @@ impl SegmentHeader {
         tx_range: Option<SegmentRangeInclusive>,
         segment: StaticFileSegment,
     ) -> Self {
-        Self { expected_block_range, block_range, tx_range, segment }
+        Self { expected_block_range, block_range, tx_range, segment, changeset_offsets_len: 0 }
     }
 
     /// Returns the static file segment kind.
@@ -188,9 +400,39 @@ impl SegmentHeader {
         self.tx_range
     }
 
+    /// Returns the number of changeset offset entries.
+    /// The actual offsets are stored in the `.csoff` sidecar file.
+    pub const fn changeset_offsets_len(&self) -> u64 {
+        self.changeset_offsets_len
+    }
+
+    /// Sets the changeset offsets length.
+    pub const fn set_changeset_offsets_len(&mut self, len: u64) {
+        self.changeset_offsets_len = len;
+    }
+
+    /// Increments the changeset offsets length by 1.
+    pub const fn increment_changeset_offsets_len(&mut self) {
+        self.changeset_offsets_len += 1;
+    }
+
     /// The expected block start of the segment.
     pub const fn expected_block_start(&self) -> BlockNumber {
         self.expected_block_range.start()
+    }
+
+    /// Sets the expected block start of the segment, using the file boundary end
+    /// from `find_fixed_range`.
+    ///
+    /// This is useful for non-zero genesis blocks where the actual starting block
+    /// differs from the file range start determined by `find_fixed_range`.
+    /// For example, if `blocks_per_file` is 500 and genesis is at 502, the range
+    /// becomes 502..=999 (start at genesis, end at file boundary).
+    pub const fn set_expected_block_start(&mut self, block: BlockNumber) {
+        let blocks_per_file =
+            self.expected_block_range.end() - self.expected_block_range.start() + 1;
+        let file_range = find_fixed_range(block, blocks_per_file);
+        self.expected_block_range = SegmentRangeInclusive::new(block, file_range.end());
     }
 
     /// The expected block end of the segment.
@@ -230,7 +472,7 @@ impl SegmentHeader {
 
     /// Increments block end range depending on segment
     pub const fn increment_block(&mut self) -> BlockNumber {
-        if let Some(block_range) = &mut self.block_range {
+        let block_num = if let Some(block_range) = &mut self.block_range {
             block_range.end += 1;
             block_range.end
         } else {
@@ -239,7 +481,15 @@ impl SegmentHeader {
                 self.expected_block_start(),
             ));
             self.expected_block_start()
+        };
+
+        // For changeset segments, increment the offsets length.
+        // The actual offset entry is written to the sidecar file by the caller.
+        if self.segment.is_change_based() {
+            self.changeset_offsets_len += 1;
         }
+
+        block_num
     }
 
     /// Increments tx end range depending on segment
@@ -254,13 +504,30 @@ impl SegmentHeader {
     }
 
     /// Removes `num` elements from end of tx or block range.
+    ///
+    /// For changeset segments, also decrements the changeset offsets length.
+    /// The caller must truncate the sidecar file accordingly.
     pub const fn prune(&mut self, num: u64) {
-        if self.segment.is_block_based() {
+        // Changesets also contain a block range, but are not strictly block-based
+        if self.segment.is_block_or_change_based() {
             if let Some(range) = &mut self.block_range {
                 if num > range.end - range.start {
                     self.block_range = None;
+                    // Clear all changeset offsets if we're clearing all blocks
+                    if self.segment.is_change_based() {
+                        self.changeset_offsets_len = 0;
+                    }
                 } else {
+                    let old_end = range.end;
                     range.end = range.end.saturating_sub(num);
+
+                    // Update changeset offsets length for changeset segments
+                    if self.segment.is_change_based() {
+                        // Calculate how many blocks we're removing
+                        let blocks_to_remove = old_end - range.end;
+                        self.changeset_offsets_len =
+                            self.changeset_offsets_len.saturating_sub(blocks_to_remove);
+                    }
                 }
             };
         } else if let Some(range) = &mut self.tx_range {
@@ -282,6 +549,27 @@ impl SegmentHeader {
         }
     }
 
+    /// Synchronizes changeset offsets length with the current block range for changeset segments.
+    ///
+    /// This should be called after modifying the block range when dealing with changeset segments
+    /// to ensure the offsets length matches the block range size.
+    /// The caller must also truncate the sidecar file accordingly.
+    pub const fn sync_changeset_offsets(&mut self) {
+        if !self.segment.is_change_based() {
+            return;
+        }
+
+        if let Some(block_range) = &self.block_range {
+            let expected_len = block_range.end - block_range.start + 1;
+            if self.changeset_offsets_len > expected_len {
+                self.changeset_offsets_len = expected_len;
+            }
+        } else {
+            // No block range means no offsets
+            self.changeset_offsets_len = 0;
+        }
+    }
+
     /// Sets a new `tx_range`.
     pub const fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
         if let Some(tx_range) = &mut self.tx_range {
@@ -294,10 +582,33 @@ impl SegmentHeader {
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
+        if self.segment.is_change_based() {
+            return Some(0)
+        }
+
         if self.segment.is_block_based() {
             return self.block_start()
         }
         self.tx_start()
+    }
+
+    /// Returns the index into the sidecar file for a given block's changeset offset.
+    ///
+    /// Returns `None` if the block is not in the block range.
+    /// To get the changeset offset, the caller must read the offset from the sidecar file at this
+    /// index.
+    pub fn changeset_offset_index(&self, block: BlockNumber) -> Option<u64> {
+        let block_range = self.block_range()?;
+        if !block_range.contains(block) {
+            return None;
+        }
+
+        let index = block - block_range.start();
+        if index >= self.changeset_offsets_len {
+            return None;
+        }
+
+        Some(index)
     }
 }
 
@@ -342,6 +653,11 @@ impl SegmentRangeInclusive {
     pub const fn is_empty(&self) -> bool {
         self.start > self.end
     }
+
+    /// Returns whether or not the segment range includes the number
+    pub fn contains(&self, number: u64) -> bool {
+        (self.start..=self.end).contains(&number)
+    }
 }
 
 impl core::fmt::Display for SegmentRangeInclusive {
@@ -384,6 +700,18 @@ mod tests {
                 StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
                 "static_file_transactions_1123233_11223233",
+                None,
+            ),
+            (
+                StaticFileSegment::AccountChangeSets,
+                1_123_233..=11_223_233,
+                "static_file_account-change-sets_1123233_11223233",
+                None,
+            ),
+            (
+                StaticFileSegment::StorageChangeSets,
+                1_123_233..=11_223_233,
+                "static_file_storage-change-sets_1123233_11223233",
                 None,
             ),
             (
@@ -439,24 +767,42 @@ mod tests {
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: None,
                 segment: StaticFileSegment::Headers,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: None,
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::Transactions,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::Receipts,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::TransactionSenders,
+                changeset_offsets_len: 0,
+            },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: Some(SegmentRangeInclusive::new(0, 300)),
+                segment: StaticFileSegment::AccountChangeSets,
+                changeset_offsets_len: 100,
+            },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: None,
+                segment: StaticFileSegment::StorageChangeSets,
+                changeset_offsets_len: 100,
             },
         ];
         // Check that we test all segments
@@ -466,7 +812,7 @@ mod tests {
         );
 
         for header in segments {
-            let segment_jar = NippyJar::new(1, &temp_dir(), header);
+            let segment_jar = NippyJar::new(1, &temp_dir(), header.clone());
             let mut serialized = Vec::new();
             segment_jar.save_to_writer(&mut serialized).unwrap();
 
@@ -490,6 +836,8 @@ mod tests {
                 StaticFileSegment::Transactions => "transactions",
                 StaticFileSegment::Receipts => "receipts",
                 StaticFileSegment::TransactionSenders => "transaction-senders",
+                StaticFileSegment::AccountChangeSets => "account-change-sets",
+                StaticFileSegment::StorageChangeSets => "storage-change-sets",
             };
             assert_eq!(static_str, expected_str);
         }
@@ -507,8 +855,21 @@ mod tests {
                 StaticFileSegment::Transactions => "Transactions",
                 StaticFileSegment::Receipts => "Receipts",
                 StaticFileSegment::TransactionSenders => "TransactionSenders",
+                StaticFileSegment::AccountChangeSets => "AccountChangeSets",
+                StaticFileSegment::StorageChangeSets => "StorageChangeSets",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_as_short_str() {
+        for segment in StaticFileSegment::iter() {
+            assert!(
+                segment.as_short_str().len() <= 15,
+                "{segment} segment name is too long: {}",
+                segment.as_short_str()
+            );
         }
     }
 }

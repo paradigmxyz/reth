@@ -7,7 +7,7 @@ use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
-use alloy_transport::layers::RetryBackoffLayer;
+use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
@@ -29,13 +29,21 @@ pub(crate) struct BenchContext {
     pub(crate) next_block: u64,
     /// Whether the chain is an OP rollup.
     pub(crate) is_optimism: bool,
+    /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    pub(crate) use_reth_namespace: bool,
+    /// Whether to fetch and replay RLP-encoded blocks.
+    pub(crate) rlp_blocks: bool,
+    /// Whether to skip waiting for persistence (pass `wait_for_persistence: false`).
+    pub(crate) no_wait_for_persistence: bool,
+    /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
+    pub(crate) no_wait_for_caches: bool,
 }
 
 impl BenchContext {
     /// This is the initialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
     /// returning the providers needed to run a benchmark.
     pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
-        info!("Running benchmark using data from RPC URL: {}", rpc_url);
+        info!(target: "reth-bench", "Running benchmark using data from RPC URL: {}", rpc_url);
 
         // Ensure that output directory exists and is a directory
         if let Some(output) = &bench_args.output {
@@ -45,13 +53,20 @@ impl BenchContext {
             // Create the directory if it doesn't exist
             if !output.exists() {
                 std::fs::create_dir_all(output)?;
-                info!("Created output directory: {:?}", output);
+                info!(target: "reth-bench", "Created output directory: {:?}", output);
             }
         }
 
-        // set up alloy client for blocks
+        // set up alloy client for blocks, retrying on 429/503 (default) and 502
+        let retry_policy =
+            RateLimitRetryPolicy::default().or(|err: &alloy_transport::TransportError| -> bool {
+                err.as_transport_err()
+                    .and_then(|t| t.as_http_error())
+                    .is_some_and(|e| e.status == 502)
+            });
+        let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
@@ -77,16 +92,18 @@ impl BenchContext {
         let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
 
         // construct the authed transport
-        info!("Connecting to Engine RPC at {} for replay", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {} for replay", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
         // Computes the block range for the benchmark.
         //
-        // - If `--advance` is provided, fetches the latest block and sets:
+        // - If `--advance` is provided, fetches the latest block from the engine and sets:
         //     - `from = head + 1`
         //     - `to = head + advance`
+        // - If only `--to` is provided, fetches the latest block from the engine and sets:
+        //     - `from = head`
         // - Otherwise, uses the values from `--from` and `--to`.
         let (from, to) = if let Some(advance) = bench_args.advance {
             if advance == 0 {
@@ -99,18 +116,32 @@ impl BenchContext {
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
             let head_number = head_block.header.number;
             (Some(head_number), Some(head_number + advance))
+        } else if bench_args.from.is_none() && bench_args.to.is_some() {
+            let head_block = auth_provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from engine"))?;
+            let head_number = head_block.header.number;
+            info!(target: "reth-bench", "No --from provided, derived from engine head: {}", head_number);
+            (Some(head_number), bench_args.to)
         } else {
             (bench_args.from, bench_args.to)
         };
 
-        // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
+        // If `--to` are not provided, we will run the benchmark continuously,
         // starting at the latest block.
-        let mut benchmark_mode = BenchMode::new(from, to)?;
+        let latest_block = block_provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .full()
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from RPC"))?;
+        let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number());
 
         let first_block = match benchmark_mode {
-            BenchMode::Continuous => {
-                // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
+            BenchMode::Continuous(start) => {
+                block_provider.get_block_by_number(start.into()).full().await?.ok_or_else(|| {
+                    eyre::eyre!("Failed to fetch block {} from RPC for continuous mode", start)
+                })?
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
@@ -120,7 +151,9 @@ impl BenchContext {
                             .get_block_by_number(block_number.into())
                             .full()
                             .await?
-                            .unwrap()
+                            .ok_or_else(|| {
+                                eyre::eyre!("Failed to fetch block {} from RPC", block_number)
+                            })?
                     }
                     None => {
                         return Err(eyre::eyre!(
@@ -132,6 +165,20 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        Ok(Self { auth_provider, block_provider, benchmark_mode, next_block, is_optimism })
+        let rlp_blocks = bench_args.rlp_blocks;
+        let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait_for_persistence = bench_args.no_wait_for_persistence;
+        let no_wait_for_caches = bench_args.no_wait_for_caches;
+        Ok(Self {
+            auth_provider,
+            block_provider,
+            benchmark_mode,
+            next_block,
+            is_optimism,
+            use_reth_namespace,
+            rlp_blocks,
+            no_wait_for_persistence,
+            no_wait_for_caches,
+        })
     }
 }

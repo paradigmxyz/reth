@@ -19,7 +19,7 @@ impl MinerApiServer for MinerApi {
         Ok(false)
     }
 
-    fn set_gas_limit(&self, _gas_price: U128) -> RpcResult<bool> {
+    fn set_gas_limit(&self, _gas_limit: U128) -> RpcResult<bool> {
         Ok(false)
     }
 }

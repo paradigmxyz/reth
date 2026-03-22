@@ -13,7 +13,7 @@ use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use tracing::trace;
 
 /// Used by [`StateRootBranchNodesIter`] to iterate over branch nodes in a state root.
@@ -141,7 +141,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
             // By sorting by the account we ensure that we continue with the partially processed
             // trie (the last of the previous run) first. We sort in reverse order because we pop
             // off of this Vec.
-            self.storage_tries.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            self.storage_tries.sort_unstable_by_key(|a| Reverse(a.0));
 
             // loop back to the top.
         }
@@ -373,7 +373,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             };
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
-                trace!(target: "trie::verify", account = ?curr_account, "Verying account has empty storage");
+                trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
 
                 let mut storage_cursor =
                     self.trie_cursor_factory.storage_trie_cursor(curr_account)?;

@@ -13,9 +13,7 @@ pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<B>>>;
 /// A downloader represents a distinct strategy for submitting requests to download block bodies,
 /// while a [`BodiesClient`][crate::bodies::client::BodiesClient] represents a client capable of
 /// fulfilling these requests.
-pub trait BodyDownloader:
-    Send + Sync + Stream<Item = BodyDownloaderResult<Self::Block>> + Unpin
-{
+pub trait BodyDownloader: Send + Stream<Item = BodyDownloaderResult<Self::Block>> + Unpin {
     /// The Block type this downloader supports
     type Block: Block + 'static;
 

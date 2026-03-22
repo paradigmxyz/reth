@@ -7,20 +7,23 @@ use reth_db_api::{
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawValue,
+    RawValue,
 };
-use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{
+    FastInstant as Instant, GotExpected, NodePrimitives, SignedTransaction,
+};
 use reth_provider::{
     BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
+    TransactionsProvider,
 };
-use reth_prune_types::PruneSegment;
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
     StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc, time::Instant};
+use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
@@ -33,7 +36,7 @@ const BATCH_SIZE: usize = 100_000;
 const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Type alias for a sender that transmits the result of sender recovery.
-type RecoveryResultSender = mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
+type RecoveryResultSender = mpsc::SyncSender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -43,18 +46,22 @@ pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
+    /// Prune mode for sender recovery. When set to `PruneMode::Full`, the stage will
+    /// fast-forward its checkpoint to skip all work, since senders will be recovered
+    /// inline by the execution stage instead.
+    pub prune_mode: Option<PruneMode>,
 }
 
 impl SenderRecoveryStage {
     /// Create new instance of [`SenderRecoveryStage`].
-    pub const fn new(config: SenderRecoveryConfig) -> Self {
-        Self { commit_threshold: config.commit_threshold }
+    pub const fn new(config: SenderRecoveryConfig, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold: config.commit_threshold, prune_mode }
     }
 }
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self { commit_threshold: 5_000_000, prune_mode: None }
     }
 }
 
@@ -65,6 +72,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader
+        + PruneCheckpointWriter
         + StorageSettingsCache,
 {
     /// Return the id of the stage
@@ -77,7 +85,45 @@ where
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table or
     /// static files depending on configuration.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        mut input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        // TODO: when senders are fully pruned, batch recover in execution stage instead of per-tx
+        // fallback
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| {
+                mode.prune_target_block(
+                    input.target(),
+                    PruneSegment::SenderRecovery,
+                    PrunePurpose::User,
+                )
+            })
+            .transpose()?
+            .flatten() &&
+            target_prunable_block > input.checkpoint().block_number
+        {
+            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+            if provider.get_prune_checkpoint(PruneSegment::SenderRecovery)?.is_none() {
+                let target_prunable_tx_number = provider
+                    .block_body_indices(target_prunable_block)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
+                    .last_tx_num();
+
+                provider.save_prune_checkpoint(
+                    PruneSegment::SenderRecovery,
+                    PruneCheckpoint {
+                        block_number: Some(target_prunable_block),
+                        tx_number: Some(target_prunable_tx_number),
+                        prune_mode,
+                    },
+                )?;
+            }
+        }
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -140,6 +186,9 @@ where
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
+        // Advance the static file header to the end of this range to account for empty blocks.
+        writer.ensure_at_block(end_block)?;
+
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -155,12 +204,16 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Lookup latest tx id that we should unwind to
-        let latest_tx_id = provider
-            .block_body_indices(unwind_to)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-            .last_tx_num();
-        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        if self.prune_mode.is_none_or(|mode| !mode.is_full()) {
+            // Lookup the next tx id after unwind_to block (first tx to remove)
+            let unwind_tx_from = provider
+                .block_body_indices(unwind_to)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
+                .next_tx_num();
+
+            EitherWriter::new_senders(provider, unwind_to)?
+                .prune_senders(unwind_tx_from, unwind_to)?;
+        }
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -194,7 +247,7 @@ where
         .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
             let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = mpsc::sync_channel((range.end - range.start) as usize);
             // Range and channel sender will be sent to rayon worker
             ((range, tx), rx)
         })
@@ -291,7 +344,7 @@ where
     //
     // However, using `std::thread::spawn` allows us to utilize the timeout grace
     // period to complete some work without throwing errors during the shutdown.
-    std::thread::spawn(move || {
+    reth_tasks::spawn_os_thread("sender-recovery", move || {
         while let Ok(chunks) = tx_receiver.recv() {
             for (chunk_range, recovered_senders_tx) in chunks {
                 // Read the raw value, and let the rayon worker to decompress & decode.
@@ -415,7 +468,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db_api::cursor::DbCursorRO;
+    use reth_db_api::{cursor::DbCursorRO, models::StorageSettings};
     use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_primitives_traits::{SealedBlock, SignerRecoverable};
     use reth_provider::{
@@ -424,6 +477,7 @@ mod tests {
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
@@ -479,6 +533,48 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// Ensure the static file header advances to trailing empty blocks.
+    #[tokio::test]
+    async fn execute_advances_static_file_for_trailing_empty_blocks() {
+        let (stage_progress, target) = (0, 3);
+        let mut rng = generators::rng();
+
+        let runner = SenderRecoveryTestRunner::default();
+        runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let input = ExecInput {
+            target: Some(target),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        let non_empty_block_number = stage_progress + 1;
+        let blocks = (stage_progress..=input.target())
+            .map(|number| {
+                random_block(
+                    &mut rng,
+                    number,
+                    BlockParams {
+                        tx_count: Some((number == non_empty_block_number) as u8),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
+
+        let result = runner.execute(input).await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { checkpoint, done: true }) if checkpoint.block_number == target);
+
+        let highest_block = runner
+            .db
+            .factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::TransactionSenders);
+        assert_eq!(Some(target), highest_block);
     }
 
     /// Execute the stage twice with input range that exceeds the commit threshold
@@ -671,7 +767,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { commit_threshold: self.threshold }
+            SenderRecoveryStage { commit_threshold: self.threshold, prune_mode: None }
         }
     }
 

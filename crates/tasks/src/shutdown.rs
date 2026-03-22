@@ -24,7 +24,7 @@ impl GracefulShutdown {
         Self { shutdown, guard: Some(guard) }
     }
 
-    /// Returns a new shutdown future that is ignores the returned [`GracefulShutdownGuard`].
+    /// Returns a new shutdown future that ignores the returned [`GracefulShutdownGuard`].
     ///
     /// This just maps the return value of the future to `()`, it does not drop the guard.
     pub fn ignore_guard(self) -> impl Future<Output = ()> + Send + Sync + Unpin + 'static {

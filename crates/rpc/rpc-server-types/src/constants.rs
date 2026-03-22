@@ -18,6 +18,20 @@ pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 /// The default maximum number of blocks for `trace_filter` requests.
 pub const DEFAULT_MAX_TRACE_FILTER_BLOCKS: u64 = 100;
 
+/// Setting for how many concurrent (heavier) _blocking_ IO requests are allowed.
+///
+/// What is considered a blocking IO request can depend on the RPC method. In general anything that
+/// requires IO is considered blocking and should be spawned as blocking. This setting is however,
+/// primarily intended for heavier blocking requests that require evm execution for example,
+/// `eth_call` and alike. This is intended to be used with a semaphore that must be acquired before
+/// a new task is spawned to avoid unnecessary pooling if the number of inflight requests exceeds
+/// the available threads in the pool.
+///
+/// tokio's blocking pool, has a default of 512 and could grow unbounded, since requests like
+/// `eth_call` also require a lot of cpu which will occupy the thread, we can set this to a lower
+/// value.
+pub const DEFAULT_MAX_BLOCKING_IO_REQUEST: usize = 256;
+
 /// The default maximum number tracing requests we're allowing concurrently.
 /// Tracing is mostly CPU bound so we're limiting the number of concurrent requests to something
 /// lower that the number of cores, in order to minimize the impact on the rest of the system.
@@ -33,23 +47,16 @@ pub fn default_max_tracing_requests() -> usize {
 pub const DEFAULT_PROOF_PERMITS: usize = 25;
 
 /// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
-
-/// The default IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 
-/// The engine_api IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc";
-
 /// The `engine_api` IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
 /// The default limit for blocks count in `eth_simulateV1`.
 pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
+
+/// The default maximum number of total storage slots for `eth_getStorageValues`.
+pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
@@ -88,7 +95,7 @@ pub mod gas_oracle {
     pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
     /// The default minimum gas price, under which the sample will be ignored
-    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
+    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::ZERO;
 
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
@@ -118,4 +125,7 @@ pub mod cache {
 
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
+
+    /// Default maximum number of transaction hashes to cache for lookups.
+    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 30_000;
 }

@@ -7,9 +7,10 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StaticFileProviderFactory, StorageSettingsCache,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -24,6 +25,8 @@ pub struct PrunerBuilder {
     delete_limit: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
+    /// Optional override for the minimum pruning distance.
+    minimum_pruning_distance: Option<u64>,
     /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
@@ -31,9 +34,14 @@ pub struct PrunerBuilder {
 impl PrunerBuilder {
     /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
-        Self::default()
+        let min_distance = pruner_config.minimum_pruning_distance;
+        let mut builder = Self::default()
             .block_interval(pruner_config.block_interval)
-            .segments(pruner_config.segments)
+            .segments(pruner_config.segments);
+        if min_distance != reth_prune_types::MINIMUM_UNWIND_SAFE_DISTANCE {
+            builder.minimum_pruning_distance = Some(min_distance);
+        }
+        builder
     }
 
     /// Sets the minimum pruning interval measured in blocks.
@@ -81,6 +89,10 @@ impl PrunerBuilder {
                                 + BlockReader<Transaction: Encodable2718>
                                 + ChainStateBlockReader
                                 + StorageSettingsCache
+                                + StageCheckpointReader
+                                + ChangeSetReader
+                                + StorageChangeSetReader
+                                + RocksDBProviderFactory
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -91,14 +103,18 @@ impl PrunerBuilder {
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
 
-        Pruner::new_with_factory(
+        let mut pruner = Pruner::new_with_factory(
             provider_factory,
             segments.into_vec(),
             self.block_interval,
             self.delete_limit,
             self.timeout,
             self.finished_exex_height,
-        )
+        );
+        if let Some(distance) = self.minimum_pruning_distance {
+            pruner = pruner.with_minimum_pruning_distance(distance);
+        }
+        pruner
     }
 
     /// Builds a [Pruner] from the current configuration with the given static file provider.
@@ -114,17 +130,25 @@ impl PrunerBuilder {
             + ChainStateBlockReader
             + PruneCheckpointWriter
             + PruneCheckpointReader
-            + StorageSettingsCache,
+            + StorageSettingsCache
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + RocksDBProviderFactory,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 
-        Pruner::new(
+        let mut pruner = Pruner::new(
             segments.into_vec(),
             self.block_interval,
             self.delete_limit,
             self.timeout,
             self.finished_exex_height,
-        )
+        );
+        if let Some(distance) = self.minimum_pruning_distance {
+            pruner = pruner.with_minimum_pruning_distance(distance);
+        }
+        pruner
     }
 }
 
@@ -135,6 +159,7 @@ impl Default for PrunerBuilder {
             segments: PruneModes::default(),
             delete_limit: usize::MAX,
             timeout: None,
+            minimum_pruning_distance: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
     }

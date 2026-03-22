@@ -21,19 +21,19 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockKind, receipt::EthReceiptConverter, tx_forward::ForwardConfig,
-    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthStateCache,
+    FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    Runtime,
 };
 use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
     BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -132,55 +132,6 @@ impl
     }
 }
 
-impl<N, Rpc> EthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert,
-    (): PendingEnvBuilder<N::Evm>,
-{
-    /// Creates a new, shareable instance using the default tokio task spawner.
-    #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        components: N,
-        eth_cache: EthStateCache<N::Primitives>,
-        gas_oracle: GasPriceOracle<N::Provider>,
-        gas_cap: impl Into<GasCap>,
-        max_simulate_blocks: u64,
-        eth_proof_window: u64,
-        blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        proof_permits: usize,
-        rpc_converter: Rpc,
-        max_batch_size: usize,
-        pending_block_kind: PendingBlockKind,
-        raw_tx_forwarder: ForwardConfig,
-        send_raw_transaction_sync_timeout: Duration,
-        evm_memory_limit: u64,
-    ) -> Self {
-        let inner = EthApiInner::new(
-            components,
-            eth_cache,
-            gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            eth_proof_window,
-            blocking_task_pool,
-            fee_history_cache,
-            TokioTaskExecutor::default().boxed(),
-            proof_permits,
-            rpc_converter,
-            (),
-            max_batch_size,
-            pending_block_kind,
-            raw_tx_forwarder.forwarder_client(),
-            send_raw_transaction_sync_timeout,
-            evm_memory_limit,
-        );
-
-        Self { inner: Arc::new(inner) }
-    }
-}
-
 impl<N, Rpc> EthApiTypes for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -190,8 +141,8 @@ where
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        &self.tx_resp_builder
+    fn converter(&self) -> &Self::RpcConvert {
+        &self.converter
     }
 }
 
@@ -250,7 +201,7 @@ where
     Rpc: RpcConvert<Error = EthApiError>,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.task_spawner()
     }
 
@@ -262,6 +213,11 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.blocking_task_guard()
+    }
+
+    #[inline]
+    fn blocking_io_task_guard(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
+        self.inner.blocking_io_request_semaphore()
     }
 }
 
@@ -285,7 +241,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock<N::Primitives>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
@@ -296,6 +252,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
 
+    /// Semaphore to limit concurrent blocking IO requests (`eth_call`, `eth_estimateGas`, etc.)
+    blocking_io_request_semaphore: Arc<Semaphore>,
+
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
 
@@ -303,7 +262,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_forwarder: Option<RpcClient>,
 
     /// Converter for RPC types.
-    tx_resp_builder: Rpc,
+    converter: Rpc,
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
@@ -323,6 +282,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Maximum memory the EVM can allocate per RPC request.
     evm_memory_limit: u64,
+
+    /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    force_blob_sidecar_upcasting: bool,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -341,15 +303,17 @@ where
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        task_spawner: Box<dyn TaskSpawner + 'static>,
+        task_spawner: Runtime,
         proof_permits: usize,
-        tx_resp_builder: Rpc,
+        converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
+        max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
         send_raw_transaction_sync_timeout: Duration,
         evm_memory_limit: u64,
+        force_blob_sidecar_upcasting: bool,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -368,7 +332,7 @@ where
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
             BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
+        task_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {
             components,
@@ -384,15 +348,17 @@ where
             blocking_task_pool,
             fee_history_cache,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            blocking_io_request_semaphore: Arc::new(Semaphore::new(max_blocking_io_requests)),
             raw_tx_sender,
             raw_tx_forwarder,
-            tx_resp_builder,
+            converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
             pending_block_kind,
             send_raw_transaction_sync_timeout,
             blob_sidecar_converter: BlobSidecarConverter::new(),
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         }
     }
 }
@@ -410,8 +376,8 @@ where
 
     /// Returns a handle to the transaction response builder.
     #[inline]
-    pub const fn tx_resp_builder(&self) -> &Rpc {
-        &self.tx_resp_builder
+    pub const fn converter(&self) -> &Rpc {
+        &self.converter
     }
 
     /// Returns a handle to data in memory.
@@ -435,11 +401,13 @@ where
 
     /// Returns a handle to the task spawner.
     #[inline]
-    pub const fn task_spawner(&self) -> &dyn TaskSpawner {
-        &*self.task_spawner
+    pub const fn task_spawner(&self) -> &Runtime {
+        &self.task_spawner
     }
 
     /// Returns a handle to the blocking thread pool.
+    ///
+    /// This is intended for tasks that are CPU bound.
     #[inline]
     pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
         &self.blocking_task_pool
@@ -525,7 +493,7 @@ where
 
     /// Returns the transaction batch sender
     #[inline]
-    const fn tx_batch_sender(
+    pub const fn tx_batch_sender(
         &self,
     ) -> &mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
         &self.tx_batch_sender
@@ -535,10 +503,11 @@ where
     #[inline]
     pub async fn add_pool_transaction(
         &self,
+        origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let request = reth_transaction_pool::BatchTxRequest::new(transaction, response_tx);
+        let request = reth_transaction_pool::BatchTxRequest::new(origin, transaction, response_tx);
 
         self.tx_batch_sender()
             .send(request)
@@ -576,6 +545,18 @@ where
     pub const fn evm_memory_limit(&self) -> u64 {
         self.evm_memory_limit
     }
+
+    /// Returns a reference to the blocking IO request semaphore.
+    #[inline]
+    pub const fn blocking_io_request_semaphore(&self) -> &Arc<Semaphore> {
+        &self.blocking_io_request_semaphore
+    }
+
+    /// Returns whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
+    #[inline]
+    pub const fn force_blob_sidecar_upcasting(&self) -> bool {
+        self.force_blob_sidecar_upcasting
+    }
 }
 
 #[cfg(test)]
@@ -585,6 +566,7 @@ mod tests {
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
+    use alloy_rpc_types_eth::{Bundle, TransactionRequest};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -780,6 +762,53 @@ mod tests {
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    async fn test_call_many_maps_provider_block_lookup_error_with_eth_api_conversion() {
+        let eth_api = build_test_eth_api(MockEthProvider::default());
+        let bundles = vec![Bundle {
+            transactions: vec![TransactionRequest::default()],
+            block_override: None,
+        }];
+
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
+            &eth_api, bundles, None, None,
+        )
+        .await;
+
+        let err = response.expect_err("call_many should fail when latest block lookup errors");
+        let message = err.message().to_ascii_lowercase();
+        assert!(
+            message.contains("block not found"),
+            "best block lookup should map via EthApiError::from(ProviderError): {message}"
+        );
+        assert!(
+            !message.contains("best block does not exist"),
+            "provider implementation detail should not leak from converted error: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_call_many_keeps_header_not_found_when_block_hash_absent() {
+        let eth_api = build_test_eth_api(NoopProvider::default());
+        let bundles = vec![Bundle {
+            transactions: vec![TransactionRequest::default()],
+            block_override: None,
+        }];
+
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
+            &eth_api, bundles, None, None,
+        )
+        .await;
+
+        let err =
+            response.expect_err("call_many should fail when latest block hash is unavailable");
+        let message = err.message().to_ascii_lowercase();
+        assert!(
+            message.contains("block not found"),
+            "missing block hash should still map to block-not-found: {message}"
+        );
     }
 
     #[tokio::test]

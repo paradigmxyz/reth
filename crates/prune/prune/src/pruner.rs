@@ -6,14 +6,17 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_exex_types::FinishedExExHeight;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+    StageCheckpointReader,
 };
 use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -41,6 +44,9 @@ pub struct Pruner<Provider, PF> {
     delete_limit: usize,
     /// Maximum time for one pruner run.
     timeout: Option<Duration>,
+    /// Optional override for the minimum pruning distance. When set, this replaces the
+    /// per-segment hardcoded minimums (e.g. `MINIMUM_UNWIND_SAFE_DISTANCE`).
+    minimum_pruning_distance: Option<u64>,
     /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
     #[doc(hidden)]
@@ -64,6 +70,7 @@ impl<Provider> Pruner<Provider, ()> {
             previous_tip_block_number: None,
             delete_limit,
             timeout,
+            minimum_pruning_distance: None,
             finished_exex_height,
             metrics: Metrics::default(),
             event_sender: Default::default(),
@@ -75,7 +82,7 @@ impl<PF> Pruner<PF::ProviderRW, PF>
 where
     PF: DatabaseProviderFactory,
 {
-    /// Crates a new pruner with the given provider factory.
+    /// Creates a new pruner with the given provider factory.
     pub fn new_with_factory(
         provider_factory: PF,
         segments: Vec<Box<dyn Segment<PF::ProviderRW>>>,
@@ -91,6 +98,7 @@ where
             previous_tip_block_number: None,
             delete_limit,
             timeout,
+            minimum_pruning_distance: None,
             finished_exex_height,
             metrics: Metrics::default(),
             event_sender: Default::default(),
@@ -98,9 +106,17 @@ where
     }
 }
 
+impl<Provider, S> Pruner<Provider, S> {
+    /// Sets the minimum pruning distance, overriding per-segment hardcoded minimums.
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.minimum_pruning_distance = Some(distance);
+        self
+    }
+}
+
 impl<Provider, S> Pruner<Provider, S>
 where
-    Provider: PruneCheckpointReader + PruneCheckpointWriter,
+    Provider: PruneCheckpointReader + PruneCheckpointWriter + StageCheckpointReader,
 {
     /// Listen for events on the pruner.
     pub fn events(&self) -> EventStream<PrunerEvent> {
@@ -112,6 +128,12 @@ where
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(
+        name = "Pruner::run_with_provider",
+        level = "debug",
+        target = "pruner",
+        skip(self, provider)
+    )]
     pub fn run_with_provider(
         &mut self,
         provider: &Provider,
@@ -147,21 +169,7 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match output.progress {
-            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
-            PruneProgress::Finished => "Pruner finished",
-        };
-
-        debug!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
-            "{message}",
-        );
+        output.debug_log(tip_block_number, deleted_entries, elapsed);
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
@@ -174,6 +182,7 @@ where
     ///
     /// Returns a list of stats per pruned segment, total number of entries pruned, and
     /// [`PruneProgress`].
+    #[instrument(level = "debug", target = "pruner", skip_all, fields(segments = self.segments.len()))]
     fn prune_segments(
         &mut self,
         provider: &Provider,
@@ -189,17 +198,37 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
+                output.progress =
+                    output.progress.combine(PruneProgress::HasMoreData(limiter.interrupt_reason()));
                 break
             }
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
                 .map(|mode| {
-                    mode.prune_target_block(tip_block_number, segment.segment(), segment.purpose())
+                    mode.prune_target_block_with_min(
+                        tip_block_number,
+                        segment.segment(),
+                        segment.purpose(),
+                        self.minimum_pruning_distance,
+                    )
                 })
                 .transpose()?
                 .flatten()
             {
+                // Check if segment has a required stage that must be finished first
+                if let Some(required_stage) = segment.required_stage() &&
+                    !is_stage_finished(provider, required_stage)?
+                {
+                    debug!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        ?required_stage,
+                        "Segment's required stage not finished, skipping"
+                    );
+                    continue
+                }
+
                 debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
@@ -232,7 +261,7 @@ where
                         .set(highest_pruned_block as f64);
                 }
 
-                output.progress = segment_output.progress;
+                output.progress = output.progress.combine(segment_output.progress);
                 output.segments.push((segment.segment(), segment_output));
 
                 debug!(
@@ -318,19 +347,35 @@ where
 
 impl<PF> Pruner<PF::ProviderRW, PF>
 where
-    PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointWriter + PruneCheckpointReader>,
+    PF: DatabaseProviderFactory<
+        ProviderRW: PruneCheckpointWriter + PruneCheckpointReader + StageCheckpointReader,
+    >,
 {
     /// Run the pruner. This will only prune data up to the highest finished ExEx height, if there
     /// are no ExExes.
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(name = "Pruner::run", level = "debug", target = "pruner", skip(self))]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.database_provider_rw()?;
         let result = self.run_with_provider(&provider, tip_block_number);
         provider.commit()?;
         result
     }
+}
+
+/// Checks if the given stage has caught up with the `Finish` stage.
+///
+/// Returns `true` if the stage checkpoint is >= the Finish stage checkpoint.
+fn is_stage_finished<Provider: StageCheckpointReader>(
+    provider: &Provider,
+    stage_id: StageId,
+) -> Result<bool, PrunerError> {
+    let stage_checkpoint = provider.get_stage_checkpoint(stage_id)?.map(|c| c.block_number);
+    let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish)?.map(|c| c.block_number);
+
+    Ok(stage_checkpoint >= finish_checkpoint)
 }
 
 #[cfg(test)]

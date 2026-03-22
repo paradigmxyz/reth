@@ -1,49 +1,58 @@
 //! Engine tree configuration.
 
+use alloy_eips::merge::EPOCH_SLOTS;
+use core::time::Duration;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
-/// Minimum number of workers we allow configuring explicitly.
-pub const MIN_WORKER_COUNT: usize = 32;
-
-/// Returns the default number of storage worker threads based on available parallelism.
-fn default_storage_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
-}
-
-/// Returns the default number of account worker threads.
-///
-/// Account workers coordinate storage proof collection and account trie traversal.
-/// They are set to the same count as storage workers for simplicity.
-fn default_account_worker_count() -> usize {
-    default_storage_worker_count()
-}
-
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
+
+/// Gas threshold below which the small block chunk size is used.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
-/// Default maximum concurrency for prewarm task.
-pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
+/// Default depth for sparse trie pruning.
+///
+/// Nodes at this depth and below are converted to hash stubs to reduce memory.
+/// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
+pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
+/// Default LFU hot-slot capacity for sparse trie pruning.
+///
+/// Limits the number of `(address, slot)` pairs retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
+
+/// Default LFU hot-account capacity for sparse trie pruning.
+///
+/// Limits the number of account addresses retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
+
+/// Default timeout for the state root task before spawning a sequential fallback.
+pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
+
+const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn default_cross_block_cache_size() -> usize {
+    if cfg!(test) {
+        1024 * 1024 // 1 MB in tests
+    } else if cfg!(target_pointer_width = "32") {
+        usize::MAX // max possible on wasm32 / 32-bit
+    } else {
+        4 * 1024 * 1024 * 1024 // 4 GB on 64-bit
+    }
+}
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
@@ -89,18 +98,16 @@ pub struct TreeConfig {
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
+    /// Whether to disable state cache.
+    disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
-    /// Whether to disable the parallel sparse trie state root algorithm.
-    disable_parallel_sparse_trie: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
-    /// Whether multiproof task should chunk proof targets.
-    multiproof_chunking_enabled: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -123,14 +130,32 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
-    /// Maximum concurrency for the prewarm task.
-    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of storage proof worker threads.
-    storage_worker_count: usize,
-    /// Number of account proof worker threads.
-    account_worker_count: usize,
+    /// Whether to disable cache metrics recording (can be expensive with large cached state).
+    disable_cache_metrics: bool,
+    /// Depth for sparse trie pruning after state root computation.
+    sparse_trie_prune_depth: usize,
+    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
+    /// When set, blocks whose total processing time (execution + state reads + state root +
+    /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
+    /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
+    slow_block_threshold: Option<Duration>,
+    /// Whether to fully disable sparse trie cache pruning between blocks.
+    disable_sparse_trie_cache_pruning: bool,
+    /// Timeout for the state root task before spawning a sequential fallback computation.
+    /// If `Some`, after waiting this duration for the state root task, a sequential state root
+    /// computation is spawned in parallel and whichever finishes first is used.
+    /// If `None`, the timeout fallback is disabled.
+    state_root_task_timeout: Option<Duration>,
+    /// Maximum random jitter applied before each proof computation (trie-debug only).
+    /// When set, each proof worker sleeps for a random duration up to this value
+    /// before starting a proof calculation.
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
 }
 
 impl Default for TreeConfig {
@@ -143,21 +168,26 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
+            disable_state_cache: false,
             disable_prewarming: false,
-            disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
-            storage_worker_count: default_storage_worker_count(),
-            account_worker_count: default_account_worker_count(),
+            disable_cache_metrics: false,
+            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 }
@@ -173,21 +203,23 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
+        disable_state_cache: bool,
         disable_prewarming: bool,
-        disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
-        cross_block_cache_size: u64,
+        cross_block_cache_size: usize,
         has_enough_parallelism: bool,
-        multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
-        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
-        storage_worker_count: usize,
-        account_worker_count: usize,
+        disable_cache_metrics: bool,
+        sparse_trie_prune_depth: usize,
+        sparse_trie_max_hot_slots: usize,
+        sparse_trie_max_hot_accounts: usize,
+        slow_block_threshold: Option<Duration>,
+        state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -197,21 +229,26 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
+            disable_state_cache,
             disable_prewarming,
-            disable_parallel_sparse_trie,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
-            prewarm_max_concurrency,
             allow_unwind_canonical_header,
-            storage_worker_count,
-            account_worker_count,
+            disable_cache_metrics,
+            sparse_trie_prune_depth,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 
@@ -240,13 +277,13 @@ impl TreeConfig {
         self.max_execute_block_batch_size
     }
 
-    /// Return whether the multiproof task chunking is enabled.
-    pub const fn multiproof_chunking_enabled(&self) -> bool {
-        self.multiproof_chunking_enabled
-    }
-
     /// Return the multiproof task chunk size.
     pub const fn multiproof_chunk_size(&self) -> usize {
+        self.multiproof_chunk_size
+    }
+
+    /// Return the effective multiproof task chunk size.
+    pub const fn effective_multiproof_chunk_size(&self) -> usize {
         self.multiproof_chunk_size
     }
 
@@ -266,12 +303,12 @@ impl TreeConfig {
         self.state_provider_metrics
     }
 
-    /// Returns whether or not the parallel sparse trie is disabled.
-    pub const fn disable_parallel_sparse_trie(&self) -> bool {
-        self.disable_parallel_sparse_trie
+    /// Returns whether or not state cache is disabled.
+    pub const fn disable_state_cache(&self) -> bool {
+        self.disable_state_cache
     }
 
-    /// Returns whether or not parallel prewarming should be used.
+    /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
     }
@@ -283,7 +320,7 @@ impl TreeConfig {
     }
 
     /// Returns the cross-block cache size.
-    pub const fn cross_block_cache_size(&self) -> u64 {
+    pub const fn cross_block_cache_size(&self) -> usize {
         self.cross_block_cache_size
     }
 
@@ -363,6 +400,12 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for whether to disable state cache.
+    pub const fn without_state_cache(mut self, disable_state_cache: bool) -> Self {
+        self.disable_state_cache = disable_state_cache;
+        self
+    }
+
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
@@ -380,7 +423,7 @@ impl TreeConfig {
     }
 
     /// Setter for cross block cache size.
-    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
     }
@@ -394,24 +437,6 @@ impl TreeConfig {
     /// Setter for state provider metrics.
     pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
         self.state_provider_metrics = state_provider_metrics;
-        self
-    }
-
-    /// Setter for whether to disable the parallel sparse trie
-    pub const fn with_disable_parallel_sparse_trie(
-        mut self,
-        disable_parallel_sparse_trie: bool,
-    ) -> Self {
-        self.disable_parallel_sparse_trie = disable_parallel_sparse_trie;
-        self
-    }
-
-    /// Setter for whether multiproof task should chunk proof targets.
-    pub const fn with_multiproof_chunking_enabled(
-        mut self,
-        multiproof_chunking_enabled: bool,
-    ) -> Self {
-        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
         self
     }
 
@@ -450,36 +475,100 @@ impl TreeConfig {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 
-    /// Setter for prewarm max concurrency.
-    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
-        self.prewarm_max_concurrency = prewarm_max_concurrency;
+    /// Returns whether cache metrics recording is disabled.
+    pub const fn disable_cache_metrics(&self) -> bool {
+        self.disable_cache_metrics
+    }
+
+    /// Setter for whether to disable cache metrics recording.
+    pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
+        self.disable_cache_metrics = disable_cache_metrics;
         self
     }
 
-    /// Return the prewarm max concurrency.
-    pub const fn prewarm_max_concurrency(&self) -> usize {
-        self.prewarm_max_concurrency
+    /// Returns the sparse trie prune depth.
+    pub const fn sparse_trie_prune_depth(&self) -> usize {
+        self.sparse_trie_prune_depth
     }
 
-    /// Return the number of storage proof worker threads.
-    pub const fn storage_worker_count(&self) -> usize {
-        self.storage_worker_count
-    }
-
-    /// Setter for the number of storage proof worker threads.
-    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
+    /// Setter for sparse trie prune depth.
+    pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
+        self.sparse_trie_prune_depth = depth;
         self
     }
 
-    /// Return the number of account proof worker threads.
-    pub const fn account_worker_count(&self) -> usize {
-        self.account_worker_count
+    /// Returns the LFU hot-slot capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
+        self.sparse_trie_max_hot_slots
     }
 
-    /// Setter for the number of account proof worker threads.
-    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+    /// Setter for LFU hot-slot capacity.
+    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
+        self.sparse_trie_max_hot_slots = max_hot_slots;
+        self
+    }
+
+    /// Returns the LFU hot-account capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
+        self.sparse_trie_max_hot_accounts
+    }
+
+    /// Setter for LFU hot-account capacity.
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = max_hot_accounts;
+        self
+    }
+
+    /// Returns the slow block threshold, if configured.
+    ///
+    /// When `Some`, blocks whose total processing time exceeds this duration emit a structured
+    /// warning with timing, state-operation, and cache-hit-rate details. `Duration::ZERO` logs
+    /// every block.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
+        self
+    }
+
+    /// Returns whether sparse trie cache pruning is disabled.
+    pub const fn disable_sparse_trie_cache_pruning(&self) -> bool {
+        self.disable_sparse_trie_cache_pruning
+    }
+
+    /// Setter for whether to disable sparse trie cache pruning.
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = value;
+        self
+    }
+
+    /// Returns the state root task timeout.
+    pub const fn state_root_task_timeout(&self) -> Option<Duration> {
+        self.state_root_task_timeout
+    }
+
+    /// Setter for state root task timeout.
+    pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.state_root_task_timeout = timeout;
+        self
+    }
+
+    /// Returns the proof jitter duration, if configured (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn proof_jitter(&self) -> Option<Duration> {
+        self.proof_jitter
+    }
+
+    /// Setter for proof jitter (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn with_proof_jitter(mut self, proof_jitter: Option<Duration>) -> Self {
+        self.proof_jitter = proof_jitter;
         self
     }
 }

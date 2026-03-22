@@ -1,31 +1,59 @@
 //! Generic reader and writer abstractions for interacting with either database tables or static
 //! files.
 
-use std::ops::Range;
+use std::{
+    collections::BTreeSet,
+    marker::PhantomData,
+    ops::{Range, RangeInclusive},
+};
 
 use crate::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut},
+    providers::{
+        history_info, rocksdb::RocksDBBatch, HistoryInfo, StaticFileProvider,
+        StaticFileProviderRWRefMut,
+    },
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRW},
+    models::{AccountBeforeTx, StorageBeforeTx},
     static_file::TransactionSenderMask,
     table::Value,
-    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
+    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy, DupCursorTy},
 };
-use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
+    tables,
+    tables::BlockNumberList,
+};
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::ReceiptTy;
+use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
+use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<P, T> =
-    EitherReader<CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+type EitherReaderTy<'a, P, T> =
+    EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+
+/// Type alias for [`EitherReader`] constructors.
+type DupEitherReaderTy<'a, P, T> = EitherReader<
+    'a,
+    DupCursorTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
+
+/// Type alias for dup [`EitherWriter`] constructors.
+type DupEitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -34,13 +62,27 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-/// Represents a destination for writing data, either to database or static files.
+/// Helper type for `RocksDB` batch argument in writer constructors.
+pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+
+/// The raw `RocksDB` batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
+pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
+
+/// Helper type for `RocksDB` snapshot argument in reader constructors.
+///
+/// The `Option` allows callers to skip `RocksDB` access when it isn't needed
+/// (e.g., on legacy MDBX-only nodes).
+pub type RocksDBRefArg<'a> = Option<crate::providers::rocksdb::RocksReadSnapshot<'a>>;
+
+/// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+    /// Write to `RocksDB` using a write-only batch (historical tables).
+    RocksDB(RocksDBBatch<'a>),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -65,30 +107,6 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Returns the destination for writing receipts.
-    ///
-    /// The rules are as follows:
-    /// - If the node should not always write receipts to static files, and any receipt pruning is
-    ///   enabled, write to the database.
-    /// - If the node should always write receipts to static files, but receipt log filter pruning
-    ///   is enabled, write to the database.
-    /// - Otherwise, write to static files.
-    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
-        provider: &P,
-    ) -> EitherWriterDestination {
-        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
-        let prune_modes = provider.prune_modes_ref();
-
-        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
-            // TODO: support writing receipts to static files with log filter pruning enabled
-            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
-        {
-            EitherWriterDestination::Database
-        } else {
-            EitherWriterDestination::StaticFile
-        }
-    }
-
     /// Creates a new [`EitherWriter`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &'a P,
@@ -109,9 +127,166 @@ impl<'a> EitherWriter<'a, (), ()> {
             ))
         }
     }
+
+    /// Creates a new [`EitherWriter`] for account changesets based on storage settings and prune
+    /// modes.
+    pub fn new_account_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for storage changesets based on storage settings.
+    pub fn new_storage_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::StorageChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?,
+            ))
+        }
+    }
+
+    /// Returns the destination for writing receipts.
+    ///
+    /// The rules are as follows:
+    /// - If the node should not always write receipts to static files, and any receipt pruning is
+    ///   enabled, write to the database.
+    /// - If the node should always write receipts to static files, but receipt log filter pruning
+    ///   is enabled, write to the database.
+    /// - Otherwise, write to static files.
+    pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        let receipts_in_static_files = provider.cached_storage_settings().storage_v2;
+        let prune_modes = provider.prune_modes_ref();
+
+        if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
+            // TODO: support writing receipts to static files with log filter pruning enabled
+            receipts_in_static_files && !prune_modes.receipts_log_filter.is_empty()
+        {
+            EitherWriterDestination::Database
+        } else {
+            EitherWriterDestination::StaticFile
+        }
+    }
+
+    /// Returns the destination for writing account changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().storage_v2 {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().storage_v2 {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for storages history based on storage settings.
+    pub fn new_storages_history<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
+    }
+
+    /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(
+            provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
+        ))
+    }
+
+    /// Creates a new [`EitherWriter`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
+    /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
+    ///
+    /// Returns `Some(WriteBatchWithTransaction)` for [`Self::RocksDB`] variant,
+    /// `None` for other variants.
+    ///
+    /// This is used to defer `RocksDB` commits to the provider level, ensuring all
+    /// storage commits (MDBX, static files, `RocksDB`) happen atomically in a single place.
+    pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
+        match self {
+            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::RocksDB(batch) => Some(batch.into_inner()),
+        }
+    }
+
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
@@ -119,6 +294,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -132,6 +308,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -146,6 +323,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -159,6 +337,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, sender)?),
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -175,6 +354,7 @@ where
                 Ok(())
             }
             Self::StaticFile(writer) => writer.append_transaction_senders(senders),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -206,41 +386,398 @@ where
 
                 writer.prune_transaction_senders(to_delete, block)?;
             }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
 
         Ok(())
     }
 }
 
-/// Represents a source for reading data, either from database or static files.
-#[derive(Debug, Display)]
-pub enum EitherReader<CURSOR, N> {
-    /// Read from database table via cursor
-    Database(CURSOR),
-    /// Read from static file
-    StaticFile(StaticFileProvider<N>),
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::TransactionHashNumbers> + DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Puts a transaction hash number mapping.
+    ///
+    /// When `append_only` is true, uses `cursor.append()` which is significantly faster
+    /// but requires entries to be inserted in order and the table to be empty.
+    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order and duplicates.
+    pub fn put_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+        tx_num: TxNumber,
+        append_only: bool,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if append_only {
+                    Ok(cursor.append(hash, &tx_num)?)
+                } else {
+                    Ok(cursor.upsert(hash, &tx_num)?)
+                }
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
+        }
+    }
+
+    /// Puts multiple transaction hash number mappings in a batch.
+    ///
+    /// Accepts a vector of `(TxHash, TxNumber)` tuples and writes them all using the same cursor.
+    /// This is more efficient than calling `put_transaction_hash_number` repeatedly.
+    ///
+    /// When `append_only` is true, uses `cursor.append()` which requires entries to be
+    /// pre-sorted and the table to be empty or have only lower keys.
+    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order.
+    pub fn put_transaction_hash_numbers_batch(
+        &mut self,
+        entries: Vec<(TxHash, TxNumber)>,
+        append_only: bool,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                for (hash, tx_num) in entries {
+                    if append_only {
+                        cursor.append(hash, &tx_num)?;
+                    } else {
+                        cursor.upsert(hash, &tx_num)?;
+                    }
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => {
+                for (hash, tx_num) in entries {
+                    batch.put::<tables::TransactionHashNumbers>(hash, &tx_num)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Deletes a transaction hash number mapping.
+    pub fn delete_transaction_hash_number(&mut self, hash: TxHash) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(hash)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
+        }
+    }
 }
 
-impl EitherReader<(), ()> {
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    /// Puts a storage history entry.
+    pub fn put_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Deletes a storage history entry.
+    pub fn delete_storage_history(&mut self, key: StorageShardedKey) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
+        }
+    }
+
+    /// Appends a storage history entry (for first sync - more efficient).
+    pub fn append_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Upserts a storage history entry (for incremental sync).
+    pub fn upsert_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address and storage key (keyed with `u64::MAX`).
+    pub fn get_last_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        let key = StorageShardedKey::last(address, storage_key);
+        match self {
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.get::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    /// Appends an account history entry (for first sync - more efficient).
+    pub fn append_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Upserts an account history entry (for incremental sync).
+    pub fn upsert_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address (keyed with `u64::MAX`).
+    pub fn get_last_account_history_shard(
+        &mut self,
+        address: Address,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor) => {
+                Ok(cursor.seek_exact(ShardedKey::last(address))?.map(|(_, v)| v))
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
+        }
+    }
+
+    /// Deletes an account history entry.
+    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
+{
+    /// Append account changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address before appending
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        // First sort the changesets
+        changeset.par_sort_by_key(|a| a.address);
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    cursor.append_dup(block_number, change)?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_account_changeset(changeset, block_number)?;
+            }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::StorageChangeSets>,
+{
+    /// Append storage changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address and storage key before appending.
+    pub fn append_storage_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<StorageBeforeTx>,
+    ) -> ProviderResult<()> {
+        changeset.par_sort_by_key(|change| (change.address, change.key));
+
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    let storage_id = BlockNumberAddress((block_number, change.address));
+                    cursor.append_dup(
+                        storage_id,
+                        StorageEntry { key: change.key, value: change.value },
+                    )?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_storage_changeset(changeset, block_number)?;
+            }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+        }
+
+        Ok(())
+    }
+}
+
+/// Represents a source for reading data, either from database, static files, or `RocksDB`.
+#[derive(Debug, Display)]
+pub enum EitherReader<'a, CURSOR, N> {
+    /// Read from database table via cursor
+    Database(CURSOR, PhantomData<&'a ()>),
+    /// Read from static file
+    StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
+    /// Read from `RocksDB` snapshot (works in both read-only and read-write modes)
+    RocksDB(crate::providers::rocksdb::RocksReadSnapshot<'a>),
+}
+
+impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &P,
-    ) -> ProviderResult<EitherReaderTy<P, tables::TransactionSenders>>
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionSenders>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider()))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
+                PhantomData,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherReader`] for storages history based on storage settings.
+    pub fn new_storages_history<P>(
+        provider: &P,
+        rocksdb: RocksDBRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherReader::RocksDB(
+                rocksdb.expect("storages_history_in_rocksdb requires rocksdb snapshot"),
+            ));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &P,
+        rocksdb: RocksDBRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherReader::RocksDB(
+                rocksdb.expect("transaction_hash_numbers_in_rocksdb requires rocksdb snapshot"),
+            ));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        rocksdb: RocksDBRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        if provider.cached_storage_settings().storage_v2 {
+            return Ok(EitherReader::RocksDB(
+                rocksdb.expect("account_history_in_rocksdb requires rocksdb snapshot"),
+            ));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for account changesets based on storage settings.
+    pub fn new_account_changesets<P>(
+        provider: &P,
+    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTx,
+    {
+        if EitherWriterDestination::account_changesets(provider).is_static_file() {
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
+        } else {
+            Ok(EitherReader::Database(
+                provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
+                PhantomData,
             ))
         }
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionSenders>,
 {
@@ -250,11 +787,11 @@ where
         range: Range<TxNumber>,
     ) -> ProviderResult<HashMap<TxNumber, Address>> {
         match self {
-            Self::Database(cursor) => cursor
+            Self::Database(cursor, _) => cursor
                 .walk_range(range)?
                 .map(|result| result.map_err(ProviderError::from))
                 .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::StaticFile(provider) => range
+            Self::StaticFile(provider, _) => range
                 .clone()
                 .zip(provider.fetch_range_iter(
                     StaticFileSegment::TransactionSenders,
@@ -266,6 +803,158 @@ where
                     Some(result.map(|sender| (tx_num, sender)))
                 })
                 .collect::<ProviderResult<HashMap<_, _>>>(),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Gets a transaction number by its hash.
+    pub fn get_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<TxNumber>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::StoragesHistory>,
+{
+    /// Gets a storage history shard entry for the given [`StorageShardedKey`], if present.
+    pub fn get_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::StoragesHistory>(key),
+        }
+    }
+
+    /// Lookup storage history and return [`HistoryInfo`].
+    pub fn storage_history_info(
+        &mut self,
+        address: Address,
+        storage_key: alloy_primitives::B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = StorageShardedKey::new(address, storage_key, block_number);
+                history_info::<tables::StoragesHistory, _, _>(
+                    cursor,
+                    key,
+                    block_number,
+                    |k| k.address == address && k.sharded_key.key == storage_key,
+                    lowest_available_block_number,
+                )
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(snapshot) => snapshot.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            ),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::AccountsHistory>,
+{
+    /// Gets an account history shard entry for the given [`ShardedKey`], if present.
+    pub fn get_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(snapshot) => snapshot.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Lookup account history and return [`HistoryInfo`].
+    pub fn account_history_info(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = ShardedKey::new(address, block_number);
+                history_info::<tables::AccountsHistory, _, _>(
+                    cursor,
+                    key,
+                    block_number,
+                    |k| k.key == address,
+                    lowest_available_block_number,
+                )
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(snapshot) => {
+                snapshot.account_history_info(address, block_number, lowest_available_block_number)
+            }
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::AccountChangeSets>,
+{
+    /// Iterate over account changesets and return all account address that were changed.
+    pub fn changed_accounts_with_range(
+        &mut self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<BTreeSet<Address>> {
+        match self {
+            Self::StaticFile(provider, _) => {
+                let highest_static_block =
+                    provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+                let Some(highest) = highest_static_block else {
+                    return Err(ProviderError::MissingHighestStaticFileBlock(
+                        StaticFileSegment::AccountChangeSets,
+                    ))
+                };
+
+                let start = *range.start();
+                let static_end = (*range.end()).min(highest);
+
+                let mut changed_accounts = BTreeSet::default();
+                if start <= static_end {
+                    for block in start..=static_end {
+                        let block_changesets = provider.account_block_changeset(block)?;
+                        for changeset in block_changesets {
+                            changed_accounts.insert(changeset.address);
+                        }
+                    }
+                }
+
+                Ok(changed_accounts)
+            }
+            Self::Database(provider, _) => provider
+                .walk_range(range)?
+                .map(|entry| {
+                    entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
+                })
+                .collect(),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -277,6 +966,8 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
+    /// Write to `RocksDB`
+    RocksDB,
 }
 
 impl EitherWriterDestination {
@@ -286,7 +977,33 @@ impl EitherWriterDestination {
         P: StorageSettingsCache,
     {
         // Write senders to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().transaction_senders_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for writing account changesets based on storage settings.
+    pub fn account_changesets<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write account changesets to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().storage_v2 {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets based on storage settings.
+    pub fn storage_changesets<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write storage changesets to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().storage_v2 {
             Self::StaticFile
         } else {
             Self::Database
@@ -296,11 +1013,69 @@ impl EitherWriterDestination {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::create_test_provider_factory;
+    use crate::{test_utils::create_test_provider_factory, StaticFileWriter};
 
     use super::*;
     use alloy_primitives::Address;
+    use reth_db::models::AccountBeforeTx;
+    use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+
+    /// Verifies that `changed_accounts_with_range` correctly caps the query range to the
+    /// static file tip when the requested range extends beyond it.
+    ///
+    /// This test documents the fix for an off-by-one bug where the code computed
+    /// `static_end = range.end().min(highest + 1)` instead of `min(highest)`.
+    /// The bug allowed iteration to attempt reading block `highest + 1` which doesn't
+    /// exist (silently returning empty results due to `MissingStaticFileBlock` handling).
+    ///
+    /// While the bug was masked by error handling, it caused:
+    /// 1. Unnecessary iteration/lookup for non-existent blocks
+    /// 2. Potential overflow when `highest == u64::MAX`
+    #[test]
+    fn test_changed_accounts_with_range_caps_at_static_file_tip() {
+        let factory = create_test_provider_factory();
+        let highest_block = 5u64;
+
+        let addresses: Vec<Address> = (0..=highest_block)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=highest_block {
+                let changeset =
+                    vec![AccountBeforeTx { address: addresses[block_num as usize], info: None }];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert_eq!(sf_tip, Some(highest_block));
+
+        let mut reader = EitherReader::new_account_changesets(&provider).unwrap();
+        assert!(matches!(reader, EitherReader::StaticFile(_, _)));
+
+        // Query range 0..=10 when tip is 5 - should return only accounts from blocks 0-5
+        let result = reader.changed_accounts_with_range(0..=10).unwrap();
+
+        let expected: BTreeSet<Address> = addresses.into_iter().collect();
+        assert_eq!(result, expected);
+    }
 
     #[test]
     fn test_reader_senders_by_tx_range() {
@@ -315,10 +1090,11 @@ mod tests {
         ];
 
         for transaction_senders_in_static_files in [false, true] {
-            factory.set_storage_settings_cache(
-                StorageSettings::legacy()
-                    .with_transaction_senders_in_static_files(transaction_senders_in_static_files),
-            );
+            factory.set_storage_settings_cache(if transaction_senders_in_static_files {
+                StorageSettings::v2()
+            } else {
+                StorageSettings::v1()
+            });
 
             let provider = factory.database_provider_rw().unwrap();
             let mut writer = EitherWriter::new_senders(&provider, 0).unwrap();
@@ -336,9 +1112,9 @@ mod tests {
             let provider = factory.database_provider_ro().unwrap();
             let mut reader = EitherReader::new_senders(&provider).unwrap();
             if transaction_senders_in_static_files {
-                assert!(matches!(reader, EitherReader::StaticFile(_)));
+                assert!(matches!(reader, EitherReader::StaticFile(_, _)));
             } else {
-                assert!(matches!(reader, EitherReader::Database(_)));
+                assert!(matches!(reader, EitherReader::Database(_, _)));
             }
 
             assert_eq!(
@@ -347,5 +1123,696 @@ mod tests {
                 "{reader}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod rocksdb_tests {
+    use super::*;
+    use crate::{
+        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
+        test_utils::create_test_provider_factory,
+        RocksDBProviderFactory,
+    };
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        tables,
+        transaction::DbTxMut,
+    };
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+    use std::marker::PhantomData;
+    use tempfile::TempDir;
+
+    fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+        (temp_dir, provider)
+    }
+
+    /// Test that `EitherWriter::new_transaction_hash_numbers` creates a `RocksDB` writer
+    /// when the storage setting is enabled, and that put operations followed by commit
+    /// persist the data to `RocksDB`.
+    #[test]
+    fn test_either_writer_transaction_hash_numbers_with_rocksdb() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Get the RocksDB batch from the provider
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        // Create EitherWriter with RocksDB
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Verify we got a RocksDB writer
+        assert!(matches!(writer, EitherWriter::RocksDB(_)));
+
+        // Write transaction hash numbers (append_only=false since we're using RocksDB)
+        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+
+        // Extract the batch and register with provider for commit
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+
+        // Commit via provider - this commits RocksDB batch too
+        provider.commit().unwrap();
+
+        // Verify data was written to RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(), Some(tx_num1));
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
+    }
+
+    /// Test that `EitherWriter::delete_transaction_hash_number` works with `RocksDB`.
+    #[test]
+    fn test_either_writer_delete_transaction_hash_number_with_rocksdb() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        // First, write a value directly to RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
+
+        // Now delete using EitherWriter
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        writer.delete_transaction_hash_number(hash).unwrap();
+
+        // Extract the batch and commit via provider
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify deletion
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_transaction_hash_numbers() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Write via RocksDBBatch (same as EitherWriter::RocksDB would use internally)
+        let mut batch = provider.batch();
+        batch.put::<tables::TransactionHashNumbers>(hash1, &tx_num1).unwrap();
+        batch.put::<tables::TransactionHashNumbers>(hash2, &tx_num2).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx (same as EitherReader::RocksDB would use internally)
+        let tx = provider.tx();
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash1).unwrap(), Some(tx_num1));
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
+
+        // Test missing key
+        let missing_hash = B256::from([99u8; 32]);
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(missing_hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10, 50]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::StoragesHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = StorageShardedKey::new(Address::random(), B256::ZERO, 0);
+        assert_eq!(tx.get::<tables::StoragesHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100, 500]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::AccountsHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = ShardedKey::new(Address::random(), 0);
+        assert_eq!(tx.get::<tables::AccountsHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_transaction_hash_number() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        // First write
+        provider.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::TransactionHashNumbers>(hash).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10]).unwrap();
+
+        // First write
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::StoragesHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::StoragesHistory>(key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100]).unwrap();
+
+        // First write
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::AccountsHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::AccountsHistory>(key).unwrap(), None);
+    }
+
+    // ==================== Parametrized Backend Equivalence Tests ====================
+    //
+    // These tests verify that MDBX and RocksDB produce identical results for history lookups.
+    // Each scenario sets up the same data in both backends and asserts identical HistoryInfo.
+
+    /// Query parameters for a history lookup test case.
+    struct HistoryQuery {
+        block_number: BlockNumber,
+        lowest_available: Option<BlockNumber>,
+        expected: HistoryInfo,
+    }
+
+    // Type aliases for cursor types (needed for EitherWriter/EitherReader type inference)
+    type AccountsHistoryWriteCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::AccountsHistory>;
+    type StoragesHistoryWriteCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::StoragesHistory>;
+    type AccountsHistoryReadCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::AccountsHistory>;
+    type StoragesHistoryReadCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::StoragesHistory>;
+
+    /// Runs the same account history queries against both MDBX and `RocksDB` backends,
+    /// asserting they produce identical results.
+    fn run_account_history_scenario(
+        scenario_name: &str,
+        address: Address,
+        shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
+        queries: &[HistoryQuery],
+    ) {
+        // Setup MDBX and RocksDB with identical data using EitherWriter
+        let factory = create_test_provider_factory();
+        let mdbx_provider = factory.database_provider_rw().unwrap();
+        let (temp_dir, rocks_provider) = create_rocksdb_provider();
+
+        // Create writers for both backends
+        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::Database(
+                mdbx_provider.tx_ref().cursor_write::<tables::AccountsHistory>().unwrap(),
+            );
+        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::RocksDB(rocks_provider.batch());
+
+        // Write identical data to both backends in a single loop
+        for (highest_block, blocks) in shards {
+            let key = ShardedKey::new(address, *highest_block);
+            let value = IntegerList::new(blocks.clone()).unwrap();
+            mdbx_writer.upsert_account_history(key.clone(), &value).unwrap();
+            rocks_writer.upsert_account_history(key, &value).unwrap();
+        }
+
+        // Commit both backends
+        drop(mdbx_writer);
+        mdbx_provider.commit().unwrap();
+        if let EitherWriter::RocksDB(batch) = rocks_writer {
+            batch.commit().unwrap();
+        }
+
+        // Run queries against both backends using EitherReader
+        let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_snapshot = rocks_provider.snapshot();
+
+        for (i, query) in queries.iter().enumerate() {
+            // MDBX query via EitherReader
+            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+                EitherReader::Database(
+                    mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
+                    PhantomData,
+                );
+            let mdbx_result = mdbx_reader
+                .account_history_info(address, query.block_number, query.lowest_available)
+                .unwrap();
+
+            // RocksDB query via EitherReader — reuse snapshot for consistent view
+            let rocks_result = rocks_snapshot
+                .account_history_info(address, query.block_number, query.lowest_available)
+                .unwrap();
+
+            // Assert both backends produce identical results
+            assert_eq!(
+                mdbx_result,
+                rocks_result,
+                "Backend mismatch in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 MDBX: {:?}, RocksDB: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                rocks_result
+            );
+
+            // Also verify against expected result
+            assert_eq!(
+                mdbx_result,
+                query.expected,
+                "Unexpected result in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 Got: {:?}, Expected: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                query.expected
+            );
+        }
+
+        drop(temp_dir);
+    }
+
+    /// Runs the same storage history queries against both MDBX and `RocksDB` backends,
+    /// asserting they produce identical results.
+    fn run_storage_history_scenario(
+        scenario_name: &str,
+        address: Address,
+        storage_key: B256,
+        shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
+        queries: &[HistoryQuery],
+    ) {
+        // Setup MDBX and RocksDB with identical data using EitherWriter
+        let factory = create_test_provider_factory();
+        let mdbx_provider = factory.database_provider_rw().unwrap();
+        let (temp_dir, rocks_provider) = create_rocksdb_provider();
+
+        // Create writers for both backends
+        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::Database(
+                mdbx_provider.tx_ref().cursor_write::<tables::StoragesHistory>().unwrap(),
+            );
+        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::RocksDB(rocks_provider.batch());
+
+        // Write identical data to both backends in a single loop
+        for (highest_block, blocks) in shards {
+            let key = StorageShardedKey::new(address, storage_key, *highest_block);
+            let value = IntegerList::new(blocks.clone()).unwrap();
+            mdbx_writer.put_storage_history(key.clone(), &value).unwrap();
+            rocks_writer.put_storage_history(key, &value).unwrap();
+        }
+
+        // Commit both backends
+        drop(mdbx_writer);
+        mdbx_provider.commit().unwrap();
+        if let EitherWriter::RocksDB(batch) = rocks_writer {
+            batch.commit().unwrap();
+        }
+
+        // Run queries against both backends using EitherReader
+        let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_snapshot = rocks_provider.snapshot();
+
+        for (i, query) in queries.iter().enumerate() {
+            // MDBX query via EitherReader
+            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+                EitherReader::Database(
+                    mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
+                    PhantomData,
+                );
+            let mdbx_result = mdbx_reader
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    query.block_number,
+                    query.lowest_available,
+                )
+                .unwrap();
+
+            // RocksDB query via snapshot — reuse for consistent view
+            let rocks_result = rocks_snapshot
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    query.block_number,
+                    query.lowest_available,
+                )
+                .unwrap();
+
+            // Assert both backends produce identical results
+            assert_eq!(
+                mdbx_result,
+                rocks_result,
+                "Backend mismatch in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 MDBX: {:?}, RocksDB: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                rocks_result
+            );
+
+            // Also verify against expected result
+            assert_eq!(
+                mdbx_result,
+                query.expected,
+                "Unexpected result in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 Got: {:?}, Expected: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                query.expected
+            );
+        }
+
+        drop(temp_dir);
+    }
+
+    /// Tests account history lookups across both MDBX and `RocksDB` backends.
+    ///
+    /// Covers the following scenarios from PR2's `RocksDB`-only tests:
+    /// 1. Single shard - basic lookups within one shard
+    /// 2. Multiple shards - `prev()` shard detection and transitions
+    /// 3. No history - query address with no entries
+    /// 4. Pruning boundary - `lowest_available` boundary behavior (block at/after boundary)
+    #[test]
+    fn test_account_history_info_both_backends() {
+        let address = Address::from([0x42; 20]);
+
+        // Scenario 1: Single shard with blocks [100, 200, 300]
+        run_account_history_scenario(
+            "single_shard",
+            address,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // Before first entry -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Between entries -> InChangeset(next_write)
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // Exact match on entry -> InChangeset(same_block)
+                HistoryQuery {
+                    block_number: 300,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(300),
+                },
+                // After last entry in last shard -> InPlainState
+                HistoryQuery {
+                    block_number: 500,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // Scenario 2: Multiple shards - tests prev() shard detection
+        run_account_history_scenario(
+            "multiple_shards",
+            address,
+            &[
+                (500, vec![100, 200, 300, 400, 500]), // First shard ends at 500
+                (u64::MAX, vec![600, 700, 800]),      // Last shard
+            ],
+            &[
+                // Before first shard, no prev -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Within first shard
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // Between shards - prev() should find first shard
+                HistoryQuery {
+                    block_number: 550,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(600),
+                },
+                // After all entries
+                HistoryQuery {
+                    block_number: 900,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // Scenario 3: No history for address
+        let address_without_history = Address::from([0x43; 20]);
+        run_account_history_scenario(
+            "no_history",
+            address_without_history,
+            &[], // No shards for this address
+            &[HistoryQuery {
+                block_number: 150,
+                lowest_available: None,
+                expected: HistoryInfo::NotYetWritten,
+            }],
+        );
+
+        // Scenario 4: Query at pruning boundary
+        // Note: We test block >= lowest_available because HistoricalStateProviderRef
+        // errors on blocks below the pruning boundary before doing the lookup.
+        // The RocksDB implementation doesn't have this check at the same level.
+        // This tests that when pruning IS available, both backends agree.
+        run_account_history_scenario(
+            "with_pruning_boundary",
+            address,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // At pruning boundary -> InChangeset(first entry after block)
+                HistoryQuery {
+                    block_number: 100,
+                    lowest_available: Some(100),
+                    expected: HistoryInfo::InChangeset(100),
+                },
+                // After pruning boundary, between entries
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: Some(100),
+                    expected: HistoryInfo::InChangeset(200),
+                },
+            ],
+        );
+    }
+
+    /// Tests storage history lookups across both MDBX and `RocksDB` backends.
+    #[test]
+    fn test_storage_history_info_both_backends() {
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+        let other_storage_key = B256::from([0x02; 32]);
+
+        // Single shard with blocks [100, 200, 300]
+        run_storage_history_scenario(
+            "storage_single_shard",
+            address,
+            storage_key,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // Before first entry -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Between entries -> InChangeset(next_write)
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // After last entry -> InPlainState
+                HistoryQuery {
+                    block_number: 500,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // No history for different storage key
+        run_storage_history_scenario(
+            "storage_no_history",
+            address,
+            other_storage_key,
+            &[], // No shards for this storage key
+            &[HistoryQuery {
+                block_number: 150,
+                lowest_available: None,
+                expected: HistoryInfo::NotYetWritten,
+            }],
+        );
+    }
+
+    /// Test that `RocksDB` batches created via `EitherWriter` are only made visible when
+    /// `provider.commit()` is called, not when the writer is dropped.
+    #[test]
+    fn test_rocksdb_commits_at_provider_level() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Get the RocksDB batch from the provider
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        // Create provider and EitherWriter
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Write transaction hash numbers (append_only=false since we're using RocksDB)
+        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+
+        // Extract the raw batch from the writer and register it with the provider
+        let raw_batch = writer.into_raw_rocksdb_batch();
+        if let Some(batch) = raw_batch {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+
+        // Data should NOT be visible yet (batch not committed)
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(),
+            None,
+            "Data should not be visible before provider.commit()"
+        );
+
+        // Commit the provider - this should commit both MDBX and RocksDB
+        provider.commit().unwrap();
+
+        // Now data should be visible in RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(),
+            Some(tx_num1),
+            "Data should be visible after provider.commit()"
+        );
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash2).unwrap(),
+            Some(tx_num2),
+            "Data should be visible after provider.commit()"
+        );
+    }
+
+    /// Test that `EitherReader::new_accounts_history` panics when settings require
+    /// `RocksDB` but no snapshot is given (`None`). This is an invariant violation that
+    /// indicates a bug - `with_rocksdb_snapshot` should always provide a snapshot when needed.
+    #[test]
+    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb snapshot")]
+    fn test_settings_mismatch_panics() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let provider = factory.database_provider_ro().unwrap();
+        let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);
     }
 }

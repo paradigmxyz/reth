@@ -39,7 +39,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     where
         Self: FullEthApiTypes,
     {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
+        async move {
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let header =
+                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            Ok(Some(header))
+        }
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -59,8 +64,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
             let block = block.clone_into_rpc_block(
                 full.into(),
-                |tx, tx_info| self.tx_resp_builder().fill(tx, tx_info),
-                |header, size| self.tx_resp_builder().convert_header(header, size),
+                |tx, tx_info| self.converter().fill(tx, tx_info),
+                |header, size| self.converter().convert_header(header, size),
             )?;
             Ok(Some(block))
         }
@@ -73,32 +78,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         &self,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
-        async move {
-            if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                return Ok(self
-                    .provider()
-                    .pending_block()
-                    .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body().transaction_count()));
-            }
-
-            let block_hash = match self
-                .provider()
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
-            };
-
-            Ok(self
-                .cache()
-                .get_recovered_block(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body().transaction_count()))
-        }
+        async move { Ok(self.recovered_block(block_id).await?.map(|b| b.body().transaction_count())) }
     }
 
     /// Helper function for `eth_getBlockReceipts`.
@@ -155,7 +135,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .collect::<Vec<_>>();
 
                 return Ok(self
-                    .tx_resp_builder()
+                    .converter()
                     .convert_receipts_with_block(inputs, block.sealed_block())
                     .map(Some)?)
             }
@@ -176,6 +156,10 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
                 if let Some((block, receipts)) = self
@@ -235,18 +219,11 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let uncles = if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                self.provider()
-                    .pending_block()
-                    .map_err(Self::Error::from_eth_err)?
-                    .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
-            } else {
-                self.recovered_block(block_id)
-                    .await?
-                    .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
-            }
-            .unwrap_or_default();
+            let uncles = self
+                .recovered_block(block_id)
+                .await?
+                .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
+                .unwrap_or_default();
 
             uncles
                 .into_iter()
@@ -256,7 +233,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                         alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
                     let size = block.length();
                     let header = self
-                        .tx_resp_builder()
+                        .converter()
                         .convert_header(SealedHeader::new_unhashed(block.header), size)?;
                     Ok(Block {
                         uncles: vec![],
@@ -287,6 +264,10 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     > + Send {
         async move {
             if block_id.is_pending() {
+                if self.pending_block_kind().is_none() {
+                    return Ok(None);
+                }
+
                 // Pending block can be fetched directly without need for caching
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?

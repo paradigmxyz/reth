@@ -1,5 +1,5 @@
 use super::setup;
-use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_consensus::{noop::NoopConsensus, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
@@ -9,13 +9,14 @@ use reth_evm::ConfigureEvm;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use std::sync::Arc;
 use tracing::info;
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn dump_execution_stage<N, E, C>(
     db_tool: &DbTool<N>,
     from: u64,
@@ -24,11 +25,12 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     should_run: bool,
     evm_config: E,
     consensus: C,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -39,9 +41,11 @@ where
     if should_run {
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,
@@ -168,7 +172,7 @@ fn dry_run<N, E, C>(
 where
     N: ProviderNodeTypes,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 

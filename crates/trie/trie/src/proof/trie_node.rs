@@ -2,11 +2,11 @@ use super::{Proof, StorageProof};
 use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{map::HashSet, B256};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
+use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::provider::{
     pad_path_to_key, RevealedNode, TrieNodeProvider, TrieNodeProviderFactory,
 };
-use std::time::Instant;
 use tracing::{enabled, trace, Level};
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
@@ -27,8 +27,8 @@ impl<T, H> ProofTrieNodeProviderFactory<T, H> {
 
 impl<T, H> TrieNodeProviderFactory for ProofTrieNodeProviderFactory<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     type AccountNodeProvider = ProofBlindedAccountProvider<T, H>;
     type StorageNodeProvider = ProofBlindedStorageProvider<T, H>;
@@ -79,8 +79,9 @@ where
             .multiproof(targets)
             .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
-        let tree_mask = proof.branch_node_tree_masks.remove(path);
-        let hash_mask = proof.branch_node_hash_masks.remove(path);
+        let masks = proof.branch_node_masks.remove(path);
+        let hash_mask = masks.map(|m| m.hash_mask);
+        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",
@@ -131,8 +132,9 @@ where
         .storage_multiproof(targets)
         .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.subtree.into_inner().remove(path);
-        let tree_mask = proof.branch_node_tree_masks.remove(path);
-        let hash_mask = proof.branch_node_hash_masks.remove(path);
+        let masks = proof.branch_node_masks.remove(path);
+        let hash_mask = masks.map(|m| m.hash_mask);
+        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",

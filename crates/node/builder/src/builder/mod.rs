@@ -15,7 +15,10 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::{TransactionPropagationPolicy, TransactionsManagerConfig},
+    transactions::{
+        config::{AnnouncementFilteringPolicy, StrictEthAnnouncementFilter},
+        TransactionPropagationPolicy, TransactionsManagerConfig,
+    },
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
     NetworkPrimitives,
 };
@@ -29,7 +32,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -76,7 +79,7 @@ pub type RethFullAdapter<DB, Types> =
 /// configured components and can interact with the node.
 ///
 /// There are convenience functions for networks that come with a preset of types and components via
-/// the [`Node`] trait, see `reth_node_ethereum::EthereumNode` or `reth_optimism_node::OpNode`.
+/// the [`Node`] trait, see `reth_node_ethereum::EthereumNode`.
 ///
 /// The [`NodeBuilder::node`] function configures the node's types and components in one step.
 ///
@@ -151,12 +154,14 @@ pub struct NodeBuilder<DB, ChainSpec> {
     config: NodeConfig<ChainSpec>,
     /// The configured database for the node.
     database: DB,
+    /// An optional [`RocksDBProvider`] to use instead of creating one during launch.
+    rocksdb_provider: Option<RocksDBProvider>,
 }
 
 impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     /// Create a new [`NodeBuilder`].
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
-        Self { config, database: () }
+        Self { config, database: (), rocksdb_provider: None }
     }
 }
 
@@ -225,7 +230,13 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
 impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Configures the underlying database that the node will use.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
-        NodeBuilder { config: self.config, database }
+        NodeBuilder { config: self.config, database, rocksdb_provider: self.rocksdb_provider }
+    }
+
+    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
+    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
+        self.rocksdb_provider = Some(rocksdb_provider);
+        self
     }
 
     /// Preconfigure the builder with the context to launch the node.
@@ -248,6 +259,8 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 
     /// Creates a preconfigured node for testing purposes with a specific datadir.
+    ///
+    /// The entire `datadir` will be cleaned up when the node is dropped.
     #[cfg(feature = "test-utils")]
     pub fn testing_node_with_datadir(
         mut self,
@@ -265,7 +278,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
 
-        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
+        let db = reth_db::test_utils::create_test_rw_db_with_datadir(data_dir.data_dir());
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }
@@ -292,7 +305,7 @@ where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
-        NodeBuilderWithTypes::new(self.config, self.database)
+        NodeBuilderWithTypes::new(self.config, self.database, self.rocksdb_provider)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -342,6 +355,12 @@ where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
+    /// Sets the [`RocksDBProvider`] to use instead of creating one during launch.
+    pub fn with_rocksdb_provider(mut self, rocksdb_provider: RocksDBProvider) -> Self {
+        self.builder.rocksdb_provider = Some(rocksdb_provider);
+        self
+    }
+
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
@@ -533,6 +552,27 @@ where
     }
 
     /// Modifies the addons with the given closure.
+    ///
+    /// This method provides access to methods on the addons type that don't have
+    /// direct builder methods. It's useful for advanced configuration scenarios
+    /// where you need to call addon-specific methods.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use tower::layer::util::Identity;
+    ///
+    /// let builder = NodeBuilder::new(config)
+    ///     .with_types::<EthereumNode>()
+    ///     .with_components(EthereumNode::components())
+    ///     .with_add_ons(EthereumAddOns::default())
+    ///     .map_add_ons(|addons| addons.with_rpc_middleware(Identity::default()));
+    /// ```
+    ///
+    /// # See also
+    ///
+    /// - [`NodeAddOns`] trait for available addon types
+    /// - [`crate::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module configuration
     pub fn map_add_ons<F>(self, f: F) -> Self
     where
         F: FnOnce(AO) -> AO,
@@ -579,10 +619,10 @@ where
     ///     .extend_rpc_modules(|ctx| {
     ///         // Access node components, so they can used by the CustomApi
     ///         let pool = ctx.pool().clone();
-    ///         
+    ///
     ///         // Add custom RPC namespace
     ///         ctx.modules.merge_configured(CustomApi { pool }.into_rpc())?;
-    ///         
+    ///
     ///         Ok(())
     ///     })
     ///     .build()?;
@@ -811,6 +851,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Convenience function to start the network tasks.
     ///
     /// Accepts the config for the transaction task and the policy for propagation.
+    /// Uses the default [`StrictEthAnnouncementFilter`] for announcement filtering.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
@@ -833,20 +874,58 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Node::Provider: BlockReaderFor<N>,
         Policy: TransactionPropagationPolicy<N>,
     {
+        self.start_network_with_policies(
+            builder,
+            pool,
+            tx_config,
+            propagation_policy,
+            StrictEthAnnouncementFilter::default(),
+        )
+    }
+
+    /// Convenience function to start the network tasks with custom policies.
+    ///
+    /// Accepts the config for the transaction task, the policy for propagation,
+    /// and a custom announcement filter. This is useful for configuring which tx types are accepted
+    /// in announcements.
+    ///
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
+    pub fn start_network_with_policies<Pool, N, PropPolicy, AnnPolicy>(
+        &self,
+        builder: NetworkBuilder<(), (), N>,
+        pool: Pool,
+        tx_config: TransactionsManagerConfig,
+        propagation_policy: PropPolicy,
+        announcement_policy: AnnPolicy,
+    ) -> NetworkHandle<N>
+    where
+        N: NetworkPrimitives,
+        Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
+                >,
+            > + Unpin
+            + 'static,
+        Node::Provider: BlockReaderFor<N>,
+        PropPolicy: TransactionPropagationPolicy<N>,
+        AnnPolicy: AnnouncementFilteringPolicy<N>,
+    {
         let (handle, network, txpool, eth) = builder
-            .transactions_with_policy(pool, tx_config, propagation_policy)
+            .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
             .request_handler(self.provider().clone())
             .split_with_handle();
 
-        self.executor.spawn_critical("p2p txpool", Box::pin(txpool));
-        self.executor.spawn_critical("p2p eth request handler", Box::pin(eth));
+        self.executor.spawn_critical_blocking_task("p2p txpool", txpool);
+        self.executor.spawn_critical_blocking_task("p2p eth request handler", eth);
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
             |shutdown| {
-                Box::pin(network.run_until_graceful_shutdown(shutdown, |network| {
+                network.run_until_graceful_shutdown(shutdown, |network| {
                     if let Some(peers_file) = known_peers_file {
                         let num_known_peers = network.num_known_peers();
                         trace!(target: "reth::cli", peers_file=?peers_file, num_peers=%num_known_peers, "Saving current peers");
@@ -859,7 +938,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                             }
                         }
                     }
-                }))
+                })
             },
         );
 
@@ -920,8 +999,8 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 self.config().chain.clone(),
                 secret_key,
                 default_peers_path,
+                self.executor.clone(),
             )
-            .with_task_executor(Box::new(self.executor.clone()))
             .set_head(self.head);
 
         Ok(builder)

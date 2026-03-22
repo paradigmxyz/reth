@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
-    common::file_ops::EraFileId,
+    common::file_ops::{EraFileId, EraFileType},
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
@@ -163,12 +163,22 @@ pub struct EraId {
     /// Optional hash identifier for this file
     /// First 4 bytes of the last historical root in the last state in the era file
     pub hash: Option<[u8; 4]>,
+
+    /// Whether to include era count in filename
+    /// It is used for custom exports when we don't use the max number of items per file
+    include_era_count: bool,
 }
 
 impl EraId {
     /// Create a new [`EraId`]
     pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
-        Self { network_name: network_name.into(), start_slot, slot_count, hash: None }
+        Self {
+            network_name: network_name.into(),
+            start_slot,
+            slot_count,
+            hash: None,
+            include_era_count: false,
+        }
     }
 
     /// Add a hash identifier to  [`EraId`]
@@ -177,32 +187,18 @@ impl EraId {
         self
     }
 
-    /// Calculate which era number the file starts at
-    pub const fn era_number(&self) -> u64 {
-        self.start_slot / SLOTS_PER_HISTORICAL_ROOT
-    }
-
-    // Helper function to calculate the number of eras per era1 file,
-    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
-    // Most of the time it should be 1, but it can never be more than 2 eras per file
-    // as there is a maximum of 8192 blocks per era1 file.
-    const fn calculate_era_count(&self) -> u64 {
-        if self.slot_count == 0 {
-            return 0;
-        }
-
-        let first_era = self.era_number();
-
-        // Calculate the actual last slot number in the range
-        let last_slot = self.start_slot + self.slot_count as u64 - 1;
-        // Find which era the last block belongs to
-        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT;
-        // Count how many eras we span
-        last_era - first_era + 1
+    /// Include era count in filename, for custom slot-per-file exports
+    pub const fn with_era_count(mut self) -> Self {
+        self.include_era_count = true;
+        self
     }
 }
 
 impl EraFileId for EraId {
+    const FILE_TYPE: EraFileType = EraFileType::Era;
+
+    const ITEMS_PER_ERA: u64 = SLOTS_PER_HISTORICAL_ROOT;
+
     fn network_name(&self) -> &str {
         &self.network_name
     }
@@ -214,24 +210,13 @@ impl EraFileId for EraId {
     fn count(&self) -> u32 {
         self.slot_count
     }
-    /// Convert to file name following the era file naming:
-    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era`
-    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
-    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
-    fn to_file_name(&self) -> String {
-        let era_number = self.era_number();
-        let era_count = self.calculate_era_count();
 
-        if let Some(hash) = self.hash {
-            format!(
-                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era",
-                self.network_name, era_number, era_count, hash[0], hash[1], hash[2], hash[3]
-            )
-        } else {
-            // era spec format with placeholder hash when no hash available
-            // Format: `<config-name>-<era-number>-<era-count>-00000000.era`
-            format!("{}-{:05}-{:05}-00000000.era", self.network_name, era_number, era_count)
-        }
+    fn hash(&self) -> Option<[u8; 4]> {
+        self.hash
+    }
+
+    fn include_era_count(&self) -> bool {
+        self.include_era_count
     }
 }
 
@@ -398,5 +383,41 @@ mod tests {
         let index = SlotIndex::from_entry(&entry).unwrap();
         let parsed_offset = index.offsets[0];
         assert_eq!(parsed_offset, -1024);
+    }
+
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192).with_hash([0x4b, 0x36, 0x3d, 0xb9]),
+        "mainnet-00000-4b363db9.era";
+        "Mainnet era 0"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 8192, 8192).with_hash([0x40, 0xcf, 0x2f, 0x3c]),
+        "mainnet-00001-40cf2f3c.era";
+        "Mainnet era 1"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192),
+        "mainnet-00000-00000000.era";
+        "Without hash"
+    )]
+    fn test_era_id_file_naming(id: EraId, expected_file_name: &str) {
+        let actual_file_name = id.to_file_name();
+        assert_eq!(actual_file_name, expected_file_name);
+    }
+
+    // File naming with era-count, for custom exports
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192).with_hash([0x4b, 0x36, 0x3d, 0xb9]).with_era_count(),
+        "mainnet-00000-00001-4b363db9.era";
+        "Mainnet era 0 with count"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 8000, 500).with_hash([0xab, 0xcd, 0xef, 0x12]).with_era_count(),
+        "mainnet-00000-00002-abcdef12.era";
+        "Spanning two eras with count"
+    )]
+    fn test_era_id_file_naming_with_era_count(id: EraId, expected_file_name: &str) {
+        let actual_file_name = id.to_file_name();
+        assert_eq!(actual_file_name, expected_file_name);
     }
 }

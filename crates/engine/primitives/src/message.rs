@@ -1,6 +1,5 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    ExecutionPayload, ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -15,7 +14,8 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use std::time::Duration;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -143,6 +143,25 @@ impl Future for PendingPayloadId {
     }
 }
 
+/// Timing breakdown for `reth_newPayload` responses.
+#[derive(Debug, Clone, Copy)]
+pub struct NewPayloadTimings {
+    /// Server-side execution latency.
+    pub latency: Duration,
+    /// Time spent waiting for persistence to complete.
+    ///
+    /// `None` when wasn't asked to wait for persistence.
+    pub persistence_wait: Option<Duration>,
+    /// Time spent waiting for the execution cache lock.
+    ///
+    /// `None` when wasn't asked to wait for execution cache.
+    pub execution_cache_wait: Option<Duration>,
+    /// Time spent waiting for the sparse trie cache lock.
+    ///
+    /// `None` when wasn't asked to wait for sparse trie cache.
+    pub sparse_trie_wait: Option<Duration>,
+}
+
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]
@@ -153,6 +172,22 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         payload: Payload::ExecutionData,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+    },
+    /// Message with new payload used by `reth_newPayload` endpoint.
+    ///
+    /// Supports independent control over waiting for persistence and cache locks before
+    /// processing, providing unbiased timing measurements when enabled.
+    ///
+    /// Returns detailed timing breakdown alongside the payload status.
+    RethNewPayload {
+        /// The execution payload received by Engine API.
+        payload: Payload::ExecutionData,
+        /// Whether to wait for in-flight persistence to complete before processing.
+        wait_for_persistence: bool,
+        /// Whether to wait for execution cache and sparse trie locks before processing.
+        wait_for_caches: bool,
+        /// The sender for returning payload status result and timing breakdown.
+        tx: oneshot::Sender<Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -174,6 +209,15 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                 write!(
                     f,
                     "NewPayload(parent: {}, number: {}, hash: {})",
+                    payload.parent_hash(),
+                    payload.block_number(),
+                    payload.block_hash()
+                )
+            }
+            Self::RethNewPayload { payload, .. } => {
+                write!(
+                    f,
+                    "RethNewPayload(parent: {}, number: {}, hash: {})",
                     payload.parent_hash(),
                     payload.block_number(),
                     payload.block_hash()
@@ -221,6 +265,28 @@ where
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Sends a new payload message used by `reth_newPayload` endpoint.
+    ///
+    /// `wait_for_persistence`: waits for in-flight persistence to complete.
+    /// `wait_for_caches`: waits for execution cache and sparse trie locks.
+    ///
+    /// Returns detailed timing breakdown alongside the payload status.
+    pub async fn reth_new_payload(
+        &self,
+        payload: Payload::ExecutionData,
+        wait_for_persistence: bool,
+        wait_for_caches: bool,
+    ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::RethNewPayload {
+            payload,
+            wait_for_persistence,
+            wait_for_caches,
+            tx,
+        });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 

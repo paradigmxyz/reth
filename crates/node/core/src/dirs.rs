@@ -3,7 +3,7 @@
 use crate::{args::DatadirArgs, utils::parse_path};
 use reth_chainspec::Chain;
 use std::{
-    env::VarError,
+    convert::Infallible,
     fmt::{Debug, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
@@ -86,8 +86,7 @@ pub trait XdgPath {
 /// A wrapper type that either parses a user-given path or defaults to an
 /// OS-specific path.
 ///
-/// The [`FromStr`] implementation supports shell expansions and common patterns such as `~` for the
-/// home directory.
+/// The [`FromStr`] implementation parses a string into a path.
 ///
 /// # Example
 ///
@@ -127,10 +126,10 @@ impl<D: XdgPath> Default for PlatformPath<D> {
 }
 
 impl<D> FromStr for PlatformPath<D> {
-    type Err = shellexpand::LookupError<VarError>;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_path(s)?, std::marker::PhantomData))
+        Ok(Self(parse_path(s), std::marker::PhantomData))
     }
 }
 
@@ -235,7 +234,7 @@ impl<D> Default for MaybePlatformPath<D> {
 }
 
 impl<D> FromStr for MaybePlatformPath<D> {
-    type Err = shellexpand::LookupError<VarError>;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let p = match s {
@@ -298,6 +297,30 @@ impl<D> ChainPath<D> {
             static_files_path.clone()
         } else {
             self.data_dir().join("static_files")
+        }
+    }
+
+    /// Returns the path to the `RocksDB` database directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/rocksdb`
+    pub fn rocksdb(&self) -> PathBuf {
+        let datadir_args = &self.2;
+        if let Some(rocksdb_path) = &datadir_args.rocksdb_path {
+            rocksdb_path.clone()
+        } else {
+            self.data_dir().join("rocksdb")
+        }
+    }
+
+    /// Returns the path to the directory for storing pprof dumps for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/pprof`
+    pub fn pprof_dumps(&self) -> PathBuf {
+        let datadir_args = &self.2;
+        if let Some(pprof_dumps_path) = &datadir_args.pprof_dumps_path {
+            pprof_dumps_path.clone()
+        } else {
+            self.data_dir().join("pprof")
         }
     }
 

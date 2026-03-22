@@ -2,11 +2,11 @@
 
 /// NetworkArg struct for configuring the network
 mod network;
-pub use network::{DiscoveryArgs, NetworkArgs};
+pub use network::{DefaultNetworkArgs, DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct for configuring the RPC
 mod rpc_server;
-pub use rpc_server::RpcServerArgs;
+pub use rpc_server::{DefaultRpcServerArgs, RpcServerArgs};
 
 /// `RpcStateCacheArgs` struct for configuring RPC state cache
 mod rpc_state_cache;
@@ -22,11 +22,11 @@ pub use database::DatabaseArgs;
 
 /// LogArgs struct for configuring the logger
 mod log;
-pub use log::{ColorMode, LogArgs, Verbosity};
+pub use log::{ColorMode, DefaultLogArgs, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
-pub use trace::{OtlpInitStatus, TraceArgs};
+pub use trace::{OtlpInitStatus, OtlpLogsStatus, TraceArgs};
 
 /// `MetricArgs` to configure metrics.
 mod metric;
@@ -46,7 +46,7 @@ pub use gas_price_oracle::GasPriceOracleArgs;
 
 /// TxPoolArgs for configuring the transaction pool
 mod txpool;
-pub use txpool::TxPoolArgs;
+pub use txpool::{DefaultTxPoolValues, TxPoolArgs};
 
 /// DevArgs for configuring the dev testnet
 mod dev;
@@ -54,7 +54,7 @@ pub use dev::DevArgs;
 
 /// PruneArgs for configuring the pruning and full node
 mod pruning;
-pub use pruning::PruningArgs;
+pub use pruning::{DefaultPruningValues, PruningArgs};
 
 /// DatadirArgs for configuring data storage paths
 mod datadir_args;
@@ -62,15 +62,11 @@ pub use datadir_args::DatadirArgs;
 
 /// BenchmarkArgs struct for configuring the benchmark to run
 mod benchmark_args;
-pub use benchmark_args::BenchmarkArgs;
+pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries};
 
 /// EngineArgs for configuring the engine
 mod engine;
-pub use engine::EngineArgs;
-
-/// `RessArgs` for configuring ress subprotocol.
-mod ress_args;
-pub use ress_args::RessArgs;
+pub use engine::{DefaultEngineValues, EngineArgs};
 
 /// `EraArgs` for configuring ERA files import.
 mod era;
@@ -78,7 +74,11 @@ pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
 /// `StaticFilesArgs` for configuring static files.
 mod static_files;
-pub use static_files::StaticFilesArgs;
+pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
+
+/// `StorageArgs` for configuring storage settings.
+mod storage;
+pub use storage::{DefaultStorageValues, StorageArgs};
 
 mod error;
 pub mod types;

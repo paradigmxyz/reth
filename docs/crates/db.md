@@ -58,8 +58,6 @@ There are many tables within the node, all used to store different types of data
 - HashedStorages
 - AccountsTrie
 - StoragesTrie
-- AccountsTrieChangeSets
-- StoragesTrieChangeSets
 - TransactionSenders
 - StageCheckpoints
 - StageCheckpointProgresses
@@ -159,7 +157,7 @@ pub trait DbTx: Debug + Send + Sync {
     ) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
-    fn commit(self) -> Result<bool, DatabaseError>;
+    fn commit(self) -> Result<(), DatabaseError>;
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.
@@ -264,45 +262,20 @@ Let's look at an example of how cursors are used. The code snippet below contain
 
 ```rust ignore
 /// Unwind the stage.
-fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
-    self.buffer.take();
+fn unwind(
+    &mut self,
+    provider: &Provider,
+    input: UnwindInput,
+) -> Result<UnwindOutput, StageError> {
+   self.buffer.take();
 
-    let static_file_provider = provider.static_file_provider();
-    let tx = provider.tx_ref();
-    // Cursors to unwind bodies, ommers
-    let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-    let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
-    let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-    // Cursors to unwind transitions
-    let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
+   ensure_consistency(provider, Some(input.unwind_to))?;
+   provider.remove_bodies_above(input.unwind_to)?;
 
-    let mut rev_walker = body_cursor.walk_back(None)?;
-    while let Some((number, block_meta)) = rev_walker.next().transpose()? {
-        if number <= input.unwind_to {
-            break
-        }
-
-        // Delete the ommers entry if any
-        if ommers_cursor.seek_exact(number)?.is_some() {
-            ommers_cursor.delete_current()?;
-        }
-
-        // Delete the withdrawals entry if any
-        if withdrawals_cursor.seek_exact(number)?.is_some() {
-            withdrawals_cursor.delete_current()?;
-        }
-
-        // Delete all transactions to block values.
-        if !block_meta.is_empty() &&
-            tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
-        {
-            tx_block_cursor.delete_current()?;
-        }
-
-        // Delete the current body value
-        rev_walker.delete_current()?;
-    }
-    //--snip--
+    Ok(UnwindOutput {
+        checkpoint: StageCheckpoint::new(input.unwind_to)
+            .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+    })
 }
 ```
 
@@ -322,4 +295,4 @@ This chapter was packed with information, so let's do a quick review. The databa
 
 # Next Chapter
 
-[Next Chapter]()
+[Next Chapter](eth-wire.md)

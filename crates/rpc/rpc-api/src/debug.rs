@@ -1,9 +1,10 @@
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -22,7 +23,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
-    /// Returns a EIP-2718 binary-encoded transaction.
+    /// Returns an EIP-2718 binary-encoded transaction.
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
     #[method(name = "getRawTransaction")]
@@ -38,7 +39,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
-    async fn bad_blocks(&self) -> RpcResult<Vec<Block>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
@@ -155,6 +156,10 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         hash: B256,
     ) -> RpcResult<ExecutionWitness>;
+
+    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
+    #[method(name = "getBlockAccessList")]
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will
@@ -283,7 +288,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<B256>>;
 
     /// Returns detailed runtime memory statistics.
     #[method(name = "memStats")]
@@ -320,7 +325,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Sets the current head of the local chain by block number. Note, this is a destructive action
     /// and may severely damage your chain. Use with extreme caution.
     #[method(name = "setHead")]
-    async fn debug_set_head(&self, number: u64) -> RpcResult<()>;
+    async fn debug_set_head(&self, number: U64) -> RpcResult<()>;
 
     /// Sets the rate of mutex profiling.
     #[method(name = "setMutexProfileFraction")]
@@ -399,7 +404,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// Sets the logging verbosity ceiling. Log messages with level up to and including the given
     /// level will be printed.

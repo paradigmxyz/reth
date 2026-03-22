@@ -2,22 +2,46 @@
 //!
 //! ## Feature Flags
 //!
+//! ### Default Features
+//!
 //! - `jemalloc`: Uses [jemallocator](https://github.com/tikv/jemallocator) as the global allocator.
 //!   This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
 //!   for more info.
+//! - `otlp`: Enables [OpenTelemetry](https://opentelemetry.io/) metrics export to a configured OTLP
+//!   collector endpoint.
+//! - `js-tracer`: Enables the `JavaScript` tracer for the `debug_trace` endpoints, allowing custom
+//!   `JavaScript`-based transaction tracing.
+//! - `keccak-cache-global`: Enables global caching for Keccak256 hashes to improve performance.
+//! - `asm-keccak`: Replaces the default, pure-Rust implementation of Keccak256 with one implemented
+//!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
+//!   details and supported targets.
+//!
+//! ### Allocator Features
+//!
 //! - `jemalloc-prof`: Enables [jemallocator's](https://github.com/tikv/jemallocator) heap profiling
 //!   and leak detection functionality. See [jemalloc's opt.prof](https://jemalloc.net/jemalloc.3.html#opt.prof)
-//!   documentation for usage details. This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
-//!   for more info.
-//! - `asm-keccak`: replaces the default, pure-Rust implementation of Keccak256 with one implemented
-//!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
-//!   details and supported targets
+//!   documentation for usage details. This is **not recommended on Windows**.
+//! - `jemalloc-symbols`: Enables jemalloc symbols for profiling. Includes `jemalloc-prof`.
+//! - `jemalloc-unprefixed`: Uses unprefixed jemalloc symbols.
+//! - `tracy-allocator`: Enables [Tracy](https://github.com/wolfpld/tracy) profiler allocator
+//!   integration for memory profiling.
+//! - `snmalloc`: Uses [snmalloc](https://github.com/microsoft/snmalloc) as the global allocator.
+//!   Use `--no-default-features` when enabling this, as jemalloc takes precedence.
+//! - `snmalloc-native`: Uses snmalloc with native CPU optimizations. Use `--no-default-features`
+//!   when enabling this.
+//!
+//! ### Log Level Features
+//!
 //! - `min-error-logs`: Disables all logs below `error` level.
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer
 //!   calls to the logging component are made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
+//!
+//! ### Development Features
+//!
+//! - `dev`: Enables development mode features, including test vector generation commands.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -26,6 +50,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+// Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
+use alloy_primitives as _;
 
 pub mod cli;
 
@@ -97,9 +124,11 @@ pub mod providers {
     pub use reth_provider::*;
 }
 
-/// Re-exported from `reth_primitives`.
+/// Re-exported primitives.
+#[allow(ambiguous_glob_reexports)]
 pub mod primitives {
-    pub use reth_primitives::*;
+    pub use reth_ethereum_primitives::*;
+    pub use reth_primitives_traits::*;
 }
 
 /// Re-exported from `reth_ethereum_consensus`.
@@ -170,7 +199,7 @@ pub mod rpc {
         pub use reth_rpc::eth::*;
     }
 
-    /// Re-exported from `reth_rpc::rpc`.
+    /// Re-exported from `reth_rpc_server_types::result`.
     pub mod result {
         pub use reth_rpc_server_types::result::*;
     }
@@ -181,12 +210,9 @@ pub mod rpc {
     }
 }
 
-/// Ress subprotocol installation.
-pub mod ress;
-
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
@@ -194,3 +220,4 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+use tracing as _;

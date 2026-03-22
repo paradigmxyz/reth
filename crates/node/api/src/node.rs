@@ -3,7 +3,7 @@
 use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_basic_payload_builder::PayloadBuilder;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
@@ -71,10 +71,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Evm: ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>
-        + Clone
-        + Unpin
-        + 'static;
+    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
 
     /// Network API.
     type Network: FullNetwork;
@@ -101,7 +98,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns an executor handle to spawn tasks.
     ///
     /// This can be used to spawn critical, blocking tasks or register tasks that should be
-    /// terminated gracefully. See also [`TaskSpawner`](reth_tasks::TaskSpawner).
+    /// terminated gracefully.
     fn task_executor(&self) -> &TaskExecutor;
 }
 

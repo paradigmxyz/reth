@@ -1,5 +1,5 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::{map::HashMap, Address};
+use alloy_primitives::{map::AddressMap, Address};
 use rustc_hash::FxHashMap;
 
 /// An internal mapping of addresses.
@@ -11,7 +11,7 @@ pub struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,
     /// Assigned [`SenderId`] for an [`Address`].
-    address_to_id: HashMap<Address, SenderId>,
+    address_to_id: AddressMap<SenderId>,
     /// Reverse mapping of [`SenderId`] to [`Address`].
     sender_to_address: FxHashMap<SenderId, Address>,
 }
@@ -64,6 +64,12 @@ impl SenderId {
     /// Returns a `Bound` for [`TransactionId`] starting with nonce `0`
     pub const fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
+    }
+
+    /// Returns a `Range` for [`TransactionId`] starting with nonce `0` and ending with nonce
+    /// `u64::MAX`
+    pub const fn range(self) -> std::ops::RangeInclusive<TransactionId> {
+        TransactionId::new(self, 0)..=TransactionId::new(self, u64::MAX)
     }
 
     /// Converts the sender to a [`TransactionId`] with the given nonce.

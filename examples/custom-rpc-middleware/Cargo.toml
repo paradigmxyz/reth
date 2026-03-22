@@ -1,0 +1,14 @@
+[package]
+name = "example-custom-rpc-middleware"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "rpc", "cli"] }
+
+clap = { workspace = true, features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+tracing.workspace = true
+tower.workspace = true

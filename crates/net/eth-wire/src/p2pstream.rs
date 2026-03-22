@@ -101,8 +101,9 @@ where
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?
             .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse))??;
 
-        // let's check the compressed length first, we will need to check again once confirming
-        // that it contains snappy-compressed data (this will be the case for all non-p2p messages).
+        // Check that the uncompressed message length does not exceed the max payload size.
+        // Note: The first message (Hello/Disconnect) is not snappy compressed. We will check the
+        // decompressed length again for subsequent messages after the handshake.
         if first_message_bytes.len() > MAX_PAYLOAD_SIZE {
             return Err(P2PStreamError::MessageTooBig {
                 message_size: first_message_bytes.len(),
@@ -939,7 +940,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let handle = tokio::spawn(Box::pin(async move {
+        let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
@@ -959,7 +960,7 @@ mod tests {
                     panic!("expected mismatched protocol version error, got {other_err:?}")
                 }
             }
-        }));
+        });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);

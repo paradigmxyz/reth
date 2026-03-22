@@ -24,7 +24,7 @@ pub fn discv4_id_to_discv5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Erro
     Ok(id2pk(peer_id)?.into())
 }
 
-/// Converts a [`PeerId`] to a [`reth_network_peers::PeerId`].
+/// Converts a [`PeerId`] to a [`discv5::libp2p_identity::PeerId`].
 pub fn discv4_id_to_multiaddr_id(
     peer_id: PeerId,
 ) -> Result<discv5::libp2p_identity::PeerId, secp256k1::Error> {

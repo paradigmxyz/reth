@@ -13,6 +13,13 @@ This section provides essential information about the ports used by the system, 
 -   **Purpose:** Peering with other nodes for synchronization of blockchain data. Nodes communicate through this port to maintain network consensus and share updated information.
 -   **Exposure Recommendation:** This port should be exposed to enable seamless interaction and synchronization with other nodes in the network.
 
+## Discovery v5 Port
+
+-   **Port:** `9200`
+-   **Protocol:** UDP
+-   **Purpose:** Used for discv5 peer discovery protocol. This is a newer discovery protocol that can be enabled with `--enable-discv5-discovery`. It operates independently from the legacy discv4 discovery on port 30303.
+-   **Exposure Recommendation:** This port should be exposed if discv5 discovery is enabled to allow peer discovery.
+
 ## Metrics Port
 
 -   **Port:** `9001`

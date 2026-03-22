@@ -1,4 +1,6 @@
+use crate::PruneLimiter;
 use alloy_primitives::BlockNumber;
+use itertools::Itertools;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::ShardedKey,
@@ -7,6 +9,8 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_provider::DBProvider;
+use reth_prune_types::{SegmentOutput, SegmentOutputCheckpoint};
+use rustc_hash::FxHashMap;
 
 enum PruneShardOutcome {
     Deleted,
@@ -19,6 +23,65 @@ pub(crate) struct PrunedIndices {
     pub(crate) deleted: usize,
     pub(crate) updated: usize,
     pub(crate) unchanged: usize,
+}
+
+/// Result of pruning history changesets, used to build the final output.
+pub(crate) struct HistoryPruneResult<K> {
+    /// Map of the highest deleted changeset keys to their block numbers.
+    pub(crate) highest_deleted: FxHashMap<K, BlockNumber>,
+    /// The last block number that had changesets pruned.
+    pub(crate) last_pruned_block: Option<BlockNumber>,
+    /// Number of changesets pruned.
+    pub(crate) pruned_count: usize,
+    /// Whether pruning is complete.
+    pub(crate) done: bool,
+}
+
+/// Finalizes history pruning by sorting sharded keys, pruning history indices, and building output.
+///
+/// This is shared between static file and database pruning for both account and storage history.
+pub(crate) fn finalize_history_prune<Provider, T, K, SK>(
+    provider: &Provider,
+    result: HistoryPruneResult<K>,
+    range_end: BlockNumber,
+    limiter: &PruneLimiter,
+    to_sharded_key: impl Fn(K, BlockNumber) -> T::Key,
+    key_matches: impl Fn(&T::Key, &T::Key) -> bool,
+) -> Result<SegmentOutput, DatabaseError>
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+    T: Table<Value = BlockNumberList>,
+    T::Key: AsRef<ShardedKey<SK>>,
+    K: Ord,
+{
+    let HistoryPruneResult { highest_deleted, last_pruned_block, pruned_count, done } = result;
+
+    // If there's more changesets to prune, set the checkpoint block number to previous,
+    // so we could finish pruning its changesets on the next run.
+    let last_changeset_pruned_block = last_pruned_block
+        .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+        .unwrap_or(range_end);
+
+    // Sort highest deleted block numbers and turn them into sharded keys.
+    // We use `sorted_unstable` because no equal keys exist in the map.
+    let highest_sharded_keys =
+        highest_deleted.into_iter().sorted_unstable().map(|(key, block_number)| {
+            to_sharded_key(key, block_number.min(last_changeset_pruned_block))
+        });
+
+    let outcomes =
+        prune_history_indices::<Provider, T, _>(provider, highest_sharded_keys, key_matches)?;
+
+    let progress = limiter.progress(done);
+
+    Ok(SegmentOutput {
+        progress,
+        pruned: pruned_count + outcomes.deleted,
+        checkpoint: Some(SegmentOutputCheckpoint {
+            block_number: Some(last_changeset_pruned_block),
+            tx_number: None,
+        }),
+    })
 }
 
 /// Prune history indices according to the provided list of highest sharded keys.

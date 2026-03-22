@@ -2,7 +2,7 @@ use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
@@ -38,7 +38,7 @@ use std::{
 /// and eventually disconnected.
 pub(crate) struct BodiesRequestFuture<B: Block, C: BodiesClient<Body = B::Body>> {
     client: Arc<C>,
-    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
@@ -60,7 +60,7 @@ where
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<C>,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
@@ -245,8 +245,7 @@ where
             }
 
             // Buffer any empty headers
-            while this.pending_headers.front().is_some_and(|h| h.is_empty()) {
-                let header = this.pending_headers.pop_front().unwrap();
+            while let Some(header) = this.pending_headers.pop_front_if(|h| h.is_empty()) {
                 this.buffer.push(BlockResponse::Empty(header));
             }
         }

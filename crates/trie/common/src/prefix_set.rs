@@ -1,6 +1,7 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
+use core::ops::Range;
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]
@@ -147,9 +148,9 @@ impl PrefixSetMut {
         self.keys.len()
     }
 
-    /// Returns `true` if the set is empty.
+    /// Returns `true` if the set is empty and `all` flag is not set.
     pub const fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        !self.all && self.keys.is_empty()
     }
 
     /// Clears the inner vec for reuse, setting `all` to `false`.
@@ -225,6 +226,36 @@ impl PrefixSet {
         false
     }
 
+    /// Returns `true` if any key in the set falls within the given half-open range
+    /// `[start, end)`.
+    ///
+    /// Like [`Self::contains`], this method maintains the internal index for sequential access
+    /// optimization.
+    #[inline]
+    pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
+        if self.all {
+            return true
+        }
+
+        while self.index > 0 && &self.keys[self.index] >= range.end {
+            self.index -= 1;
+        }
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key >= range.start && key < range.end {
+                self.index += idx;
+                return true
+            }
+
+            if key >= range.end {
+                self.index += idx;
+                return false
+            }
+        }
+
+        false
+    }
+
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
         self.keys.iter()
@@ -240,9 +271,9 @@ impl PrefixSet {
         self.keys.len()
     }
 
-    /// Returns `true` if the set is empty.
+    /// Returns `true` if the set is empty and `all` flag is not set.
     pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        !self.all && self.keys.is_empty()
     }
 }
 

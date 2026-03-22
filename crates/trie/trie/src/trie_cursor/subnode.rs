@@ -1,4 +1,4 @@
-use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
+use crate::{BranchNodeCompact, Nibbles, StoredSubNode};
 use alloy_primitives::B256;
 use alloy_trie::proof::AddedRemovedKeys;
 
@@ -57,14 +57,12 @@ impl CursorSubNode {
     /// Creates a new [`CursorSubNode`] from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
-        let position = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(
-            SubNodePosition::ParentBranch,
-            |n| {
-                SubNodePosition::Child(
-                    CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap(),
-                )
-            },
-        );
+        let position = node
+            .as_ref()
+            .filter(|n| n.root_hash.is_none())
+            .map_or(SubNodePosition::ParentBranch, |n| {
+                SubNodePosition::Child(n.state_mask.iter().next().unwrap())
+            });
         Self::new_with_full_key(key, node, position)
     }
 

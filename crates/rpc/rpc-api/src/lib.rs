@@ -24,11 +24,15 @@ mod miner;
 mod net;
 mod otterscan;
 mod reth;
+mod reth_engine;
 mod rpc;
+mod testing;
 mod trace;
 mod txpool;
 mod validation;
 mod web3;
+
+pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
 /// re-export of all server traits
 pub use servers::*;
@@ -44,15 +48,17 @@ pub mod servers {
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
+        reth_engine::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus},
         rpc::RpcApiServer,
+        testing::TestingApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
         validation::BlockSubmissionValidationApiServer,
         web3::Web3ApiServer,
     };
     pub use reth_rpc_eth_api::{
-        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer, L2EthApiExtServer,
+        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthConfigApiServer,
+        EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
     };
 }
 
@@ -74,14 +80,16 @@ pub mod clients {
         net::NetApiClient,
         otterscan::OtterscanClient,
         reth::RethApiClient,
-        rpc::RpcApiServer,
+        reth_engine::RethEngineApiClient,
+        rpc::RpcApiClient,
+        testing::TestingApiClient,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
         validation::BlockSubmissionValidationApiClient,
         web3::Web3ApiClient,
     };
     pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
-        L2EthApiExtServer,
+        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
+        EthFilterApiClient, L2EthApiExtClient,
     };
 }

@@ -215,8 +215,8 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.seeked = true;
 
         let entry = match (mem_entry, &self.cursor_entry) {
-            (Some((mem_key, entry_inner)), _) if mem_key == key => {
-                entry_inner.map(|node| (key, node))
+            (Some((mem_key, entry_inner)), _) if *mem_key == key => {
+                entry_inner.clone().map(|node| (key, node))
             }
             (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
             _ => None,
@@ -758,7 +758,7 @@ mod tests {
                     .into_iter()
                     .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })
@@ -780,7 +780,7 @@ mod tests {
                     .into_iter()
                     .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })

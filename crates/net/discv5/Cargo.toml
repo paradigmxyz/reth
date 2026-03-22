@@ -41,6 +41,7 @@ metrics.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["std", "rand"] }
 rand_08.workspace = true

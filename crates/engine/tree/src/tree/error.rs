@@ -6,15 +6,13 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
-use tokio::sync::oneshot::error::TryRecvError;
 
-/// This is an error that can come from advancing persistence. Either this can be a
-/// [`TryRecvError`], or this can be a [`ProviderError`]
+/// This is an error that can come from advancing persistence.
 #[derive(Debug, thiserror::Error)]
 pub enum AdvancePersistenceError {
-    /// An error that can be from failing to receive a value from persistence
-    #[error(transparent)]
-    RecvError(#[from] TryRecvError),
+    /// The persistence channel was closed unexpectedly
+    #[error("persistence channel closed")]
+    ChannelClosed,
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),

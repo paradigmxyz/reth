@@ -46,12 +46,33 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
 
+  loki:
+    restart: unless-stopped
+    image: grafana/loki:latest
+    ports:
+      - 3100:3100
+    volumes:
+      - ./loki/:/etc/loki/
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki.yml
+
+  promtail:
+    restart: unless-stopped
+    image: grafana/promtail:latest
+    depends_on:
+      - loki
+    volumes:
+      - ./promtail/:/etc/promtail/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail.yml
+
   grafana:
     restart: unless-stopped
     image: grafana/grafana:latest
     depends_on:
       - reth
       - prometheus
+      - loki
     ports:
       - 3000:3000
     environment:
@@ -82,6 +103,8 @@ volumes:
   logs:
     driver: local
   prometheus_data:
+    driver: local
+  loki_data:
     driver: local
   grafana_data:
     driver: local

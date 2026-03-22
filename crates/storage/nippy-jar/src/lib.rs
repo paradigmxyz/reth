@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::{Read, Write},
+    io::{self, Read, Write},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -59,6 +59,8 @@ const INDEX_FILE_EXTENSION: &str = "idx";
 const OFFSETS_FILE_EXTENSION: &str = "off";
 /// The file extension used for configuration files.
 pub const CONFIG_FILE_EXTENSION: &str = "conf";
+/// The file extension used for changeset offset sidecar files.
+pub const CHANGESET_OFFSETS_FILE_EXTENSION: &str = "csoff";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.
@@ -201,11 +203,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
             .inspect_err(|e| {
-                warn!( ?path, %e, "Failed to load static file jar");
+                warn!(?path, %e, "Failed to load static file jar");
             })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
-        let mut obj = Self::load_from_reader(config_file)?;
+        let mut obj = Self::load_from_reader(io::BufReader::new(config_file))?;
         obj.path = path.to_path_buf();
         Ok(obj)
     }
@@ -240,13 +242,22 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.path.with_extension(CONFIG_FILE_EXTENSION)
     }
 
+    /// Returns the path for the changeset offsets sidecar file.
+    pub fn changeset_offsets_path(&self) -> PathBuf {
+        self.path.with_extension(CHANGESET_OFFSETS_FILE_EXTENSION)
+    }
+
     /// Deletes from disk this [`NippyJar`] alongside every satellite file.
     pub fn delete(self) -> Result<(), NippyJarError> {
         // TODO(joshie): ensure consistency on unexpected shutdown
 
-        for path in
-            [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
-        {
+        for path in [
+            self.data_path().into(),
+            self.index_path(),
+            self.offsets_path(),
+            self.config_path(),
+            self.changeset_offsets_path(),
+        ] {
             if path.exists() {
                 debug!(target: "nippy-jar", ?path, "Removing file.");
                 reth_fs_util::remove_file(path)?;
@@ -418,9 +429,14 @@ impl DataReader {
         &self.data_mmap[range]
     }
 
-    /// Returns total size of data
+    /// Returns total size of data file.
     pub fn size(&self) -> usize {
         self.data_mmap.len()
+    }
+
+    /// Returns total size of offsets file.
+    pub fn offsets_size(&self) -> usize {
+        self.offset_mmap.len()
     }
 }
 

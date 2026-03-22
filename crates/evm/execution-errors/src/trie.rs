@@ -7,7 +7,7 @@ use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
 
 /// State root errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -15,19 +15,25 @@ pub enum StateRootError {
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),
+    /// Provider error when loading prefix sets
+    #[error(transparent)]
+    PrefixSetLoadError(#[from] ProviderError),
 }
 
-impl From<StateRootError> for DatabaseError {
-    fn from(err: StateRootError) -> Self {
-        match err {
+impl From<StateRootError> for ProviderError {
+    fn from(value: StateRootError) -> Self {
+        match value {
             StateRootError::Database(err) |
-            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
+            StateRootError::StorageRootError(StorageRootError::Database(err)) => {
+                Self::Database(err)
+            }
+            StateRootError::PrefixSetLoadError(err) => err,
         }
     }
 }
 
 /// Storage root error.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -43,7 +49,7 @@ impl From<StorageRootError> for DatabaseError {
 }
 
 /// State proof errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateProofError {
     /// Internal database error.
     #[error(transparent)]
@@ -51,6 +57,12 @@ pub enum StateProofError {
     /// RLP decoding error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Trie inconsistency detected during proof calculation.
+    ///
+    /// This occurs when cached trie nodes disagree with the leaf data, causing
+    /// proof calculation to be unable to make forward progress.
+    #[error("trie inconsistency: {0}")]
+    TrieInconsistency(alloc::string::String),
 }
 
 impl From<StateProofError> for ProviderError {
@@ -58,6 +70,7 @@ impl From<StateProofError> for ProviderError {
         match value {
             StateProofError::Database(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
+            StateProofError::TrieInconsistency(msg) => Self::Database(DatabaseError::Other(msg)),
         }
     }
 }
@@ -152,20 +165,15 @@ pub enum SparseTrieErrorKind {
     #[error("sparse trie is blind")]
     Blind,
     /// Encountered blinded node on update.
-    #[error("attempted to update blind node at {path:?}: {hash}")]
-    BlindedNode {
-        /// Blind node path.
-        path: Nibbles,
-        /// Node hash
-        hash: B256,
-    },
+    #[error("attempted to update blind node at {0:?}")]
+    BlindedNode(Nibbles),
     /// Encountered unexpected node at path when revealing.
     #[error("encountered an invalid node at path {path:?} when revealing: {node:?}")]
     Reveal {
         /// Path to the node.
         path: Nibbles,
         /// Node that was at the path when revealing.
-        node: Box<dyn core::fmt::Debug + Send>,
+        node: Box<dyn core::fmt::Debug + Send + Sync>,
     },
     /// RLP error.
     #[error(transparent)]
@@ -178,7 +186,7 @@ pub enum SparseTrieErrorKind {
     },
     /// Other.
     #[error(transparent)]
-    Other(#[from] Box<dyn core::error::Error + Send>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Trie witness errors.

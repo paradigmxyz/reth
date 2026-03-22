@@ -163,7 +163,7 @@ impl AuthenticatedTransport {
 
             // shift the iat forward by one second so there is some buffer time
             let mut shifted_claims = inner_and_claims.1;
-            shifted_claims.iat -= 1;
+            shifted_claims.iat -= 30;
 
             // if the claims are out of date, reset the inner transport
             if !shifted_claims.is_within_time_window() {

@@ -41,9 +41,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     GetNodeData(RequestPair<GetNodeData>),
     NodeData(RequestPair<NodeData>),
     GetReceipts(RequestPair<GetReceipts>),
+    GetReceipts70(RequestPair<GetReceipts70>),
     Receipts(RequestPair<Receipts<N::Receipt>>),
     Receipts69(RequestPair<Receipts69<N::Receipt>>),
+    Receipts70(RequestPair<Receipts70<N::Receipt>>),
     BlockRangeUpdate(BlockRangeUpdate),
+    Other(RawCapabilityMessage),
 }
 
 /// Represents message IDs for eth protocol messages.
@@ -66,6 +69,7 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     Receipts = 0x10,
     BlockRangeUpdate = 0x11,
+    Other(u8),
 }
 
 ```
@@ -319,7 +323,9 @@ The EthStream wraps a stream and handles eth message (RLP) encoding/decoding wit
 [File: crates/net/eth-wire/src/ethstream.rs](../../crates/net/eth-wire/src/ethstream.rs)
 ```rust,ignore
 #[pin_project]
-pub struct EthStream<S> {
+pub struct EthStream<S, N = EthNetworkPrimitives> {
+    /// Eth-specific logic
+    eth: EthStreamInner<N>,
     #[pin]
     inner: S,
 }
@@ -382,7 +388,7 @@ pub struct UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S> {
     // ...
-    pub async fn handshake(mut self, hello: HelloMessageWithProtocols) -> Result<(P2PStream<S>, HelloMessage), Error> {
+    pub async fn handshake(mut self, hello: HelloMessageWithProtocols) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         self.inner.send(alloy_rlp::encode(P2PMessage::Hello(hello.message())).into()).await?;
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next()).await;
 
@@ -413,3 +419,6 @@ additional "satellite" protocols (e.g. `snap`) using negotiated `SharedCapabilit
 - Starting with ETH69:
   - `BlockRangeUpdate (0x11)` announces the historical block range served.
   - Receipts omit bloom: encoded as `Receipts69` instead of `Receipts`.
+- Starting with ETH70 (EIP-7975):
+  - Status reuses the ETH69 format (no additional block range fields).
+  - Receipts continue to omit bloom; `GetReceipts`/`Receipts` add the eth/70 variants to support partial receipt ranges (`firstBlockReceiptIndex` and `lastBlockIncomplete`).

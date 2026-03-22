@@ -5,21 +5,17 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
-use std::{
-    env::VarError,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
-/// Parses a user-specified path with support for environment variables and common shorthands (e.g.
-/// ~ for the user's home directory).
-pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
-    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
+/// Parses a user-specified path into a [`PathBuf`].
+pub fn parse_path(value: &str) -> PathBuf {
+    PathBuf::from(value)
 }
 
 /// Attempts to retrieve or create a JWT secret from the specified path.
@@ -71,7 +67,7 @@ where
 pub async fn get_single_body<B, Client>(
     client: Client,
     header: SealedHeader<B::Header>,
-    consensus: impl Consensus<B, Error = ConsensusError>,
+    consensus: impl Consensus<B>,
 ) -> Result<SealedBlock<B>>
 where
     B: Block,

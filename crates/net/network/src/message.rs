@@ -3,15 +3,15 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use crate::types::Receipts69;
+use crate::types::{BlockAccessLists, Receipts69, Receipts70};
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
-    Receipts, SharedTransactions, Transactions,
+    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
+    NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData,
+    PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -65,6 +65,36 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Other(RawCapabilityMessage),
 }
 
+impl<N: NetworkPrimitives> PeerMessage<N> {
+    /// Returns a static string identifying the message variant for logging.
+    pub const fn message_kind(&self) -> &'static str {
+        match self {
+            Self::NewBlockHashes(_) => "NewBlockHashes",
+            Self::NewBlock(_) => "NewBlock",
+            Self::ReceivedTransaction(_) => "ReceivedTransaction",
+            Self::SendTransactions(_) => "SendTransactions",
+            Self::PooledTransactions(_) => "PooledTransactions",
+            Self::EthRequest(_) => "EthRequest",
+            Self::BlockRangeUpdated(_) => "BlockRangeUpdated",
+            Self::Other(_) => "Other",
+        }
+    }
+
+    /// Returns the number of items in the message payload, if applicable.
+    pub fn message_item_count(&self) -> usize {
+        match self {
+            Self::NewBlockHashes(msg) => msg.len(),
+            Self::ReceivedTransaction(msg) => msg.len(),
+            Self::SendTransactions(msg) => msg.len(),
+            Self::PooledTransactions(msg) => msg.len(),
+            Self::NewBlock(_) |
+            Self::EthRequest(_) |
+            Self::BlockRangeUpdated(_) |
+            Self::Other(_) => 1,
+        }
+    }
+}
+
 /// Request Variants that only target block related data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockRequest {
@@ -77,6 +107,11 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies(GetBlockBodies),
+
+    /// Requests receipts from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetReceipts(GetReceipts),
 }
 
 /// Corresponding variant for [`PeerRequest`].
@@ -116,6 +151,16 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
     },
+    /// Represents a response to a request for receipts using eth/70.
+    Receipts70 {
+        /// The receiver channel for the response to a receipts request.
+        response: oneshot::Receiver<RequestResult<Receipts70<N::Receipt>>>,
+    },
+    /// Represents a response to a request for block access lists.
+    BlockAccessLists {
+        /// The receiver channel for the response to a block access lists request.
+        response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -151,6 +196,14 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             Self::Receipts69 { response } => {
                 poll_request!(response, Receipts69, cx)
             }
+            Self::Receipts70 { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Receipts70(res),
+                Err(err) => PeerResponseResult::Receipts70(Err(err.into())),
+            },
+            Self::BlockAccessLists { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::BlockAccessLists(res),
+                Err(err) => PeerResponseResult::BlockAccessLists(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -171,6 +224,10 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
     /// Represents a result containing receipts or an error for eth/69.
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
+    /// Represents a result containing receipts or an error for eth/70.
+    Receipts70(RequestResult<Receipts70<N::Receipt>>),
+    /// Represents a result containing block access lists or an error.
+    BlockAccessLists(RequestResult<BlockAccessLists>),
 }
 
 // === impl PeerResponseResult ===
@@ -208,6 +265,20 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(resp) => {
                 to_message!(resp, Receipts69, id)
             }
+            Self::Receipts70(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::Receipts70(request))
+                }
+                Err(err) => Err(err),
+            },
+            Self::BlockAccessLists(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::BlockAccessLists(request))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 
@@ -220,6 +291,8 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
+            Self::Receipts70(res) => res.as_ref().err(),
+            Self::BlockAccessLists(res) => res.as_ref().err(),
         }
     }
 

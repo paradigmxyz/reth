@@ -11,20 +11,19 @@ use reth_trie::{
     proof_v2::StorageProofCalculator,
     trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
 };
-use reth_trie_common::{HashedPostState, HashedStorage, Nibbles};
-use std::collections::BTreeMap;
+use reth_trie_common::{HashedPostState, HashedStorage};
 
 /// Generate test data for benchmarking.
 ///
 /// Returns a tuple of:
 /// - Hashed address for the storage trie
 /// - `HashedPostState` with random storage slots
-/// - Proof targets (Nibbles) that are 80% from existing slots, 20% random
+/// - Proof targets as B256 (sorted) for V2 implementation
 /// - Equivalent [`B256Set`] for legacy implementation
 fn generate_test_data(
     dataset_size: usize,
     num_targets: usize,
-) -> (B256, HashedPostState, Vec<Nibbles>, B256Set) {
+) -> (B256, HashedPostState, Vec<B256>, B256Set) {
     let mut runner = TestRunner::deterministic();
 
     // Use a fixed hashed address for the storage trie
@@ -68,14 +67,8 @@ fn generate_test_data(
 
     let target_b256s = targets_strategy.new_tree(&mut runner).unwrap().current();
 
-    // Convert B256 targets to sorted Nibbles for V2
-    let mut targets: Vec<Nibbles> = target_b256s
-        .iter()
-        .map(|b256| {
-            // SAFETY: B256 is exactly 32 bytes
-            unsafe { Nibbles::unpack_unchecked(b256.as_slice()) }
-        })
-        .collect();
+    // Sort B256 targets for V2 (storage_proof expects sorted targets)
+    let mut targets: Vec<B256> = target_b256s.clone();
     targets.sort();
 
     // Create B256Set for legacy
@@ -86,19 +79,42 @@ fn generate_test_data(
 
 /// Create cursor factories from a `HashedPostState` for storage trie testing.
 ///
-/// This mimics the test harness pattern from the `proof_v2` tests.
+/// This mimics the test harness pattern from the `proof_v2` tests by using `StateRoot`
+/// to generate `TrieUpdates` from the `HashedPostState`.
 fn create_cursor_factories(
     post_state: &HashedPostState,
 ) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
-    // Ensure that there's a storage trie dataset for every storage trie, even if empty
-    let storage_trie_nodes: B256Map<BTreeMap<_, _>> =
-        post_state.storages.keys().copied().map(|addr| (addr, Default::default())).collect();
+    use reth_trie::{updates::StorageTrieUpdates, StateRoot};
+
+    // Create empty trie cursor factory to serve as the initial state for StateRoot
+    // Ensure that there's a storage trie dataset for every storage account
+    let storage_tries: B256Map<_> = post_state
+        .storages
+        .keys()
+        .copied()
+        .map(|addr| (addr, StorageTrieUpdates::default()))
+        .collect();
+
+    let empty_trie_cursor_factory =
+        MockTrieCursorFactory::from_trie_updates(reth_trie_common::updates::TrieUpdates {
+            storage_tries: storage_tries.clone(),
+            ..Default::default()
+        });
 
     // Create mock hashed cursor factory from the post state
     let hashed_cursor_factory = MockHashedCursorFactory::from_hashed_post_state(post_state.clone());
 
-    // Create empty trie cursor factory (leaf-only calculator doesn't need trie nodes)
-    let trie_cursor_factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_trie_nodes);
+    // Generate TrieUpdates using StateRoot
+    let (_root, mut trie_updates) =
+        StateRoot::new(empty_trie_cursor_factory, hashed_cursor_factory.clone())
+            .root_with_updates()
+            .expect("StateRoot should succeed");
+
+    // Continue using empty storage tries for each account
+    trie_updates.storage_tries = storage_tries;
+
+    // Initialize trie cursor factory from the generated TrieUpdates
+    let trie_cursor_factory = MockTrieCursorFactory::from_trie_updates(trie_updates);
 
     (trie_cursor_factory, hashed_cursor_factory)
 }
@@ -145,10 +161,10 @@ fn bench_proof_algos(c: &mut Criterion) {
                     StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
                 b.iter_batched(
-                    || targets.clone(),
-                    |targets| {
+                    || targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
+                    |mut targets| {
                         proof_calculator
-                            .storage_proof(hashed_address, targets.into_iter())
+                            .storage_proof(hashed_address, &mut targets)
                             .expect("Proof generation failed");
                     },
                     BatchSize::SmallInput,

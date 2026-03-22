@@ -9,6 +9,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
+use reth_tokio_util::EventSender;
 use std::{
     future::Future,
     sync::{
@@ -49,12 +50,12 @@ where
         tracing::info!("MyMiddleware processed call {}", req.method);
         let count = self.count.clone();
         let service = self.service.clone();
-        Box::pin(async move {
+        async move {
             let rp = service.call(req).await;
             // Modify the state.
             count.fetch_add(1, Ordering::Relaxed);
             rp
-        })
+        }
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
@@ -73,8 +74,11 @@ where
 async fn test_rpc_middleware() {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let modules =
-        builder.build(TransportRpcModuleConfig::set_http(RpcModuleSelection::All), eth_api);
+    let modules = builder.build(
+        TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
+        eth_api,
+        EventSender::new(1),
+    );
 
     let mylayer = MyMiddlewareLayer::default();
 

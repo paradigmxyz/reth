@@ -12,9 +12,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{
-    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry, *,
-};
+use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
@@ -29,8 +27,8 @@ pub use blocks::*;
 pub use integer_list::IntegerList;
 pub use metadata::*;
 pub use reth_db_models::{
-    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
-    StoredBlockWithdrawals,
+    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StorageBeforeTx,
+    StoredBlockBodyIndices, StoredBlockWithdrawals,
 };
 pub use sharded_key::ShardedKey;
 
@@ -126,13 +124,10 @@ impl Decode for String {
 }
 
 impl Encode for StoredNibbles {
-    type Encoded = Vec<u8>;
+    type Encoded = arrayvec::ArrayVec<u8, 64>;
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
-        // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.to_vec()
+        self.0.iter().collect()
     }
 }
 
@@ -143,17 +138,42 @@ impl Decode for StoredNibbles {
 }
 
 impl Encode for StoredNibblesSubKey {
-    type Encoded = Vec<u8>;
+    type Encoded = [u8; 65];
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(65);
-        self.to_compact(&mut buf);
-        buf
+        self.to_compact_array()
     }
 }
 
 impl Decode for StoredNibblesSubKey {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
+impl Encode for PackedStoredNibbles {
+    type Encoded = [u8; 33];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for PackedStoredNibbles {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
+impl Encode for PackedStoredNibblesSubKey {
+    type Encoded = [u8; 33];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for PackedStoredNibblesSubKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         Ok(Self::from_compact(value, value.len()).0)
     }
@@ -223,16 +243,19 @@ impl_compression_for_compact!(
     TxType,
     StorageEntry,
     BranchNodeCompact,
-    TrieChangeSetsEntry,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
+    PackedStoredNibbles,
+    PackedStoredNibblesSubKey,
+    PackedStorageTrieEntry,
     StoredBlockBodyIndices,
     StoredBlockOmmers<H>,
     StoredBlockWithdrawals,
     StaticFileBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
+    StorageBeforeTx,
     TransactionSigned,
     CompactU256,
     StageCheckpoint,
@@ -245,9 +268,9 @@ impl_compression_for_compact!(
 #[cfg(feature = "op")]
 mod op {
     use super::*;
-    use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+    use op_alloy_consensus::{OpReceipt, OpTxEnvelope};
 
-    impl_compression_for_compact!(OpTransactionSigned, OpReceipt);
+    impl_compression_for_compact!(OpTxEnvelope, OpReceipt);
 }
 
 macro_rules! impl_compression_fixed_compact {
@@ -348,7 +371,6 @@ mod tests {
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
-        assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
@@ -368,7 +390,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Receipt, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);

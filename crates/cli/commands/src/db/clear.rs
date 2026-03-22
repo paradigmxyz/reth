@@ -29,7 +29,7 @@ impl Command {
                 let static_file_provider = tool.provider_factory.static_file_provider();
                 let static_files = iter_static_files(static_file_provider.directory())?;
 
-                if let Some(segment_static_files) = static_files.get(&segment) {
+                if let Some(segment_static_files) = static_files.get(segment) {
                     for (block_range, _) in segment_static_files {
                         static_file_provider.delete_jar(segment, block_range.start())?;
                     }

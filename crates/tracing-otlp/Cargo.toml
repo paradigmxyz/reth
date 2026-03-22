@@ -14,6 +14,7 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
+opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tracing.workspace = true
@@ -35,4 +36,11 @@ otlp = [
     "opentelemetry-otlp",
     "opentelemetry-semantic-conventions",
     "tracing-opentelemetry",
+]
+
+otlp-logs = [
+    "otlp",
+    "opentelemetry-appender-tracing",
+    "opentelemetry-otlp/logs",
+    "opentelemetry_sdk/logs",
 ]

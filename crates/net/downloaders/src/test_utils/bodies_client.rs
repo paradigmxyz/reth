@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -7,7 +7,6 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use std::{
-    collections::HashMap,
     fmt::Debug,
     ops::RangeInclusive,
     sync::{
@@ -21,7 +20,7 @@ use tokio::sync::Mutex;
 /// A [`BodiesClient`] for testing.
 #[derive(Debug, Default)]
 pub struct TestBodiesClient {
-    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
+    bodies: Arc<Mutex<B256Map<BlockBody>>>,
     should_delay: bool,
     max_batch_size: Option<usize>,
     times_requested: AtomicU64,
@@ -29,7 +28,7 @@ pub struct TestBodiesClient {
 }
 
 impl TestBodiesClient {
-    pub(crate) fn with_bodies(mut self, bodies: HashMap<B256, BlockBody>) -> Self {
+    pub(crate) fn with_bodies(mut self, bodies: B256Map<BlockBody>) -> Self {
         self.bodies = Arc::new(Mutex::new(bodies));
         self
     }
