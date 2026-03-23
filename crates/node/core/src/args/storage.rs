@@ -52,7 +52,12 @@ pub struct StorageArgs {
     /// When set, new databases will be initialized with the V2 storage layout that
     /// separates hot and cold data. Existing databases always use the settings
     /// persisted in their metadata regardless of this flag.
-    #[arg(long = "storage.v2", default_value_t = DefaultStorageValues::get_global().v2, action = clap::ArgAction::Set)]
+    #[arg(
+        long = "storage.v2",
+        default_value_t = DefaultStorageValues::get_global().v2,
+        num_args = 0..=1,
+        default_missing_value = "true",
+    )]
     pub v2: bool,
 }
 
@@ -78,6 +83,12 @@ mod tests {
     #[test]
     fn test_default_storage_args() {
         let args = CommandParser::<StorageArgs>::parse_from(["reth"]).args;
+        assert!(args.v2);
+    }
+
+    #[test]
+    fn test_storage_v2_implicit_true() {
+        let args = CommandParser::<StorageArgs>::parse_from(["reth", "--storage.v2"]).args;
         assert!(args.v2);
     }
 
