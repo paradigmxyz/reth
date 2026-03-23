@@ -521,7 +521,6 @@ pub(super) mod serde_bincode_compat {
 
     #[derive(Debug, Serialize, Deserialize)]
     struct RecoveredBlockRepr {
-        hash: BlockHash,
         rlp: Bytes,
         senders: Vec<Address>,
     }
@@ -537,10 +536,9 @@ pub(super) mod serde_bincode_compat {
                     .blocks
                     .iter()
                     .map(|(num, recovered)| {
-                        let hash = recovered.hash();
                         let senders = recovered.senders().to_vec();
                         let rlp = Bytes::from(alloy_rlp::encode(recovered.sealed_block()));
-                        (*num, RecoveredBlockRepr { hash, rlp, senders })
+                        (*num, RecoveredBlockRepr { rlp, senders })
                     })
                     .collect(),
                 execution_outcome: (&value.execution_outcome).into(),
@@ -584,7 +582,7 @@ pub(super) mod serde_bincode_compat {
                 .map(|(num, repr)| {
                     let block = N::Block::decode(&mut repr.rlp.as_ref())
                         .expect("invalid RLP for block in serde_bincode_compat");
-                    let sealed = SealedBlock::new_unchecked(block, repr.hash);
+                    let sealed = SealedBlock::new_unhashed(block);
                     (num, RecoveredBlock::new_sealed(sealed, repr.senders))
                 })
                 .collect();
