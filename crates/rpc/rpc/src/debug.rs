@@ -75,7 +75,7 @@ where
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
                     let Ok(recovered) =
-                        RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                        RecoveredBlock::try_recover_sealed(*block)
                 {
                     bad_block_store.insert(recovered);
                 }
