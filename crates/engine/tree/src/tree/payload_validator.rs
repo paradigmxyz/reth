@@ -563,14 +563,14 @@ where
 
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
-            let block = block.clone();
+            let body = block.body().clone();
             let parent_span = Span::current();
             let num_hash = block.num_hash();
             self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
                 let _span =
                     debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
                         .entered();
-                block.body().calculate_tx_root()
+                body.calculate_tx_root()
             })
         });
         let block = block.with_senders(senders);

@@ -60,6 +60,18 @@ fn prefix_range(
     begin..end
 }
 
+/// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
+/// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
+const fn slotmap_slot_size<T>() -> usize {
+    // Slot<T> = { u: SlotUnion<T>, version: u32 }
+    // SlotUnion<T> = union { value: ManuallyDrop<T>, next_free: u32 }
+    // size = max(size_of::<T>(), 4) + 4, rounded up to align_of::<T>() (or 4)
+    let union_size = if core::mem::size_of::<T>() > 4 { core::mem::size_of::<T>() } else { 4 };
+    let raw = union_size + 4;
+    let align = if core::mem::align_of::<T>() > 4 { core::mem::align_of::<T>() } else { 4 };
+    (raw + align - 1) & !(align - 1)
+}
+
 /// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
 /// traversal.
@@ -153,6 +165,9 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
+    /// Cached total memory footprint of this subtrie in bytes. Computed during prune;
+    /// starts at 0 before the first prune.
+    cached_memory_size: usize,
 }
 
 impl ArenaSparseSubtrie {
@@ -174,7 +189,14 @@ impl ArenaSparseSubtrie {
             required_proofs: Vec::new(),
             num_leaves: 0,
             num_dirty_leaves: 0,
+            cached_memory_size: 0,
         })
+    }
+
+    /// Returns the cached total memory footprint of this subtrie in bytes.
+    /// Accurate after prune; returns 0 before the first prune.
+    const fn memory_size(&self) -> usize {
+        self.cached_memory_size
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
@@ -194,13 +216,13 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf.
+    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the
+    /// arena in a single BFS pass.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. The method
-    /// walks all nodes depth-first with the cursor, removing non-retained nodes bottom-up.
-    /// Only the boundary nodes (direct children of retained branches) have their parent's
-    /// child slot replaced with `Blinded`; deeper nodes are simply removed since their parent
-    /// will also be removed.
+    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
+    /// arena by BFS-copying only retained nodes from the root, blinding non-retained children
+    /// at the boundary. Non-retained subtrees are never visited — they are dropped with the
+    /// old arena.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
@@ -213,69 +235,103 @@ impl ArenaSparseSubtrie {
             retained_leaves.windows(2).all(|w| w[0] <= w[1]),
             "retained_leaves must be sorted"
         );
+        debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
-        let mut pruned: usize = 0;
-        let mut pruned_leaves: u64 = 0;
+        let old_count = self.arena.len();
+        // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
+        // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
+        // avoids most reallocations without over-allocating when pruning is heavy.
+        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        // Queue: (new_idx, path TO the node — excluding its own short_key)
+        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        let mut new_num_leaves = 0u64;
+        let mut new_nodes_heap_size = 0usize;
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        // Root is always retained.
+        let root_node = self.arena.remove(self.root).expect("root exists");
+        let new_root = new_arena.insert(root_node);
+        queue.push_back((new_root, self.path));
 
-        loop {
-            let result = self.buffers.cursor.next(&mut self.arena, |_, node| {
-                matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
-            });
+        while let Some((new_idx, node_path)) = queue.pop_front() {
+            new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {
-                    // Don't prune the root.
-                    if self.buffers.cursor.depth() == 0 {
-                        continue;
+            let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
+                if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
+                    new_num_leaves += 1;
+                }
+                continue;
+            };
+
+            // Logical path of this branch (path TO node + its extension/short_key).
+            let mut branch_logical_path = node_path;
+            branch_logical_path.extend(&b.short_key);
+
+            // Collect (dense_pos, nibble, old_child_idx) for revealed children.
+            let children: SmallVec<[(usize, u8, Index); 16]> = BranchChildIter::new(b.state_mask)
+                .filter_map(|(dense_idx, nibble)| match &b.children[dense_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => {
+                        Some((dense_idx.get(), nibble, *old_idx))
                     }
+                    _ => None,
+                })
+                .collect();
 
-                    let head = self.buffers.cursor.head().expect("cursor is non-empty");
-                    let head_idx = head.index;
-                    let nibble = head.path.last();
+            for (child_pos, nibble, old_child_idx) in children {
+                // Child's path in the trie (edges to reach it, excluding its own short_key).
+                let mut child_path = branch_logical_path;
+                child_path.push(nibble);
 
-                    // Compute the node's key prefix for the retention check. We use
-                    // `short_key()` directly rather than `head_logical_branch_path()`
-                    // because the head can be a leaf.
-                    let short_key =
-                        self.arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head.path;
-                    node_prefix.extend(short_key);
+                // Child's full prefix for the retention check.
+                let child_short_key = match &self.arena[old_child_idx] {
+                    ArenaSparseNode::Branch(b) => &b.short_key,
+                    ArenaSparseNode::Leaf { key, .. } => key,
+                    other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
+                };
+                let mut child_prefix = child_path;
+                child_prefix.extend(child_short_key);
 
-                    // Check if this node (or any descendant) is retained. Always search
-                    // from 0 because DFS order is not lexicographic — backtracking can
-                    // revisit prefixes earlier than previously visited subtrees.
-                    let range = prefix_range(retained_leaves, 0, &node_prefix);
-                    if !range.is_empty() {
-                        continue;
-                    }
-
-                    if matches!(self.arena[head_idx], ArenaSparseNode::Leaf { .. }) {
-                        pruned_leaves += 1;
-                    }
-
-                    ArenaParallelSparseTrie::remove_pruned_node(
-                        &mut self.arena,
-                        &self.buffers.cursor,
-                        head_idx,
-                        nibble,
-                    );
-                    pruned += 1;
+                if has_prefix(retained_leaves, &child_prefix) {
+                    // Retained — move child to new arena.
+                    let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                    let new_child_idx = new_arena.insert(child_node);
+                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
+                        unreachable!()
+                    };
+                    b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+                    queue.push_back((new_child_idx, child_path));
+                } else {
+                    // Not retained — blind the child slot in the new arena.
+                    let rlp_node = self.arena[old_child_idx]
+                        .state_ref()
+                        .expect("child must have state")
+                        .cached_rlp_node()
+                        .cloned()
+                        .expect("pruned child must have cached RLP (prune runs after hashing)");
+                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
+                        unreachable!()
+                    };
+                    b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
                 }
             }
         }
 
-        self.num_leaves -= pruned_leaves;
-
-        if pruned > 0 {
-            compact_arena(&mut self.arena, &mut self.root);
-        }
+        let pruned = old_count - new_arena.len();
+        self.num_leaves = new_num_leaves;
+        self.num_dirty_leaves = 0;
+        self.arena = new_arena;
+        self.root = new_root;
+        self.cached_memory_size =
+            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
-        pruned
+        return pruned;
+
+        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
+        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
+            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
+            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
+        }
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
@@ -2580,17 +2636,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn memory_size(&self) -> usize {
-        let node_size = core::mem::size_of::<ArenaSparseNode>();
+        let slot_size = slotmap_slot_size::<ArenaSparseNode>();
 
-        // Upper arena: capacity × node size.
-        let upper = self.upper_arena.capacity() * node_size;
+        // Upper arena: capacity × slot size.
+        let upper = self.upper_arena.capacity() * slot_size;
 
-        // Active subtries: capacity × node size per subtrie arena.
+        // Active subtries: cached total memory from last prune.
         let subtrie_size: usize = self
             .upper_arena
             .iter()
             .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.arena.capacity() * node_size),
+                ArenaSparseNode::Subtrie(s) => Some(s.memory_size()),
                 _ => None,
             })
             .sum();

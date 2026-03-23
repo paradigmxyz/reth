@@ -64,8 +64,9 @@ impl BenchContext {
                     .and_then(|t| t.as_http_error())
                     .is_some_and(|e| e.status == 502)
             });
+        let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new_with_policy(10, 800, u64::MAX, retry_policy))
+            .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 

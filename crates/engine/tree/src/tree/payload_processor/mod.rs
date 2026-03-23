@@ -39,8 +39,7 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    ArenaParallelSparseTrie, ConfigurableSparseTrie, ParallelSparseTrie, ParallelismThresholds,
-    RevealableSparseTrie, SparseStateTrie,
+    ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie, SparseStateTrie,
 };
 use std::{
     ops::Not,
@@ -61,14 +60,6 @@ pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
-
-/// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
-///
-/// These values were determined by performing benchmarks using gradually increasing values to judge
-/// the effects. Below 100 throughput would generally be equal or slightly less, while above 150 it
-/// would deteriorate to the point where PST might as well not be used.
-const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
-    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -138,8 +129,6 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Whether to use the arena-based sparse trie implementation.
-    enable_arena_sparse_trie: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
 }
@@ -175,7 +164,6 @@ where
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
-            enable_arena_sparse_trie: config.enable_arena_sparse_trie(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
@@ -567,7 +555,6 @@ where
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
-        let enable_arena_sparse_trie = self.enable_arena_sparse_trie;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
@@ -594,19 +581,9 @@ where
                         target: "engine::tree::payload_processor",
                         "Creating new sparse trie - no preserved trie available"
                     );
-                    let default_trie = if enable_arena_sparse_trie {
-                        RevealableSparseTrie::blind_from(
-                            ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
-                        )
-                    } else {
-                        RevealableSparseTrie::blind_from(
-                            ConfigurableSparseTrie::HashMap(
-                                ParallelSparseTrie::default().with_parallelism_thresholds(
-                                    PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
-                                ),
-                            ),
-                        )
-                    };
+                    let default_trie = RevealableSparseTrie::blind_from(
+                        ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
+                    );
                     SparseStateTrie::default()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)

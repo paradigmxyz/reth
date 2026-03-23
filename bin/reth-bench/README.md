@@ -35,6 +35,10 @@ The `new-payload-fcu` command supports two optional waiting modes that can be us
 - `--wait-time <duration>`: Fixed sleep interval between blocks (e.g., `--wait-time 100ms` or `--wait-time 400` for 400ms)
 - `--wait-for-persistence`: Waits for blocks to be persisted using the `reth_subscribePersistedBlock` subscription
 
+Both `new-payload-fcu` and `new-payload-only` support `--rpc-block-fetch-retries <RETRIES>`
+to control how many times block fetches are retried after an RPC failure. The default is `10`.
+Use `--rpc-block-fetch-retries forever` to keep retrying indefinitely.
+
 When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
 
 By default, the WebSocket URL for persistence subscriptions is derived from `--engine-rpc-url` (converting to ws:// on port 8546). Use `--ws-rpc-url` to override this.

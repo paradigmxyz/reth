@@ -1011,9 +1011,6 @@ Engine:
       --engine.disable-sparse-trie-cache-pruning
           Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
 
-      --engine.enable-arena-sparse-trie
-          Enable the arena-based sparse trie implementation instead of the default hash-map-based one
-
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
 

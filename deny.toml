@@ -12,6 +12,8 @@ ignore = [
     "RUSTSEC-2025-0141",
     # https://rustsec.org/advisories/RUSTSEC-2023-0089 atomic-polyfill is unmaintained, transitive dep via test-fuzz
     "RUSTSEC-2023-0089",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0002 lru upgrade requires a discv5 bump first
+    "RUSTSEC-2026-0002",
 ]
 
 # This section is considered when running `cargo deny check bans`.
