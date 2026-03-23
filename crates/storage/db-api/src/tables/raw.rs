@@ -132,7 +132,7 @@ impl<V: Value> RawValue<V> {
 
     /// Returns the decompressed value.
     pub fn value(&self) -> Result<V, DatabaseError> {
-        V::decompress(&self.value)
+        V::decompress(&self.value).map_err(|_| DatabaseError::Decode)
     }
 
     /// Returns the raw value as seen on the database.

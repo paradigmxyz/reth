@@ -63,6 +63,9 @@ impl reth_codecs::Compact for StoredNibbles {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StoredNibbles);
+
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
@@ -130,6 +133,9 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
         (Self(Nibbles::from_nibbles_unchecked(&buf[..len])), &buf[65..])
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StoredNibblesSubKey);
 
 /// Packed representation of nibbles for the `AccountsTrie` (storage v2).
 ///
@@ -204,6 +210,9 @@ impl reth_codecs::Compact for PackedStoredNibbles {
         (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(PackedStoredNibbles);
 
 /// Packed representation of nibbles as a `DupSort` subkey for `StoragesTrie` (storage v2).
 ///
@@ -285,6 +294,9 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
         (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(PackedStoredNibblesSubKey);
 
 #[cfg(test)]
 mod tests {

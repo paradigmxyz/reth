@@ -90,6 +90,5 @@ arbitrary = [
 ]
 op = [
     "dep:op-alloy-consensus",
-    "reth-codecs/op",
     "reth-primitives-traits/op",
 ]

@@ -105,6 +105,9 @@ impl InMemorySize for Account {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(Account);
+
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
@@ -208,6 +211,9 @@ impl reth_codecs::Compact for Bytecode {
         (decoded, &[])
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(Bytecode);
 
 impl From<&GenesisAccount> for Account {
     fn from(value: &GenesisAccount) -> Self {
