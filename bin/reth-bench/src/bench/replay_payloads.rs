@@ -93,7 +93,7 @@ pub struct Command {
         value_name = "MODE",
         num_args = 0..=1,
         default_missing_value = "always",
-        value_parser = reth_node_core::args::benchmark_args::parse_wait_for_persistence,
+        value_parser = clap::value_parser!(WaitForPersistence),
         requires = "reth_new_payload",
         verbatim_doc_comment
     )]
