@@ -220,18 +220,10 @@ impl Command {
 
             let use_reth = self.reth_new_payload;
             let (version, params) = if use_reth {
-                let mode = self.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
-                let wait_for_persistence = match mode {
-                    WaitForPersistence::Always => None,
-                    WaitForPersistence::Never => Some(false),
-                    WaitForPersistence::EveryN(n) => {
-                        if block_number % n == 0 {
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                };
+                let wait_for_persistence = self
+                    .wait_for_persistence
+                    .unwrap_or(WaitForPersistence::Never)
+                    .rpc_value(block_number);
                 let reth_data = ExecutionData {
                     payload: execution_payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::v4(

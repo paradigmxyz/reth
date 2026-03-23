@@ -180,7 +180,7 @@ pub(crate) fn block_to_new_payload(
     no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     let block_number = block.header.number;
-    let wait_for_persistence = persistence_wait_value(wait_for_persistence, block_number);
+    let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
 
     if let Some(rlp) = rlp {
         return Ok((
@@ -217,21 +217,6 @@ pub(crate) fn block_to_new_payload(
         ))
     } else {
         Ok((Some(version), params))
-    }
-}
-
-/// Returns the `wait_for_persistence` parameter value for the given block number.
-fn persistence_wait_value(mode: WaitForPersistence, block_number: u64) -> Option<bool> {
-    match mode {
-        WaitForPersistence::Always => None, // server default (true)
-        WaitForPersistence::Never => Some(false),
-        WaitForPersistence::EveryN(n) => {
-            if block_number % n == 0 {
-                Some(true)
-            } else {
-                Some(false)
-            }
-        }
     }
 }
 

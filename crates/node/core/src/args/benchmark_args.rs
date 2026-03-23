@@ -188,6 +188,27 @@ impl Default for WaitForPersistence {
     }
 }
 
+impl WaitForPersistence {
+    /// Returns the `wait_for_persistence` RPC parameter value for a given block number.
+    ///
+    /// - `None` → use the server default (true)
+    /// - `Some(false)` → skip waiting
+    /// - `Some(true)` → explicitly wait
+    pub const fn rpc_value(self, block_number: u64) -> Option<bool> {
+        match self {
+            Self::Always => None,
+            Self::Never => Some(false),
+            Self::EveryN(n) => {
+                if block_number % n == 0 {
+                    Some(true)
+                } else {
+                    Some(false)
+                }
+            }
+        }
+    }
+}
+
 impl FromStr for WaitForPersistence {
     type Err = String;
 
