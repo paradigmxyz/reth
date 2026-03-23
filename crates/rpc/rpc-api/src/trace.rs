@@ -106,4 +106,16 @@ pub trait TraceApi<TxReq> {
     /// This is the same as `trace_transactionOpcodeGas` but for all transactions in a block.
     #[method(name = "blockOpcodeGas")]
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>>;
+
+    /// Returns traces for a range of transactions within a block.
+    ///
+    /// Transactions before `start` are replayed without tracing to build up state.
+    /// Transactions from `start` to `end` (exclusive) are traced.
+    #[method(name = "blockRange")]
+    async fn trace_block_range(
+        &self,
+        block_id: BlockId,
+        start: u64,
+        end: u64,
+    ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 }

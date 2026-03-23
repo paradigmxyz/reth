@@ -515,6 +515,36 @@ where
         Ok(traces)
     }
 
+    /// Returns traces for a range of transactions within a block.
+    ///
+    /// Transactions before `start` are replayed without tracing to build up state.
+    pub async fn trace_block_range(
+        &self,
+        block_id: BlockId,
+        start: u64,
+        end: u64,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let traces = self
+            .eth_api()
+            .trace_block_range(
+                block_id,
+                None,
+                start,
+                end,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, mut ctx| {
+                    let traces = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await?;
+
+        Ok(traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>()))
+    }
+
     /// Replays all transactions in a block
     pub async fn replay_block_transactions(
         &self,
@@ -750,6 +780,17 @@ where
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+    }
+
+    /// Handler for `trace_blockRange`
+    async fn trace_block_range(
+        &self,
+        block_id: BlockId,
+        start: u64,
+        end: u64,
+    ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(Self::trace_block_range(self, block_id, start, end).await.map_err(Into::into)?)
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
-use futures::Future;
+use futures::{future::ready, Future, FutureExt};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Database, Evm,
@@ -230,6 +230,47 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         )
     }
 
+    /// Executes a range of transactions within a block.
+    ///
+    /// Transactions before `start_index` are replayed without tracing to build up state.
+    /// Transactions from `start_index` to `end_index` (exclusive) are traced.
+    fn trace_block_range<F, R>(
+        &self,
+        block_id: BlockId,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        start_index: u64,
+        end_index: u64,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
+                >,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        if end_index == 0 || start_index >= end_index {
+            return ready(Ok(Some(Vec::new()))).right_future()
+        }
+        self.trace_block_range_with_inspector(
+            block_id,
+            block,
+            Some(start_index),
+            Some(end_index - 1),
+            move || TracingInspector::new(config),
+            f,
+        )
+        .left_future()
+    }
+
     /// Executes all transactions of a block.
     ///
     /// If a `highest_index` is given, this will only execute the first `highest_index`
@@ -244,6 +285,47 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         &self,
         block_id: BlockId,
         block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        highest_index: Option<u64>,
+        inspector_setup: Setup,
+        f: F,
+    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
+                >,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        R: Send + 'static,
+    {
+        self.trace_block_range_with_inspector(
+            block_id,
+            block,
+            None,
+            highest_index,
+            inspector_setup,
+            f,
+        )
+    }
+
+    /// Core method for tracing a range of transactions within a block.
+    ///
+    /// If `lowest_index` is set, transactions before it are replayed without tracing to build up
+    /// state. If `highest_index` is set, tracing stops after that index (inclusive, 0-based).
+    ///
+    /// Both `trace_block_until_with_inspector` and `trace_block_range` delegate to this.
+    fn trace_block_range_with_inspector<Setup, Insp, F, R>(
+        &self,
+        block_id: BlockId,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        lowest_index: Option<u64>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -272,38 +354,43 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             if block.body().transactions().is_empty() {
-                // nothing to trace
                 return Ok(Some(Vec::new()))
             }
 
-            // replay all transactions of the block
-            // we need to get the state of the parent block because we're replaying this block
-            // on top of its parent block's state
             self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 let block_hash = block.hash();
-
                 let block_number = evm_env.block_env.number().saturating_to();
                 let base_fee = evm_env.block_env.basefee();
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                // prepare transactions, we do everything upfront to reduce time spent with open
-                // state
-                let max_transactions = highest_index.map_or_else(
-                    || block.body().transaction_count(),
-                    |highest| {
-                        // we need + 1 because the index is 0-based
-                        highest as usize + 1
-                    },
-                );
+                let tx_count = block.body().transaction_count();
+                let start = lowest_index.unwrap_or(0) as usize;
+                let end = highest_index.map_or(tx_count, |h| (h as usize + 1).min(tx_count));
 
-                let mut idx = 0;
+                if start >= end {
+                    return Ok(Some(Vec::new()))
+                }
+
+                let transactions: Vec<_> = block.transactions_recovered().collect();
+
+                // Replay transactions before start without tracing to build up state
+                if start > 0 {
+                    let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
+                    for tx in transactions.iter().take(start) {
+                        let tx_env = this.evm_config().tx_env(*tx);
+                        evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+                    }
+                }
+
+                // Trace transactions in [start, end)
+                let mut idx = start as u64;
 
                 let results = this
                     .evm_config()
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
-                    .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
+                    .try_trace_many(transactions[start..end].iter().copied(), |ctx| {
                         #[allow(clippy::needless_update)]
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
@@ -314,7 +401,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                             ..Default::default()
                         };
                         idx += 1;
-
                         f(tx_info, ctx)
                     })
                     .collect::<Result<_, _>>()?;
@@ -400,7 +486,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
         R: Send + 'static,
     {
-        self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
+        self.trace_block_range_with_inspector(block_id, block, None, None, insp_setup, f)
     }
 
     /// Applies chain-specific state transitions required before executing a block.

@@ -12,6 +12,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
+use core::ops::Range;
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
@@ -106,24 +107,51 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Trace the entire block asynchronously
+    /// Trace transactions in a block, optionally limiting to a specific range.
+    ///
+    /// If `tx_range` is `None`, all transactions are traced. If set, transactions before the
+    /// range start are replayed without tracing to build up state, and only transactions
+    /// within the range are traced.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
+        tx_range: Option<Range<usize>>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut results = Vec::with_capacity(block.body().transactions().len());
-
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let mut transactions = block.transactions_recovered().enumerate().peekable();
+                let tx_count = block.body().transactions().len();
+                let range = tx_range.unwrap_or(0..tx_count);
+                let start = range.start.min(tx_count);
+                let end = range.end.min(tx_count);
+
+                if start >= end {
+                    return Ok(Vec::new())
+                }
+
+                let transactions: Vec<_> = block.transactions_recovered().collect();
+
+                // Replay transactions before start without tracing to build up state
+                if start > 0 {
+                    let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
+                    for tx in transactions.iter().take(start) {
+                        let tx_env = eth_api.evm_config().tx_env(*tx);
+                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+                    }
+                }
+
+                // Trace transactions in [start, end)
+                let mut results = Vec::with_capacity(end - start);
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                while let Some((index, tx)) = transactions.next() {
+
+                let mut trace_txs = transactions[start..end].iter().enumerate().peekable();
+                while let Some((relative_idx, tx)) = trace_txs.next() {
+                    let index = start + relative_idx;
                     let tx_hash = *tx.tx_hash();
-                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let tx_env = eth_api.evm_config().tx_env(*tx);
 
                     let res = eth_api.inspect(
                         &mut db,
@@ -146,10 +174,10 @@ where
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
-                    if transactions.peek().is_some() {
+                    if trace_txs.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                        // need to apply the state changes of this transaction before executing the
-                        // next transaction
+                        // need to apply the state changes of this transaction before executing
+                        // the next transaction
                         db.commit(res.state)
                     }
                 }
@@ -189,7 +217,8 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
+        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts, None)
+            .await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -205,7 +234,27 @@ where
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts).await
+        self.trace_block(block, evm_env, opts, None).await
+    }
+
+    /// Replays a range of transactions within a block and returns their traces.
+    ///
+    /// Transactions before `start` are replayed without tracing to build up state.
+    pub async fn debug_trace_block_range(
+        &self,
+        block_id: BlockId,
+        start: u64,
+        end: u64,
+        opts: GethDebugTracingOptions,
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
+
+        self.trace_block(block, evm_env, opts, Some(start as usize..end as usize)).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -807,6 +856,34 @@ where
             .map_err(Into::into)
     }
 
+    /// Handler for `debug_traceBlockByHashRange`
+    async fn debug_trace_block_by_hash_range(
+        &self,
+        block: B256,
+        start: u64,
+        end: u64,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_trace_block_range(self, block.into(), start, end, opts.unwrap_or_default())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Handler for `debug_traceBlockByNumberRange`
+    async fn debug_trace_block_by_number_range(
+        &self,
+        block: BlockNumberOrTag,
+        start: u64,
+        end: u64,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_trace_block_range(self, block.into(), start, end, opts.unwrap_or_default())
+            .await
+            .map_err(Into::into)
+    }
+
     /// Handler for `debug_traceTransaction`
     async fn debug_trace_transaction(
         &self,
@@ -1118,7 +1195,7 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(block, evm_env, opts).await.map_err(Into::into)
+        self.trace_block(block, evm_env, opts, None).await.map_err(Into::into)
     }
 
     async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {

@@ -84,6 +84,32 @@ pub trait DebugApi<TxReq: RpcObject> {
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
+    /// Returns traces for a range of transactions within a block by block hash.
+    ///
+    /// Transactions before `start` are replayed without tracing to build up state.
+    /// Transactions from `start` to `end` (exclusive) are traced.
+    #[method(name = "traceBlockByHashRange")]
+    async fn debug_trace_block_by_hash_range(
+        &self,
+        block: B256,
+        start: u64,
+        end: u64,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+
+    /// Returns traces for a range of transactions within a block by block number.
+    ///
+    /// Transactions before `start` are replayed without tracing to build up state.
+    /// Transactions from `start` to `end` (exclusive) are traced.
+    #[method(name = "traceBlockByNumberRange")]
+    async fn debug_trace_block_by_number_range(
+        &self,
+        block: BlockNumberOrTag,
+        start: u64,
+        end: u64,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+
     /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
     /// exact same manner as it was executed on the network. It will replay any transaction that
     /// may have been executed prior to this one before it will finally attempt to execute the
