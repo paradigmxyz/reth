@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use serde::Deserialize;
 use std::time::Duration;
@@ -164,33 +165,22 @@ where
     }
 }
 
-/// Options controlling the `wait_for_persistence` parameter sent with `reth_newPayload`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum PersistenceWaitMode {
-    /// Always wait for persistence (default `reth_newPayload` behavior).
-    Always,
-    /// Never wait for persistence (`--no-wait-for-persistence`).
-    Never,
-    /// Wait for persistence every N blocks, skip for the rest.
-    EveryNBlocks(u64),
-}
-
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
 ///
 /// Returns `(version, versioned_params, execution_data)`.
 ///
-/// When `persistence_mode` is `Never` or `EveryNBlocks` (on non-matching blocks), passes
-/// `wait_for_persistence: false` to the `reth_newPayload` endpoint.
+/// `wait_for_persistence` controls how `wait_for_persistence` is passed to
+/// `reth_newPayload` on a per-block basis.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
-    persistence_mode: PersistenceWaitMode,
+    wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
     let block_number = block.header.number;
-    let wait_for_persistence = persistence_wait_value(persistence_mode, block_number);
+    let wait_for_persistence = persistence_wait_value(wait_for_persistence, block_number);
 
     if let Some(rlp) = rlp {
         return Ok((
@@ -231,12 +221,12 @@ pub(crate) fn block_to_new_payload(
 }
 
 /// Returns the `wait_for_persistence` parameter value for the given block number.
-fn persistence_wait_value(mode: PersistenceWaitMode, block_number: u64) -> Option<bool> {
+fn persistence_wait_value(mode: WaitForPersistence, block_number: u64) -> Option<bool> {
     match mode {
-        PersistenceWaitMode::Always => None, // server default (true)
-        PersistenceWaitMode::Never => Some(false),
-        PersistenceWaitMode::EveryNBlocks(n) => {
-            if n > 0 && block_number % n == 0 {
+        WaitForPersistence::Always => None, // server default (true)
+        WaitForPersistence::Never => Some(false),
+        WaitForPersistence::EveryN(n) => {
+            if block_number % n == 0 {
                 Some(true)
             } else {
                 Some(false)

@@ -94,12 +94,19 @@ pub struct BenchmarkArgs {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
 
-    /// Skip waiting for in-flight persistence before processing.
+    /// Control when `reth_newPayload` waits for in-flight persistence.
     ///
-    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
-    /// to the `reth_newPayload` endpoint.
-    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
-    pub no_wait_for_persistence: bool,
+    /// Accepts `always` (default — wait on every block), `never`, or a number N
+    /// to wait every N blocks and skip the rest.
+    ///
+    /// Implies `--reth-new-payload`.
+    #[arg(
+        long = "wait-for-persistence",
+        value_name = "MODE",
+        value_parser = parse_wait_for_persistence,
+        verbatim_doc_comment
+    )]
+    pub wait_for_persistence: Option<WaitForPersistence>,
 
     /// Skip waiting for execution cache and sparse trie locks before processing.
     ///
@@ -107,17 +114,6 @@ pub struct BenchmarkArgs {
     /// to the `reth_newPayload` endpoint.
     #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     pub no_wait_for_caches: bool,
-
-    /// Wait for persistence every N blocks during benchmarking.
-    ///
-    /// When set, passes `wait_for_persistence: true` to `reth_newPayload` every N blocks
-    /// and `wait_for_persistence: false` for all other blocks. This applies back-pressure
-    /// to prevent OOM during long-running back-to-back block benchmarks.
-    ///
-    /// Implies `--reth-new-payload`. When not set, persistence behavior is controlled by
-    /// `--no-wait-for-persistence` (default: wait for all blocks).
-    #[arg(long = "wait-for-persistence-every", value_name = "N", verbatim_doc_comment)]
-    pub wait_for_persistence_every: Option<u64>,
 
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]
@@ -172,6 +168,49 @@ fn parse_rpc_block_fetch_retries(value: &str) -> Result<RpcBlockFetchRetries, St
     value.parse()
 }
 
+/// Controls when `reth_newPayload` waits for in-flight persistence to complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitForPersistence {
+    /// Wait for persistence on every block (default `reth_newPayload` behavior).
+    Always,
+    /// Never wait for persistence.
+    Never,
+    /// Wait for persistence every N blocks, skip for the rest.
+    EveryN(u64),
+}
+
+impl Default for WaitForPersistence {
+    fn default() -> Self {
+        Self::Always
+    }
+}
+
+impl FromStr for WaitForPersistence {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("always") {
+            return Ok(Self::Always)
+        }
+        if s.eq_ignore_ascii_case("never") {
+            return Ok(Self::Never)
+        }
+        let n = s.parse::<u64>().map_err(|_| {
+            format!("invalid value {s:?}, expected 'always', 'never', or a block interval number")
+        })?;
+        if n == 0 {
+            return Err("block interval must be > 0, use 'never' to disable".to_string())
+        }
+        Ok(Self::EveryN(n))
+    }
+}
+
+/// Parses a [`WaitForPersistence`] value from a CLI string.
+pub fn parse_wait_for_persistence(value: &str) -> Result<WaitForPersistence, String> {
+    value.parse()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +253,36 @@ mod tests {
         ])
         .args;
         assert_eq!(args.rpc_block_fetch_retries, RpcBlockFetchRetries::Finite(7));
+    }
+
+    #[test]
+    fn test_parse_wait_for_persistence() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--wait-for-persistence",
+            "always",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Always));
+
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--wait-for-persistence",
+            "never",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Never));
+
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--wait-for-persistence",
+            "10",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::EveryN(10)));
+
+        // default is None
+        let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;
+        assert_eq!(args.wait_for_persistence, None);
     }
 }

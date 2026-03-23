@@ -9,7 +9,7 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{block_to_new_payload, call_new_payload_with_reth, PersistenceWaitMode},
+    valid_payload::{block_to_new_payload, call_new_payload_with_reth},
 };
 use alloy_provider::{ext::DebugApi, Provider};
 use clap::Parser;
@@ -52,9 +52,8 @@ impl Command {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
-            no_wait_for_persistence,
+            wait_for_persistence,
             no_wait_for_caches,
-            wait_for_persistence_every,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -125,19 +124,12 @@ impl Command {
 
             debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
-            let persistence_mode = if let Some(n) = wait_for_persistence_every {
-                PersistenceWaitMode::EveryNBlocks(n)
-            } else if no_wait_for_persistence {
-                PersistenceWaitMode::Never
-            } else {
-                PersistenceWaitMode::Always
-            };
             let (version, params) = block_to_new_payload(
                 block,
                 is_optimism,
                 rlp,
                 use_reth_namespace,
-                persistence_mode,
+                wait_for_persistence,
                 no_wait_for_caches,
             )?;
 

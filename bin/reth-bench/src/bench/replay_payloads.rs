@@ -22,6 +22,7 @@ use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use std::{
     path::PathBuf,
@@ -81,12 +82,19 @@ pub struct Command {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 
-    /// Skip waiting for in-flight persistence before processing.
+    /// Control when `reth_newPayload` waits for in-flight persistence.
     ///
-    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
-    /// to the `reth_newPayload` endpoint.
-    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
-    no_wait_for_persistence: bool,
+    /// Accepts `always` (default — wait on every block), `never`, or a number N
+    /// to wait every N blocks and skip the rest.
+    ///
+    /// Implies `--reth-new-payload`.
+    #[arg(
+        long = "wait-for-persistence",
+        value_name = "MODE",
+        value_parser = reth_node_core::args::benchmark_args::parse_wait_for_persistence,
+        verbatim_doc_comment
+    )]
+    wait_for_persistence: Option<WaitForPersistence>,
 
     /// Skip waiting for execution cache and sparse trie locks before processing.
     ///
@@ -94,16 +102,6 @@ pub struct Command {
     /// to the `reth_newPayload` endpoint.
     #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     no_wait_for_caches: bool,
-
-    /// Wait for persistence every N blocks during replay.
-    ///
-    /// When set, passes `wait_for_persistence: true` to `reth_newPayload` every N blocks
-    /// and `wait_for_persistence: false` for all other blocks. This applies back-pressure
-    /// to prevent OOM during long-running benchmark runs.
-    ///
-    /// Implies `--reth-new-payload`.
-    #[arg(long = "wait-for-persistence-every", value_name = "N", verbatim_doc_comment)]
-    wait_for_persistence_every: Option<u64>,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
@@ -217,18 +215,19 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let use_reth = self.reth_new_payload || self.wait_for_persistence_every.is_some();
+            let use_reth = self.reth_new_payload || self.wait_for_persistence.is_some();
             let (version, params) = if use_reth {
-                let wait_for_persistence = if let Some(n) = self.wait_for_persistence_every {
-                    if n > 0 && block_number % n == 0 {
-                        Some(true)
-                    } else {
-                        Some(false)
+                let mode = self.wait_for_persistence.unwrap_or(WaitForPersistence::Always);
+                let wait_for_persistence = match mode {
+                    WaitForPersistence::Always => None,
+                    WaitForPersistence::Never => Some(false),
+                    WaitForPersistence::EveryN(n) => {
+                        if block_number % n == 0 {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
                     }
-                } else if self.no_wait_for_persistence {
-                    Some(false)
-                } else {
-                    None
                 };
                 let reth_data = ExecutionData {
                     payload: execution_payload.clone().into(),
