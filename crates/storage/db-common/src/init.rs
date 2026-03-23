@@ -3,7 +3,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
-    keccak256,
     map::{AddressMap, B256Map, HashMap},
     Address, B256, U256,
 };
@@ -27,8 +26,8 @@ use reth_provider::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_trie::{
-    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
-    IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
+    prefix_set::TriePrefixSets, IntermediateStateRootState, StateRoot as StateRootComputer,
+    StateRootProgress,
 };
 use reth_trie_db::DatabaseStateRoot;
 
@@ -532,14 +531,17 @@ where
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
 
-    // write state to db and collect prefix sets
-    let mut prefix_sets = TriePrefixSetsMut::default();
-    dump_state(collector, provider_rw, block, &mut prefix_sets)?;
+    // write state to db
+    dump_state(collector, provider_rw, block)?;
 
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
+    // clear trie tables so state root is computed from scratch
+    provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
+    provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(provider_rw, Some(prefix_sets.freeze()))?;
+    let computed_state_root = compute_state_root(provider_rw, None)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -616,7 +618,6 @@ fn dump_state<Provider>(
     mut collector: Collector<Address, GenesisAccount>,
     provider_rw: &Provider,
     block: u64,
-    prefix_sets: &mut TriePrefixSetsMut,
 ) -> Result<(), eyre::Error>
 where
     Provider: StaticFileProviderFactory
@@ -638,22 +639,6 @@ where
         let (address, account) = entry?;
         let (address, _) = Address::from_compact(address.as_slice(), address.len());
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
-
-        // Add to prefix sets
-        let hashed_address = keccak256(address);
-        prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-        // Add storage keys to prefix sets if storage exists
-        if let Some(ref storage) = account.storage {
-            for key in storage.keys() {
-                let hashed_key = keccak256(key);
-                prefix_sets
-                    .storage_prefix_sets
-                    .entry(hashed_address)
-                    .or_default()
-                    .insert(Nibbles::unpack(hashed_key));
-            }
-        }
 
         accounts.push((address, account));
 
