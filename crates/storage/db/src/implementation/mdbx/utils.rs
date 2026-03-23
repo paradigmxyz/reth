@@ -17,12 +17,12 @@ where
 {
     Ok((
         match k {
-            Cow::Borrowed(k) => Decode::decode(k)?,
-            Cow::Owned(k) => Decode::decode_owned(k)?,
+            Cow::Borrowed(k) => Decode::decode(k).map_err(|_| DatabaseError::Decode)?,
+            Cow::Owned(k) => Decode::decode_owned(k).map_err(|_| DatabaseError::Decode)?,
         },
         match v {
-            Cow::Borrowed(v) => Decompress::decompress(v)?,
-            Cow::Owned(v) => Decompress::decompress_owned(v)?,
+            Cow::Borrowed(v) => Decompress::decompress(v).map_err(|_| DatabaseError::Decode)?,
+            Cow::Owned(v) => Decompress::decompress_owned(v).map_err(|_| DatabaseError::Decode)?,
         },
     ))
 }
@@ -35,8 +35,8 @@ where
     T: Table,
 {
     Ok(match kv.1 {
-        Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress_owned(v)?,
+        Cow::Borrowed(v) => Decompress::decompress(v).map_err(|_| DatabaseError::Decode)?,
+        Cow::Owned(v) => Decompress::decompress_owned(v).map_err(|_| DatabaseError::Decode)?,
     })
 }
 
@@ -46,7 +46,7 @@ where
     T: Table,
 {
     Ok(match value {
-        Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress_owned(v)?,
+        Cow::Borrowed(v) => Decompress::decompress(v).map_err(|_| DatabaseError::Decode)?,
+        Cow::Owned(v) => Decompress::decompress_owned(v).map_err(|_| DatabaseError::Decode)?,
     })
 }

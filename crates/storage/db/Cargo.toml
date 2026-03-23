@@ -94,7 +94,6 @@ arbitrary = [
     "reth-prune-types/arbitrary",
 ]
 op = [
-    "reth-db-api/op",
     "reth-primitives-traits/op",
 ]
 disable-lock = []

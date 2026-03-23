@@ -1,18 +1,13 @@
 //! Implements data structures specific to the database
 
 use crate::{
-    table::{Compress, Decode, Decompress, Encode},
+    table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_consensus::Header;
-use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Bytes, Log, B256, U256};
-use reth_codecs::{Compact, add_arbitrary_tests, impl_compression_for_compact};
-use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
-use reth_primitives_traits::{Account, Bytecode, StorageEntry};
-use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, *};
+use alloy_primitives::{Address, B256, U256};
+use reth_codecs::{add_arbitrary_tests, impl_compression_for_compact, Compact};
+use reth_prune_types::PruneSegment;
+use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
@@ -212,18 +207,7 @@ impl Decode for ClientVersion {
     }
 }
 
-impl_compression_for_compact!(
-    StoredBlockOmmers<H>,
-    CompactU256
-);
-
-#[cfg(feature = "op")]
-mod op {
-    use super::*;
-    use op_alloy_consensus::{OpReceipt, OpTxEnvelope};
-
-    impl_compression_for_compact!(OpTxEnvelope, OpReceipt);
-}
+impl_compression_for_compact!(StoredBlockOmmers<H>, CompactU256);
 
 /// Adds wrapper structs for some primitive types so they can use `StructFlags` from Compact, when
 /// used as pure table values.

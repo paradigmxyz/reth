@@ -1,6 +1,7 @@
 //! Utils for `stages`.
 use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
 use reth_config::config::EtlConfig;
+use reth_db::DatabaseError;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
@@ -257,7 +258,7 @@ where
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
+        let new_list = BlockNumberList::decompress_owned(v).map_err(|_| DatabaseError::Decode)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
@@ -465,7 +466,7 @@ where
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = StorageShardedKey::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
+        let new_list = BlockNumberList::decompress_owned(v).map_err(|_| DatabaseError::Decode)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");

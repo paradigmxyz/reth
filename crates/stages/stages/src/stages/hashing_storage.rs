@@ -1,6 +1,7 @@
 use alloy_primitives::{b256, bytes::BufMut, keccak256, Address, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
+use reth_db::DatabaseError;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{BlockNumberAddress, CompactU256},
@@ -164,7 +165,9 @@ where
                     B256::from_slice(&addr_key[..32]),
                     StorageEntry {
                         key: B256::from_slice(&addr_key[32..]),
-                        value: CompactU256::decompress_owned(value)?.into(),
+                        value: CompactU256::decompress_owned(value)
+                            .map_err(|_| DatabaseError::Decode)?
+                            .into(),
                     },
                 )?;
             }

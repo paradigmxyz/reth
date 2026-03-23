@@ -176,11 +176,11 @@ impl<V: Value> Compress for RawValue<V> {
 }
 
 impl<V: Value> Decompress for RawValue<V> {
-    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
+    fn decompress(value: &[u8]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self { value: value.to_vec(), _phantom: std::marker::PhantomData })
     }
 
-    fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+    fn decompress_owned(value: Vec<u8>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self { value, _phantom: std::marker::PhantomData })
     }
 }

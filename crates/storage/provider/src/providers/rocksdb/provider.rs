@@ -1525,7 +1525,7 @@ impl<'db> RocksReadSnapshot<'db> {
         let Some(value_bytes) = iter.value() else {
             return fallback();
         };
-        let chunk = BlockNumberList::decompress(value_bytes)?;
+        let chunk = BlockNumberList::decompress(value_bytes).map_err(|_| DatabaseError::Decode)?;
         let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
         let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {

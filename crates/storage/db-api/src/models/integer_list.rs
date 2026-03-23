@@ -1,9 +1,6 @@
 //! Implements [`Compress`] and [`Decompress`] for [`IntegerList`]
 
-use crate::{
-    table::{Compress, Decompress},
-    DatabaseError,
-};
+use crate::table::{Compress, Decompress};
 use bytes::BufMut;
 use core::fmt;
 use derive_more::Deref;
@@ -171,8 +168,8 @@ impl Compress for IntegerList {
 }
 
 impl Decompress for IntegerList {
-    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
-        Self::from_bytes(value).map_err(|_| DatabaseError::Decode)
+    fn decompress(value: &[u8]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::from_bytes(value).map_err(Into::into)
     }
 }
 

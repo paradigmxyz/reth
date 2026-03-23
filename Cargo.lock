@@ -6558,7 +6558,6 @@ version = "3.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "799781ae679d79a948e13d4824a40970bfa500058d245760dd857301059810fa"
 dependencies = [
- "arbitrary",
  "arrayvec",
  "bitvec",
  "byte-slice-cast",
@@ -7811,6 +7810,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.11.3"
+source = "git+ssh://git@github.com/paradigmxyz/reth-core.git?branch=main#badf59f286942534e3befd4b3a44e0d5a2d0525a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7820,6 +7820,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
+ "parity-scale-codec",
  "reth-codecs-derive",
  "reth-zstd-compressors",
  "serde",
@@ -7829,6 +7830,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "1.11.3"
+source = "git+ssh://git@github.com/paradigmxyz/reth-core.git?branch=main#badf59f286942534e3befd4b3a44e0d5a2d0525a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7944,7 +7946,6 @@ name = "reth-db-api"
 version = "1.11.3"
 dependencies = [
  "alloy-consensus",
- "alloy-genesis",
  "alloy-primitives",
  "arbitrary",
  "arrayvec",
@@ -7952,8 +7953,6 @@ dependencies = [
  "derive_more",
  "metrics",
  "modular-bitfield",
- "op-alloy-consensus",
- "parity-scale-codec",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
@@ -10549,6 +10548,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "1.11.3"
+source = "git+ssh://git@github.com/paradigmxyz/reth-core.git?branch=main#badf59f286942534e3befd4b3a44e0d5a2d0525a"
 dependencies = [
  "zstd",
 ]

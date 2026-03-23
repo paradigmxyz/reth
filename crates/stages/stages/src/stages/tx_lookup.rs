@@ -2,6 +2,7 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
+use reth_db::DatabaseError;
 use reth_db_api::{
     table::{Decode, Decompress, Value},
     tables,
@@ -182,7 +183,7 @@ where
 
                         // Decode from raw ETL bytes
                         let hash = TxHash::decode(&hash_bytes)?;
-                        let tx_num = TxNumber::decompress(&number_bytes)?;
+                        let tx_num = TxNumber::decompress(&number_bytes).map_err(|_| DatabaseError::Decode)?;
                         writer.put_transaction_hash_number(hash, tx_num, append_only)?;
                     }
 
