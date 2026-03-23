@@ -9517,7 +9517,6 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "auto_impl",
- "bincode",
  "byteorder",
  "bytes",
  "dashmap",
