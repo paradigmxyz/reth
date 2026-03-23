@@ -562,6 +562,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
                     unbounded_rx,
+                    unbounded_broadcast_msgs: self.metrics.total_unbounded_broadcast_msgs.clone(),
                     to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),

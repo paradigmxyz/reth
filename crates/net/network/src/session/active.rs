@@ -25,7 +25,7 @@ use crate::{
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
-use metrics::Gauge;
+use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
@@ -150,6 +150,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Unbounded channel for commands that couldn't fit in the bounded channel (broadcast
     /// overflow) and for disconnect commands that must never be dropped.
     pub(crate) unbounded_rx: mpsc::UnboundedReceiver<SessionCommand<N>>,
+    /// Counter for broadcast messages received via the unbounded overflow channel.
+    pub(crate) unbounded_broadcast_msgs: Counter,
     /// Sink to send messages to the [`SessionManager`](super::SessionManager).
     pub(crate) to_session_manager: MeteredPollSender<ActiveSessionMessage<N>>,
     /// A message that needs to be delivered to the session manager
@@ -684,7 +686,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             while let Poll::Ready(Some(cmd)) = this.unbounded_rx.poll_recv(cx) {
                 progress = true;
                 match cmd {
-                    SessionCommand::Message(msg) => this.on_internal_peer_message(msg),
+                    SessionCommand::Message(msg) => {
+                        this.unbounded_broadcast_msgs.increment(1);
+                        this.on_internal_peer_message(msg);
+                    }
                     SessionCommand::Disconnect { reason } => {
                         let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
                         return this.try_disconnect(reason, cx)
@@ -1218,6 +1223,7 @@ mod tests {
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
                         unbounded_rx,
+                        unbounded_broadcast_msgs: Counter::noop(),
                         to_session_manager: MeteredPollSender::new(
                             poll_sender,
                             "network_active_session",

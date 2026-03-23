@@ -143,6 +143,8 @@ pub struct SessionManagerMetrics {
     pub(crate) total_outgoing_peer_messages_dropped: Counter,
     /// Number of queued outgoing messages
     pub(crate) queued_outgoing_messages: Gauge,
+    /// Total number of broadcast messages sent via the unbounded overflow channel.
+    pub(crate) total_unbounded_broadcast_msgs: Counter,
 }
 
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
