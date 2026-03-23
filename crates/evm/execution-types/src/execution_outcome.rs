@@ -532,6 +532,7 @@ pub(super) mod serde_bincode_compat {
     mod tests {
         use super::super::{serde_bincode_compat, ExecutionOutcome};
         use rand::Rng;
+        use reth_ethereum_primitives::Receipt;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -539,9 +540,9 @@ pub(super) mod serde_bincode_compat {
         fn test_chain_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-            struct Data {
+            struct Data<T: reth_primitives_traits::Receipt> {
                 #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_>")]
-                data: ExecutionOutcome,
+                data: ExecutionOutcome<T>,
             }
 
             let mut bytes = [0u8; 1024];
@@ -556,7 +557,7 @@ pub(super) mod serde_bincode_compat {
             };
 
             let encoded = bincode::serialize(&data).unwrap();
-            let decoded = bincode::deserialize::<Data>(&encoded).unwrap();
+            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
     }

@@ -474,7 +474,7 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 pub(super) mod serde_bincode_compat {
     use crate::serde_bincode_compat;
     use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
-    use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+    use alloy_primitives::{Address, BlockNumber, Bytes};
     use alloy_rlp::Decodable;
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
@@ -618,6 +618,8 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Chain};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
@@ -633,9 +635,12 @@ pub(super) mod serde_bincode_compat {
                 chain: Chain,
             }
 
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 chain: Chain::new(
-                    vec![RecoveredBlock::default()],
+                    vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                        .unwrap()],
                     Default::default(),
                     BTreeMap::new(),
                 ),
