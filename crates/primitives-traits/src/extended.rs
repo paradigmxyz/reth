@@ -1,7 +1,4 @@
-use crate::{
-    size::InMemorySize,
-    transaction::signed::{RecoveryError, SignedTransaction},
-};
+use crate::{transaction::signed::RecoveryError, InMemorySize};
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{SignerRecoverable, TxHashRef},
@@ -166,13 +163,6 @@ where
     fn tx_hash(&self) -> &TxHash {
         delegate!(self => tx.tx_hash())
     }
-}
-
-impl<B, T> SignedTransaction for Extended<B, T>
-where
-    B: SignedTransaction + IsTyped2718 + TxHashRef,
-    T: SignedTransaction + TxHashRef,
-{
 }
 
 impl<B, T> Typed2718 for Extended<B, T>

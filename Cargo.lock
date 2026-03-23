@@ -9516,7 +9516,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-trie",
  "arbitrary",
- "auto_impl",
  "byteorder",
  "bytes",
  "dashmap",

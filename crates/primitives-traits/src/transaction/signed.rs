@@ -2,12 +2,9 @@
 
 use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use alloc::fmt;
-use alloy_consensus::{
-    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
-    EthereumTxEnvelope, SignableTransaction,
-};
+use alloy_consensus::transaction::{Recovered, SignerRecoverable, TxHashRef};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718, IsTyped2718};
-use alloy_primitives::{keccak256, Address, Signature, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -27,7 +24,6 @@ impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact {}
 ///   transactions
 ///
 /// Use unchecked methods only when dealing with historical pre-EIP-2 transactions.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
     Send
     + Sync
@@ -48,16 +44,6 @@ pub trait SignedTransaction:
     + TxHashRef
     + IsTyped2718
 {
-    /// Returns whether this is a system transaction.
-    ///
-    /// System transactions are created at the protocol level rather than by users. They are
-    /// typically used by L2s for special purposes (e.g., Optimism deposit transactions with type
-    /// 126) and may have different validation rules or fee handling compared to standard
-    /// user-initiated transactions.
-    fn is_system_tx(&self) -> bool {
-        false
-    }
-
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
@@ -90,13 +76,11 @@ pub trait SignedTransaction:
     }
 
     /// Tries to recover signer and return [`Recovered`] by cloning the type.
-    #[auto_impl(keep_default_for(&, Arc))]
     fn try_clone_into_recovered(&self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`Recovered`] by cloning the type.
-    #[auto_impl(keep_default_for(&, Arc))]
     fn try_clone_into_recovered_unchecked(&self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
@@ -105,7 +89,6 @@ pub trait SignedTransaction:
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`SignerRecoverable::recover_signer`].
-    #[auto_impl(keep_default_for(&, Arc))]
     fn try_into_recovered(self) -> Result<Recovered<Self>, Self> {
         match self.recover_signer() {
             Ok(signer) => Ok(Recovered::new_unchecked(self, signer)),
@@ -118,7 +101,6 @@ pub trait SignedTransaction:
     ///
     /// Returns `RecoveryError` if the transaction's signature is invalid.
     #[deprecated(note = "Use try_into_recovered_unchecked instead")]
-    #[auto_impl(keep_default_for(&, Arc))]
     fn into_recovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))
     }
@@ -126,7 +108,6 @@ pub trait SignedTransaction:
     /// Returns the [`Recovered`] transaction with the given sender.
     ///
     /// Note: assumes the given signer is the signer of this transaction.
-    #[auto_impl(keep_default_for(&, Arc))]
     fn with_signer(self, signer: Address) -> Recovered<Self> {
         Recovered::new_unchecked(self, signer)
     }
@@ -134,29 +115,29 @@ pub trait SignedTransaction:
     /// Returns the [`Recovered`] transaction with the given signer, using a reference to self.
     ///
     /// Note: assumes the given signer is the signer of this transaction.
-    #[auto_impl(keep_default_for(&, Arc))]
     fn with_signer_ref(&self, signer: Address) -> Recovered<&Self> {
         Recovered::new_unchecked(self, signer)
     }
 }
 
-impl<T> SignedTransaction for EthereumTxEnvelope<T>
-where
-    T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
-    Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
+impl<T> SignedTransaction for T where
+    Self: Send
+        + Sync
+        + Unpin
+        + Clone
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + Hash
+        + Encodable
+        + Decodable
+        + Encodable2718
+        + Decodable2718
+        + alloy_consensus::Transaction
+        + MaybeSerde
+        + InMemorySize
+        + SignerRecoverable
+        + TxHashRef
+        + IsTyped2718
 {
-}
-
-#[cfg(feature = "op")]
-mod op {
-    use super::*;
-    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-
-    impl SignedTransaction for OpPooledTransaction {}
-
-    impl SignedTransaction for OpTxEnvelope {
-        fn is_system_tx(&self) -> bool {
-            self.is_system_transaction()
-        }
-    }
 }

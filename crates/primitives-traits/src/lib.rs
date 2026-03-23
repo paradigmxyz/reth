@@ -171,8 +171,7 @@ pub mod header;
 pub use header::{Header, SealedHeader, SealedHeaderFor};
 
 /// Heuristic size trait
-pub mod size;
-pub use size::InMemorySize;
+pub use alloy_consensus::InMemorySize;
 
 /// Rayon utilities
 #[cfg(feature = "rayon")]
