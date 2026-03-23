@@ -104,7 +104,6 @@ serde = [
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
-    "reth-primitives-traits/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
     "dep:serde_with",
     "alloy-genesis/serde-bincode-compat",

@@ -178,16 +178,6 @@ pub use extended::Extended;
 pub mod header;
 pub use header::{Header, SealedHeader, SealedHeaderFor};
 
-/// Bincode-compatible serde implementations for common abstracted types in Reth.
-///
-/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
-/// Reth types require optional serialization for RPC compatibility. This module makes so that
-/// all fields are serialized.
-///
-/// Read more: <https://github.com/bincode-org/bincode/issues/326>
-#[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat;
-
 /// Heuristic size trait
 pub mod size;
 pub use size::InMemorySize;
