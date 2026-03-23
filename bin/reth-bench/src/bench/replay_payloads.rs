@@ -95,15 +95,15 @@ pub struct Command {
     #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     no_wait_for_caches: bool,
 
-    /// Force waiting for persistence every N blocks during replay.
+    /// Wait for persistence every N blocks during replay.
     ///
     /// When set, passes `wait_for_persistence: true` to `reth_newPayload` every N blocks
     /// and `wait_for_persistence: false` for all other blocks. This applies back-pressure
     /// to prevent OOM during long-running benchmark runs.
     ///
     /// Implies `--reth-new-payload`.
-    #[arg(long, value_name = "N", verbatim_doc_comment)]
-    force_persistence_every_n_blocks: Option<u64>,
+    #[arg(long = "wait-for-persistence-every", value_name = "N", verbatim_doc_comment)]
+    wait_for_persistence_every: Option<u64>,
 
     /// Optional Prometheus metrics endpoint to scrape after each block.
     ///
@@ -217,9 +217,9 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let use_reth = self.reth_new_payload || self.force_persistence_every_n_blocks.is_some();
+            let use_reth = self.reth_new_payload || self.wait_for_persistence_every.is_some();
             let (version, params) = if use_reth {
-                let wait_for_persistence = if let Some(n) = self.force_persistence_every_n_blocks {
+                let wait_for_persistence = if let Some(n) = self.wait_for_persistence_every {
                     if n > 0 && block_number % n == 0 {
                         Some(true)
                     } else {

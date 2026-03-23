@@ -38,7 +38,7 @@ pub(crate) struct BenchContext {
     /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
     pub(crate) no_wait_for_caches: bool,
     /// When set, wait for persistence every N blocks (pass `wait_for_persistence: true` on those).
-    pub(crate) force_persistence_every_n_blocks: Option<u64>,
+    pub(crate) wait_for_persistence_every: Option<u64>,
 }
 
 impl BenchContext {
@@ -168,9 +168,9 @@ impl BenchContext {
 
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
-        let force_persistence_every_n_blocks = bench_args.force_persistence_every_n_blocks;
+        let wait_for_persistence_every = bench_args.wait_for_persistence_every;
         let use_reth_namespace =
-            bench_args.reth_new_payload || rlp_blocks || force_persistence_every_n_blocks.is_some();
+            bench_args.reth_new_payload || rlp_blocks || wait_for_persistence_every.is_some();
         let no_wait_for_persistence = bench_args.no_wait_for_persistence;
         let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
@@ -183,7 +183,7 @@ impl BenchContext {
             rlp_blocks,
             no_wait_for_persistence,
             no_wait_for_caches,
-            force_persistence_every_n_blocks,
+            wait_for_persistence_every,
         })
     }
 }

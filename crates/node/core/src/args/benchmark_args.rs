@@ -108,7 +108,7 @@ pub struct BenchmarkArgs {
     #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
     pub no_wait_for_caches: bool,
 
-    /// Force waiting for persistence every N blocks during benchmarking.
+    /// Wait for persistence every N blocks during benchmarking.
     ///
     /// When set, passes `wait_for_persistence: true` to `reth_newPayload` every N blocks
     /// and `wait_for_persistence: false` for all other blocks. This applies back-pressure
@@ -116,8 +116,8 @@ pub struct BenchmarkArgs {
     ///
     /// Implies `--reth-new-payload`. When not set, persistence behavior is controlled by
     /// `--no-wait-for-persistence` (default: wait for all blocks).
-    #[arg(long, value_name = "N", verbatim_doc_comment)]
-    pub force_persistence_every_n_blocks: Option<u64>,
+    #[arg(long = "wait-for-persistence-every", value_name = "N", verbatim_doc_comment)]
+    pub wait_for_persistence_every: Option<u64>,
 
     /// Fetch and replay RLP-encoded blocks. Implies `reth_new_payload`.
     #[arg(long, default_value = "false", verbatim_doc_comment)]

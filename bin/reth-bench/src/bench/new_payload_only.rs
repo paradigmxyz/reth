@@ -54,7 +54,7 @@ impl Command {
             rlp_blocks,
             no_wait_for_persistence,
             no_wait_for_caches,
-            force_persistence_every_n_blocks,
+            wait_for_persistence_every,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -125,7 +125,7 @@ impl Command {
 
             debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
-            let persistence_mode = if let Some(n) = force_persistence_every_n_blocks {
+            let persistence_mode = if let Some(n) = wait_for_persistence_every {
                 PersistenceWaitMode::EveryNBlocks(n)
             } else if no_wait_for_persistence {
                 PersistenceWaitMode::Never
