@@ -103,6 +103,8 @@ pub struct BenchmarkArgs {
     #[arg(
         long = "wait-for-persistence",
         value_name = "MODE",
+        num_args = 0..=1,
+        default_missing_value = "always",
         value_parser = parse_wait_for_persistence,
         requires = "reth_new_payload",
         verbatim_doc_comment
@@ -284,6 +286,15 @@ mod tests {
         ])
         .args;
         assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::EveryN(10)));
+
+        // bare --wait-for-persistence (no value) defaults to Always
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--reth-new-payload",
+            "--wait-for-persistence",
+        ])
+        .args;
+        assert_eq!(args.wait_for_persistence, Some(WaitForPersistence::Always));
 
         // default is None
         let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;

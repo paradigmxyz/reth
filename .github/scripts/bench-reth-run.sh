@@ -244,7 +244,7 @@ BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 # Build optional flags
 EXTRA_BENCH_ARGS=()
 if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
-  EXTRA_BENCH_ARGS+=(--reth-new-payload)
+  EXTRA_BENCH_ARGS+=(--reth-new-payload --wait-for-persistence)
 fi
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
