@@ -16,4 +16,4 @@ mod client;
 mod providers;
 
 pub use client::{BlockProvider, DebugConsensusClient};
-pub use providers::{EtherscanBlockProvider, RpcBlockProvider};
+pub use providers::{EtherscanBlockProvider, FallbackBlockProvider, RpcBlockProvider};
