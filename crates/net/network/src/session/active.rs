@@ -415,6 +415,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if msg.is_valid_for_version(self.conn.version()) {
                     self.queued_outgoing.push_pooled_hashes(msg);
                 } else {
+                    self.queued_outgoing.broadcast_items.sub(msg.len());
                     debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
