@@ -119,7 +119,7 @@ impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
                 Poll::Pending
             }
             Self::Trigger(trigger) => {
-                if trigger.poll_next_unpin(cx).is_ready() {
+                if let Poll::Ready(Some(_)) = trigger.poll_next_unpin(cx) {
                     return Poll::Ready(())
                 }
                 Poll::Pending
