@@ -819,7 +819,7 @@ jobs:
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*Nightly regression* failed while *${failedStep}*` },
+                text: { type: 'mrkdwn', text: `*Nightly regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
               },
               {
                 type: 'actions',
