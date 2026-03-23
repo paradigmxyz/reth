@@ -99,11 +99,12 @@ pub struct BenchmarkArgs {
     /// Accepts `always` (wait on every block), `never` (default), or a number N
     /// to wait every N blocks and skip the rest.
     ///
-    /// Implies `--reth-new-payload`.
+    /// Requires `--reth-new-payload`.
     #[arg(
         long = "wait-for-persistence",
         value_name = "MODE",
         value_parser = parse_wait_for_persistence,
+        requires = "reth_new_payload",
         verbatim_doc_comment
     )]
     pub wait_for_persistence: Option<WaitForPersistence>,
@@ -259,6 +260,7 @@ mod tests {
     fn test_parse_wait_for_persistence() {
         let args = CommandParser::<BenchmarkArgs>::parse_from([
             "reth-bench",
+            "--reth-new-payload",
             "--wait-for-persistence",
             "always",
         ])
@@ -267,6 +269,7 @@ mod tests {
 
         let args = CommandParser::<BenchmarkArgs>::parse_from([
             "reth-bench",
+            "--reth-new-payload",
             "--wait-for-persistence",
             "never",
         ])
@@ -275,6 +278,7 @@ mod tests {
 
         let args = CommandParser::<BenchmarkArgs>::parse_from([
             "reth-bench",
+            "--reth-new-payload",
             "--wait-for-persistence",
             "10",
         ])

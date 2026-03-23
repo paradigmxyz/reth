@@ -87,11 +87,12 @@ pub struct Command {
     /// Accepts `always` (default — wait on every block), `never`, or a number N
     /// to wait every N blocks and skip the rest.
     ///
-    /// Implies `--reth-new-payload`.
+    /// Requires `--reth-new-payload`.
     #[arg(
         long = "wait-for-persistence",
         value_name = "MODE",
         value_parser = reth_node_core::args::benchmark_args::parse_wait_for_persistence,
+        requires = "reth_new_payload",
         verbatim_doc_comment
     )]
     wait_for_persistence: Option<WaitForPersistence>,
@@ -215,7 +216,7 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let use_reth = self.reth_new_payload || self.wait_for_persistence.is_some();
+            let use_reth = self.reth_new_payload;
             let (version, params) = if use_reth {
                 let mode = self.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
                 let wait_for_persistence = match mode {
