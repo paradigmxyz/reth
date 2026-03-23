@@ -172,20 +172,15 @@ fn parse_rpc_block_fetch_retries(value: &str) -> Result<RpcBlockFetchRetries, St
 }
 
 /// Controls when `reth_newPayload` waits for in-flight persistence to complete.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WaitForPersistence {
     /// Wait for persistence on every block (default `reth_newPayload` behavior).
+    #[default]
     Always,
     /// Never wait for persistence.
     Never,
     /// Wait for persistence every N blocks, skip for the rest.
     EveryN(u64),
-}
-
-impl Default for WaitForPersistence {
-    fn default() -> Self {
-        Self::Always
-    }
 }
 
 impl WaitForPersistence {
@@ -199,7 +194,7 @@ impl WaitForPersistence {
             Self::Always => None,
             Self::Never => Some(false),
             Self::EveryN(n) => {
-                if block_number % n == 0 {
+                if block_number.is_multiple_of(n) {
                     Some(true)
                 } else {
                     Some(false)
