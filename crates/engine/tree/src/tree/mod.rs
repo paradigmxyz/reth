@@ -277,9 +277,6 @@ where
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
     execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
-    /// Whether the node uses hashed state as canonical storage (v2 mode).
-    /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
-    use_hashed_state: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -308,7 +305,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
-            .field("use_hashed_state", &self.use_hashed_state)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -349,7 +345,6 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -373,7 +368,6 @@ where
             evm_config,
             changeset_cache,
             execution_timing_stats: HashMap::new(),
-            use_hashed_state,
             runtime,
         }
     }
@@ -395,7 +389,6 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -429,7 +422,6 @@ where
             kind,
             evm_config,
             changeset_cache,
-            use_hashed_state,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -2519,12 +2511,7 @@ where
 
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
-
-            // When use_hashed_state is enabled, skip reinserting the old chain — the
-            // bundle state references plain state reverts which don't exist.
-            if !self.use_hashed_state {
-                self.reinsert_reorged_blocks(old.clone());
-            }
+            self.reinsert_reorged_blocks(old.clone());
         }
 
         // update the tracked in-memory state with the new chain
