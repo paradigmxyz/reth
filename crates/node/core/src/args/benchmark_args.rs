@@ -96,7 +96,7 @@ pub struct BenchmarkArgs {
 
     /// Control when `reth_newPayload` waits for in-flight persistence.
     ///
-    /// Accepts `always` (default — wait on every block), `never`, or a number N
+    /// Accepts `always` (wait on every block), `never` (default), or a number N
     /// to wait every N blocks and skip the rest.
     ///
     /// Implies `--reth-new-payload`.

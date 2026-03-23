@@ -167,7 +167,7 @@ impl BenchContext {
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
         let wait_for_persistence =
-            bench_args.wait_for_persistence.unwrap_or(WaitForPersistence::Always);
+            bench_args.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
         let use_reth_namespace =
             bench_args.reth_new_payload || rlp_blocks || bench_args.wait_for_persistence.is_some();
         let no_wait_for_caches = bench_args.no_wait_for_caches;

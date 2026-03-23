@@ -217,7 +217,7 @@ impl Command {
 
             let use_reth = self.reth_new_payload || self.wait_for_persistence.is_some();
             let (version, params) = if use_reth {
-                let mode = self.wait_for_persistence.unwrap_or(WaitForPersistence::Always);
+                let mode = self.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
                 let wait_for_persistence = match mode {
                     WaitForPersistence::Always => None,
                     WaitForPersistence::Never => Some(false),
