@@ -12,6 +12,7 @@ use crate::{
     },
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
+        PersistenceWaitMode,
     },
 };
 use alloy_provider::{ext::DebugApi, Provider};
@@ -97,6 +98,7 @@ impl Command {
             rlp_blocks,
             no_wait_for_persistence,
             no_wait_for_caches,
+            force_persistence_every_n_blocks,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
@@ -199,12 +201,19 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
+            let persistence_mode = if let Some(n) = force_persistence_every_n_blocks {
+                PersistenceWaitMode::EveryNBlocks(n)
+            } else if no_wait_for_persistence {
+                PersistenceWaitMode::Never
+            } else {
+                PersistenceWaitMode::Always
+            };
             let (version, params) = block_to_new_payload(
                 block,
                 is_optimism,
                 rlp,
                 use_reth_namespace,
-                no_wait_for_persistence,
+                persistence_mode,
                 no_wait_for_caches,
             )?;
             let start = Instant::now();

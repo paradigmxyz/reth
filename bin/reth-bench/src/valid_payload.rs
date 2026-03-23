@@ -164,26 +164,40 @@ where
     }
 }
 
+/// Options controlling the `wait_for_persistence` parameter sent with `reth_newPayload`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PersistenceWaitMode {
+    /// Always wait for persistence (default `reth_newPayload` behavior).
+    Always,
+    /// Never wait for persistence (`--no-wait-for-persistence`).
+    Never,
+    /// Wait for persistence every N blocks, skip for the rest.
+    EveryNBlocks(u64),
+}
+
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
 ///
 /// Returns `(version, versioned_params, execution_data)`.
 ///
-/// When `no_wait_for_persistence` or `no_wait_for_caches` is `true` and using `reth_newPayload`,
-/// passes the corresponding `wait_for_*: false` to skip that wait.
+/// When `persistence_mode` is `Never` or `EveryNBlocks` (on non-matching blocks), passes
+/// `wait_for_persistence: false` to the `reth_newPayload` endpoint.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
-    no_wait_for_persistence: bool,
+    persistence_mode: PersistenceWaitMode,
     no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let block_number = block.header.number;
+    let wait_for_persistence = persistence_wait_value(persistence_mode, block_number);
+
     if let Some(rlp) = rlp {
         return Ok((
             None,
             serde_json::to_value((
                 RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),
-                no_wait_for_persistence.then_some(false),
+                wait_for_persistence,
                 no_wait_for_caches.then_some(false),
             ))?,
         ));
@@ -207,12 +221,27 @@ pub(crate) fn block_to_new_payload(
             None,
             serde_json::to_value((
                 RethNewPayloadInput::ExecutionData(execution_data),
-                no_wait_for_persistence.then_some(false),
+                wait_for_persistence,
                 no_wait_for_caches.then_some(false),
             ))?,
         ))
     } else {
         Ok((Some(version), params))
+    }
+}
+
+/// Returns the `wait_for_persistence` parameter value for the given block number.
+fn persistence_wait_value(mode: PersistenceWaitMode, block_number: u64) -> Option<bool> {
+    match mode {
+        PersistenceWaitMode::Always => None, // server default (true)
+        PersistenceWaitMode::Never => Some(false),
+        PersistenceWaitMode::EveryNBlocks(n) => {
+            if n > 0 && block_number % n == 0 {
+                Some(true)
+            } else {
+                Some(false)
+            }
+        }
     }
 }
 
