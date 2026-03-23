@@ -159,10 +159,8 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 }
 
 /// Signs the [Transaction] with a random key pair.
-pub fn sign_tx_with_random_key_pair<R: Rng>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let secp = Secp256k1::new();
-    // TODO: rand08
-    let key_pair = Keypair::new(&secp, &mut rand_08::thread_rng());
+pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
+    let key_pair = generate_key(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -175,16 +173,22 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
 }
 
 /// Generates a new random [Keypair].
-pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
+pub fn generate_key<R: Rng>(rng: &mut R) -> Keypair {
     let secp = Secp256k1::new();
-    Keypair::new(&secp, &mut rand_08::thread_rng())
+
+    loop {
+        let mut secret = [0u8; 32];
+        rng.fill(secret.as_mut_slice());
+
+        if let Ok(key_pair) = Keypair::from_seckey_slice(&secp, &secret) {
+            return key_pair;
+        }
+    }
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
-pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
-    let secp = Secp256k1::new();
-    // TODO: rand08
-    (0..count).map(|_| Keypair::new(&secp, &mut rand_08::thread_rng())).collect()
+pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
+    (0..count).map(|_| generate_key(rng)).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -495,8 +499,6 @@ mod tests {
 
     #[test]
     fn test_sign_message() {
-        let secp = Secp256k1::new();
-
         let tx = Transaction::Eip1559(TxEip1559 {
             chain_id: 1,
             nonce: 0x42,
@@ -510,8 +512,9 @@ mod tests {
         });
         let signature_hash = tx.signature_hash();
 
+        let mut rng = rand::rng();
         for _ in 0..100 {
-            let key_pair = Keypair::new(&secp, &mut rand_08::thread_rng());
+            let key_pair = generate_key(&mut rng);
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
