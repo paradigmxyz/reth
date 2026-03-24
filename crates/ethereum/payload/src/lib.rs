@@ -12,6 +12,7 @@
 use alloy_consensus::Transaction;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
+use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
@@ -25,9 +26,9 @@ use reth_evm::{
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
@@ -82,12 +83,12 @@ where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
-    type Attributes = EthPayloadBuilderAttributes;
+    type Attributes = EthPayloadAttributes;
     type BuiltPayload = EthBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
+        args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         default_ethereum_payload(
             self.evm_config.clone(),
@@ -140,7 +141,7 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     client: Client,
     pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
+    args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
@@ -150,7 +151,7 @@ where
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
-    let PayloadConfig { parent_header, attributes } = config;
+    let PayloadConfig { parent_header, attributes, payload_id } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider.as_ref());
@@ -163,11 +164,11 @@ where
             &parent_header,
             NextBlockEnvAttributes {
                 timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient(),
-                prev_randao: attributes.prev_randao(),
+                suggested_fee_recipient: attributes.suggested_fee_recipient,
+                prev_randao: attributes.prev_randao,
                 gas_limit: builder_config.gas_limit(parent_header.gas_limit),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: Some(attributes.withdrawals().clone()),
+                withdrawals: attributes.withdrawals.clone().map(Into::into),
                 extra_data: builder_config.extra_data,
             },
         )
@@ -175,7 +176,7 @@ where
 
     let chain_spec = client.chain_spec();
 
-    debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
     let base_fee = builder.evm_mut().block().basefee();
@@ -211,7 +212,8 @@ where
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
-    let withdrawals_rlp_length = attributes.withdrawals().length();
+    let withdrawals_rlp_length =
+        attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -368,7 +370,7 @@ where
         .then_some(execution_result.requests);
 
     let sealed_block = Arc::new(block.into_sealed_block());
-    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
         return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
@@ -377,7 +379,7 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
+    let payload = EthBuiltPayload::new(sealed_block, total_fees, requests)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 

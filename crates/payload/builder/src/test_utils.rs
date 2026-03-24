@@ -99,7 +99,7 @@ impl PayloadJob for TestPayloadJob {
     }
 
     fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
-        Ok(self.attr.timestamp)
+        Ok(self.attr.inner.timestamp)
     }
 
     fn resolve_kind(

@@ -12,14 +12,14 @@ pub struct PayloadTestContext<T: PayloadTypes> {
     payload_builder: PayloadBuilderHandle<T>,
     pub timestamp: u64,
     #[debug(skip)]
-    attributes_generator: Box<dyn Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync>,
+    attributes_generator: Box<dyn Fn(u64) -> T::PayloadAttributes + Send + Sync>,
 }
 
 impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Creates a new payload helper
     pub async fn new(
         payload_builder: PayloadBuilderHandle<T>,
-        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync + 'static,
+        attributes_generator: impl Fn(u64) -> T::PayloadAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
@@ -33,7 +33,7 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     }
 
     /// Creates a new payload job from static attributes
-    pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadBuilderAttributes> {
+    pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadAttributes> {
         self.timestamp += 1;
         let attributes = (self.attributes_generator)(self.timestamp);
         self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
@@ -41,10 +41,7 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     }
 
     /// Asserts that the next event is a payload attributes event
-    pub async fn expect_attr_event(
-        &mut self,
-        attrs: T::PayloadBuilderAttributes,
-    ) -> eyre::Result<()> {
+    pub async fn expect_attr_event(&mut self, attrs: T::PayloadAttributes) -> eyre::Result<()> {
         let first_event = self.payload_event_stream.next().await.unwrap()?;
         if let Events::Attributes(attr) = first_event {
             assert_eq!(attrs.timestamp(), attr.timestamp());

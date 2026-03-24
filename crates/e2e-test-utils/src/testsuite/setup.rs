@@ -288,9 +288,7 @@ where
 
     /// Create a static attributes generator that doesn't capture any instance data
     fn create_static_attributes_generator<N>(
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
-           + Copy
-           + use<N, I>
+    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Copy + use<N, I>
     where
         N: NodeBuilderHelper<Payload = I>,
     {
@@ -302,7 +300,7 @@ where
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             };
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
             )
         }

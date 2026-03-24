@@ -48,7 +48,11 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)>
 where
     N: NodeBuilderHelper,
@@ -65,7 +69,11 @@ pub async fn setup_engine<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     Wallet,
@@ -90,7 +98,11 @@ pub async fn setup_engine_with_connection<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
     connect_nodes: bool,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,

@@ -25,7 +25,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
+    BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -3053,7 +3053,7 @@ where
         attrs: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
-        version: EngineApiMessageVersion,
+        _version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
             self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
@@ -3066,34 +3066,27 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <T::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
-            state.head_block_hash,
-            attrs,
-            version as u8,
-        ) {
-            Ok(attributes) => {
-                // send the payload to the builder and return the receiver for the pending payload
-                // id, initiating payload job is handled asynchronously
-                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
-                // Client software MUST respond to this method call in the following way:
-                // {
-                //      payloadStatus: {
-                //          status: VALID,
-                //          latestValidHash: forkchoiceState.headBlockHash,
-                //          validationError: null
-                //      },
-                //      payloadId: buildProcessId
-                // }
-                //
-                // if the payload is deemed VALID and the build process has begun.
-                OnForkChoiceUpdated::updated_with_pending_payload_id(
-                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
-                    pending_payload_id,
-                )
-            }
-            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
-        }
+        // send the payload to the builder and return the receiver for the pending payload
+        // id, initiating payload job is handled asynchronously
+        let pending_payload_id =
+            self.payload_builder.send_new_payload(state.head_block_hash, attrs);
+
+        // Client software MUST respond to this method call in the following way:
+        // {
+        //      payloadStatus: {
+        //          status: VALID,
+        //          latestValidHash: forkchoiceState.headBlockHash,
+        //          validationError: null
+        //      },
+        //      payloadId: buildProcessId
+        // }
+        //
+        // if the payload is deemed VALID and the build process has begun.
+        OnForkChoiceUpdated::updated_with_pending_payload_id(
+            PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+            pending_payload_id,
+        )
     }
 
     /// Remove all blocks up to __and including__ the given block number.

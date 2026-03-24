@@ -25,8 +25,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
-    PayloadAttributesBuilder, PayloadBuilderAttributes,
+    payload_id, BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadAttributes,
+    PayloadAttributesBuilder,
 };
 
 mod payload;
@@ -47,15 +47,6 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     /// These attributes typically come from external sources (e.g., consensus layer over RPC such
     /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
-
-    /// Extended attributes used internally during payload building.
-    ///
-    /// This type augments the basic payload attributes with additional information
-    /// needed during the building process, such as unique identifiers and parent
-    /// block references.
-    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-        + Clone
-        + Unpin;
 
     /// Converts a sealed block into the execution payload format.
     fn block_to_payload(

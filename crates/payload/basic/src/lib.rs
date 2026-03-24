@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
@@ -140,9 +140,11 @@ where
 
     fn new_payload_job(
         &self,
+        parent: B256,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
+        id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if attributes.parent().is_zero() {
+        let parent_header = if parent.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -151,14 +153,14 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(attributes.parent())
+                .sealed_header_by_hash(parent)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent))?
         };
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
-        let config = PayloadConfig::new(Arc::new(parent_header), attributes);
+        let config = PayloadConfig::new(Arc::new(parent_header), attributes, id);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -667,20 +669,26 @@ pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     pub parent_header: Arc<SealedHeader<Header>>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
+    /// The payload id.
+    pub payload_id: PayloadId,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
 where
-    Attributes: PayloadBuilderAttributes,
+    Attributes: PayloadAttributes,
 {
     /// Create new payload config.
-    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
-        Self { parent_header, attributes }
+    pub const fn new(
+        parent_header: Arc<SealedHeader<Header>>,
+        attributes: Attributes,
+        payload_id: PayloadId,
+    ) -> Self {
+        Self { parent_header, attributes, payload_id }
     }
 
     /// Returns the payload id.
-    pub fn payload_id(&self) -> PayloadId {
-        self.attributes.payload_id()
+    pub const fn payload_id(&self) -> PayloadId {
+        self.payload_id
     }
 }
 
@@ -831,7 +839,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
 /// Ethereum client types.
 pub trait PayloadBuilder: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
-    type Attributes: PayloadBuilderAttributes;
+    type Attributes: PayloadAttributes;
     /// The type of the built payload.
     type BuiltPayload: BuiltPayload;
 
