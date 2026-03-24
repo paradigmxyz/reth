@@ -47,6 +47,5 @@ op = [
     "dep:op-alloy-consensus",
     "dep:op-alloy-rpc-types",
     "reth-evm/op",
-    "reth-primitives-traits/op",
     "alloy-evm/op",
 ]

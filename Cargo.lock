@@ -3620,7 +3620,6 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -6344,7 +6343,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "arbitrary",
  "derive_more",
  "serde",
  "serde_with",
@@ -7600,6 +7598,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-tasks",
+ "serde",
  "tokio",
  "tracing",
 ]
@@ -8608,7 +8607,6 @@ version = "1.11.3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
@@ -8616,7 +8614,6 @@ dependencies = [
  "reth-primitives-traits",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 2.0.18",
 ]
 
@@ -9475,6 +9472,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
@@ -9487,6 +9485,8 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -9531,7 +9531,6 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "once_cell",
- "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "quanta",

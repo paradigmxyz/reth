@@ -1,13 +1,15 @@
 //! Utils for testing purposes.
 
 use crate::{
-    traits::KeepPayloadJobAlive, EthBuiltPayload, EthPayloadBuilderAttributes,
-    PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
+    traits::KeepPayloadJobAlive, EthBuiltPayload, PayloadBuilderHandle, PayloadBuilderService,
+    PayloadJob, PayloadJobGenerator,
 };
 
 use alloy_consensus::Block;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
+use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
+use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
 use reth_primitives_traits::Block as _;
@@ -28,10 +30,8 @@ pub fn test_payload_service<T>() -> (
     PayloadBuilderHandle<T>,
 )
 where
-    T: PayloadTypes<
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-            BuiltPayload = EthBuiltPayload,
-        > + 'static,
+    T: PayloadTypes<PayloadAttributes = EthPayloadAttributes, BuiltPayload = EthBuiltPayload>
+        + 'static,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
@@ -39,10 +39,8 @@ where
 /// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<T>() -> PayloadBuilderHandle<T>
 where
-    T: PayloadTypes<
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-            BuiltPayload = EthBuiltPayload,
-        > + 'static,
+    T: PayloadTypes<PayloadAttributes = EthPayloadAttributes, BuiltPayload = EthBuiltPayload>
+        + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
@@ -59,7 +57,9 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 
     fn new_payload_job(
         &self,
-        attr: EthPayloadBuilderAttributes,
+        _parent: B256,
+        attr: EthPayloadAttributes,
+        _id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         Ok(TestPayloadJob { attr })
     }
@@ -68,7 +68,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 /// A [`PayloadJob`] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
-    attr: EthPayloadBuilderAttributes,
+    attr: EthPayloadAttributes,
 }
 
 impl Future for TestPayloadJob {
@@ -80,21 +80,20 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
-    type PayloadAttributes = EthPayloadBuilderAttributes;
+    type PayloadAttributes = EthPayloadAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
     type BuiltPayload = EthBuiltPayload;
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
-            self.attr.payload_id(),
             Arc::new(Block::<_>::default().seal_slow()),
             U256::ZERO,
             Some(Default::default()),
         ))
     }
 
-    fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
+    fn payload_attributes(&self) -> Result<EthPayloadAttributes, PayloadBuilderError> {
         Ok(self.attr.clone())
     }
 

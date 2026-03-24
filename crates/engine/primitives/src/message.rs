@@ -14,7 +14,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use std::time::Duration;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -195,8 +195,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         state: ForkchoiceState,
         /// The payload attributes for block building.
         payload_attrs: Option<Payload::PayloadAttributes>,
-        /// The Engine API Version.
-        version: EngineApiMessageVersion,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
@@ -297,10 +295,9 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
-            .send_fork_choice_updated(state, payload_attrs, version)
+            .send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
@@ -313,14 +310,12 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,
             payload_attrs,
             tx,
-            version,
         });
         rx
     }
