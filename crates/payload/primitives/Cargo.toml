@@ -55,5 +55,4 @@ std = [
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",
-    "reth-primitives-traits/op",
 ]

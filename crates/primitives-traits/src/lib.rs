@@ -164,8 +164,6 @@ pub use storage::{StorageEntry, ValueWithSubKey};
 
 pub mod sync;
 
-mod extended;
-pub use extended::Extended;
 /// Common header types
 pub mod header;
 pub use header::{Header, SealedHeader, SealedHeaderFor};
