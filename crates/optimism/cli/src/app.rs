@@ -9,9 +9,11 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_node::{OpExecutorProvider, OpNode};
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
+#[cfg(feature = "otlp")]
 use reth_tracing_otlp::OtlpProtocol;
 use std::{fmt, sync::Arc};
 use tracing::info;
+#[cfg(feature = "otlp")]
 use url::Url;
 
 /// A wrapper around a parsed CLI that handles command execution.
@@ -118,8 +120,9 @@ where
     ///
     /// If file logging is enabled, this function stores guard to the struct.
     /// For gRPC OTLP, it requires tokio runtime context.
-    pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
+    pub fn init_tracing(&mut self, _runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
+            #[allow(unused_mut)]
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
@@ -127,7 +130,7 @@ where
                 self.cli.traces.validate()?;
                 if let Some(endpoint) = &self.cli.traces.otlp {
                     info!(target: "reth::cli", "Starting OTLP tracing export to {:?}", endpoint);
-                    self.init_otlp_export(&mut layers, endpoint, runner)?;
+                    self.init_otlp_export(&mut layers, endpoint, _runner)?;
                 }
             }
 

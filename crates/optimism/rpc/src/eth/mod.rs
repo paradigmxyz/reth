@@ -14,12 +14,17 @@ use crate::{
     OpEthApiError, SequencerClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{B256, U256};
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, B256, U256};
+use alloy_rlp::EMPTY_STRING_CODE;
+use alloy_rpc_types_eth::EIP1186AccountProofResponse;
+use alloy_serde::JsonStorageKey;
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
+use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
@@ -33,11 +38,13 @@ use reth_rpc_eth_api::{
         pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
         LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes,
+    EthApiTypes, FromEthApiError, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter,
+    RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
-use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
+use reth_rpc_eth_types::{
+    EthApiError, EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
+};
+use reth_storage_api::{BlockIdReader, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -144,7 +151,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         parent_hash: B256,
     ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
         let Some(rx) = self.inner.flashblocks.as_ref().map(|f| &f.pending_block_rx) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // Check if a flashblock is being built
@@ -307,6 +314,17 @@ where
 {
 }
 
+fn normalize_empty_storage_proofs(response: &mut EIP1186AccountProofResponse) {
+    for storage_proof in &mut response.storage_proof {
+        if storage_proof.value.is_zero() &&
+            storage_proof.proof.len() == 1 &&
+            storage_proof.proof[0].as_ref() == [EMPTY_STRING_CODE]
+        {
+            storage_proof.proof = Vec::new();
+        }
+    }
+}
+
 impl<N, Rpc> EthState for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -316,6 +334,59 @@ where
     #[inline]
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_api.eth_proof_window()
+    }
+
+    /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
+    ///
+    /// This implementation aligns with geth's behavior for empty storage proofs:
+    /// When storage root is empty and storage value is 0, geth returns an empty proof `[]`
+    /// instead of `["0x80"]` (the RLP encoding of empty trie root).
+    fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_id: Option<BlockId>,
+    ) -> Result<
+        impl std::future::Future<Output = Result<EIP1186AccountProofResponse, Self::Error>> + Send,
+        Self::Error,
+    >
+    where
+        Self: EthApiSpec,
+    {
+        Ok(async move {
+            let _permit = self
+                .acquire_owned()
+                .await
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
+
+            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_id = block_id.unwrap_or_default();
+
+            let max_window = self.max_proof_window();
+            if max_window > 0 {
+                let block_number = self
+                    .provider()
+                    .block_number_for_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(block_id))?;
+                if chain_info.best_number.saturating_sub(block_number) > max_window {
+                    return Err(EthApiError::ExceedsMaxProofWindow.into());
+                }
+            }
+            self.spawn_blocking_io_fut(move |this| async move {
+                let state = this.state_at_block_id(block_id).await?;
+                let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
+                let proof = state
+                    .proof(Default::default(), address, &storage_keys)
+                    .map_err(Self::Error::from_eth_err)?;
+                let mut response = proof.into_eip1186_response(keys);
+                normalize_empty_storage_proofs(&mut response);
+
+                Ok(response)
+            })
+            .await
+        })
     }
 }
 
@@ -527,5 +598,36 @@ where
             U256::from(min_suggested_priority_fee),
             flashblocks,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use alloy_rpc_types_eth::EIP1186StorageProof;
+
+    #[test]
+    fn normalizes_empty_storage_proof_to_geth_shape() {
+        let mut response = EIP1186AccountProofResponse {
+            storage_proof: vec![
+                EIP1186StorageProof {
+                    key: JsonStorageKey::from(B256::ZERO),
+                    value: U256::ZERO,
+                    proof: vec![Bytes::from_static(&[EMPTY_STRING_CODE])],
+                },
+                EIP1186StorageProof {
+                    key: JsonStorageKey::from(B256::from([1u8; 32])),
+                    value: U256::from(1),
+                    proof: vec![Bytes::from_static(&[0x01])],
+                },
+            ],
+            ..Default::default()
+        };
+
+        normalize_empty_storage_proofs(&mut response);
+
+        assert!(response.storage_proof[0].proof.is_empty());
+        assert_eq!(response.storage_proof[1].proof, vec![Bytes::from_static(&[0x01])]);
     }
 }

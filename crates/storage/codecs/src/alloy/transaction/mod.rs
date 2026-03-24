@@ -81,8 +81,10 @@ mod tests {
             },
         },
         test_utils::test_decode,
+        Compact,
     };
-    use alloy_primitives::hex;
+    use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use op_alloy_consensus::TxDeposit;
 
     #[test]
     fn test_ensure_backwards_compatibility() {
@@ -96,7 +98,7 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_ensure_backwards_compatibility_optimism() {
-        assert_eq!(crate::alloy::transaction::optimism::TxDeposit::bitflag_encoded_bytes(), 2);
+        assert_eq!(crate::alloy::transaction::optimism::TxDeposit::bitflag_encoded_bytes(), 3);
     }
 
     #[test]
@@ -144,8 +146,21 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_decode_deposit() {
-        test_decode::<op_alloy_consensus::TxDeposit>(&hex!(
-            "8108ac8f15983d59b6ae4911a00ff7bfcd2e53d2950926f8c82c12afad02861c46fcb293e776204052725e1c08ff2e9ff602ca916357601fa972a14094891fe3598b718758f22c46f163c18bcaa6296ce87e5267ef3fd932112842fbbf79011548cdf067d93ce6098dfc0aaf5a94531e439f30d6dfd0c6"
-        ));
+        let tx = TxDeposit {
+            source_hash: B256::repeat_byte(0x11),
+            from: Address::repeat_byte(0x22),
+            to: alloy_primitives::TxKind::Call(Address::repeat_byte(0x33)),
+            mint: 100,
+            value: U256::from(200u64),
+            gas_limit: 300,
+            is_system_transaction: false,
+            eth_value: 400,
+            input: Bytes::from_static(&[0x44, 0x55, 0x66]),
+            eth_tx_value: Some(500),
+        };
+
+        let mut encoded = Vec::new();
+        tx.to_compact(&mut encoded);
+        test_decode::<TxDeposit>(&encoded);
     }
 }

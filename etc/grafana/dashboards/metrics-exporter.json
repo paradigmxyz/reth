@@ -3547,14 +3547,14 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "definition": "label_values(eth_con_beacon_slot, instance)",
+          "definition": "label_values(eth_exe_web3_client_version, instance)",
           "hide": 0,
           "includeAll": false,
           "multi": false,
           "name": "instance",
           "options": [],
           "query": {
-            "query": "label_values(eth_con_beacon_slot, instance)",
+            "query": "label_values(eth_exe_web3_client_version, instance)",
             "refId": "StandardVariableQuery"
           },
           "refresh": 2,

@@ -14,6 +14,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_consensus::ConsensusError;
+use reth_mantle_forks::MantleHardforks;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{receipt::gas_spent_by_transactions, BlockBody, GotExpected};
@@ -87,7 +88,7 @@ where
 /// - Compares the gas used in the block header to the actual gas usage after execution
 pub fn validate_block_post_execution<R: DepositReceipt>(
     header: impl BlockHeader,
-    chain_spec: impl OpHardforks,
+    chain_spec: impl MantleHardforks,
     result: &BlockExecutionResult<R>,
 ) -> Result<(), ConsensusError> {
     // Validate that the blob gas used is present and correctly computed if Jovian is active.
@@ -145,16 +146,35 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[R],
-    chain_spec: impl OpHardforks,
+    chain_spec: impl MantleHardforks,
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
     let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let receipts_root =
-        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+        calculate_receipt_root_optimism(&receipts_with_bloom, &chain_spec, timestamp);
 
     // Calculate header logs bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+    if receipts_root != expected_receipts_root {
+        let deposit_count = receipts.iter().filter(|r| r.as_deposit_receipt().is_some()).count();
+        let has_deposit_nonce = receipts
+            .iter()
+            .any(|r| r.as_deposit_receipt().is_some_and(|d| d.deposit_nonce.is_some()));
+        tracing::warn!(
+            target: "optimism::consensus",
+            block_timestamp = timestamp,
+            mantle_chain = chain_spec.is_mantle_chain(),
+            regolith_active = chain_spec.is_regolith_active_at_timestamp(timestamp),
+            calculated_root = %receipts_root,
+            expected_root = %expected_receipts_root,
+            receipts_count = receipts.len(),
+            deposit_count,
+            has_deposit_nonce,
+            "Receipt root mismatch"
+        );
+    }
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,

@@ -95,6 +95,8 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
+# Debug: export full state on state root mismatch (dev/troubleshooting only)
+state-export = ["reth-engine-tree/state-export", "reth-db-common/state-export"]
 js-tracer = [
     "reth-rpc/js-tracer",
     "reth-node-ethereum/js-tracer",

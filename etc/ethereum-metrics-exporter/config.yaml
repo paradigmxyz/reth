@@ -1,11 +1,11 @@
 consensus:
   enabled: true
-  url: "http://lighthouse:5052"
-  name: "consensus-client"
+  url: "http://host.docker.internal:33500"
+  name: "op-node-rpc2"
 execution:
   enabled: true
-  url: "http://reth:8545"
-  name: "execution-client"
+  url: "http://host.docker.internal:29545"
+  name: "op-reth-rpc2"
   modules:
     - "eth"
     - "net"

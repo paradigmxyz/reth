@@ -114,12 +114,15 @@ impl StageId {
 
     /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
     /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
+    #[cfg(not(feature = "std"))]
+    pub const fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
+        None
+    }
+
+    /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
+    /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
+    #[cfg(feature = "std")]
     pub fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
-        #[cfg(not(feature = "std"))]
-        {
-            None
-        }
-        #[cfg(feature = "std")]
         ENCODED_STAGE_IDS
             .get_or_init(|| {
                 let mut map = HashMap::with_capacity(Self::ALL.len());

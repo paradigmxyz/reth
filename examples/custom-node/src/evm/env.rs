@@ -226,6 +226,10 @@ impl TransactionEnv for PaymentTxEnv {
     fn set_access_list(&mut self, access_list: AccessList) {
         self.0.set_access_list(access_list);
     }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        self.0.set_gas_price(gas_price);
+    }
 }
 
 impl TransactionEnv for CustomTxEnv {
@@ -254,6 +258,13 @@ impl TransactionEnv for CustomTxEnv {
         match self {
             Self::Op(tx) => tx.set_access_list(access_list),
             Self::Payment(tx) => tx.set_access_list(access_list),
+        }
+    }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        match self {
+            Self::Op(tx) => tx.set_gas_price(gas_price),
+            Self::Payment(tx) => tx.set_gas_price(gas_price),
         }
     }
 }

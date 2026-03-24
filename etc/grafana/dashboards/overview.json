@@ -12141,18 +12141,18 @@
         "hide": 2,
         "label": "Instance Label",
         "name": "instance_label",
-        "query": "${VAR_INSTANCE_LABEL}",
+        "query": "job",
         "skipUrlSync": true,
         "type": "constant",
         "current": {
-          "value": "${VAR_INSTANCE_LABEL}",
-          "text": "${VAR_INSTANCE_LABEL}",
+          "value": "job",
+          "text": "job",
           "selected": false
         },
         "options": [
           {
-            "value": "${VAR_INSTANCE_LABEL}",
-            "text": "${VAR_INSTANCE_LABEL}",
+            "value": "job",
+            "text": "job",
             "selected": false
           }
         ]

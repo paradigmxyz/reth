@@ -481,26 +481,25 @@ reth-ress-provider = { path = "crates/ress/provider" }
 # revm-database-interface = { version = "8.0.5", default-features = false }
 # op-revm = { version = "12.0.2", default-features = false }
 # revm-inspectors = "0.32.0"
-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-bytecode = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-state = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-primitives = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-interpreter = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-inspector = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-context = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-context-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-database = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-database-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-op-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.2", default-features = false }
-revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.1.1", default-features = false }
-
+revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-bytecode = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-state = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-primitives = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-interpreter = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-inspector = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-context = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-context-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-database = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-database-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+op-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.2.1", default-features = false }
+revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.2.0", default-features = false }
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 # alloy-evm = { version = "0.23.0", default-features = false }
-alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.1.2", default-features = false }
+alloy-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.4.1"
@@ -509,42 +508,42 @@ alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.4.4"
 
-alloy-consensus = { version = "1.0.41", default-features = false }
-alloy-contract = { version = "1.0.41", default-features = false }
-alloy-eips = { version = "1.0.41", default-features = false }
-alloy-genesis = { version = "1.0.41", default-features = false }
-alloy-json-rpc = { version = "1.0.41", default-features = false }
-alloy-network = { version = "1.0.41", default-features = false }
-alloy-network-primitives = { version = "1.0.41", default-features = false }
-alloy-provider = { version = "1.0.41", features = ["reqwest"], default-features = false }
-alloy-pubsub = { version = "1.0.41", default-features = false }
-alloy-rpc-client = { version = "1.0.41", default-features = false }
-alloy-rpc-types = { version = "1.0.41", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "1.0.41", default-features = false }
-alloy-rpc-types-anvil = { version = "1.0.41", default-features = false }
-alloy-rpc-types-beacon = { version = "1.0.41", default-features = false }
-alloy-rpc-types-debug = { version = "1.0.41", default-features = false }
-alloy-rpc-types-engine = { version = "1.0.41", default-features = false }
-alloy-rpc-types-eth = { version = "1.0.41", default-features = false }
-alloy-rpc-types-mev = { version = "1.0.41", default-features = false }
-alloy-rpc-types-trace = { version = "1.0.41", default-features = false }
-alloy-rpc-types-txpool = { version = "1.0.41", default-features = false }
-alloy-serde = { version = "1.0.41", default-features = false }
-alloy-signer = { version = "1.0.41", default-features = false }
-alloy-signer-local = { version = "1.0.41", default-features = false }
-alloy-transport = { version = "1.0.41" }
-alloy-transport-http = { version = "1.0.41", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "1.0.41", default-features = false }
-alloy-transport-ws = { version = "1.0.41", default-features = false }
+alloy-consensus = { version = "1.4.3", default-features = false }
+alloy-contract = { version = "1.4.3", default-features = false }
+alloy-eips = { version = "1.4.3", default-features = false }
+alloy-genesis = { version = "1.4.3", default-features = false }
+alloy-json-rpc = { version = "1.4.3", default-features = false }
+alloy-network = { version = "1.4.3", default-features = false }
+alloy-network-primitives = { version = "1.4.3", default-features = false }
+alloy-provider = { version = "1.4.3", features = ["reqwest"], default-features = false }
+alloy-pubsub = { version = "1.4.3", default-features = false }
+alloy-rpc-client = { version = "1.4.3", default-features = false }
+alloy-rpc-types = { version = "1.4.3", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "1.4.3", default-features = false }
+alloy-rpc-types-anvil = { version = "1.4.3", default-features = false }
+alloy-rpc-types-beacon = { version = "1.4.3", default-features = false }
+alloy-rpc-types-debug = { version = "1.4.3", default-features = false }
+alloy-rpc-types-engine = { version = "1.4.3", default-features = false }
+alloy-rpc-types-eth = { version = "1.4.3", default-features = false }
+alloy-rpc-types-mev = { version = "1.4.3", default-features = false }
+alloy-rpc-types-trace = { version = "1.4.3", default-features = false }
+alloy-rpc-types-txpool = { version = "1.4.3", default-features = false }
+alloy-serde = { version = "1.4.3", default-features = false }
+alloy-signer = { version = "1.4.3", default-features = false }
+alloy-signer-local = { version = "1.4.3", default-features = false }
+alloy-transport = { version = "1.4.3" }
+alloy-transport-http = { version = "1.4.3", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "1.4.3", default-features = false }
+alloy-transport-ws = { version = "1.4.3", default-features = false }
 
 # op
-alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.1.2", default-features = false }
+alloy-op-evm = { git = "https://github.com/mantle-xyz/evm", tag = "v2.2.0", default-features = false }
 alloy-op-hardforks = "0.4.4"
-op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.1.0", default-features = false }
+op-alloy-rpc-types = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.2.0", default-features = false }
+op-alloy-rpc-types-engine = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.2.0", default-features = false }
+op-alloy-network = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.2.0", default-features = false }
+op-alloy-consensus = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.2.0", default-features = false }
+op-alloy-rpc-jsonrpsee = { git = "https://github.com/mantle-xyz/op-alloy", tag = "v2.2.0", default-features = false }
 # alloy-op-evm = { version = "0.23.0", default-features = false }
 # op-alloy-rpc-types = { version = "0.22.0", default-features = false }
 # op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
@@ -753,66 +752,29 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
-# alloy-evm = { path = "/Users/sh001/Documents/codes/op-reth/evm/crates/evm", default-features = false }
-# alloy-op-evm = { path = "/Users/sh001/Documents/codes/op-reth/evm/crates/op-evm", default-features = false }
-# op-alloy-rpc-types = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/rpc-types", default-features = false }
-# op-alloy-rpc-types-engine = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/rpc-types-engine", default-features = false }
-# op-alloy-network = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/network", default-features = false }
-# op-alloy-consensus = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/consensus", default-features = false }
-# op-alloy-rpc-jsonrpsee = { path = "/Users/sh001/Documents/codes/op-reth/op-alloy/crates/rpc-jsonrpsee", default-features = false }
-# revm = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/revm", default-features = false }
-# revm-bytecode = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/bytecode", default-features = false }
-# revm-state = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/state", default-features = false }
-# revm-primitives = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/primitives", default-features = false }
-# revm-interpreter = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/interpreter", default-features = false }
-# revm-inspector = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/inspector", default-features = false }
-# revm-context = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/context", default-features = false }
-# revm-context-interface = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/context/interface", default-features = false }
-# revm-database = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database", default-features = false }
-# revm-database-interface = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database/interface", default-features = false }
-# op-revm = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/op-revm", default-features = false }
-# revm-inspectors = { path = "/Users/sh001/Documents/codes/op-reth/revm-inspectors", default-features = false }
-# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-#
-# op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
-# op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
-# op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
-# op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
-#
-# revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
-#
-# jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-# jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-# jsonrpsee-server = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-# jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-# jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+# [patch."https://github.com/mantle-xyz/revm"]
+# revm = { path = "../revm/crates/revm" }
+# revm-bytecode = { path = "../revm/crates/bytecode" }
+# revm-state = { path = "../revm/crates/state" }
+# revm-primitives = { path = "../revm/crates/primitives" }
+# revm-interpreter = { path = "../revm/crates/interpreter" }
+# revm-inspector = { path = "../revm/crates/inspector" }
+# revm-context = { path = "../revm/crates/context" }
+# revm-context-interface = { path = "../revm/crates/context/interface" }
+# revm-database = { path = "../revm/crates/database" }
+# revm-database-interface = { path = "../revm/crates/database/interface" }
+# op-revm = { path = "../revm/crates/op-revm" }
 
-# alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
+# [patch."https://github.com/mantle-xyz/revm-inspectors"]
+# revm-inspectors = { path = "../revm-inspectors" }
+
+# [patch."https://github.com/mantle-xyz/evm"]
+# alloy-evm = { path = "../evm/crates/evm" }
+# alloy-op-evm = { path = "../evm/crates/op-evm" }
+
+# [patch."https://github.com/mantle-xyz/op-alloy"]
+# op-alloy-rpc-types = { path = "../op-alloy/crates/rpc-types" }
+# op-alloy-rpc-types-engine = { path = "../op-alloy/crates/rpc-types-engine" }
+# op-alloy-network = { path = "../op-alloy/crates/network" }
+# op-alloy-consensus = { path = "../op-alloy/crates/consensus" }
+# op-alloy-rpc-jsonrpsee = { path = "../op-alloy/crates/rpc-jsonrpsee" }

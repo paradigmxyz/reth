@@ -23,7 +23,7 @@ reth-fs-util.workspace = true
 reth-node-types.workspace = true
 reth-static-file-types.workspace = true
 reth-execution-errors.workspace = true
-reth-mantle-forks = { workspace = true, features = ["std"] }
+reth-mantle-forks = { workspace = true, features = ["std"], optional = true }
 
 # eth
 alloy-consensus.workspace = true
@@ -44,6 +44,10 @@ serde_json.workspace = true
 
 # tracing
 tracing.workspace = true
+
+[features]
+# Debug: export full state on state root mismatch (dev/troubleshooting only)
+state-export = ["dep:reth-mantle-forks", "reth-mantle-forks/state-export"]
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }

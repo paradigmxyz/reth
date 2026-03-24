@@ -137,7 +137,7 @@ where
         Box::pin(async move {
             // Check if request should be forwarded to historical endpoint
             if let Some(response) = historical.maybe_forward_request(&req).await {
-                return response
+                return response;
             }
 
             // Handle the request with the inner service
@@ -183,7 +183,7 @@ where
         };
 
         if should_forward {
-            return self.forward_to_historical(req).await
+            return self.forward_to_historical(req).await;
         }
 
         None

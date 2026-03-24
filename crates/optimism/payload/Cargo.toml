@@ -18,6 +18,7 @@ reth-primitives-traits.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-transaction-pool.workspace = true
 reth-storage-api.workspace = true
+reth-provider.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-payload-builder.workspace = true
@@ -27,11 +28,12 @@ reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-payload-validator.workspace = true
+reth-mantle-forks = { workspace = true, optional = true, features = ["std"] }
 
 # op-reth
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-optimism-txpool.workspace = true
 
 # ethereum
@@ -52,3 +54,8 @@ tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
+
+[features]
+mantle-debug = ["dep:reth-mantle-forks"]
+# Debug: export full state at specific block heights (e.g. when debugging fork/state root mismatch)
+state-export = ["dep:reth-mantle-forks", "reth-mantle-forks/state-export"]

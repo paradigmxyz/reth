@@ -1,8 +1,8 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::state::{has_hashed_snapshot_marker, macros::delegate_provider_impls},
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
@@ -39,7 +39,15 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
 impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+        if let Some(account) = self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)? {
+            return Ok(Some(account));
+        }
+
+        if has_hashed_snapshot_marker(self.tx())? {
+            return self.tx().get::<tables::HashedAccounts>(keccak256(*address)).map_err(Into::into);
+        }
+
+        Ok(None)
     }
 }
 
@@ -163,8 +171,22 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
         {
-            return Ok(Some(entry.value))
+            return Ok(Some(entry.value));
         }
+
+        if !has_hashed_snapshot_marker(self.tx())? {
+            return Ok(None);
+        }
+
+        let hashed_address = keccak256(account);
+        let hashed_slot = keccak256(storage_key);
+        let mut hashed_cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        if let Some(entry) = hashed_cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+            entry.key == hashed_slot
+        {
+            return Ok(Some(entry.value));
+        }
+
         Ok(None)
     }
 }
@@ -201,10 +223,81 @@ delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvid
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_provider_factory;
+    use alloy_primitives::{address, b256, keccak256, U256};
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_primitives_traits::{Account, StorageEntry};
+
+    const HASHED_SNAPSHOT_MARKER: &str = "__hashed_only_state_snapshot__";
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
     const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
         assert_state_provider::<LatestStateProvider<T>>();
+    }
+
+    #[test]
+    fn latest_provider_does_not_use_hashed_storage_without_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let value = U256::from(42);
+
+        tx.put::<tables::HashedStorages>(
+            keccak256(address),
+            StorageEntry { key: keccak256(slot), value },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(LatestStateProviderRef::new(&provider).storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn latest_provider_uses_hashed_storage_with_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let value = U256::from(42);
+
+        tx.put::<tables::HashedStorages>(
+            keccak256(address),
+            StorageEntry { key: keccak256(slot), value },
+        )
+        .unwrap();
+        tx.put::<tables::StageCheckpointProgresses>(HASHED_SNAPSHOT_MARKER.to_string(), vec![1])
+            .unwrap();
+        tx.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(
+            LatestStateProviderRef::new(&provider).storage(address, slot).unwrap(),
+            Some(value)
+        );
+    }
+
+    #[test]
+    fn latest_provider_uses_hashed_account_with_marker() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let address = address!("0x0000000000000000000000000000000000000002");
+        let account = Account { nonce: 7, balance: U256::from(99), bytecode_hash: None };
+
+        tx.put::<tables::HashedAccounts>(keccak256(address), account).unwrap();
+        tx.put::<tables::StageCheckpointProgresses>(HASHED_SNAPSHOT_MARKER.to_string(), vec![1])
+            .unwrap();
+        tx.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(
+            LatestStateProviderRef::new(&provider).basic_account(&address).unwrap(),
+            Some(account)
+        );
     }
 }

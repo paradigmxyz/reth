@@ -67,6 +67,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// Computed L1 cost cannot be represented in runtime gas arithmetic.
+    #[error("tx l1 cost is out of range for u64 gas arithmetic")]
+    TxL1CostOutOfRange,
     /// The encoded transaction was missing during evm execution.
     #[error("missing enveloped transaction bytes")]
     MissingEnvelopedTx,
@@ -80,7 +83,8 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
         match err {
             OpInvalidTransactionError::DepositSystemTxPostRegolith |
             OpInvalidTransactionError::HaltedDepositPostRegolith |
-            OpInvalidTransactionError::MissingEnvelopedTx => {
+            OpInvalidTransactionError::MissingEnvelopedTx |
+            OpInvalidTransactionError::TxL1CostOutOfRange => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
             OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
@@ -97,6 +101,7 @@ impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
                 Ok(Self::DepositSystemTxPostRegolith)
             }
             OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
+            OpTransactionError::TxL1CostOutOfRange => Ok(Self::TxL1CostOutOfRange),
             OpTransactionError::MissingEnvelopedTx => Ok(Self::MissingEnvelopedTx),
             OpTransactionError::Base(err) => Err(err),
             OpTransactionError::BvmEth(_) => todo!(),

@@ -1,5 +1,4 @@
 use crate::tree::MeteredStateHook;
-use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
@@ -78,8 +77,7 @@ impl EngineApiMetrics {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                let span = debug_span!(target: "engine::tree", "execute tx");
                 let _enter = span.enter();
                 trace!(target: "engine::tree", "Executing transaction");
                 executor.execute_transaction(tx)?;

@@ -14,7 +14,7 @@ pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
-    BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+    BlockReaderIdExt, DatabaseProviderFactory, NodePrimitivesProvider, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -68,6 +68,7 @@ where
         + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: OpHardforks>
+        + DatabaseProviderFactory
         + Clone
         + 'static,
     EvmConfig: ConfigureEvm<

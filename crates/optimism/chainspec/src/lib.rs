@@ -40,6 +40,7 @@ pub mod constants;
 mod dev;
 mod mantle;
 mod mantle_mainnet;
+mod mantle_sepolia;
 mod op;
 mod op_sepolia;
 
@@ -53,10 +54,11 @@ pub use base_sepolia::BASE_SEPOLIA;
 pub use basefee::*;
 pub use dev::OP_DEV;
 pub use mantle_mainnet::MANTLE_MAINNET;
+pub use mantle_sepolia::MANTLE_SEPOLIA;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
-use crate::mantle::MantleChainInfo;
+use crate::mantle::{extract_mantle_base_fee_params, should_use_mantle_alignment, MantleChainInfo};
 /// Re-export for convenience
 pub use reth_optimism_forks::*;
 
@@ -302,12 +304,18 @@ impl EthChainSpec for OpChainSpec {
             compute_jovian_base_fee(self, parent, target_timestamp).ok()
         } else if self.is_holocene_active_at_timestamp(parent.timestamp()) {
             decode_holocene_base_fee(self, parent, target_timestamp).ok()
+        } else if self.is_skadi_active_at_timestamp(parent.timestamp()) ||
+            self.is_limb_active_at_timestamp(parent.timestamp())
+        {
+            parent.base_fee_per_gas()
         } else {
             // For chains with Constant basefee (e.g., Mantle), keep basefee unchanged
             // to avoid dynamic calculation that would cause basefee variation
             match &self.inner.base_fee_params {
                 BaseFeeParamsKind::Constant(_) => parent.base_fee_per_gas(),
-                BaseFeeParamsKind::Variable(_) => self.inner.next_block_base_fee(parent, target_timestamp),
+                BaseFeeParamsKind::Variable(_) => {
+                    self.inner.next_block_base_fee(parent, target_timestamp)
+                }
             }
         }
     }
@@ -351,6 +359,15 @@ impl MantleHardforks for OpChainSpec {
     fn mantle_fork_activation(&self, fork: MantleHardfork) -> ForkCondition {
         self.fork(fork)
     }
+
+    fn is_mantle_chain(&self) -> bool {
+        use reth_mantle_forks::{MANTLE_MAINNET_CHAIN_ID, MANTLE_SEPOLIA_CHAIN_ID};
+        let id = self.chain().id();
+        matches!(id, MANTLE_MAINNET_CHAIN_ID | MANTLE_SEPOLIA_CHAIN_ID) ||
+            self.mantle_fork_activation(MantleHardfork::Skadi) != ForkCondition::Never ||
+            self.mantle_fork_activation(MantleHardfork::Limb) != ForkCondition::Never ||
+            self.mantle_fork_activation(MantleHardfork::Arsia) != ForkCondition::Never
+    }
 }
 
 impl From<Genesis> for OpChainSpec {
@@ -359,11 +376,70 @@ impl From<Genesis> for OpChainSpec {
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
+        let mantle_genesis_info_opt =
+            optimism_genesis_info.mantle_chain_info.as_ref().and_then(|info| info.genesis_info);
+        let use_mantle_alignment =
+            should_use_mantle_alignment(genesis.config.chain_id, mantle_genesis_info_opt);
         let mantle_genesis_info = optimism_genesis_info
             .mantle_chain_info
+            .clone()
             .unwrap_or_default()
             .genesis_info
             .unwrap_or_default();
+
+        let l1_shanghai_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_skadi_time
+        } else {
+            genesis.config.shanghai_time.or(genesis_info.canyon_time)
+        };
+        let l1_cancun_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_skadi_time
+        } else {
+            genesis.config.cancun_time.or(genesis_info.ecotone_time)
+        };
+        let l1_prague_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_skadi_time
+        } else {
+            genesis.config.prague_time.or(genesis_info.isthmus_time)
+        };
+        let l1_osaka_time =
+            if use_mantle_alignment { mantle_genesis_info.mantle_limb_time } else { None };
+
+        let op_canyon_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.canyon_time
+        };
+        let op_ecotone_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.ecotone_time
+        };
+        let op_fjord_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.fjord_time
+        };
+        let op_granite_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.granite_time
+        };
+        let op_holocene_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.holocene_time
+        };
+        let op_isthmus_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.isthmus_time
+        };
+        let op_jovian_time = if use_mantle_alignment {
+            mantle_genesis_info.mantle_arsia_time
+        } else {
+            genesis_info.jovian_time
+        };
 
         // Block-based hardforks
         let hardfork_opts = [
@@ -400,25 +476,24 @@ impl From<Genesis> for OpChainSpec {
         // Time-based hardforks
         let time_hardfork_opts = [
             // L1
-            // we need to map the L1 hardforks to the activation timestamps of the corresponding mantle
-            // hardforks
-            (EthereumHardfork::Shanghai.boxed(), mantle_genesis_info.mantle_skadi_time),
-            (EthereumHardfork::Cancun.boxed(), mantle_genesis_info.mantle_skadi_time),
-            (EthereumHardfork::Prague.boxed(), mantle_genesis_info.mantle_skadi_time),
-            (EthereumHardfork::Osaka.boxed(), mantle_genesis_info.mantle_limb_time),
+            (EthereumHardfork::Shanghai.boxed(), l1_shanghai_time),
+            (EthereumHardfork::Cancun.boxed(), l1_cancun_time),
+            (EthereumHardfork::Prague.boxed(), l1_prague_time),
+            (EthereumHardfork::Osaka.boxed(), l1_osaka_time),
             // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            (OpHardfork::Granite.boxed(), genesis_info.granite_time),
-            (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
-            (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
-            (OpHardfork::Jovian.boxed(), genesis_info.jovian_time),
+            (OpHardfork::Canyon.boxed(), op_canyon_time),
+            (OpHardfork::Ecotone.boxed(), op_ecotone_time),
+            (OpHardfork::Fjord.boxed(), op_fjord_time),
+            (OpHardfork::Granite.boxed(), op_granite_time),
+            (OpHardfork::Holocene.boxed(), op_holocene_time),
+            (OpHardfork::Isthmus.boxed(), op_isthmus_time),
+            (OpHardfork::Jovian.boxed(), op_jovian_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
             // Mantle
             (MantleHardfork::Skadi.boxed(), mantle_genesis_info.mantle_skadi_time),
             (MantleHardfork::Limb.boxed(), mantle_genesis_info.mantle_limb_time),
+            (MantleHardfork::Arsia.boxed(), mantle_genesis_info.mantle_arsia_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -456,7 +531,7 @@ impl From<Genesis> for OpChainSpec {
                 // We assume no OP network merges, and set the paris block and total difficulty to
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
-                base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+                base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
             },
         }
@@ -478,44 +553,45 @@ struct OpGenesisInfo {
 
 impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut info = Self {
-            mantle_chain_info: MantleChainInfo::extract_from(&genesis.config.extra_fields),
-            optimism_chain_info: op_alloy_rpc_types::OpChainInfo::extract_from(
-                &genesis.config.extra_fields,
-            )
-            .unwrap_or_default(),
-            ..Default::default()
-        };
-        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info &&
-            let (Some(elasticity), Some(denominator)) = (
-                optimism_base_fee_info.eip1559_elasticity,
-                optimism_base_fee_info.eip1559_denominator,
-            )
-        {
-            let base_fee_params = if let Some(canyon_denominator) =
-                optimism_base_fee_info.eip1559_denominator_canyon
+        let mantle_chain_info = MantleChainInfo::extract_from(&genesis.config.extra_fields);
+        let mantle_genesis_info = mantle_chain_info.as_ref().and_then(|info| info.genesis_info);
+        let use_mantle_alignment =
+            should_use_mantle_alignment(genesis.config.chain_id, mantle_genesis_info);
+
+        let optimism_chain_info =
+            op_alloy_rpc_types::OpChainInfo::extract_from(&genesis.config.extra_fields)
+                .unwrap_or_default();
+        let base_fee_params = if use_mantle_alignment {
+            extract_mantle_base_fee_params(&optimism_chain_info)
+        } else if let Some(base_fee_info) = optimism_chain_info.base_fee_info {
+            if let (Some(elasticity), Some(denominator)) =
+                (base_fee_info.eip1559_elasticity, base_fee_info.eip1559_denominator)
             {
-                BaseFeeParamsKind::Variable(
-                    vec![
-                        (
-                            EthereumHardfork::London.boxed(),
-                            BaseFeeParams::new(denominator as u128, elasticity as u128),
-                        ),
-                        (
-                            OpHardfork::Canyon.boxed(),
-                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                        ),
-                    ]
-                    .into(),
-                )
+                if let Some(canyon_denominator) = base_fee_info.eip1559_denominator_canyon {
+                    BaseFeeParamsKind::Variable(
+                        vec![
+                            (
+                                EthereumHardfork::London.boxed(),
+                                BaseFeeParams::new(denominator as u128, elasticity as u128),
+                            ),
+                            (
+                                OpHardfork::Canyon.boxed(),
+                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                            ),
+                        ]
+                        .into(),
+                    )
+                } else {
+                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                }
             } else {
-                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-            };
+                BaseFeeParamsKind::Constant(BaseFeeParams::ethereum())
+            }
+        } else {
+            BaseFeeParamsKind::Constant(BaseFeeParams::ethereum())
+        };
 
-            info.base_fee_params = base_fee_params;
-        }
-
-        info
+        Self { mantle_chain_info, optimism_chain_info, base_fee_params }
     }
 }
 
@@ -523,20 +599,21 @@ impl OpGenesisInfo {
 pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
     let mut header = reth_chainspec::make_genesis_header(genesis, hardforks);
 
-    // If Skadi(Isthmus) is active, overwrite the withdrawals root with the storage root of predeploy
-    // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(MantleHardfork::Skadi).active_at_timestamp(header.timestamp)
-        && let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER)
-            && let Some(storage) = &predeploy.storage {
-                header.withdrawals_root =
-                    Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
-                        if v.is_zero() {
-                            None
-                        } else {
-                            Some((*k, (*v).into()))
-                        }
-                    })));
-            }
+    // If Skadi(Isthmus) is active, overwrite the withdrawals root with the storage root of
+    // predeploy `L2ToL1MessagePasser.sol`
+    if hardforks.fork(MantleHardfork::Skadi).active_at_timestamp(header.timestamp) &&
+        let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) &&
+        let Some(storage) = &predeploy.storage
+    {
+        header.withdrawals_root =
+            Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
+                if v.is_zero() {
+                    None
+                } else {
+                    Some((*k, (*v).into()))
+                }
+            })));
+    }
     header
 }
 
@@ -1077,6 +1154,80 @@ mod tests {
     }
 
     #[test]
+    fn parse_mantle_hardforks_with_arsia_alignment() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 5000,
+        "bedrockBlock": 0,
+        "regolithTime": 10,
+        "canyonTime": 20,
+        "ecotoneTime": 30,
+        "fjordTime": 40,
+        "graniteTime": 50,
+        "holoceneTime": 60,
+        "isthmusTime": 70,
+        "jovianTime": 80,
+        "mantleSkadiTime": 90,
+        "mantleArsiaTime": 100,
+        "mantleLimbTime": 110,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chain_spec: OpChainSpec = genesis.into();
+
+        assert!(!chain_spec.is_canyon_active_at_timestamp(99));
+        assert!(chain_spec.is_canyon_active_at_timestamp(100));
+        assert!(chain_spec.is_holocene_active_at_timestamp(100));
+
+        assert!(!chain_spec.is_shanghai_active_at_timestamp(89));
+        assert!(chain_spec.is_shanghai_active_at_timestamp(90));
+        assert!(!chain_spec.is_limb_active_at_timestamp(109));
+        assert!(chain_spec.is_limb_active_at_timestamp(110));
+
+        assert_eq!(
+            chain_spec.base_fee_params,
+            BaseFeeParamsKind::Variable(
+                vec![(MantleHardfork::Arsia.boxed(), BaseFeeParams::new(50, 6))].into()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_custom_mantle_aligned_chain_is_marked_as_mantle() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 55003,
+        "bedrockBlock": 0,
+        "regolithTime": 10,
+        "mantleSkadiTime": 90,
+        "mantleArsiaTime": 100,
+        "mantleLimbTime": 110,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chain_spec: OpChainSpec = genesis.into();
+
+        assert!(chain_spec.is_mantle_chain());
+        assert!(chain_spec.is_skadi_active_at_timestamp(90));
+        assert!(chain_spec.is_arsia_active_at_timestamp(100));
+        assert!(chain_spec.is_limb_active_at_timestamp(110));
+    }
+
+    #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
         use op_alloy_rpc_types::OpBaseFeeInfo;
 
@@ -1368,5 +1519,20 @@ mod tests {
         for eth_hf in EthereumHardfork::VARIANTS {
             assert!(!content.contains(eth_hf.name()));
         }
+    }
+
+    #[test]
+    fn mantle_sepolia_spec_is_exposed() {
+        assert_eq!(MANTLE_SEPOLIA.chain().id(), 5003);
+        assert!(MANTLE_SEPOLIA.is_skadi_active_at_timestamp(1_752_649_200));
+        assert!(MANTLE_SEPOLIA.is_limb_active_at_timestamp(1_764_745_200));
+        assert!(MANTLE_SEPOLIA.is_arsia_active_at_timestamp(1_774_422_000));
+    }
+
+    #[cfg(feature = "superchain-configs")]
+    #[test]
+    fn mantle_sepolia_aliases_are_supported() {
+        assert_eq!(generated_chain_value_parser("mantle_sepolia").unwrap().chain().id(), 5003);
+        assert_eq!(generated_chain_value_parser("mantle-sepolia").unwrap().chain().id(), 5003);
     }
 }

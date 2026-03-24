@@ -23,6 +23,7 @@ use reth_consensus_common::validation::{
     validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
+use reth_mantle_forks::MantleHardforks;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{
@@ -58,7 +59,8 @@ impl<ChainSpec> OpBeaconConsensus<ChainSpec> {
 impl<N, ChainSpec> FullConsensus<N> for OpBeaconConsensus<ChainSpec>
 where
     N: NodePrimitives<Receipt: DepositReceipt>,
-    ChainSpec: EthChainSpec<Header = N::BlockHeader> + OpHardforks + Debug + Send + Sync,
+    ChainSpec:
+        EthChainSpec<Header = N::BlockHeader> + OpHardforks + MantleHardforks + Debug + Send + Sync,
 {
     fn validate_block_post_execution(
         &self,
@@ -72,7 +74,8 @@ where
 impl<B, ChainSpec> Consensus<B> for OpBeaconConsensus<ChainSpec>
 where
     B: Block,
-    ChainSpec: EthChainSpec<Header = B::Header> + OpHardforks + Debug + Send + Sync,
+    ChainSpec:
+        EthChainSpec<Header = B::Header> + OpHardforks + MantleHardforks + Debug + Send + Sync,
 {
     type Error = ConsensusError;
 
@@ -139,7 +142,7 @@ where
 impl<H, ChainSpec> HeaderValidator<H> for OpBeaconConsensus<ChainSpec>
 where
     H: BlockHeader,
-    ChainSpec: EthChainSpec<Header = H> + OpHardforks + Debug + Send + Sync,
+    ChainSpec: EthChainSpec<Header = H> + OpHardforks + MantleHardforks + Debug + Send + Sync,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();
@@ -182,11 +185,18 @@ where
             validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        validate_against_parent_eip1559_base_fee(
-            header.header(),
-            parent.header(),
-            &self.chain_spec,
-        )?;
+        let parent_timestamp = parent.timestamp();
+        let is_pre_arsia_mantle = !self.chain_spec.is_arsia_active_at_timestamp(parent_timestamp) &&
+            (self.chain_spec.is_skadi_active_at_timestamp(parent_timestamp) ||
+                self.chain_spec.is_limb_active_at_timestamp(parent_timestamp));
+
+        if !is_pre_arsia_mantle {
+            validate_against_parent_eip1559_base_fee(
+                header.header(),
+                parent.header(),
+                &self.chain_spec,
+            )?;
+        }
 
         // Ensure that the blob gas fields for this block are correctly set.
         // In the op-stack, the excess blob gas is always 0 for all blocks after ecotone.
@@ -230,8 +240,9 @@ mod tests {
     use op_alloy_consensus::{
         encode_holocene_extra_data, encode_jovian_extra_data, OpTypedTransaction,
     };
-    use reth_chainspec::BaseFeeParams;
+    use reth_chainspec::{BaseFeeParams, ForkCondition};
     use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+    use reth_mantle_forks::MantleHardfork;
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder, OP_MAINNET};
     use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{proofs, GotExpected, RecoveredBlock, SealedBlock, SealedHeader};
@@ -616,6 +627,104 @@ mod tests {
             ConsensusError::BaseFeeDiff(GotExpected {
                 got: MIN_BASE_FEE - 1,
                 expected: MIN_BASE_FEE,
+            })
+        );
+    }
+
+    #[test]
+    fn test_header_base_fee_validation_skips_pre_arsia_for_mantle() {
+        const PARENT_BASE_FEE: u64 = 1_000_000_000;
+        const CHILD_BASE_FEE: u64 = 20_000_000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .bedrock_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .with_fork(MantleHardfork::Skadi, ForkCondition::Timestamp(0))
+            .with_fork(MantleHardfork::Limb, ForkCondition::Timestamp(0))
+            .build();
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let parent = Header {
+            number: 0,
+            timestamp: 100,
+            base_fee_per_gas: Some(PARENT_BASE_FEE),
+            gas_limit: 200_000_000_000,
+            gas_used: 46_841,
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            timestamp: 102,
+            parent_hash: parent.hash(),
+            base_fee_per_gas: Some(CHILD_BASE_FEE),
+            gas_limit: 200_000_000_000,
+            gas_used: 101_995_351,
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_header_base_fee_validation_enforced_from_arsia_for_mantle() {
+        const PARENT_BASE_FEE: u64 = 1_000_000_000;
+        const CHILD_BASE_FEE: u64 = 20_000_000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .bedrock_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .with_fork(MantleHardfork::Skadi, ForkCondition::Timestamp(0))
+            .with_fork(MantleHardfork::Limb, ForkCondition::Timestamp(0))
+            .with_fork(MantleHardfork::Arsia, ForkCondition::Timestamp(0))
+            .build();
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let parent = Header {
+            number: 0,
+            timestamp: 100,
+            base_fee_per_gas: Some(PARENT_BASE_FEE),
+            gas_limit: 200_000_000_000,
+            gas_used: 46_841,
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            timestamp: 102,
+            parent_hash: parent.hash(),
+            base_fee_per_gas: Some(CHILD_BASE_FEE),
+            gas_limit: 200_000_000_000,
+            gas_used: 101_995_351,
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ConsensusError::BaseFeeDiff(GotExpected {
+                got: CHILD_BASE_FEE,
+                expected: PARENT_BASE_FEE,
             })
         );
     }

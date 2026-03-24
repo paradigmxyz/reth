@@ -1,5 +1,7 @@
 //! Conversion traits for receipt responses to primitive receipt types.
 
+#[cfg(feature = "op")]
+use alloy_consensus::{Receipt, ReceiptWithBloom, TxReceipt};
 use alloy_network::Network;
 use std::convert::Infallible;
 
@@ -35,7 +37,55 @@ impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primit
     fn from_receipt_response(
         receipt_response: op_alloy_rpc_types::OpTransactionReceipt,
     ) -> Result<Self, Self::Error> {
-        Ok(receipt_response.inner.inner.map_logs(Into::into).into())
+        let rb = receipt_response.inner.inner;
+        let receipt = Receipt {
+            status: rb.receipt.status_or_post_state(),
+            cumulative_gas_used: rb.receipt.cumulative_gas_used(),
+            logs: rb
+                .receipt
+                .logs()
+                .iter()
+                .map(|l| alloy_primitives::Log::from(l.clone()))
+                .collect(),
+        };
+        let logs_bloom = rb.logs_bloom;
+        let envelope = match rb.receipt {
+            op_alloy_consensus::OpReceipt::Legacy(_) => {
+                op_alloy_consensus::OpReceiptEnvelope::Legacy(ReceiptWithBloom {
+                    receipt,
+                    logs_bloom,
+                })
+            }
+            op_alloy_consensus::OpReceipt::Eip2930(_) => {
+                op_alloy_consensus::OpReceiptEnvelope::Eip2930(ReceiptWithBloom {
+                    receipt,
+                    logs_bloom,
+                })
+            }
+            op_alloy_consensus::OpReceipt::Eip1559(_) => {
+                op_alloy_consensus::OpReceiptEnvelope::Eip1559(ReceiptWithBloom {
+                    receipt,
+                    logs_bloom,
+                })
+            }
+            op_alloy_consensus::OpReceipt::Eip7702(_) => {
+                op_alloy_consensus::OpReceiptEnvelope::Eip7702(ReceiptWithBloom {
+                    receipt,
+                    logs_bloom,
+                })
+            }
+            op_alloy_consensus::OpReceipt::Deposit(d) => {
+                op_alloy_consensus::OpReceiptEnvelope::Deposit(ReceiptWithBloom {
+                    receipt: op_alloy_consensus::OpDepositReceipt {
+                        deposit_nonce: d.deposit_nonce,
+                        deposit_receipt_version: d.deposit_receipt_version,
+                        inner: receipt,
+                    },
+                    logs_bloom,
+                })
+            }
+        };
+        Ok(envelope.into())
     }
 }
 
@@ -70,14 +120,18 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_try_from_receipt_response_optimism() {
-        use op_alloy_consensus::OpReceiptEnvelope;
+        use alloy_consensus::ReceiptWithBloom;
+        use op_alloy_consensus::OpReceipt as OpConsensusReceipt;
         use op_alloy_network::Optimism;
         use op_alloy_rpc_types::OpTransactionReceipt;
         use reth_optimism_primitives::OpReceipt;
 
         let op_receipt = OpTransactionReceipt {
             inner: alloy_rpc_types_eth::TransactionReceipt {
-                inner: OpReceiptEnvelope::Eip1559(Default::default()),
+                inner: ReceiptWithBloom {
+                    logs_bloom: Default::default(),
+                    receipt: OpConsensusReceipt::Eip1559(Default::default()),
+                },
                 transaction_hash: Default::default(),
                 transaction_index: None,
                 block_hash: None,

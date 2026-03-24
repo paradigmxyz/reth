@@ -83,14 +83,10 @@ where
 /// Calculates the blob gas used ratio for a block, accounting for the case where
 /// `max_blob_gas_per_block` is zero.
 ///
-/// Returns `0.0` if `blob_gas_used` is `0`, otherwise returns the ratio
-/// `blob_gas_used/max_blob_gas_per_block`.
-pub fn checked_blob_gas_used_ratio(blob_gas_used: u64, max_blob_gas_per_block: u64) -> f64 {
-    if blob_gas_used == 0 {
-        0.0
-    } else {
-        blob_gas_used as f64 / max_blob_gas_per_block as f64
-    }
+/// Returns `0.0` (matching geth's behavior where `MaxBlobGasPerBlock` returns 0 for chains
+/// without blob support)
+pub const fn checked_blob_gas_used_ratio(_blob_gas_used: u64, _max_blob_gas_per_block: u64) -> f64 {
+    0.0
 }
 
 #[cfg(test)]
@@ -126,9 +122,11 @@ mod tests {
         assert_eq!(checked_blob_gas_used_ratio(0, 0), 0.0);
         // Blob gas used is zero, max blob gas per block is non-zero
         assert_eq!(checked_blob_gas_used_ratio(0, 100), 0.0);
+        // Blob gas used is non-zero, max blob gas per block is 0 (division by zero protection)
+        assert_eq!(checked_blob_gas_used_ratio(50, 0), 0.0);
         // Blob gas used is non-zero, max blob gas per block is non-zero
-        assert_eq!(checked_blob_gas_used_ratio(50, 100), 0.5);
+        assert_eq!(checked_blob_gas_used_ratio(50, 100), 0.0);
         // Blob gas used is non-zero and equal to max blob gas per block
-        assert_eq!(checked_blob_gas_used_ratio(100, 100), 1.0);
+        assert_eq!(checked_blob_gas_used_ratio(100, 100), 0.0);
     }
 }

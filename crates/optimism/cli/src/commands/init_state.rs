@@ -10,9 +10,9 @@ use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
-use reth_provider::DBProvider;
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    BlockNumReader, DBProvider, DatabaseProviderFactory, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use std::{io::BufReader, sync::Arc};
 use tracing::info;

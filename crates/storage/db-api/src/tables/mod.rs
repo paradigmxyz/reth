@@ -551,6 +551,10 @@ pub enum ChainStateKey {
     LastSafeBlock,
 }
 
+/// Key stored in [`StageCheckpointProgresses`] to indicate the database was initialized from a
+/// hashed-only state snapshot and requires hashed-table fallback for runtime state reads.
+pub const HASHED_SNAPSHOT_MARKER: &str = "__hashed_only_state_snapshot__";
+
 impl Encode for ChainStateKey {
     type Encoded = [u8; 1];
 

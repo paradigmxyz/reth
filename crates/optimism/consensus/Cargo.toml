@@ -24,6 +24,7 @@ reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
+reth-mantle-forks.workspace = true
 reth-optimism-primitives.workspace = true
 
 # ethereum

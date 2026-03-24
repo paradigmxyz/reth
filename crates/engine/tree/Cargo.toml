@@ -34,7 +34,7 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
-reth-mantle-forks = { workspace = true, features = ["std"] }
+reth-mantle-forks = { workspace = true, features = ["std"], optional = true }
 
 # alloy
 alloy-evm.workspace = true
@@ -66,7 +66,7 @@ tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true
-eyre.workspace = true
+eyre = { workspace = true, optional = true }
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -99,12 +99,12 @@ revm-state.workspace = true
 
 assert_matches.workspace = true
 criterion.workspace = true
-eyre.workspace = true
 serde_json.workspace = true
 crossbeam-channel.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
+eyre.workspace = true
 
 [[bench]]
 name = "channel_perf"
@@ -115,6 +115,8 @@ name = "state_root_task"
 harness = false
 
 [features]
+# Debug: export full state on state root mismatch (dev/troubleshooting only)
+state-export = ["dep:reth-mantle-forks", "dep:eyre", "reth-mantle-forks/state-export"]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
@@ -134,7 +136,6 @@ test-utils = [
     "reth-tracing",
     "reth-trie/test-utils",
     "reth-trie-sparse/test-utils",
-    "reth-prune-types?/test-utils",
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",

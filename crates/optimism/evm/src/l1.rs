@@ -1,6 +1,6 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use crate::{error::L1BlockInfoError, revm_spec_by_timestamp_after_bedrock, OpBlockExecutionError};
+use crate::{error::L1BlockInfoError, OpBlockExecutionError};
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, U16, U256};
 use op_revm::L1BlockInfo;
@@ -17,6 +17,10 @@ const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
 /// The function selector of the "setL1BlockValuesJovian" function in the `L1Block` contract.
 /// This is the first 4 bytes of `keccak256("setL1BlockValuesJovian()")`.
 const L1_BLOCK_JOVIAN_SELECTOR: [u8; 4] = hex!("3db6be2b");
+
+/// The function selector of the "setL1BlockValuesArsia" function in the `L1Block` contract.
+/// This is the first 4 bytes of `keccak256("setL1BlockValuesArsia()")`.
+const L1_BLOCK_ARSIA_SELECTOR: [u8; 4] = hex!("49e72383");
 
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
@@ -57,11 +61,11 @@ pub fn extract_l1_info_from_tx<T: Transaction>(
 pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     // Parse the L1 info transaction into an L1BlockInfo struct, depending on the function selector.
     // There are currently 4 variants:
-    // - Jovian
+    // - Jovian|Arsia
     // - Isthmus
     // - Ecotone
     // - Bedrock
-    if input[0..4] == L1_BLOCK_JOVIAN_SELECTOR {
+    if input[0..4] == L1_BLOCK_JOVIAN_SELECTOR || input[0..4] == L1_BLOCK_ARSIA_SELECTOR {
         parse_l1_info_tx_jovian(input[4..].as_ref())
     } else if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
         parse_l1_info_tx_isthmus(input[4..].as_ref())
@@ -139,17 +143,19 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    // let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
-    //     OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
-    // })?;
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
+    })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    // let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
-    //     .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
 
     Ok(L1BlockInfo {
         l1_base_fee,
         l1_base_fee_scalar,
+        l1_blob_base_fee: Some(l1_blob_base_fee),
+        l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
         ..Default::default()
     })
 }
@@ -192,27 +198,27 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    let _l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let _l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
-    let _operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
+    let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeScalarConversion)
     })?;
-    let _operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
+    let operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeConstantConversion)
     })?;
 
     Ok(L1BlockInfo {
         l1_base_fee,
         l1_base_fee_scalar,
-        // l1_blob_base_fee: Some(l1_blob_base_fee),
-        // l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
-        // operator_fee_scalar: Some(operator_fee_scalar),
-        // operator_fee_constant: Some(operator_fee_constant),
+        l1_blob_base_fee: Some(l1_blob_base_fee),
+        l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
+        operator_fee_scalar: Some(operator_fee_scalar),
+        operator_fee_constant: Some(operator_fee_constant),
         ..Default::default()
     })
 }
@@ -306,6 +312,17 @@ pub trait RethL1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
 
+    /// Like [`RethL1BlockInfo::l1_tx_data_fee`] but for RPC estimate: no cache, and adds
+    /// `fastlz_delta` to compressed size (e.g. 80 to align with geth).
+    fn l1_tx_data_fee_for_estimate(
+        &self,
+        chain_spec: impl MantleHardforks,
+        timestamp: u64,
+        input: &[u8],
+        is_deposit: bool,
+        fastlz_delta: u64,
+    ) -> Result<U256, BlockExecutionError>;
+
     /// Computes the data gas cost for an L2 transaction.
     ///
     /// ### Takes
@@ -332,8 +349,23 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO);
         }
 
-        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
         Ok(self.calculate_tx_l1_cost(input, spec_id))
+    }
+
+    fn l1_tx_data_fee_for_estimate(
+        &self,
+        chain_spec: impl MantleHardforks,
+        timestamp: u64,
+        input: &[u8],
+        is_deposit: bool,
+        fastlz_delta: u64,
+    ) -> Result<U256, BlockExecutionError> {
+        if is_deposit {
+            return Ok(U256::ZERO);
+        }
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
+        Ok(self.calculate_tx_l1_cost_for_estimate(input, spec_id, fastlz_delta))
     }
 
     fn l1_data_gas(
@@ -342,7 +374,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
         Ok(self.data_gas(input, spec_id))
     }
 }
