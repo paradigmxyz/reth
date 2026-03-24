@@ -43,7 +43,7 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, _parent: B256, attr: PayloadAttributes, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
+//! fn new_payload_job(&self, parent: B256, attr: PayloadAttributes, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
 //!         Ok(EmptyBlockPayloadJob{ attributes: attr, parent })
 //!     }
 //!
