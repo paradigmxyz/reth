@@ -2965,7 +2965,12 @@ where
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
         if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+            if let Some(number) = self.provider.block_number(hash)? {
+                if self.provider.block_hash(number)?.is_some_and(|canonical_hash| canonical_hash == hash) {
+                    canonical =
+                        self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+                }
+            }
         }
 
         Ok(canonical)
