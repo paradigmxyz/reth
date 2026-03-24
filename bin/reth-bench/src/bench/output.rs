@@ -22,14 +22,14 @@ pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct GasRampPayloadFile {
     /// Engine API version (1-5).
-    pub(crate) version: u8,
+    ///
+    /// `None` indicates that `reth_newPayload` should be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) version: Option<u8>,
     /// The block hash for FCU.
     pub(crate) block_hash: B256,
     /// The params to pass to newPayload.
     pub(crate) params: serde_json::Value,
-    /// The execution data for `reth_newPayload`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(crate) execution_data: Option<alloy_rpc_types_engine::ExecutionData>,
 }
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas

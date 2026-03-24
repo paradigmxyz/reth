@@ -9,32 +9,8 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
-/// Returns the default number of storage worker threads based on available parallelism.
-fn default_storage_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
-}
-
-/// Returns the default number of account worker threads.
-///
-/// Account workers coordinate storage proof collection and account trie traversal.
-/// They are set to the same count as storage workers for simplicity.
-fn default_account_worker_count() -> usize {
-    default_storage_worker_count()
-}
-
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
-
-/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
-/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
-pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
@@ -127,8 +103,6 @@ pub struct TreeConfig {
     cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
-    /// Whether multiproof task should chunk proof targets.
-    multiproof_chunking_enabled: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -153,10 +127,6 @@ pub struct TreeConfig {
     always_process_payload_attributes_on_canonical_head: bool,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of storage proof worker threads.
-    storage_worker_count: usize,
-    /// Number of account proof worker threads.
-    account_worker_count: usize,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
@@ -187,15 +157,12 @@ impl Default for TreeConfig {
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
-            multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
-            storage_worker_count: default_storage_worker_count(),
-            account_worker_count: default_account_worker_count(),
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
@@ -221,15 +188,12 @@ impl TreeConfig {
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
-        multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
         allow_unwind_canonical_header: bool,
-        storage_worker_count: usize,
-        account_worker_count: usize,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
@@ -248,15 +212,12 @@ impl TreeConfig {
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
-            multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
-            storage_worker_count,
-            account_worker_count,
             disable_cache_metrics,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
@@ -288,11 +249,6 @@ impl TreeConfig {
     /// Return the maximum execute block batch size.
     pub const fn max_execute_block_batch_size(&self) -> usize {
         self.max_execute_block_batch_size
-    }
-
-    /// Return whether the multiproof task chunking is enabled.
-    pub const fn multiproof_chunking_enabled(&self) -> bool {
-        self.multiproof_chunking_enabled
     }
 
     /// Return the multiproof task chunk size.
@@ -458,15 +414,6 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether multiproof task should chunk proof targets.
-    pub const fn with_multiproof_chunking_enabled(
-        mut self,
-        multiproof_chunking_enabled: bool,
-    ) -> Self {
-        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
-        self
-    }
-
     /// Setter for multiproof task chunk size for proof targets.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
         self.multiproof_chunk_size = multiproof_chunk_size;
@@ -500,42 +447,6 @@ impl TreeConfig {
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
-    }
-
-    /// Return the number of storage proof worker threads.
-    pub const fn storage_worker_count(&self) -> usize {
-        self.storage_worker_count
-    }
-
-    /// Setter for the number of storage proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_storage_worker_count_opt(
-        mut self,
-        storage_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = storage_worker_count {
-            self.storage_worker_count = count;
-        }
-        self
-    }
-
-    /// Return the number of account proof worker threads.
-    pub const fn account_worker_count(&self) -> usize {
-        self.account_worker_count
-    }
-
-    /// Setter for the number of account proof worker threads.
-    ///
-    /// No-op if it's [`None`].
-    pub const fn with_account_worker_count_opt(
-        mut self,
-        account_worker_count: Option<usize>,
-    ) -> Self {
-        if let Some(count) = account_worker_count {
-            self.account_worker_count = count;
-        }
-        self
     }
 
     /// Returns whether cache metrics recording is disabled.

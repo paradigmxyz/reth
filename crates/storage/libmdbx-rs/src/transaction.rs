@@ -177,7 +177,7 @@ where
                 self.env().txn_manager().remove_active_read_transaction(txn);
 
                 let mut latency = CommitLatency::new();
-                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) })
+                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdbx_commit_latency()) })
                     .map(|v| (v, latency))
             } else {
                 let (sender, rx) = sync_channel(0);
@@ -246,7 +246,7 @@ where
         unsafe {
             let mut stat = Stat::new();
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>()))
+                mdbx_result(ffi::mdbx_dbi_stat(txn, dbi, stat.mdbx_stat(), size_of::<Stat>()))
             })??;
             Ok(stat)
         }
@@ -647,7 +647,7 @@ impl CommitLatency {
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
-    pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+    pub(crate) const fn mdbx_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
     }
 }

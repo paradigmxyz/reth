@@ -191,6 +191,78 @@ The `book` CI job (`.github/workflows/lint.yml`) enforces this by regenerating t
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
+#### Titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) with an optional scope:
+
+```
+<type>(<scope>): <short description>
+```
+
+**Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`
+
+**Scope** (optional): crate or area, e.g. `evm`, `trie`, `rpc`, `engine`, `net`
+
+Examples:
+- `fix(rpc): correct gas estimation for ERC-20 transfers`
+- `perf: batch trie updates to reduce cursor overhead`
+- `feat(engine): add new_payload_interval metric`
+
+#### Descriptions
+
+Keep it short. Say what changed and why — nothing more.
+
+**Do:**
+- Write 1–3 sentences summarizing the change
+- Explain _why_ if the diff doesn't make it obvious
+- Link related issues or EIPs
+- Include benchmark numbers for perf changes
+
+**Don't:**
+- List every file changed — that's what the diff is for
+- Repeat the title in the body
+- Add "Files changed" or "Changes" sections
+- Write walls of text that go stale when the diff is updated
+- Use filler like "This PR introduces...", "comprehensive", "robust", "enhance", "leverage"
+
+**Template:**
+
+```
+Closes #<issue>
+
+<what changed, 1-3 sentences>
+
+<why, if not obvious from the diff>
+```
+
+**Good example:**
+
+```
+Closes #16800
+
+Adds fallback for external IP resolution so node startup doesn't fail
+when STUN is unreachable. Falls back to the configured default.
+```
+
+**Bad example:**
+
+```
+## Summary
+This PR introduces comprehensive improvements to the IP resolution system.
+
+## Changes
+- Modified `crates/net/discv4/src/lib.rs` to add fallback
+- Modified `crates/net/discv4/src/config.rs` to add default IP
+- Added tests in `crates/net/discv4/src/tests/ip.rs`
+
+## Files Changed
+- crates/net/discv4/src/lib.rs
+- crates/net/discv4/src/config.rs
+- crates/net/discv4/src/tests/ip.rs
+```
+
+#### Labels and CI
+
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
 * when changes are docs related, add C-docs label

@@ -20,8 +20,8 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
-    InspectorFor, TransactionEnv, TxEnvFor,
+    block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
+    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnv, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -745,6 +745,14 @@ pub trait Call:
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
+
+                // apply pre-execution changes (e.g. EIP-4788 beacon root, EIP-2935 blockhashes)
+                RpcNodeCore::evm_config(&this)
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?
+                    .apply_pre_execution_changes()
+                    .map_err(Self::Error::from_eth_err)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;

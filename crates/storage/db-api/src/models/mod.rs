@@ -151,6 +151,34 @@ impl Decode for StoredNibblesSubKey {
     }
 }
 
+impl Encode for PackedStoredNibbles {
+    type Encoded = [u8; 33];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for PackedStoredNibbles {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
+impl Encode for PackedStoredNibblesSubKey {
+    type Encoded = [u8; 33];
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for PackedStoredNibblesSubKey {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
 impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
@@ -218,6 +246,9 @@ impl_compression_for_compact!(
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
+    PackedStoredNibbles,
+    PackedStoredNibblesSubKey,
+    PackedStorageTrieEntry,
     StoredBlockBodyIndices,
     StoredBlockOmmers<H>,
     StoredBlockWithdrawals,

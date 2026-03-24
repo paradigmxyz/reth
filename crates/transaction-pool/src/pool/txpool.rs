@@ -490,19 +490,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pending_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
+        self.pending_pool.txs_by_sender(sender)
     }
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.basefee_pool.all().chain(self.queued_pool.all()).collect()
-    }
-
-    /// Returns an iterator over all transactions from parked pools
-    pub(crate) fn queued_transactions_iter(
-        &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
-        self.basefee_pool.all().chain(self.queued_pool.all())
     }
 
     /// Returns the number of transactions in parked pools
@@ -523,7 +516,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.queued_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
+        let mut txs = self.basefee_pool.txs_by_sender(sender);
+        txs.extend(self.queued_pool.txs_by_sender(sender));
+        txs
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.

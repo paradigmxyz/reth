@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
 use alloy_primitives::{map::B256Map, Bytes};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
@@ -20,11 +20,11 @@ pub trait DatabaseTrieWitness<'a, TX> {
     ) -> Result<B256Map<Bytes>, TrieWitnessError>;
 }
 
-impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
-    for TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseTrieWitness<'a, TX>
+    for TrieWitness<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn overlay_witness(
@@ -35,7 +35,10 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         TrieWitness::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                &nodes_sorted,
+            ),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets_mut(input.prefix_sets)

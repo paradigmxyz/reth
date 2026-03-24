@@ -5,7 +5,8 @@ use crate::ProviderResult;
 use alloy_primitives::BlockNumber;
 use reth_db::models::AccountBeforeTx;
 use reth_db_api::models::BlockNumberAddress;
-use reth_storage_api::{ChangeSetReader, ChangesetEntry, StorageChangeSetReader};
+use reth_primitives_traits::StorageEntry;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use std::ops::{Bound, RangeBounds};
 
 /// Iterator that walks account changesets from static files in a block range.
@@ -109,7 +110,7 @@ pub struct StaticFileStorageChangesetWalker<P> {
     /// Current block being processed
     current_block: BlockNumber,
     /// Changesets for current block
-    current_changesets: Vec<(BlockNumberAddress, ChangesetEntry)>,
+    current_changesets: Vec<(BlockNumberAddress, StorageEntry)>,
     /// Index within current block's changesets
     changeset_index: usize,
 }
@@ -143,7 +144,7 @@ impl<P> Iterator for StaticFileStorageChangesetWalker<P>
 where
     P: StorageChangeSetReader,
 {
-    type Item = ProviderResult<(BlockNumberAddress, ChangesetEntry)>;
+    type Item = ProviderResult<(BlockNumberAddress, StorageEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(changeset) = self.current_changesets.get(self.changeset_index).copied() {

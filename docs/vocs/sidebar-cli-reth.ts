@@ -172,6 +172,21 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
+                    text: "reth db stage-checkpoints",
+                    link: "/cli/reth/db/stage-checkpoints",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db stage-checkpoints get",
+                            link: "/cli/reth/db/stage-checkpoints/get"
+                        },
+                        {
+                            text: "reth db stage-checkpoints set",
+                            link: "/cli/reth/db/stage-checkpoints/set"
+                        }
+                    ]
+                },
+                {
                     text: "reth db account-storage",
                     link: "/cli/reth/db/account-storage"
                 },

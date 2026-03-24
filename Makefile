@@ -17,6 +17,9 @@ FEATURES ?=
 # Cargo profile for builds. Default is for local builds, CI uses an override.
 PROFILE ?= release
 
+# Extra RUSTFLAGS to append to build targets (e.g., "-C target-cpu=x86-64-v3")
+EXTRA_RUSTFLAGS ?=
+
 # Extra flags for Cargo
 CARGO_INSTALL_EXTRA_FLAGS ?=
 
@@ -74,7 +77,7 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
 # Builds the reth binary natively.
 build-native-%:
-	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -96,7 +99,7 @@ build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.

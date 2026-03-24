@@ -30,14 +30,4 @@ return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
 
 [dev-dependencies]
-criterion.workspace = true
-rand.workspace = true
 tempfile.workspace = true
-
-[[bench]]
-name = "cursor"
-harness = false
-
-[[bench]]
-name = "transaction"
-harness = false

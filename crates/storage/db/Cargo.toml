@@ -58,7 +58,6 @@ tempfile.workspace = true
 parking_lot.workspace = true
 
 serde.workspace = true
-criterion.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -87,7 +86,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-prune-types/test-utils",
 ]
-bench = ["reth-db-api/bench"]
 arbitrary = [
     "reth-db-api/arbitrary",
     "alloy-primitives/arbitrary",
@@ -100,23 +98,3 @@ op = [
     "reth-primitives-traits/op",
 ]
 disable-lock = []
-
-[[bench]]
-name = "hash_keys"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "get"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "put"
-required-features = ["test-utils"]
-harness = false

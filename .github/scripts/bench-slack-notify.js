@@ -118,9 +118,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
 
   const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
-  const countsLine = warmup
-    ? `*Warmup:* ${warmup} | *Blocks:* ${summary.blocks}`
-    : `*Blocks:* ${summary.blocks}`;
+  const cores = process.env.BENCH_CORES || '0';
+  const countsParts = [];
+  if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
+  countsParts.push(`*Blocks:* ${summary.blocks}`);
+  if (cores !== '0') countsParts.push(`*Cores:* ${cores}`);
+  const countsLine = countsParts.join(' | ');
 
   const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, countsLine].join('\n');
 
@@ -281,23 +284,29 @@ async function success({ core, context }) {
     }
   }
 
-  // Always DM the actor
-  if (actorSlackId) {
-    await sendWithThread(actorSlackId);
-  } else {
-    core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
-  }
-
-  // Post to public channel if any metric shows significant improvement
+  // Post to public channel if any metric shows significant improvement or regression
   const channel = process.env.SLACK_BENCH_CHANNEL;
+  let postedToChannel = false;
   if (channel) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
       await sendWithThread(channel);
+      postedToChannel = true;
     } else {
       core.info('No significant improvement, skipping public channel notification');
     }
+  }
+
+  // DM the actor only when results were not posted to the public channel
+  if (!postedToChannel) {
+    if (actorSlackId) {
+      await sendWithThread(actorSlackId);
+    } else {
+      core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
+    }
+  } else {
+    core.info(`Results posted to channel, skipping DM to ${actor}`);
   }
 }
 

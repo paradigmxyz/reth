@@ -161,7 +161,7 @@ impl Environment {
             mdbx_result(ffi::mdbx_env_stat_ex(
                 self.env_ptr(),
                 ptr::null(),
-                stat.mdb_stat(),
+                stat.mdbx_stat(),
                 size_of::<Stat>(),
             ))?;
             Ok(stat)
@@ -305,13 +305,13 @@ unsafe impl Sync for EnvPtr {}
 pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
-    /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
+    /// Create a new Stat with zero'd inner struct `ffi::MDBX_stat`.
     pub(crate) const fn new() -> Self {
         unsafe { Self(mem::zeroed()) }
     }
 
-    /// Returns a mut pointer to `ffi::MDB_stat`.
-    pub(crate) const fn mdb_stat(&mut self) -> *mut ffi::MDBX_stat {
+    /// Returns a mut pointer to `ffi::MDBX_stat`.
+    pub(crate) const fn mdbx_stat(&mut self) -> *mut ffi::MDBX_stat {
         &mut self.0
     }
 }

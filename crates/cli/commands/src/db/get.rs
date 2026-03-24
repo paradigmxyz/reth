@@ -98,7 +98,7 @@ impl Command {
                         )?;
 
                         if let Some(entry) = entry {
-                            let se: reth_primitives_traits::StorageEntry = entry.into();
+                            let se: reth_primitives_traits::StorageEntry = entry;
                             println!("{}", serde_json::to_string_pretty(&se)?);
                         } else {
                             error!(target: "reth::cli", "No content for the given table key.");
@@ -110,7 +110,7 @@ impl Command {
                     let serializable: Vec<_> = changesets
                         .into_iter()
                         .map(|(addr, entry)| {
-                            let se: reth_primitives_traits::StorageEntry = entry.into();
+                            let se: reth_primitives_traits::StorageEntry = entry;
                             (addr, se)
                         })
                         .collect();

@@ -64,10 +64,8 @@ where
     let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
         for (key, indices) in cache.drain() {
             let last = *indices.last().expect("qed");
-            collector.insert(
-                sharded_key_factory(key, last),
-                BlockNumberList::new_pre_sorted(indices.into_iter()),
-            )?;
+            collector
+                .insert(sharded_key_factory(key, last), BlockNumberList::new_pre_sorted(indices))?;
         }
         Ok::<(), StageError>(())
     };
@@ -129,10 +127,8 @@ where
 
     let mut insert_fn = |address: Address, indices: Vec<u64>| {
         let last = indices.last().expect("indices is non-empty");
-        collector.insert(
-            ShardedKey::new(address, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
-        )?;
+        collector
+            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
         Ok(())
     };
 
@@ -190,7 +186,7 @@ where
         let last = indices.last().expect("qed");
         collector.insert(
             StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
+            BlockNumberList::new_pre_sorted(indices),
         )?;
         Ok::<(), StageError>(())
     };
@@ -208,10 +204,7 @@ where
 
     for (idx, changeset_result) in walker.enumerate() {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache
-            .entry(AddressStorageKey((address, storage.key.as_b256())))
-            .or_default()
-            .push(block_number);
+        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
 
         if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");

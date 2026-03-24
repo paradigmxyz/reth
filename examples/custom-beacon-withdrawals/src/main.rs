@@ -17,13 +17,13 @@ use reth_ethereum::{
     cli::interface::Cli,
     evm::{
         primitives::{
+            block::StateDB,
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-            Database, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
-            NextBlockEnvAttributes, OnStateHook,
+            Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
+            OnStateHook,
         },
         revm::{
             context::TxEnv,
-            db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
         },
@@ -101,12 +101,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: EthEvm<DB, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB: StateDB + 'a,
+        I: InspectorFor<Self, DB> + 'a,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(
@@ -187,10 +187,9 @@ pub struct CustomBlockExecutor<'a, Evm> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
 }
 
-impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
+impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+    E: Evm<DB: StateDB, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;

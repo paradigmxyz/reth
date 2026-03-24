@@ -1104,9 +1104,9 @@ mod tests {
 
         let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
 
-        // Assert basic_nodes contains our node
+        // Assert persisted_peers contains our node (legacy format is auto-converted)
         let node: NodeRecord = enode.parse().unwrap();
-        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+        assert!(net_cfg.peers_config.persisted_peers.iter().any(|p| p.record == node));
 
         // Cleanup
         let _ = fs::remove_file(&peers_file);

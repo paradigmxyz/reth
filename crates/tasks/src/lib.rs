@@ -34,6 +34,7 @@ pub mod lazy;
 pub mod metrics;
 pub mod runtime;
 pub mod shutdown;
+pub mod utils;
 pub(crate) mod worker_map;
 
 #[cfg(feature = "rayon")]

@@ -413,7 +413,9 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
         Ok(Vec::default())
     }
 
@@ -422,14 +424,16 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         _block_number: BlockNumber,
         _address: Address,
         _storage_key: B256,
-    ) -> ProviderResult<Option<crate::ChangesetEntry>> {
+    ) -> ProviderResult<Option<reth_primitives_traits::StorageEntry>> {
         Ok(None)
     }
 
     fn storage_changesets_range(
         &self,
         _range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
         Ok(Vec::default())
     }
 
@@ -537,14 +541,6 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
         _storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        _account: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Err(ProviderError::UnsupportedProvider)
     }
 }
 

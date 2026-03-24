@@ -8,6 +8,7 @@ pub use config::{ConnectionsConfig, PeersConfig};
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
 
 use alloy_eip2124::ForkId;
+use reth_network_peers::{NodeRecord, PeerId};
 use tracing::trace;
 
 use crate::{
@@ -138,5 +139,35 @@ impl Peer {
     #[inline]
     pub const fn is_static(&self) -> bool {
         matches!(self.kind, PeerKind::Static)
+    }
+}
+
+/// Peer info persisted to disk.
+///
+/// Contains richer metadata than a plain [`NodeRecord`], preserving the peer's kind, fork ID,
+/// and reputation across restarts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PersistedPeerInfo {
+    /// The node record (id, address, ports).
+    pub record: NodeRecord,
+    /// The kind of peer.
+    pub kind: PeerKind,
+    /// The [`ForkId`] that the peer announced via discovery.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub fork_id: Option<ForkId>,
+    /// The peer's reputation at the time of persisting.
+    pub reputation: i32,
+}
+
+impl PersistedPeerInfo {
+    /// Returns the peer id.
+    pub const fn peer_id(&self) -> PeerId {
+        self.record.id
+    }
+
+    /// Converts a legacy [`NodeRecord`] into a [`PersistedPeerInfo`] with default metadata.
+    pub const fn from_node_record(record: NodeRecord) -> Self {
+        Self { record, kind: PeerKind::Basic, fork_id: None, reputation: DEFAULT_REPUTATION }
     }
 }

@@ -67,7 +67,11 @@ grep Cached /proc/meminfo
 # CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
 RETH_BENCH="$(which reth-bench)"
 ONLINE=$(nproc --all)
-RETH_CPUS="1-$(( ONLINE - 1 ))"
+MAX_RETH=$(( ONLINE - 1 ))
+if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
+  MAX_RETH=$BENCH_CORES
+fi
+RETH_CPUS="1-${MAX_RETH}"
 
 RETH_ARGS=(
   node
@@ -84,9 +88,10 @@ RETH_ARGS=(
 )
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+  RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
   sudo taskset -c "$RETH_CPUS" nice -n -20 \
-    "$SAMPLY" record --save-only --presymbolicate \
+    "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &

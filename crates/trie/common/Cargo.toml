@@ -59,7 +59,6 @@ plain_hasher.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-criterion.workspace = true
 bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -132,12 +131,3 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
 ]
 rayon = ["dep:rayon"]
-
-[[bench]]
-name = "prefix_set"
-harness = false
-
-[[bench]]
-name = "hashed_state"
-harness = false
-required-features = ["rayon"]
