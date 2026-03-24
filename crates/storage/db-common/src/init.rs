@@ -460,13 +460,14 @@ where
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<Provider>(
+pub fn init_from_state_dump<PF>(
     mut reader: impl BufRead,
-    provider_rw: &Provider,
+    provider_factory: &PF,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256>
 where
-    Provider: StaticFileProviderFactory
+    PF: DatabaseProviderFactory + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
         + BlockNumReader
         + BlockHashReader
@@ -480,26 +481,36 @@ where
         + StorageSettingsCache
         + RocksDBProviderFactory
         + NodePrimitivesProvider
-        + AsRef<Provider>,
+        + AsRef<PF::ProviderRW>,
 {
     if etl_config.file_size == 0 {
         return Err(eyre::eyre!("ETL file size cannot be zero"))
     }
 
-    let block = provider_rw.last_block_number()?;
+    let (block, hash, header) = {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        let block = provider_rw.last_block_number()?;
 
-    let hash = provider_rw
-        .block_hash(block)?
-        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
-    let header = provider_rw
-        .header_by_number(block)?
-        .map(|h| SealedHeader::new(h, hash))
-        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+        let hash = provider_rw
+            .block_hash(block)?
+            .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
+        let header = provider_rw
+            .header_by_number(block)?
+            .map(|h| SealedHeader::new(h, hash))
+            .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
 
-    let expected_state_root = header.state_root();
+        debug!(target: "reth::cli",
+            block,
+            chain=%provider_rw.chain_spec().chain(),
+            "Initializing state at block"
+        );
+
+        (block, hash, header)
+    };
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
+    let expected_state_root = header.state_root();
     if expected_state_root != dump_state_root {
         error!(target: "reth::cli",
             ?dump_state_root,
@@ -514,26 +525,24 @@ where
         .into())
     }
 
-    debug!(target: "reth::cli",
-        block,
-        chain=%provider_rw.chain_spec().chain(),
-        "Initializing state at block"
-    );
-
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    dump_state(collector, provider_rw, block)?;
+    dump_state(collector, provider_factory, block)?;
 
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // clear trie tables so state root is computed from scratch
-    provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
-    provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
+        provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+        provider_rw.commit()?;
+    }
 
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(provider_rw, None)?;
+    let computed_state_root = compute_state_root_chunked(provider_factory, None)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -554,8 +563,12 @@ where
     }
 
     // insert sync stages for stages that require state
-    for stage in StageId::STATE_REQUIRED {
-        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        for stage in StageId::STATE_REQUIRED {
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+        }
+        provider_rw.commit()?;
     }
 
     Ok(hash)
@@ -598,13 +611,14 @@ fn parse_accounts(
 }
 
 /// Takes a [`Collector`] and processes all accounts.
-fn dump_state<Provider>(
+fn dump_state<PF>(
     mut collector: Collector<Address, GenesisAccount>,
-    provider_rw: &Provider,
+    provider_factory: &PF,
     block: u64,
 ) -> Result<(), eyre::Error>
 where
-    Provider: StaticFileProviderFactory
+    PF: DatabaseProviderFactory,
+    PF::ProviderRW: StaticFileProviderFactory
         + DBProvider<Tx: DbTxMut>
         + HeaderProvider
         + HashingWriter
@@ -613,7 +627,7 @@ where
         + StorageSettingsCache
         + RocksDBProviderFactory
         + NodePrimitivesProvider
-        + AsRef<Provider>,
+        + AsRef<PF::ProviderRW>,
 {
     let accounts_len = collector.len();
     let mut accounts = Vec::new();
@@ -638,25 +652,28 @@ where
                 "Writing accounts to db"
             );
 
+            let provider_rw = provider_factory.database_provider_rw()?;
+
             // use transaction to insert genesis header
             insert_genesis_hashes(
-                provider_rw,
+                &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
             )?;
 
             insert_history(
-                provider_rw,
+                &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
             )?;
 
             // block is already written to static files
             insert_state(
-                provider_rw,
+                &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
             )?;
 
+            provider_rw.commit()?;
             accounts.clear();
             chunk_byte_size = 0;
         }
@@ -732,6 +749,82 @@ where
                     "State root has been computed"
                 );
 
+                return Ok(root)
+            }
+        }
+    }
+}
+
+fn compute_state_root_chunked<PF>(
+    provider_factory: &PF,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory + StorageSettingsCache,
+    PF::ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter,
+{
+    reth_trie_db::with_adapter!(provider_factory, |A| {
+        compute_state_root_chunked_inner::<_, A>(provider_factory, prefix_sets)
+    })
+}
+
+fn compute_state_root_chunked_inner<PF, A>(
+    provider_factory: &PF,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory,
+    PF::ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter,
+    A: reth_trie_db::TrieTableAdapter,
+{
+    trace!(target: "reth::cli", "Computing state root");
+
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let mut total_flushed_updates = 0;
+
+    loop {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        let mut state_root = DbStateRoot::<_, A>::from_tx(provider_rw.tx_ref())
+            .with_intermediate_state(intermediate_state.take());
+
+        if let Some(sets) = prefix_sets.clone() {
+            state_root = state_root.with_prefix_sets(sets);
+        }
+
+        match state_root.root_with_progress()? {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                trace!(target: "reth::cli",
+                    last_account_key = %state.account_root_state.last_hashed_key,
+                    updated_len,
+                    total_flushed_updates,
+                    "Flushing trie updates"
+                );
+
+                intermediate_state = Some(*state);
+                provider_rw.commit()?;
+
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
+                    info!(target: "reth::cli",
+                        total_flushed_updates,
+                        "Flushing trie updates"
+                    );
+                }
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                trace!(target: "reth::cli",
+                    %root,
+                    updated_len,
+                    total_flushed_updates,
+                    "State root has been computed"
+                );
+
+                provider_rw.commit()?;
                 return Ok(root)
             }
         }
