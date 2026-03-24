@@ -1,11 +1,21 @@
 use crate::BlockProvider;
 use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
+use alloy_pubsub::FallbackPubSubConnect;
 use alloy_transport::TransportResult;
+use alloy_transport_ws::{WsConnect, WebSocketConfig as WsNativeConfig};
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
-use reth_tracing::tracing::{debug, warn};
+use reth_tracing::tracing::{debug, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+
+/// WebSocket config for large blocks (128 MiB frame/message).
+fn ws_native_config() -> WsNativeConfig {
+    let mut config = WsNativeConfig::default();
+    config.max_frame_size = Some(128 * 1024 * 1024);
+    config.max_message_size = Some(128 * 1024 * 1024);
+    config
+}
 
 /// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
 /// RPC subscriptions.
@@ -39,6 +49,45 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
                     .await?,
             ),
             url: rpc_url.to_string(),
+            convert: Arc::new(convert),
+        })
+    }
+
+    /// Create an RPC block provider with WS fallback across multiple URLs.
+    ///
+    /// Uses [`FallbackPubSubConnect`] to round-robin across WS endpoints on reconnection,
+    /// providing transparent connection-level failover.
+    pub async fn new_with_ws_fallback(
+        ws_urls: &[String],
+        convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
+    ) -> eyre::Result<Self> {
+        if ws_urls.is_empty() {
+            return Err(eyre::eyre!("at least one WS URL is required"));
+        }
+
+        let connectors: Vec<WsConnect> = ws_urls
+            .iter()
+            .map(|url| {
+                WsConnect::new(url.as_str())
+                    .with_config(ws_native_config())
+                    .with_max_retries(u32::MAX)
+            })
+            .collect();
+
+        let display_urls = ws_urls.join(", ");
+        info!(
+            target: "consensus::debug-client",
+            urls=%display_urls,
+            "Creating WS fallback provider with {} endpoints",
+            ws_urls.len(),
+        );
+
+        let fallback = FallbackPubSubConnect::new(connectors);
+        let provider = ProviderBuilder::default().connect_pubsub_with(fallback).await?;
+
+        Ok(Self {
+            provider: Arc::new(provider),
+            url: display_urls,
             convert: Arc::new(convert),
         })
     }
