@@ -7832,7 +7832,8 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf1df733d93427eb197cf80a7aaa68bff8949e1b59d34cde1ad410351a24136d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7852,7 +7853,8 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d14acf8feadf1eed0734d1766b55b6c19a374d4cb140bc862880f96da33e7e5a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10572,7 +10574,8 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3be2e9bda3e45c5d87cfbe811676bfb9cb1f0e6fa82d1dd6a3e8cd996512f236"
 dependencies = [
  "zstd",
 ]
