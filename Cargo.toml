@@ -712,33 +712,33 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-consensus = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-contract = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-eips = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-genesis = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-json-rpc = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-network = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-network-primitives = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-provider = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-pubsub = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-client = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-admin = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-anvil = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-beacon = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-debug = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-engine = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-eth = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-mev = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-trace = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-rpc-types-txpool = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-serde = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-signer = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-signer-local = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-transport = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-transport-http = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-transport-ipc = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
-alloy-transport-ws = { git = "https://github.com/noble-assets/alloy", rev = "817a7479" }
+alloy-consensus = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-contract = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-eips = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-genesis = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-json-rpc = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-network = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-network-primitives = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-provider = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-pubsub = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-client = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-admin = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-anvil = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-beacon = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-debug = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-engine = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-eth = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-mev = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-trace = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-rpc-types-txpool = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-serde = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-signer = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-signer-local = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-transport = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-transport-http = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-transport-ipc = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
+alloy-transport-ws = { git = "https://github.com/noble-assets/alloy", rev = "17f5e6aa" }
 
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
