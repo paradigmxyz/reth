@@ -3,6 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{Transaction, TransactionInput, TransactionReceipt, TransactionRequest};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
@@ -10,7 +11,6 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
 use reth_node_ethereum::EthereumNode;
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
 use std::{sync::Arc, time::Duration};
 
@@ -83,15 +83,14 @@ fn test_chain_spec() -> Arc<ChainSpec> {
 }
 
 /// Returns test payload attributes for the given timestamp.
-fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
-    let attributes = alloy_rpc_types_engine::PayloadAttributes {
+const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
+    PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: alloy_primitives::Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+    }
 }
 
 /// Smoke test: node boots with `RocksDB` routing enabled.

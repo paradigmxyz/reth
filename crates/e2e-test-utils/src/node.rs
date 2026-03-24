@@ -15,7 +15,7 @@ use reth_node_api::{
 };
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
     HeaderProvider, StageCheckpointReader,
@@ -112,11 +112,11 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload().await.unwrap();
+        let (eth_attr, payload_id) = self.payload.new_payload().await.unwrap();
         // first event is the payload attributes
-        self.payload.expect_attr_event(eth_attr.clone()).await?;
+        self.payload.expect_attr_event(eth_attr).await?;
         // wait for the payload builder to have finished building
-        self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
+        self.payload.wait_for_built_payload(payload_id).await;
         // ensure we're also receiving the built payload as event
         Ok(self.payload.expect_built_payload().await?)
     }

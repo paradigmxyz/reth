@@ -137,21 +137,6 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-#[cfg(feature = "op")]
-impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
-    fn timestamp(&self) -> u64 {
-        self.payload_attributes.timestamp
-    }
-
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload_attributes.withdrawals.as_ref()
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.payload_attributes.parent_beacon_block_root
-    }
-}
-
 /// Factory trait for creating payload attributes.
 ///
 /// Enables different strategies for generating payload attributes based on
@@ -242,13 +227,13 @@ pub fn payload_id(
 mod tests {
     use super::*;
     use alloy_eips::eip4895::Withdrawal;
-    use alloy_primitives::B64;
+    use alloy_primitives::{Address, B64};
     use core::str::FromStr;
 
     #[test]
     fn attributes_serde() {
         let attributes = r#"{"timestamp":"0x1235","prevRandao":"0xf343b00e02dc34ec0124241f74f32191be28fb370bb48060f5fa4df99bda774c","suggestedFeeRecipient":"0x0000000000000000000000000000000000000000","withdrawals":null,"parentBeaconBlockRoot":null}"#;
-        let _attributes: PayloadAttributes = serde_json::from_str(attributes).unwrap();
+        let _attributes: EthPayloadAttributes = serde_json::from_str(attributes).unwrap();
     }
 
     #[test]
@@ -257,7 +242,7 @@ mod tests {
         let parent =
             B256::from_str("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a")
                 .unwrap();
-        let attributes = PayloadAttributes {
+        let attributes = EthPayloadAttributes {
             timestamp: 0x5,
             prev_randao: B256::from_str(
                 "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -284,7 +269,7 @@ mod tests {
         let parent =
             B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
                 .unwrap();
-        let attributes = PayloadAttributes {
+        let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
             suggested_fee_recipient: Address::from_str(
@@ -321,7 +306,7 @@ mod tests {
         let parent =
             B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
                 .unwrap();
-        let attributes = PayloadAttributes {
+        let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_str(
                 "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",

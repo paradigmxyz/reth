@@ -1,5 +1,6 @@
 //! Utilities for end-to-end tests.
 
+use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
@@ -145,11 +146,8 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider<
-            Payload: PayloadTypes<
-                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
-            >,
-        > + Node<
+        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
@@ -170,11 +168,8 @@ where
 
 impl<T> NodeBuilderHelper for T where
     Self: Default
-        + NodeTypesForProvider<
-            Payload: PayloadTypes<
-                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
-            >,
-        > + Node<
+        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,

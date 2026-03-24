@@ -30,7 +30,7 @@
 //! use std::task::{Context, Poll};
 //! use alloy_consensus::{Header, Block};
 //! use alloy_primitives::U256;
-//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives_traits::SealedBlock;
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
@@ -40,7 +40,7 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
+//! fn new_payload_job(&self, attr: PayloadAttributes) -> Result<Self::Job, PayloadBuilderError> {
 //!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
 //!     }
 //!
@@ -48,11 +48,11 @@
 //!
 //! /// A [PayloadJob] that builds empty blocks.
 //! pub struct EmptyBlockPayloadJob {
-//!   attributes: EthPayloadBuilderAttributes,
+//!   attributes: PayloadAttributes,
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
-//!    type PayloadAttributes = EthPayloadBuilderAttributes;
+//!    type PayloadAttributes = PayloadAttributes;
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
 //!    type BuiltPayload = EthBuiltPayload;
 //!
@@ -71,7 +71,7 @@
 //!     Ok(payload)
 //! }
 //!
-//! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
+//! fn payload_attributes(&self) -> Result<PayloadAttributes, PayloadBuilderError> {
 //!     Ok(self.attributes.clone())
 //! }
 //!

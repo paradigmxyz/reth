@@ -3620,7 +3620,6 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -9478,6 +9477,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror 2.0.18",
  "tokio",
