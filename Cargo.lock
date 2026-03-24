@@ -8292,7 +8292,6 @@ dependencies = [
  "crossbeam-channel",
  "derive_more",
  "eyre",
- "fixed-cache",
  "futures",
  "metrics",
  "metrics-util",
@@ -8315,6 +8314,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-cache",
  "reth-execution-types",
  "reth-exex-types",
  "reth-metrics",
@@ -8725,6 +8725,21 @@ dependencies = [
  "reth-testing-utils",
  "revm",
  "secp256k1 0.30.0",
+]
+
+[[package]]
+name = "reth-execution-cache"
+version = "1.11.3"
+dependencies = [
+ "alloy-primitives",
+ "fixed-cache",
+ "metrics",
+ "parking_lot",
+ "reth-metrics",
+ "reth-primitives-traits",
+ "reth-revm",
+ "revm-state",
+ "tracing",
 ]
 
 [[package]]

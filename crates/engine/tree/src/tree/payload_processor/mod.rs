@@ -2,7 +2,7 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
+    cached_state::{CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache},
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
@@ -24,7 +24,6 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
     SpecFor, TxEnvFor,
 };
-pub use reth_execution_cache::{self, CachedExecution};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
@@ -958,15 +957,6 @@ impl<R> Drop for CacheTaskHandle<R> {
     }
 }
 
-/// Shared access to most recently used cache.
-///
-/// This cache is intended to used for processing the payload in the following manner:
-///  - Get Cache if the payload's parent block matches the parent block
-///  - Update cache upon successful payload execution
-///
-/// Type alias for the [`reth_execution_cache::PayloadExecutionCache`] backed by [`SavedCache`].
-pub type PayloadExecutionCache = reth_execution_cache::PayloadExecutionCache<SavedCache>;
-
 /// EVM context required to execute a block.
 #[derive(Debug, Clone)]
 pub struct ExecutionEnv<Evm: ConfigureEvm> {
@@ -1013,9 +1003,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::PayloadExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
+        cached_state::{CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache},
         payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,

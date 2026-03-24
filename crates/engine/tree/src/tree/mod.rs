@@ -65,7 +65,9 @@ mod trie_updates;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
-pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
+pub use cached_state::{
+    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;

@@ -12,8 +12,8 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateProvider, SavedCache},
-    payload_processor::{bal, multiproof::MultiProofMessage, PayloadExecutionCache},
+    cached_state::{CachedStateProvider, PayloadExecutionCache, SavedCache},
+    payload_processor::{bal, multiproof::MultiProofMessage},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
