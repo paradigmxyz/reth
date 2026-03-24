@@ -1297,7 +1297,8 @@ where
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
             // Wait for any in-progress persistence to complete (blocking)
-            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+            if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
+                debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
             }
