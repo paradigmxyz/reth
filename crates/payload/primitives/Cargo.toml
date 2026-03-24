@@ -55,6 +55,9 @@ std = [
     "reth-primitives-traits/std",
     "either/std",
     "alloy-consensus/std",
+    "alloy-rlp/std",
+    "serde_json/std",
+    "sha2/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",
