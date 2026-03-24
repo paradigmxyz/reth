@@ -27,7 +27,11 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{
+    providers::BlockchainProvider,
+    test_utils::{create_test_provider_factory_with_chain_spec, MockEthProvider, MockNodeTypesWithDB},
+    DBProvider, DatabaseProviderFactory, SaveBlocksMode,
+};
 use reth_tasks::spawn_os_thread;
 use std::{
     collections::BTreeMap,
@@ -351,6 +355,87 @@ impl TestHarness {
         }
 
         self.provider.extend_blocks(block_data);
+    }
+}
+
+struct BlockchainProviderTestHarness {
+    tree: EngineApiTreeHandler<
+        EthPrimitives,
+        BlockchainProvider<MockNodeTypesWithDB>,
+        EthEngineTypes,
+        BasicEngineValidator<BlockchainProvider<MockNodeTypesWithDB>, MockEvmConfig, MockEngineValidator>,
+        MockEvmConfig,
+    >,
+    from_tree_rx: UnboundedReceiver<EngineApiEvent>,
+    block_builder: TestBlockBuilder,
+}
+
+impl BlockchainProviderTestHarness {
+    fn with_persisted_blocks(
+        chain_spec: Arc<ChainSpec>,
+        blocks: Vec<ExecutedBlock>,
+    ) -> Self {
+        use std::sync::mpsc::channel;
+
+        let (action_tx, _action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx);
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let provider_rw = factory.database_provider_rw().unwrap();
+        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let canonical_in_memory_state = provider.canonical_in_memory_state();
+        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks });
+        let tree_config =
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+
+        let (from_tree_tx, from_tree_rx) = unbounded_channel();
+        let state = EngineApiTreeState::new(
+            tree_config.block_buffer_limit(),
+            tree_config.max_invalid_header_cache_length(),
+            canonical_in_memory_state.get_canonical_head().num_hash(),
+            EngineApiKind::Ethereum,
+        );
+
+        let (to_payload_service, _payload_command_rx) = unbounded_channel();
+        let payload_builder = PayloadBuilderHandle::new(to_payload_service);
+
+        let evm_config = MockEvmConfig::default();
+        let changeset_cache = ChangesetCache::new();
+        let payload_validator = MockEngineValidator;
+        let engine_validator = BasicEngineValidator::new(
+            provider.clone(),
+            consensus.clone(),
+            evm_config.clone(),
+            payload_validator,
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache.clone(),
+            reth_tasks::Runtime::test(),
+        );
+
+        let tree = EngineApiTreeHandler::new(
+            provider,
+            consensus,
+            engine_validator,
+            from_tree_tx,
+            state,
+            canonical_in_memory_state,
+            persistence_handle,
+            PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
+            payload_builder,
+            tree_config,
+            EngineApiKind::Ethereum,
+            evm_config,
+            changeset_cache,
+            reth_tasks::Runtime::test(),
+        );
+
+        let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        Self { tree, from_tree_rx, block_builder }
     }
 }
 
@@ -1122,6 +1207,98 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         ancestor_block.hash(),
         "In-memory state: Latest block hash should be updated to canonical ancestor"
     );
+}
+
+#[tokio::test]
+async fn test_fcu_back_from_synthetic_sibling_to_original_head_recanonicalizes_head() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut block_builder =
+        TestBlockBuilder::<EthPrimitives>::default().with_chain_spec((*chain_spec).clone());
+    let persisted_blocks: Vec<_> = block_builder.get_executed_blocks(0..10).collect();
+    let mut test_harness =
+        BlockchainProviderTestHarness::with_persisted_blocks(chain_spec, persisted_blocks.clone());
+
+    let a8 = persisted_blocks[8].recovered_block().clone();
+    let a9 = persisted_blocks[9].recovered_block().clone();
+
+    let s9 = test_harness.block_builder.get_executed_block_with_number(9, a8.hash());
+    let s9_hash = s9.recovered_block().hash();
+    test_harness.tree.state.tree_state.insert_executed(s9.clone());
+
+    let synthetic_state = ForkchoiceState {
+        head_block_hash: s9_hash,
+        safe_block_hash: a8.hash(),
+        finalized_block_hash: a8.hash(),
+    };
+    let (tx1, rx1) = oneshot::channel();
+    let _ = test_harness
+        .tree
+        .on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: synthetic_state,
+                payload_attrs: None,
+                tx: tx1,
+                version: EngineApiMessageVersion::default(),
+            }
+            .into(),
+        ))
+        .unwrap();
+
+    let response1 = rx1.await.unwrap().unwrap().await.unwrap();
+    assert!(response1.payload_status.is_valid());
+
+    loop {
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        if matches!(
+            event,
+            EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::ForkchoiceUpdated(state, ForkchoiceStatus::Valid))
+                if state == synthetic_state
+        ) {
+            break
+        }
+    }
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), s9_hash);
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), s9_hash);
+    assert!(test_harness.tree.find_canonical_header(a9.hash()).unwrap().is_none());
+
+    let target_state = ForkchoiceState {
+        head_block_hash: a9.hash(),
+        safe_block_hash: a8.hash(),
+        finalized_block_hash: a8.hash(),
+    };
+    let (tx2, rx2) = oneshot::channel();
+    let _ = test_harness
+        .tree
+        .on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: target_state,
+                payload_attrs: None,
+                tx: tx2,
+                version: EngineApiMessageVersion::default(),
+            }
+            .into(),
+        ))
+        .unwrap();
+
+    let response2 = rx2.await.unwrap().unwrap().await.unwrap();
+    assert!(response2.payload_status.is_valid());
+
+    loop {
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        if matches!(
+            event,
+            EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::ForkchoiceUpdated(state, ForkchoiceStatus::Valid))
+                if state == target_state
+        ) {
+            break
+        }
+    }
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), a9.hash());
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), a9.hash());
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain
