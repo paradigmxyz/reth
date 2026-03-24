@@ -62,6 +62,9 @@ pub const MANTLE_SEPOLIA_CHAIN_ID: u64 = 5003;
 /// Skadi upgrade timestamp for Mantle mainnet
 pub const MANTLE_MAINNET_SKADI_TIMESTAMP: u64 = 1_756_278_000; // Wed Aug 27 2025 15:00:00 GMT+0800
 
+/// Limb upgrade timestamp for Mantle mainnet
+pub const MANTLE_MAINNET_LIMB_TIMESTAMP: u64 = 1_768_374_000; // Wed Jan 14 2026 15:00:00 GMT+0800
+
 /// Skadi upgrade timestamp for Mantle Sepolia testnet
 pub const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200; // Wed Jul 16 2025 15:00:00 GMT+0800
 
@@ -69,10 +72,7 @@ pub const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200; // Wed Jul 16 202
 pub const MANTLE_SEPOLIA_LIMB_TIMESTAMP: u64 = 1_764_745_200; // Wed Dec 03 2025 15:00:00 GMT+0800
 
 /// Arsia upgrade timestamp for Mantle Sepolia testnet
-pub const MANTLE_SEPOLIA_ARSIA_TIMESTAMP: u64 = 1_774_422_000; // Sun Mar 22 2026 15:00:00 GMT+0800
-
-/// Limb upgrade timestamp for Mantle mainnet
-pub const MANTLE_MAINNET_LIMB_TIMESTAMP: u64 = 1_768_374_000; // Wed Jan 14 2026 15:00:00 GMT+0800
+pub const MANTLE_SEPOLIA_ARSIA_TIMESTAMP: u64 = 1_774_422_000; // Wed Mar 25 2026 15:00:00 GMT+0800
 
 hardfork!(
     /// Mantle-specific hardforks that extend the OP Stack hardfork set.
