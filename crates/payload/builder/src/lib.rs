@@ -30,8 +30,9 @@
 //! use std::task::{Context, Poll};
 //! use alloy_consensus::{Header, Block};
 //! use alloy_primitives::U256;
-//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives_traits::SealedBlock;
+//! use alloy_rpc_types::engine::PayloadAttributes;
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;
@@ -40,7 +41,7 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, attr: PayloadAttributes) -> Result<Self::Job, PayloadBuilderError> {
+//! fn new_payload_job(&self, _parent: B256, attr: PayloadAttributes, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
 //!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
 //!     }
 //!
@@ -67,7 +68,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
+//!     let payload = EthBuiltPayload::new(Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
 //!     Ok(payload)
 //! }
 //!
