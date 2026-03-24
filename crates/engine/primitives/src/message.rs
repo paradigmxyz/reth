@@ -14,7 +14,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use std::time::Duration;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 

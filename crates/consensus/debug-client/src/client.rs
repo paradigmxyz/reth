@@ -1,8 +1,7 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
 use reth_node_api::{
-    BuiltPayload, ConsensusEngineHandle, ExecutionPayload, NodePrimitives,
-    PayloadTypes,
+    BuiltPayload, ConsensusEngineHandle, ExecutionPayload, NodePrimitives, PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
@@ -131,10 +130,7 @@ where
                 safe_block_hash,
                 finalized_block_hash,
             };
-            let _ = self
-                .engine_handle
-                .fork_choice_updated(state, None)
-                .await;
+            let _ = self.engine_handle.fork_choice_updated(state, None).await;
         }
     }
 }

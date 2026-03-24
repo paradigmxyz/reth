@@ -24,9 +24,7 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, NewPayloadError, PayloadTypes,
-};
+use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -1144,11 +1142,8 @@ where
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     // Clone only when we actually need to process the attributes
-                    let updated = self.process_payload_attributes(
-                        attr.clone(),
-                        &canonical_header,
-                        state,
-                    );
+                    let updated =
+                        self.process_payload_attributes(attr.clone(), &canonical_header, state);
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
             }
@@ -1452,16 +1447,11 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated {
-                                state,
-                                payload_attrs,
-                                tx,
-                            } => {
+                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
-                                let mut output =
-                                    self.on_forkchoice_updated(state, payload_attrs);
+                                let mut output = self.on_forkchoice_updated(state, payload_attrs);
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
