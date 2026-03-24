@@ -1,7 +1,7 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
 use reth_node_api::{
-    BuiltPayload, ConsensusEngineHandle, EngineApiMessageVersion, ExecutionPayload, NodePrimitives,
+    BuiltPayload, ConsensusEngineHandle, ExecutionPayload, NodePrimitives,
     PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
@@ -133,7 +133,7 @@ where
             };
             let _ = self
                 .engine_handle
-                .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
+                .fork_choice_updated(state, None)
                 .await;
         }
     }

@@ -7,7 +7,7 @@ use futures_util::{stream::Fuse, Stream, StreamExt};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
+    BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
 };
 use reth_primitives_traits::{HeaderTy, SealedHeaderFor};
 use reth_storage_api::BlockReader;
@@ -216,7 +216,7 @@ where
         let state = self.forkchoice_state();
         let res = self
             .to_engine
-            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
+            .fork_choice_updated(state, None)
             .await?;
 
         if !res.is_valid() {
@@ -234,7 +234,6 @@ where
             .fork_choice_updated(
                 self.forkchoice_state(),
                 Some(self.payload_attributes_builder.build(&self.last_header)),
-                EngineApiMessageVersion::default(),
             )
             .await?;
 

@@ -25,7 +25,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadTypes,
+    BuiltPayload, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -993,7 +993,6 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<T::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
@@ -1006,13 +1005,13 @@ where
         }
 
         // Return early if we are on the correct fork
-        if let Some(result) = self.handle_canonical_head(state, &attrs, version)? {
+        if let Some(result) = self.handle_canonical_head(state, &attrs)? {
             return Ok(result);
         }
 
         // Attempt to apply a chain update when the head differs from our canonical chain.
         // This handles reorgs and chain extensions by making the specified head canonical.
-        if let Some(result) = self.apply_chain_update(state, &attrs, version)? {
+        if let Some(result) = self.apply_chain_update(state, &attrs)? {
             return Ok(result);
         }
 
@@ -1063,7 +1062,6 @@ where
         &self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Process the forkchoice update by trying to make the head block canonical
         //
@@ -1101,7 +1099,7 @@ where
                     ProviderError::HeaderNotFound(state.head_block_hash.into())
                 })?;
             // Clone only when we actually need to process the attributes
-            let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+            let updated = self.process_payload_attributes(attr.clone(), &tip, state);
             return Ok(Some(TreeOutcome::new(updated)));
         }
 
@@ -1124,7 +1122,6 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
@@ -1151,7 +1148,6 @@ where
                         attr.clone(),
                         &canonical_header,
                         state,
-                        version,
                     );
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
@@ -1183,7 +1179,7 @@ where
 
             if let Some(attr) = attrs {
                 // Clone only when we actually need to process the attributes
-                let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+                let updated = self.process_payload_attributes(attr.clone(), &tip, state);
                 return Ok(Some(TreeOutcome::new(updated)));
             }
 
@@ -1460,13 +1456,12 @@ where
                                 state,
                                 payload_attrs,
                                 tx,
-                                version,
                             } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
                                 let mut output =
-                                    self.on_forkchoice_updated(state, payload_attrs, version);
+                                    self.on_forkchoice_updated(state, payload_attrs);
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
@@ -3053,7 +3048,6 @@ where
         attrs: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
-        _version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
             self.payload_validator.validate_payload_attributes_against_header(&attrs, head)

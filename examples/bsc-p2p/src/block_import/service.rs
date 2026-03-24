@@ -154,7 +154,7 @@ where
                 finalized_block_hash: head_block_hash,
             };
 
-            match engine.fork_choice_updated(state, None, EngineApiMessageVersion::default()).await
+            match engine.fork_choice_updated(state, None).await
             {
                 Ok(response) => match response.payload_status.status {
                     PayloadStatusEnum::Valid => Outcome::<T> {
@@ -421,7 +421,6 @@ mod tests {
                     BeaconEngineMessage::ForkchoiceUpdated {
                         state: _,
                         payload_attrs: _,
-                        version: _,
                         tx,
                     } => {
                         tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(

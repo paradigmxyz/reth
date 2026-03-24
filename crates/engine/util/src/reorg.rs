@@ -14,7 +14,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
@@ -202,7 +202,6 @@ where
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
-                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
@@ -213,7 +212,6 @@ where
                         state,
                         payload_attrs,
                         tx,
-                        version,
                     }),
                     _,
                 ) => {
@@ -226,7 +224,6 @@ where
                         state,
                         payload_attrs,
                         tx,
-                        version,
                     })
                 }
                 (item, _) => item,

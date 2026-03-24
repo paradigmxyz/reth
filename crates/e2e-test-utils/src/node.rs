@@ -10,7 +10,7 @@ use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
-    Block, BlockBody, BlockTy, EngineApiMessageVersion, FullNodeComponents, PayloadTypes,
+    Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes,
     PrimitivesTy,
 };
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
@@ -265,7 +265,6 @@ where
                     finalized_block_hash: current_head,
                 },
                 None,
-                EngineApiMessageVersion::default(),
             )
             .await?;
 
