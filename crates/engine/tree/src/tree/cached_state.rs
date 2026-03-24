@@ -7,6 +7,7 @@ use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
+use reth_execution_cache::CachedExecution;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -970,10 +971,22 @@ impl SavedCache {
         }
         self.caches.update_metrics(&self.metrics);
     }
+}
 
-    /// Clears all caches, resetting them to empty state,
-    /// and updates the hash of the block this cache belongs to.
-    pub(crate) fn clear_with_hash(&mut self, hash: B256) {
+impl CachedExecution for SavedCache {
+    fn executed_block_hash(&self) -> B256 {
+        self.hash
+    }
+
+    fn is_available(&self) -> bool {
+        Arc::strong_count(&self.usage_guard) == 1
+    }
+
+    fn usage_count(&self) -> usize {
+        Arc::strong_count(&self.usage_guard)
+    }
+
+    fn clear_with_hash(&mut self, hash: B256) {
         self.hash = hash;
         self.caches.clear();
     }
