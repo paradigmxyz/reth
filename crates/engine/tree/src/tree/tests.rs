@@ -29,7 +29,9 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory_with_chain_spec, MockEthProvider, MockNodeTypesWithDB},
+    test_utils::{
+        create_test_provider_factory_with_chain_spec, MockEthProvider, MockNodeTypesWithDB,
+    },
     DBProvider, DatabaseProviderFactory, SaveBlocksMode,
 };
 use reth_tasks::spawn_os_thread;
@@ -363,7 +365,11 @@ struct BlockchainProviderTestHarness {
         EthPrimitives,
         BlockchainProvider<MockNodeTypesWithDB>,
         EthEngineTypes,
-        BasicEngineValidator<BlockchainProvider<MockNodeTypesWithDB>, MockEvmConfig, MockEngineValidator>,
+        BasicEngineValidator<
+            BlockchainProvider<MockNodeTypesWithDB>,
+            MockEvmConfig,
+            MockEngineValidator,
+        >,
         MockEvmConfig,
     >,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
@@ -371,10 +377,7 @@ struct BlockchainProviderTestHarness {
 }
 
 impl BlockchainProviderTestHarness {
-    fn with_persisted_blocks(
-        chain_spec: Arc<ChainSpec>,
-        blocks: Vec<ExecutedBlock>,
-    ) -> Self {
+    fn with_persisted_blocks(chain_spec: Arc<ChainSpec>, blocks: Vec<ExecutedBlock>) -> Self {
         use std::sync::mpsc::channel;
 
         let (action_tx, _action_rx) = channel();

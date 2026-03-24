@@ -2966,7 +2966,11 @@ where
 
         if canonical.is_none() {
             if let Some(number) = self.provider.block_number(hash)? {
-                if self.provider.block_hash(number)?.is_some_and(|canonical_hash| canonical_hash == hash) {
+                if self
+                    .provider
+                    .block_hash(number)?
+                    .is_some_and(|canonical_hash| canonical_hash == hash)
+                {
                     canonical =
                         self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
                 }
