@@ -326,7 +326,7 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", branch = "main", default-features = false }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", branch = "main", features = ["alloy"], default-features = false }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", branch = "main" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
