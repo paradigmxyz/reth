@@ -93,11 +93,12 @@ impl<B: Block> BlockBuffer<B> {
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
     pub fn remove_block_with_children(&mut self, parent_hash: &BlockHash) -> Vec<SealedBlock<B>> {
-        let removed = self
+        let mut removed: Vec<_> = self
             .remove_block(parent_hash)
             .into_iter()
             .chain(self.remove_children(vec![*parent_hash]))
             .collect();
+        removed.sort_by_key(|block| block.number());
         self.metrics.blocks.set(self.blocks.len() as f64);
         removed
     }
