@@ -43,12 +43,18 @@ pub struct EthBeaconConsensus<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
     /// Maximum allowed extra data size in bytes
     max_extra_data_size: usize,
+    /// When true, skips the gas limit change validation between parent and child blocks.
+    skip_gas_limit_ramp_check: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE }
+        Self {
+            chain_spec,
+            max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE,
+            skip_gas_limit_ramp_check: false,
+        }
     }
 
     /// Returns the maximum allowed extra data size.
@@ -59,6 +65,12 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
     /// Sets the maximum allowed extra data size and returns the updated instance.
     pub const fn with_max_extra_data_size(mut self, size: usize) -> Self {
         self.max_extra_data_size = size;
+        self
+    }
+
+    /// Disables the gas limit change validation between parent and child blocks.
+    pub const fn with_skip_gas_limit_ramp_check(mut self, skip: bool) -> Self {
+        self.skip_gas_limit_ramp_check = skip;
         self
     }
 
@@ -205,7 +217,9 @@ where
 
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
-        validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+        if !self.skip_gas_limit_ramp_check {
+            validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+        }
 
         validate_against_parent_eip1559_base_fee(
             header.header(),

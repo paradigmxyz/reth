@@ -222,7 +222,6 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
-            provider.cached_storage_settings().use_hashed_state(),
             reth_tasks::Runtime::test(),
         );
 

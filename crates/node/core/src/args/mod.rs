@@ -22,7 +22,7 @@ pub use database::DatabaseArgs;
 
 /// LogArgs struct for configuring the logger
 mod log;
-pub use log::{ColorMode, LogArgs, Verbosity};
+pub use log::{ColorMode, DefaultLogArgs, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
@@ -62,7 +62,7 @@ pub use datadir_args::DatadirArgs;
 
 /// BenchmarkArgs struct for configuring the benchmark to run
 mod benchmark_args;
-pub use benchmark_args::BenchmarkArgs;
+pub use benchmark_args::{BenchmarkArgs, RpcBlockFetchRetries, WaitForPersistence};
 
 /// EngineArgs for configuring the engine
 mod engine;
@@ -78,7 +78,7 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 /// `StorageArgs` for configuring storage settings.
 mod storage;
-pub use storage::StorageArgs;
+pub use storage::{DefaultStorageValues, StorageArgs};
 
 mod error;
 pub mod types;

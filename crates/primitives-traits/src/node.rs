@@ -1,6 +1,4 @@
-use crate::{
-    FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx, MaybeSerdeBincodeCompat,
-};
+use crate::{FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx};
 use core::fmt;
 
 /// Configures all the primitive types of the node.
@@ -12,8 +10,7 @@ pub trait NodePrimitives:
     Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
 {
     /// Block primitive.
-    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>
-        + MaybeSerdeBincodeCompat;
+    type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>;
     /// Block header primitive.
     type BlockHeader: FullBlockHeader;
     /// Block body primitive.

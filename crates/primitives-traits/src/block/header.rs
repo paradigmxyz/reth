@@ -1,6 +1,6 @@
 //! Block header data primitive.
 
-use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use alloy_primitives::Sealable;
 use core::{fmt, hash::Hash};
 
@@ -30,7 +30,6 @@ pub trait BlockHeader:
     + Sealable
     + InMemorySize
     + MaybeSerde
-    + MaybeSerdeBincodeCompat
     + AsRef<Self>
     + 'static
 {

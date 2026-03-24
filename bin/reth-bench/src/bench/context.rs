@@ -9,7 +9,7 @@ use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
-use reth_node_core::args::BenchmarkArgs;
+use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use tracing::info;
 
 /// This is intended to be used by benchmarks that replay blocks from an RPC.
@@ -33,6 +33,10 @@ pub(crate) struct BenchContext {
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
     pub(crate) rlp_blocks: bool,
+    /// Controls when `reth_newPayload` waits for persistence.
+    pub(crate) wait_for_persistence: WaitForPersistence,
+    /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
+    pub(crate) no_wait_for_caches: bool,
 }
 
 impl BenchContext {
@@ -60,8 +64,9 @@ impl BenchContext {
                     .and_then(|t| t.as_http_error())
                     .is_some_and(|e| e.status == 502)
             });
+        let max_retries = bench_args.rpc_block_fetch_retries.as_max_retries();
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new_with_policy(10, 800, u64::MAX, retry_policy))
+            .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
@@ -161,7 +166,10 @@ impl BenchContext {
 
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
+        let wait_for_persistence =
+            bench_args.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
         let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
             auth_provider,
             block_provider,
@@ -170,6 +178,8 @@ impl BenchContext {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
+            wait_for_persistence,
+            no_wait_for_caches,
         })
     }
 }

@@ -234,8 +234,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt)) => {
-                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                Some((tx, meta, receipt, all_receipts)) => {
+                    self.build_transaction_receipt(tx, meta, receipt, all_receipts).await.map(Some)
                 }
                 None => Ok(None),
             }
@@ -255,6 +255,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 Recovered<ProviderTx<Self::Provider>>,
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
+                Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
             )>,
             Self::Error,
         >,
@@ -269,13 +270,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let meta = cached.transaction_meta(hash);
 
                 // Best case: receipts are also cached.
-                if let Some(receipt) = cached.receipt().cloned() {
-                    return Ok(Some((tx, meta, receipt)));
+                if let Some(all_receipts) = cached.receipts.clone() &&
+                    let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
+                {
+                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
                 }
 
                 // Block still cached but receipts evicted — fetch via cache since
-                // the block is recent and `build_transaction_receipt` needs all
-                // receipts for gas accounting anyway.
+                // `build_transaction_receipt` needs all receipts for gas accounting
+                // anyway.
                 if let Some(receipts) = self
                     .cache()
                     .get_receipts(cached.block.hash())
@@ -283,7 +286,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(Self::Error::from_eth_err)? &&
                     let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt)));
+                    return Ok(Some((tx, meta, receipt, Some(receipts))));
                 }
             }
 
@@ -301,7 +304,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt)))
+                Ok(receipt.map(|receipt| (tx, meta, receipt, None)))
             })
             .await
         }

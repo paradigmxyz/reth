@@ -322,4 +322,15 @@ impl ArenaSparseNode {
             }
         }
     }
+
+    /// Returns the heap bytes owned by this node beyond its inline `SlotMap` slot.
+    pub(super) fn extra_heap_bytes(&self) -> usize {
+        match self {
+            Self::Leaf { value, .. } => value.capacity(),
+            Self::Branch(b) if b.children.spilled() => {
+                b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>()
+            }
+            _ => 0,
+        }
+    }
 }

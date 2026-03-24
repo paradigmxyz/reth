@@ -1,11 +1,10 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
-use alloy_primitives::B256;
 use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Serialize};
 use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
@@ -17,20 +16,6 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
-
-/// Serialized format for gas ramp payloads on disk.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct GasRampPayloadFile {
-    /// Engine API version (1-5).
-    ///
-    /// `None` indicates that `reth_newPayload` should be used.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) version: Option<u8>,
-    /// The block hash for FCU.
-    pub(crate) block_hash: B256,
-    /// The params to pass to newPayload.
-    pub(crate) params: serde_json::Value,
-}
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.

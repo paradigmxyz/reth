@@ -277,9 +277,6 @@ where
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
     execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
-    /// Whether the node uses hashed state as canonical storage (v2 mode).
-    /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
-    use_hashed_state: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -308,7 +305,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
-            .field("use_hashed_state", &self.use_hashed_state)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -349,7 +345,6 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -373,7 +368,6 @@ where
             evm_config,
             changeset_cache,
             execution_timing_stats: HashMap::new(),
-            use_hashed_state,
             runtime,
         }
     }
@@ -395,7 +389,6 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -429,7 +422,6 @@ where
             kind,
             evm_config,
             changeset_cache,
-            use_hashed_state,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -1544,58 +1536,52 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                // Before processing the new payload, we wait for persistence and
-                                // cache updates to complete. We do it in parallel, spawning
-                                // persistence and cache update wait tasks with Tokio, so that we
-                                // can get an unbiased breakdown on how long did every step take.
-                                //
-                                // If we first wait for persistence, and only then for cache
-                                // updates, we will offset the cache update waits by the duration of
-                                // persistence, which is incorrect.
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx = if let Some((rx, start_time, _action)) =
-                                    pending_persistence
-                                {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
-                                    self.runtime.spawn_blocking_named("wait-persist", move || {
-                                        let start = Instant::now();
-                                        let result =
-                                            rx.recv().expect("persistence state channel closed");
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                    Some(persistence_rx)
-                                } else {
-                                    None
-                                };
-
-                                let cache_wait = self.payload_validator.wait_for_caches();
-
-                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
-                                {
-                                    let (result, start_time, wait_duration) = persistence_rx
-                                        .recv()
-                                        .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(result, start_time);
-                                    Some(wait_duration)
-                                } else {
-                                    None
-                                };
-
+                            BeaconEngineMessage::RethNewPayload {
+                                payload,
+                                wait_for_persistence,
+                                wait_for_caches,
+                                tx,
+                            } => {
                                 debug!(
                                     target: "engine::tree",
-                                    ?persistence_wait,
-                                    execution_cache_wait = ?cache_wait.execution_cache,
-                                    sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Persistence finished and caches updated for reth_newPayload"
+                                    wait_for_persistence,
+                                    wait_for_caches,
+                                    "Processing reth_newPayload"
                                 );
+
+                                let persistence_wait = if wait_for_persistence {
+                                    let pending_persistence = self.persistence_state.rx.take();
+                                    if let Some((rx, start_time, _action)) = pending_persistence {
+                                        let (persistence_tx, persistence_rx) =
+                                            std::sync::mpsc::channel();
+                                        self.runtime.spawn_blocking_named(
+                                            "wait-persist",
+                                            move || {
+                                                let start = Instant::now();
+                                                let result = rx
+                                                    .recv()
+                                                    .expect("persistence state channel closed");
+                                                let _ = persistence_tx.send((
+                                                    result,
+                                                    start_time,
+                                                    start.elapsed(),
+                                                ));
+                                            },
+                                        );
+                                        let (result, start_time, wait_duration) = persistence_rx
+                                            .recv()
+                                            .expect("persistence result channel closed");
+                                        let _ = self.on_persistence_complete(result, start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        Some(Duration::ZERO)
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -1615,8 +1601,9 @@ where
                                 let timings = NewPayloadTimings {
                                     latency,
                                     persistence_wait,
-                                    execution_cache_wait: cache_wait.execution_cache,
-                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                    execution_cache_wait: cache_wait
+                                        .map(|wait| wait.execution_cache),
+                                    sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
                                 if let Err(err) =
                                     tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
@@ -2524,12 +2511,7 @@ where
 
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
-
-            // When use_hashed_state is enabled, skip reinserting the old chain — the
-            // bundle state references plain state reverts which don't exist.
-            if !self.use_hashed_state {
-                self.reinsert_reorged_blocks(old.clone());
-            }
+            self.reinsert_reorged_blocks(old.clone());
         }
 
         // update the tracked in-memory state with the new chain
@@ -2693,10 +2675,7 @@ where
 
         // try to append the block
         match self.insert_block(block) {
-            Ok(
-                InsertPayloadOk::Inserted(BlockStatus::Valid) |
-                InsertPayloadOk::AlreadySeen(BlockStatus::Valid),
-            ) => {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 return self.on_valid_downloaded_block(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
@@ -3056,6 +3035,16 @@ where
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// This is called during `engine_forkchoiceUpdated` when the CL provides payload attributes,
+    /// indicating it wants the EL to start building a new block.
+    ///
+    /// Runs [`PayloadValidator::validate_payload_attributes_against_header`](reth_engine_primitives::PayloadValidator::validate_payload_attributes_against_header) to ensure
+    /// `payloadAttributes.timestamp > headBlock.timestamp` per the Engine API spec.
+    ///
+    /// If validation passes, sends the attributes to the payload builder to start a new
+    /// payload job. If it fails, returns `INVALID_PAYLOAD_ATTRIBUTES` without rolling back
+    /// the forkchoice update.
     ///
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.

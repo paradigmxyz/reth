@@ -33,14 +33,12 @@ op-alloy-consensus = { workspace = true, optional = true, features = ["k256"] }
 secp256k1 = { workspace = true, features = ["recovery"], optional = true }
 
 # misc
-auto_impl.workspace = true
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 once_cell.workspace = true
 quanta = { workspace = true, optional = true }
-serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 
 # required by reth-codecs
@@ -63,7 +61,6 @@ alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
 secp256k1 = { workspace = true, features = ["recovery", "global-context", "rand"] }
-bincode.workspace = true
 byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -81,7 +78,6 @@ std = [
     "alloy-primitives/std",
     "revm-primitives/std",
     "serde?/std",
-    "serde_with?/std",
     "alloy-rlp/std",
     "bytes/std",
     "derive_more/std",
@@ -120,16 +116,6 @@ arbitrary = [
     "reth-chainspec/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "dashmap?/arbitrary",
-]
-serde-bincode-compat = [
-    "serde",
-    "serde_with",
-    "alloy-consensus/serde-bincode-compat",
-    "alloy-eips/serde-bincode-compat",
-    "op-alloy-consensus?/serde",
-    "op-alloy-consensus?/serde-bincode-compat",
-    "alloy-genesis/serde-bincode-compat",
-    "alloy-rpc-types-eth?/serde-bincode-compat",
 ]
 serde = [
     "dep:serde",

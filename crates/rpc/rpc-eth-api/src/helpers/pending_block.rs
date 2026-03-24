@@ -262,7 +262,9 @@ pub trait LoadPendingBlock:
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_env = builder.evm_mut().block().clone();
+        let block_gas_limit: u64 = builder.evm().block().gas_limit();
+        let basefee = builder.evm().block().basefee();
+        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
 
         let blob_params = self
             .provider()
@@ -271,15 +273,14 @@ pub trait LoadPendingBlock:
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
             let mut best_txs = self
                 .pool()
                 .best_transactions_with_attributes(BestTransactionsAttributes::new(
-                    block_env.basefee(),
-                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                    basefee,
+                    blob_gasprice,
                 ))
                 // freeze to get a block as fast as possible
                 .without_updates();
