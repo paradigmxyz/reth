@@ -326,8 +326,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { git = "ssh://git@github.com/paradigmxyz/reth-core.git", branch = "main" }
-reth-codecs-derive = { git = "ssh://git@github.com/paradigmxyz/reth-core.git", branch = "main" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", branch = "main" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", branch = "main" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -429,7 +429,7 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { git = "ssh://git@github.com/paradigmxyz/reth-core.git", branch = "main", default-features = false }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", branch = "main", default-features = false }
 
 # revm
 revm = { version = "36.0.0", default-features = false }

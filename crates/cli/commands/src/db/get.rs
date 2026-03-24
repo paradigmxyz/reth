@@ -5,7 +5,7 @@ use reth_db::{
         AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
         ReceiptMask, TransactionMask, TransactionSenderMask,
     },
-    DatabaseError, RawDupSort,
+    RawDupSort,
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -199,10 +199,8 @@ impl Command {
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
-                                    let header = HeaderTy::<N>::decompress(content[0].as_slice())
-                                        .map_err(|_| DatabaseError::Decode)?;
-                                    let block_hash = BlockHash::decompress(content[1].as_slice())
-                                        .map_err(|_| DatabaseError::Decode)?;
+                                    let header = HeaderTy::<N>::decompress(content[0].as_slice())?;
+                                    let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
                                         "Header\n{}\n\nBlockHash\n{}",
                                         serde_json::to_string_pretty(&header)?,
@@ -212,23 +210,20 @@ impl Command {
                                 StaticFileSegment::Transactions => {
                                     let transaction = <<Transactions as Table>::Value>::decompress(
                                         content[0].as_slice(),
-                                    )
-                                    .map_err(|_| DatabaseError::Decode)?;
+                                    )?;
                                     println!("{}", serde_json::to_string_pretty(&transaction)?);
                                 }
                                 StaticFileSegment::Receipts => {
                                     let receipt = <<Receipts as Table>::Value>::decompress(
                                         content[0].as_slice(),
-                                    )
-                                    .map_err(|_| DatabaseError::Decode)?;
+                                    )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::TransactionSenders => {
                                     let sender =
                                         <<tables::TransactionSenders as Table>::Value>::decompress(
                                             content[0].as_slice(),
-                                        )
-                                        .map_err(|_| DatabaseError::Decode)?;
+                                        )?;
                                     println!("{}", serde_json::to_string_pretty(&sender)?);
                                 }
                                 StaticFileSegment::AccountChangeSets => {

@@ -1,7 +1,7 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
-use reth_db_api::{table::Decompress, DatabaseError};
+use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
 use reth_static_file_types::SegmentHeader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -61,7 +61,7 @@ impl<'a> StaticFileCursor<'a> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some(M::FIRST::decompress(row[0]).map_err(|_| DatabaseError::Decode)?)),
+            Some(row) => Ok(Some(M::FIRST::decompress(row[0])?)),
             None => Ok(None),
         }
     }
@@ -74,10 +74,7 @@ impl<'a> StaticFileCursor<'a> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some((
-                M::FIRST::decompress(row[0]).map_err(|_| DatabaseError::Decode)?,
-                M::SECOND::decompress(row[1]).map_err(|_| DatabaseError::Decode)?,
-            ))),
+            Some(row) => Ok(Some((M::FIRST::decompress(row[0])?, M::SECOND::decompress(row[1])?))),
             None => Ok(None),
         }
     }
@@ -91,9 +88,9 @@ impl<'a> StaticFileCursor<'a> {
 
         match row {
             Some(row) => Ok(Some((
-                M::FIRST::decompress(row[0]).map_err(|_| DatabaseError::Decode)?,
-                M::SECOND::decompress(row[1]).map_err(|_| DatabaseError::Decode)?,
-                M::THIRD::decompress(row[2]).map_err(|_| DatabaseError::Decode)?,
+                M::FIRST::decompress(row[0])?,
+                M::SECOND::decompress(row[1])?,
+                M::THIRD::decompress(row[2])?,
             ))),
             None => Ok(None),
         }
