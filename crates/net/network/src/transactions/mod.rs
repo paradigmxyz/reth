@@ -913,12 +913,8 @@ where
         } else {
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction
-            for tx in to_propagate {
-                if !peer.seen_transactions.contains(tx.tx_hash()) {
-                    // Only include if the peer hasn't seen the transaction
-                    full_transactions.push(&tx);
-                }
-            }
+            let to_propagate = to_propagate.filter(|tx| !peer.seen_transactions.contains(tx.tx_hash()));
+            full_transactions.extend(to_propagate);
         }
 
         if full_transactions.is_empty() {
@@ -988,12 +984,8 @@ where
             if propagation_mode.is_forced() {
                 hashes.extend(to_propagate)
             } else {
-                for tx in to_propagate {
-                    if !peer.seen_transactions.contains(tx.tx_hash()) {
-                        // Include if the peer hasn't seen it
-                        hashes.push(&tx);
-                    }
-                }
+                let to_propagate = to_propagate.filter(|tx| !peer.seen_transactions.contains(tx.tx_hash()));
+                hashes.extend(to_propagate);
             }
 
             let new_pooled_hashes = hashes.build();
