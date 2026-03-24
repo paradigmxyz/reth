@@ -7832,7 +7832,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#08cb942870f1ede46e7fb563f5aafe816ddecca7"
+source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7852,7 +7852,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#08cb942870f1ede46e7fb563f5aafe816ddecca7"
+source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10572,7 +10572,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?branch=main#08cb942870f1ede46e7fb563f5aafe816ddecca7"
+source = "git+https://github.com/paradigmxyz/reth-core?branch=main#2fa119d29319a3ebdbb7e4a89b35e9418fd32b1a"
 dependencies = [
  "zstd",
 ]
