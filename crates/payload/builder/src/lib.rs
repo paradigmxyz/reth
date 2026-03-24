@@ -29,6 +29,8 @@
 //! use std::sync::Arc;
 //! use std::task::{Context, Poll};
 //! use alloy_consensus::{Header, Block};
+//! use alloy_primitives::B256;
+//! use reth_payload_builder::PayloadId;
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives_traits::SealedBlock;
@@ -42,7 +44,7 @@
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
 //! fn new_payload_job(&self, _parent: B256, attr: PayloadAttributes, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
-//!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
+//!         Ok(EmptyBlockPayloadJob{ attributes: attr, parent })
 //!     }
 //!
 //! }
@@ -50,6 +52,7 @@
 //! /// A [PayloadJob] that builds empty blocks.
 //! pub struct EmptyBlockPayloadJob {
 //!   attributes: PayloadAttributes,
+//!   parent: B256,
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
@@ -61,7 +64,7 @@
 //!     // NOTE: some fields are omitted here for brevity
 //!     let block = Block {
 //!         header: Header {
-//!             parent_hash: self.attributes.parent,
+//!             parent_hash: self.parent,
 //!             timestamp: self.attributes.timestamp,
 //!             beneficiary: self.attributes.suggested_fee_recipient,
 //!             ..Default::default()
