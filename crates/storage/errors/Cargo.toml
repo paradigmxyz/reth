@@ -42,4 +42,5 @@ std = [
     "reth-prune-types/std",
     "reth-static-file-types/std",
     "revm-state/std",
+    "reth-codecs/std",
 ]

@@ -54,6 +54,7 @@ std = [
     "reth-zstd-compressors/std",
     "serde_json/std",
     "serde_with/std",
+    "reth-codecs?/std",
 ]
 reth-codec = [
     "std",
