@@ -149,12 +149,12 @@ impl PruneModes {
             if let Some(PruneMode::Distance(limit)) = prune_mode {
                 // check if distance exceeds the configured limit
                 if distance > *limit {
-                    // but only if we haven't pruned the target yet, if we don't have a checkpoint
-                    // yet, it's fully unpruned yet
-                    let pruned_height = checkpoint
+                    // Reject only when we know the history has already been pruned past target.
+                    // If checkpoint is missing, treat it as not pruned yet.
+                    if checkpoint
                         .and_then(|checkpoint| checkpoint.1.block_number)
-                        .unwrap_or(latest_block);
-                    if pruned_height >= target_block {
+                        .is_some_and(|pruned_height| pruned_height >= target_block)
+                    {
                         // we've pruned the target block already and can't unwind past it
                         return Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
                             latest_block,
@@ -262,23 +262,12 @@ mod tests {
         // Distance is 50, limit is 100 - OK
         assert!(prune_modes.ensure_unwind_target_unpruned(1000, 950, &[]).is_ok());
 
-        // Test case 3: Distance exceeds limit with no checkpoint
-        // NOTE: Current implementation assumes pruned_height = latest_block when no checkpoint
-        // exists This means it will fail because it assumes we've pruned up to block 1000 >
-        // target 800
+        // Test case 3: Distance exceeds limit with no checkpoint - should succeed because
+        // missing checkpoint means we cannot prove the target was pruned yet.
         let prune_modes =
             PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
-        // Distance is 200 > 100, no checkpoint - current impl treats as pruned up to latest_block
-        let result = prune_modes.ensure_unwind_target_unpruned(1000, 800, &[]);
-        assert_matches!(
-            result,
-            Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
-                latest_block: 1000,
-                target_block: 800,
-                history_type: HistoryType::AccountHistory,
-                limit: 100
-            })
-        );
+        // Distance is 200 > 100, no checkpoint: should not fail.
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 800, &[]).is_ok());
 
         // Test case 4: Distance exceeds limit and target is pruned - should fail
         let prune_modes =
