@@ -2822,7 +2822,6 @@ where
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
-        // The commit_duration is unknown at this point so we use Duration::ZERO.
         if let Some(stats) = timing_stats {
             if let Some(threshold) = self.config.slow_block_threshold() {
                 let total_duration = stats.execution_duration + stats.state_hash_duration;
