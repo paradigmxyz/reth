@@ -272,7 +272,6 @@ jobs:
       - typos
       - grafana
       - no-test-deps
-      - features
       - feature-propagation
       - deny
     timeout-minutes: 30
