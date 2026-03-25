@@ -33,7 +33,7 @@ type NodeConfigModifier<C> = Box<dyn Fn(NodeConfig<C>) -> NodeConfig<C> + Send +
 pub struct E2ETestSetupBuilder<N, F>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
+    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
         + Send
         + Sync
         + Copy
@@ -50,7 +50,7 @@ where
 impl<N, F> E2ETestSetupBuilder<N, F>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
+    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
         + Send
         + Sync
         + Copy
@@ -207,7 +207,7 @@ where
 impl<N, F> std::fmt::Debug for E2ETestSetupBuilder<N, F>
 where
     N: NodeBuilderHelper,
-    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
+    F: Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
         + Send
         + Sync
         + Copy

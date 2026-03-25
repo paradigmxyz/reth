@@ -85,6 +85,7 @@ std = [
     "serde_json/std",
     "revm-database/std",
     "revm-state/std",
+    "reth-codecs?/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [

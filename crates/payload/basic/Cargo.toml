@@ -38,3 +38,4 @@ metrics.workspace = true
 
 # misc
 tracing.workspace = true
+serde.workspace = true

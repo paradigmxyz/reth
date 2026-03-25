@@ -99,8 +99,6 @@ members = [
     "crates/stages/types/",
     "crates/static-file/static-file",
     "crates/static-file/types/",
-    "crates/storage/codecs/",
-    "crates/storage/codecs/derive/",
     "crates/storage/db-api/",
     "crates/storage/db-common",
     "crates/storage/db-models/",
@@ -111,7 +109,6 @@ members = [
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
     "crates/storage/storage-api/",
-    "crates/storage/zstd-compressors/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -329,8 +326,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { path = "crates/storage/codecs" }
-reth-codecs-derive = { path = "crates/storage/codecs/derive" }
+reth-codecs = { version = "0.1.0", default-features = false }
+reth-codecs-derive = "0.1.0"
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -432,7 +429,7 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
+reth-zstd-compressors = { version = "0.1.0", default-features = false }
 
 # revm
 revm = { version = "36.0.0", default-features = false }
@@ -681,7 +678,6 @@ memmap2 = "0.9.4"
 mev-share-sse = { version = "0.5.0", default-features = false }
 num-traits = "0.2.15"
 page_size = "0.6.0"
-parity-scale-codec = "3.2.1"
 plain_hasher = "0.2"
 pretty_assertions = "1.4"
 ratatui = { version = "0.30", default-features = false }

@@ -1,8 +1,10 @@
 //! Trait abstractions used by the payload crate.
 
+use alloy_primitives::B256;
+use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
 
@@ -19,7 +21,7 @@ use std::future::Future;
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
     /// Represents the payload attributes type that is used to spawn this payload job.
-    type PayloadAttributes: PayloadBuilderAttributes + std::fmt::Debug;
+    type PayloadAttributes: PayloadAttributes + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Self::BuiltPayload, PayloadBuilderError>>
         + Send
@@ -108,7 +110,9 @@ pub trait PayloadJobGenerator {
     /// returned directly.
     fn new_payload_job(
         &self,
+        parent: B256,
         attr: <Self::Job as PayloadJob>::PayloadAttributes,
+        id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError>;
 
     /// Handles new chain state events

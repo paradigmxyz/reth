@@ -1,8 +1,9 @@
+use alloy_primitives::B256;
 use futures_util::StreamExt;
-use reth_node_api::{BlockBody, PayloadKind};
+use reth_node_api::{BlockBody, PayloadAttributes, PayloadKind};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use reth_payload_builder_primitives::Events;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
@@ -12,14 +13,14 @@ pub struct PayloadTestContext<T: PayloadTypes> {
     payload_builder: PayloadBuilderHandle<T>,
     pub timestamp: u64,
     #[debug(skip)]
-    attributes_generator: Box<dyn Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync>,
+    attributes_generator: Box<dyn Fn(u64) -> T::PayloadAttributes + Send + Sync>,
 }
 
 impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Creates a new payload helper
     pub async fn new(
         payload_builder: PayloadBuilderHandle<T>,
-        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes + Send + Sync + 'static,
+        attributes_generator: impl Fn(u64) -> T::PayloadAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
@@ -33,18 +34,20 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     }
 
     /// Creates a new payload job from static attributes
-    pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadBuilderAttributes> {
+    pub async fn new_payload(&mut self) -> eyre::Result<(T::PayloadAttributes, PayloadId)> {
         self.timestamp += 1;
         let attributes = (self.attributes_generator)(self.timestamp);
-        self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
-        Ok(attributes)
+        let parent_hash = B256::ZERO;
+        let payload_id = self
+            .payload_builder
+            .send_new_payload(parent_hash, attributes.clone())
+            .await
+            .unwrap()?;
+        Ok((attributes, payload_id))
     }
 
     /// Asserts that the next event is a payload attributes event
-    pub async fn expect_attr_event(
-        &mut self,
-        attrs: T::PayloadBuilderAttributes,
-    ) -> eyre::Result<()> {
+    pub async fn expect_attr_event(&mut self, attrs: T::PayloadAttributes) -> eyre::Result<()> {
         let first_event = self.payload_event_stream.next().await.unwrap()?;
         if let Events::Attributes(attr) = first_event {
             assert_eq!(attrs.timestamp(), attr.timestamp());
