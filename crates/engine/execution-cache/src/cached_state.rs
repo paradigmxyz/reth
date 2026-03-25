@@ -27,10 +27,6 @@ use std::{
 };
 use tracing::{debug_span, instrument, trace, warn};
 
-// ----------------------------------------
-// Fixed-cache sizing helpers
-// ----------------------------------------
-
 /// Alignment in bytes for entries in the fixed-cache.
 ///
 /// Each bucket in `fixed-cache` is aligned to 128 bytes (cache line) due to
@@ -86,10 +82,6 @@ impl CacheConfig for EpochCacheConfig {
 /// Type alias for the fixed-cache used for accounts and storage.
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
 
-// ----------------------------------------
-// CachedStatus
-// ----------------------------------------
-
 /// Represents the status of a key in the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CachedStatus<T> {
@@ -98,10 +90,6 @@ pub enum CachedStatus<T> {
     /// The key exists in cache and has a specific value.
     Cached(T),
 }
-
-// ----------------------------------------
-// CachedStateMetrics
-// ----------------------------------------
 
 /// Metrics for the cached state provider, showing hits / misses for each cache
 #[derive(Metrics, Clone)]
@@ -192,10 +180,6 @@ impl CachedStateMetrics {
     }
 }
 
-// ----------------------------------------
-// CacheStats
-// ----------------------------------------
-
 /// Cache hit/miss statistics for detailed block logging.
 #[derive(Debug, Default)]
 pub struct CacheStats {
@@ -274,10 +258,6 @@ impl CacheStats {
         self.code_misses.load(Ordering::Relaxed)
     }
 }
-
-// ----------------------------------------
-// CacheStatsHandler
-// ----------------------------------------
 
 /// A stats handler for fixed-cache that tracks collisions and size.
 ///
@@ -367,10 +347,6 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
         self.decrement_size();
     }
 }
-
-// ----------------------------------------
-// ExecutionCache
-// ----------------------------------------
 
 /// Execution cache used during block processing.
 ///
@@ -658,10 +634,6 @@ impl ExecutionCache {
     }
 }
 
-// ----------------------------------------
-// SavedCache
-// ----------------------------------------
-
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
 #[derive(Debug, Clone)]
@@ -751,10 +723,6 @@ impl SavedCache {
         self.usage_guard.clone()
     }
 }
-
-// ----------------------------------------
-// CachedStateProvider
-// ----------------------------------------
 
 /// A wrapper of a state provider and a shared cache.
 ///
