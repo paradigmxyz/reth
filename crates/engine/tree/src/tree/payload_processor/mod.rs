@@ -2,13 +2,13 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache},
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, StateProviderBuilder, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache,
+    StateProviderBuilder, TreeConfig, WaitForCaches,
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -1004,9 +1004,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        cached_state::{CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache},
         payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
+        CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache,
         StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};

@@ -50,7 +50,6 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
-mod cached_state;
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -65,15 +64,15 @@ mod trie_updates;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
-pub use cached_state::{
-    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
-};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+pub use reth_execution_cache::{
+    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+};
 
 pub mod state;
 
