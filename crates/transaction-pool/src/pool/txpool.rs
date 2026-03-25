@@ -3105,6 +3105,35 @@ mod tests {
     }
 
     #[test]
+    fn insert_replace_underpriced_rounds_up_minimum_bump() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { minimal_protocol_basefee: 0, ..Default::default() };
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(1);
+        tx.set_max_fee(1);
+
+        let first = f.validated(tx.clone());
+        let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        let mut replacement = f.validated(tx.rng_hash().inc_price());
+        replacement.transaction.set_priority_fee(1);
+        replacement.transaction.set_max_fee(2);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        replacement.transaction.set_priority_fee(2);
+        replacement.transaction.set_max_fee(2);
+        let replaced = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap();
+        assert!(replaced.replaced_tx.is_some());
+        assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
     fn insert_conflicting_type_normal_to_blob() {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;

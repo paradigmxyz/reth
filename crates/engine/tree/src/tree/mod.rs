@@ -24,9 +24,7 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
-};
+use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -277,9 +275,6 @@ where
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
     execution_timing_stats: HashMap<B256, Box<ExecutionTimingStats>>,
-    /// Whether the node uses hashed state as canonical storage (v2 mode).
-    /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
-    use_hashed_state: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -308,7 +303,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
-            .field("use_hashed_state", &self.use_hashed_state)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -349,7 +343,6 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -373,7 +366,6 @@ where
             evm_config,
             changeset_cache,
             execution_timing_stats: HashMap::new(),
-            use_hashed_state,
             runtime,
         }
     }
@@ -395,7 +387,6 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
-        use_hashed_state: bool,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -429,7 +420,6 @@ where
             kind,
             evm_config,
             changeset_cache,
-            use_hashed_state,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -791,15 +781,10 @@ where
         // If the canonical chain is ahead of the new chain,
         // gather all blocks until new head number.
         while current_canonical_number > current_number {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-                current_canonical_number -= 1;
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
+            current_canonical_number -= 1;
         }
 
         // Both new and old chain pointers are now at the same height.
@@ -808,14 +793,9 @@ where
         // Walk both chains from specified hashes at same height until
         // a common ancestor (fork block) is reached.
         while old_hash != current_hash {
-            if let Some(block) = self.canonical_block_by_hash(old_hash)? {
-                old_hash = block.recovered_block().parent_hash();
-                old_chain.push(block);
-            } else {
-                // This shouldn't happen as we're walking back the canonical chain
-                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None)
-            }
+            let block = self.canonical_block_by_hash(old_hash)?;
+            old_hash = block.recovered_block().parent_hash();
+            old_chain.push(block);
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
             {
@@ -942,36 +922,22 @@ where
         let new_head_hash = canonical_header.hash();
         let new_head_number = canonical_header.number();
 
-        // Try to load the canonical ancestor's block
-        match self.canonical_block_by_hash(new_head_hash)? {
-            Some(executed_block) => {
-                // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![executed_block],
-                    old: old_blocks,
-                });
+        // Load the canonical ancestor's block
+        let executed_block = self.canonical_block_by_hash(new_head_hash)?;
+        // Perform the reorg to properly handle the unwind
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
 
-                // CRITICAL: Update the canonical head after the reorg
-                // This ensures get_canonical_head() returns the correct block
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+        // CRITICAL: Update the canonical head after the reorg
+        // This ensures get_canonical_head() returns the correct block
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-                debug!(
-                    target: "engine::tree",
-                    block_number = new_head_number,
-                    block_hash = ?new_head_hash,
-                    "Successfully loaded canonical ancestor into memory via reorg"
-                );
-            }
-            None => {
-                // Fallback: update header only if block cannot be found
-                warn!(
-                    target: "engine::tree",
-                    block_hash = ?new_head_hash,
-                    "Could not find canonical ancestor block, updating header only"
-                );
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
-            }
-        }
+        debug!(
+            target: "engine::tree",
+            block_number = new_head_number,
+            block_hash = ?new_head_hash,
+            "Successfully loaded canonical ancestor into memory via reorg"
+        );
 
         Ok(())
     }
@@ -997,18 +963,17 @@ where
             return Ok(());
         }
 
-        // Try to load the block from storage
-        if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
-            self.canonical_in_memory_state
-                .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
+        // Load the block from storage
+        let executed_block = self.canonical_block_by_hash(block_hash)?;
+        self.canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
-            debug!(
-                target: "engine::tree",
-                block_number,
-                block_hash = ?block_hash,
-                "Added canonical block to in-memory state"
-            );
-        }
+        debug!(
+            target: "engine::tree",
+            block_number,
+            block_hash = ?block_hash,
+            "Added canonical block to in-memory state"
+        );
 
         Ok(())
     }
@@ -1026,7 +991,6 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<T::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
@@ -1039,13 +1003,13 @@ where
         }
 
         // Return early if we are on the correct fork
-        if let Some(result) = self.handle_canonical_head(state, &attrs, version)? {
+        if let Some(result) = self.handle_canonical_head(state, &attrs)? {
             return Ok(result);
         }
 
         // Attempt to apply a chain update when the head differs from our canonical chain.
         // This handles reorgs and chain extensions by making the specified head canonical.
-        if let Some(result) = self.apply_chain_update(state, &attrs, version)? {
+        if let Some(result) = self.apply_chain_update(state, &attrs)? {
             return Ok(result);
         }
 
@@ -1096,7 +1060,6 @@ where
         &self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Process the forkchoice update by trying to make the head block canonical
         //
@@ -1134,7 +1097,7 @@ where
                     ProviderError::HeaderNotFound(state.head_block_hash.into())
                 })?;
             // Clone only when we actually need to process the attributes
-            let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+            let updated = self.process_payload_attributes(attr.clone(), &tip, state);
             return Ok(Some(TreeOutcome::new(updated)));
         }
 
@@ -1157,7 +1120,6 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>,
-        version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
@@ -1180,12 +1142,8 @@ where
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     // Clone only when we actually need to process the attributes
-                    let updated = self.process_payload_attributes(
-                        attr.clone(),
-                        &canonical_header,
-                        state,
-                        version,
-                    );
+                    let updated =
+                        self.process_payload_attributes(attr.clone(), &canonical_header, state);
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
             }
@@ -1216,7 +1174,7 @@ where
 
             if let Some(attr) = attrs {
                 // Clone only when we actually need to process the attributes
-                let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
+                let updated = self.process_payload_attributes(attr.clone(), &tip, state);
                 return Ok(Some(TreeOutcome::new(updated)));
             }
 
@@ -1489,17 +1447,11 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated {
-                                state,
-                                payload_attrs,
-                                tx,
-                                version,
-                            } => {
+                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
-                                let mut output =
-                                    self.on_forkchoice_updated(state, payload_attrs, version);
+                                let mut output = self.on_forkchoice_updated(state, payload_attrs);
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
@@ -1569,58 +1521,52 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
-                                // Before processing the new payload, we wait for persistence and
-                                // cache updates to complete. We do it in parallel, spawning
-                                // persistence and cache update wait tasks with Tokio, so that we
-                                // can get an unbiased breakdown on how long did every step take.
-                                //
-                                // If we first wait for persistence, and only then for cache
-                                // updates, we will offset the cache update waits by the duration of
-                                // persistence, which is incorrect.
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-
-                                let pending_persistence = self.persistence_state.rx.take();
-                                let persistence_rx = if let Some((rx, start_time, _action)) =
-                                    pending_persistence
-                                {
-                                    let (persistence_tx, persistence_rx) =
-                                        std::sync::mpsc::channel();
-                                    self.runtime.spawn_blocking_named("wait-persist", move || {
-                                        let start = Instant::now();
-                                        let result =
-                                            rx.recv().expect("persistence state channel closed");
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                    Some(persistence_rx)
-                                } else {
-                                    None
-                                };
-
-                                let cache_wait = self.payload_validator.wait_for_caches();
-
-                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
-                                {
-                                    let (result, start_time, wait_duration) = persistence_rx
-                                        .recv()
-                                        .expect("persistence result channel closed");
-                                    let _ = self.on_persistence_complete(result, start_time);
-                                    Some(wait_duration)
-                                } else {
-                                    None
-                                };
-
+                            BeaconEngineMessage::RethNewPayload {
+                                payload,
+                                wait_for_persistence,
+                                wait_for_caches,
+                                tx,
+                            } => {
                                 debug!(
                                     target: "engine::tree",
-                                    ?persistence_wait,
-                                    execution_cache_wait = ?cache_wait.execution_cache,
-                                    sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Persistence finished and caches updated for reth_newPayload"
+                                    wait_for_persistence,
+                                    wait_for_caches,
+                                    "Processing reth_newPayload"
                                 );
+
+                                let persistence_wait = if wait_for_persistence {
+                                    let pending_persistence = self.persistence_state.rx.take();
+                                    if let Some((rx, start_time, _action)) = pending_persistence {
+                                        let (persistence_tx, persistence_rx) =
+                                            std::sync::mpsc::channel();
+                                        self.runtime.spawn_blocking_named(
+                                            "wait-persist",
+                                            move || {
+                                                let start = Instant::now();
+                                                let result = rx
+                                                    .recv()
+                                                    .expect("persistence state channel closed");
+                                                let _ = persistence_tx.send((
+                                                    result,
+                                                    start_time,
+                                                    start.elapsed(),
+                                                ));
+                                            },
+                                        );
+                                        let (result, start_time, wait_duration) = persistence_rx
+                                            .recv()
+                                            .expect("persistence result channel closed");
+                                        let _ = self.on_persistence_complete(result, start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        Some(Duration::ZERO)
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -1640,8 +1586,9 @@ where
                                 let timings = NewPayloadTimings {
                                     latency,
                                     persistence_wait,
-                                    execution_cache_wait: cache_wait.execution_cache,
-                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                    execution_cache_wait: cache_wait
+                                        .map(|wait| wait.execution_cache),
+                                    sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
                                 };
                                 if let Err(err) =
                                     tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
@@ -2029,11 +1976,11 @@ where
     /// pruned for a given block, this operation will return an error. On archive nodes, it
     /// can retrieve any block.
     #[instrument(level = "debug", target = "engine::tree", skip(self))]
-    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
+    fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(Some(block.clone()))
+            return Ok(block.clone())
         }
 
         let (block, senders) = self
@@ -2075,11 +2022,22 @@ where
             },
         });
 
-        Ok(Some(ExecutedBlock::new(
+        Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output,
             trie_data,
-        )))
+        ))
+    }
+
+    /// Returns `true` if a block with the given hash is known, either in memory or in the
+    /// database. This is a lightweight existence check that avoids constructing a full
+    /// [`SealedHeader`].
+    fn has_block_by_hash(&self, hash: B256) -> ProviderResult<bool> {
+        if self.state.tree_state.contains_hash(&hash) {
+            Ok(true)
+        } else {
+            self.provider.is_known(hash)
+        }
     }
 
     /// Return sealed block header from in-memory state or database by hash.
@@ -2126,7 +2084,7 @@ where
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        if self.sealed_header_by_hash(parent_hash)?.is_some() {
+        if self.has_block_by_hash(parent_hash)? {
             return Ok(Some(parent_hash))
         }
 
@@ -2140,7 +2098,7 @@ where
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_block.is_none() && self.sealed_header_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.has_block_by_hash(current_hash)? {
                 return Ok(Some(current_hash))
             }
         }
@@ -2538,12 +2496,7 @@ where
 
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
-
-            // When use_hashed_state is enabled, skip reinserting the old chain — the
-            // bundle state references plain state reverts which don't exist.
-            if !self.use_hashed_state {
-                self.reinsert_reorged_blocks(old.clone());
-            }
+            self.reinsert_reorged_blocks(old.clone());
         }
 
         // update the tracked in-memory state with the new chain
@@ -2707,10 +2660,7 @@ where
 
         // try to append the block
         match self.insert_block(block) {
-            Ok(
-                InsertPayloadOk::Inserted(BlockStatus::Valid) |
-                InsertPayloadOk::AlreadySeen(BlockStatus::Valid),
-            ) => {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 return self.on_valid_downloaded_block(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
@@ -2807,7 +2757,7 @@ where
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
         // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
             convert_to_block(self, input)?;
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
         }
@@ -3071,6 +3021,16 @@ where
 
     /// Validates the payload attributes with respect to the header and fork choice state.
     ///
+    /// This is called during `engine_forkchoiceUpdated` when the CL provides payload attributes,
+    /// indicating it wants the EL to start building a new block.
+    ///
+    /// Runs [`PayloadValidator::validate_payload_attributes_against_header`](reth_engine_primitives::PayloadValidator::validate_payload_attributes_against_header) to ensure
+    /// `payloadAttributes.timestamp > headBlock.timestamp` per the Engine API spec.
+    ///
+    /// If validation passes, sends the attributes to the payload builder to start a new
+    /// payload job. If it fails, returns `INVALID_PAYLOAD_ATTRIBUTES` without rolling back
+    /// the forkchoice update.
+    ///
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
@@ -3078,7 +3038,6 @@ where
         attrs: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
-        version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
             self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
@@ -3091,34 +3050,27 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <T::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
-            state.head_block_hash,
-            attrs,
-            version as u8,
-        ) {
-            Ok(attributes) => {
-                // send the payload to the builder and return the receiver for the pending payload
-                // id, initiating payload job is handled asynchronously
-                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
-                // Client software MUST respond to this method call in the following way:
-                // {
-                //      payloadStatus: {
-                //          status: VALID,
-                //          latestValidHash: forkchoiceState.headBlockHash,
-                //          validationError: null
-                //      },
-                //      payloadId: buildProcessId
-                // }
-                //
-                // if the payload is deemed VALID and the build process has begun.
-                OnForkChoiceUpdated::updated_with_pending_payload_id(
-                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
-                    pending_payload_id,
-                )
-            }
-            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
-        }
+        // send the payload to the builder and return the receiver for the pending payload
+        // id, initiating payload job is handled asynchronously
+        let pending_payload_id =
+            self.payload_builder.send_new_payload(state.head_block_hash, attrs);
+
+        // Client software MUST respond to this method call in the following way:
+        // {
+        //      payloadStatus: {
+        //          status: VALID,
+        //          latestValidHash: forkchoiceState.headBlockHash,
+        //          validationError: null
+        //      },
+        //      payloadId: buildProcessId
+        // }
+        //
+        // if the payload is deemed VALID and the build process has begun.
+        OnForkChoiceUpdated::updated_with_pending_payload_id(
+            PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+            pending_payload_id,
+        )
     }
 
     /// Remove all blocks up to __and including__ the given block number.

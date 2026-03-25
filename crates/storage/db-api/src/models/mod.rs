@@ -1,18 +1,13 @@
 //! Implements data structures specific to the database
 
 use crate::{
-    table::{Compress, Decode, Decompress, Encode},
+    table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_consensus::Header;
-use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Bytes, Log, B256, U256};
-use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
-use reth_primitives_traits::{Account, Bytecode, StorageEntry};
-use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, *};
+use alloy_primitives::{Address, B256, U256};
+use reth_codecs::{add_arbitrary_tests, impl_compression_for_compact, Compact};
+use reth_prune_types::PruneSegment;
+use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
@@ -212,94 +207,7 @@ impl Decode for ClientVersion {
     }
 }
 
-/// Implements compression for Compact type.
-macro_rules! impl_compression_for_compact {
-    ($($name:ident$(<$($generic:ident),*>)?),+) => {
-        $(
-            impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Compress for $name$(<$($generic),*>)? {
-                type Compressed = Vec<u8>;
-
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-                    let _ = Compact::to_compact(self, buf);
-                }
-            }
-
-            impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Decompress for $name$(<$($generic),*>)? {
-                fn decompress(value: &[u8]) -> Result<$name$(<$($generic),*>)?, $crate::DatabaseError> {
-                    let (obj, _) = Compact::from_compact(value, value.len());
-                    Ok(obj)
-                }
-            }
-        )+
-    };
-}
-
-impl_compression_for_compact!(
-    Bytes,
-    Header,
-    Account,
-    Log,
-    Receipt<T>,
-    TxType,
-    StorageEntry,
-    BranchNodeCompact,
-    StoredNibbles,
-    StoredNibblesSubKey,
-    StorageTrieEntry,
-    PackedStoredNibbles,
-    PackedStoredNibblesSubKey,
-    PackedStorageTrieEntry,
-    StoredBlockBodyIndices,
-    StoredBlockOmmers<H>,
-    StoredBlockWithdrawals,
-    StaticFileBlockWithdrawals,
-    Bytecode,
-    AccountBeforeTx,
-    StorageBeforeTx,
-    TransactionSigned,
-    CompactU256,
-    StageCheckpoint,
-    PruneCheckpoint,
-    ClientVersion,
-    // Non-DB
-    GenesisAccount
-);
-
-#[cfg(feature = "op")]
-mod op {
-    use super::*;
-    use op_alloy_consensus::{OpReceipt, OpTxEnvelope};
-
-    impl_compression_for_compact!(OpTxEnvelope, OpReceipt);
-}
-
-macro_rules! impl_compression_fixed_compact {
-    ($($name:tt),+) => {
-        $(
-            impl Compress for $name {
-                type Compressed = Vec<u8>;
-
-                fn uncompressable_ref(&self) -> Option<&[u8]> {
-                    Some(self.as_ref())
-                }
-
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-                    let _ = Compact::to_compact(self, buf);
-                }
-            }
-
-            impl Decompress for $name {
-                fn decompress(value: &[u8]) -> Result<$name, $crate::DatabaseError> {
-                    let (obj, _) = Compact::from_compact(&value, value.len());
-                    Ok(obj)
-                }
-            }
-
-        )+
-    };
-}
-
-impl_compression_fixed_compact!(B256, Address);
+impl_compression_for_compact!(StoredBlockOmmers<H>, CompactU256);
 
 /// Adds wrapper structs for some primitive types so they can use `StructFlags` from Compact, when
 /// used as pure table values.

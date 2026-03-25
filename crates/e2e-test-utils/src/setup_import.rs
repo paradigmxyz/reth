@@ -1,6 +1,7 @@
 //! Setup utilities for importing RLP chain data before starting nodes.
 
 use crate::{node::NodeTestContext, NodeHelperType, Wallet};
+use alloy_rpc_types_engine::PayloadAttributes;
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig};
 use reth_config::Config;
@@ -59,11 +60,7 @@ pub async fn setup_engine_with_chain_import(
     is_dev: bool,
     tree_config: TreeConfig,
     rlp_path: &Path,
-    attributes_generator: impl Fn(u64) -> reth_payload_builder::EthPayloadBuilderAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
+    attributes_generator: impl Fn(u64) -> PayloadAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<ChainImportResult> {
     let runtime = reth_tasks::Runtime::test();
 
@@ -273,10 +270,10 @@ pub fn load_forkchoice_state(path: &Path) -> eyre::Result<alloy_rpc_types_engine
 mod tests {
     use super::*;
     use crate::test_rlp_utils::{create_fcu_json, generate_test_blocks, write_blocks_to_rlp};
+    use alloy_rpc_types_engine::PayloadAttributes;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::mdbx::DatabaseArguments;
     use reth_ethereum_primitives::Block;
-    use reth_payload_builder::EthPayloadBuilderAttributes;
     use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, BlockHashReader, BlockNumReader, BlockReaderIdExt,
@@ -569,7 +566,7 @@ mod tests {
             false,
             TreeConfig::default(),
             &rlp_path,
-            |_| EthPayloadBuilderAttributes::default(),
+            |_| PayloadAttributes::default(),
         )
         .await
         .expect("Failed to setup nodes with chain import");

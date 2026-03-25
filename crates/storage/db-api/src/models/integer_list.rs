@@ -1,12 +1,10 @@
 //! Implements [`Compress`] and [`Decompress`] for [`IntegerList`]
 
-use crate::{
-    table::{Compress, Decompress},
-    DatabaseError,
-};
+use crate::table::{Compress, Decompress};
 use bytes::BufMut;
 use core::fmt;
 use derive_more::Deref;
+use reth_codecs::DecompressError;
 use roaring::RoaringTreemap;
 
 /// A data structure that uses Roaring Bitmaps to efficiently store a list of integers.
@@ -171,8 +169,8 @@ impl Compress for IntegerList {
 }
 
 impl Decompress for IntegerList {
-    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
-        Self::from_bytes(value).map_err(|_| DatabaseError::Decode)
+    fn decompress(value: &[u8]) -> Result<Self, DecompressError> {
+        Self::from_bytes(value).map_err(DecompressError::new)
     }
 }
 

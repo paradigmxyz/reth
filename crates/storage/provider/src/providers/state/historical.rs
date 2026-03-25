@@ -20,7 +20,7 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::{masked::MaskedTrieCursorFactory, InMemoryTrieCursorFactory},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
@@ -156,8 +156,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_accounts_history(self.provider, rocksdb_ref)?;
             reader.account_history_info(
                 address,
                 self.block_number,
@@ -181,8 +181,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
-            let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+        self.provider.with_rocksdb_snapshot(|rocksdb_ref| {
+            let mut reader = EitherReader::new_storages_history(self.provider, rocksdb_ref)?;
             reader.storage_history_info(
                 address,
                 lookup_key,
@@ -525,18 +525,16 @@ impl<
             let nodes_sorted = input.nodes.into_sorted();
             let state_sorted = input.state.into_sorted();
             TrieWitness::new(
-                MaskedTrieCursorFactory::new(
-                    InMemoryTrieCursorFactory::new(
-                        reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                        &nodes_sorted,
-                    ),
-                    input.prefix_sets.freeze(),
+                InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    &nodes_sorted,
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
                     &state_sorted,
                 ),
             )
+            .with_prefix_sets_mut(input.prefix_sets)
             .always_include_root_node()
             .compute(target)
             .map_err(ProviderError::from)

@@ -2,7 +2,7 @@
 
 use crate::{
     transaction::signed::RecoveryError, BlockHeader, FullSignedTx, InMemorySize, MaybeSerde,
-    MaybeSerdeBincodeCompat, SignedTransaction,
+    SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
@@ -13,9 +13,9 @@ use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
+pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
 
-impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
+impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> {}
 
 /// Abstraction for block's body.
 ///

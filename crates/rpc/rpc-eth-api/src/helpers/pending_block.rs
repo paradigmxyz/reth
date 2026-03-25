@@ -262,7 +262,9 @@ pub trait LoadPendingBlock:
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_env = builder.evm_mut().block().clone();
+        let block_gas_limit: u64 = builder.evm().block().gas_limit();
+        let basefee = builder.evm().block().basefee();
+        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
 
         let blob_params = self
             .provider()
@@ -271,15 +273,14 @@ pub trait LoadPendingBlock:
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
             let mut best_txs = self
                 .pool()
                 .best_transactions_with_attributes(BestTransactionsAttributes::new(
-                    block_env.basefee(),
-                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                    basefee,
+                    blob_gasprice,
                 ))
                 // freeze to get a block as fast as possible
                 .without_updates();
@@ -318,7 +319,8 @@ pub trait LoadPendingBlock:
 
                 // There's only limited amount of blob space available per block, so we need to
                 // check if the EIP-4844 can still fit in the block
-                if let Some(tx_blob_gas) = tx.blob_gas_used() &&
+                let tx_blob_gas = tx.blob_gas_used();
+                if let Some(tx_blob_gas) = tx_blob_gas &&
                     sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
                 {
                     // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -335,7 +337,7 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let gas_used = match builder.execute_transaction(tx.clone()) {
+                let gas_used = match builder.execute_transaction(tx) {
                     Ok(gas_used) => gas_used,
                     Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                         error,
@@ -360,7 +362,7 @@ pub trait LoadPendingBlock:
                 };
 
                 // add to the total blob gas used if the transaction successfully executed
-                if let Some(tx_blob_gas) = tx.blob_gas_used() {
+                if let Some(tx_blob_gas) = tx_blob_gas {
                     sum_blob_gas_used += tx_blob_gas;
 
                     // if we've reached the max data gas per block, we can skip blob txs entirely

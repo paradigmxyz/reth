@@ -71,11 +71,14 @@ on:
         required: false
         default: "true"
         type: boolean
+      otlp:
+        description: "Export OTLP traces and logs"
+        required: false
+        default: "true"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
-  BASELINE: base
-  SEED: reth
   RUSTC_WRAPPER: "sccache"
   BENCH_RUNNERS: 2
 
@@ -110,6 +113,7 @@ jobs:
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       abba: ${{ steps.args.outputs.abba }}
+      otlp: ${{ steps.args.outputs.otlp }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -151,6 +155,7 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
+              var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -177,10 +182,10 @@ jobs:
               const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'no-slack']);
-              const boolDefaultTrue = new Set(['reth_newPayload', 'abba']);
+              const boolDefaultTrue = new Set(['reth_newPayload', 'abba', 'otlp']);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -250,7 +255,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -270,6 +275,7 @@ jobs:
               bigBlocks = blocks === 'big' ? 'true' : 'false';
               var rethNewPayload = defaults.reth_newPayload;
               var abba = defaults.abba;
+              var otlp = defaults.otlp;
               var waitTime = defaults['wait-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
@@ -308,6 +314,7 @@ jobs:
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('abba', abba);
+            core.setOutput('otlp', otlp);
 
       - name: Acknowledge request
         id: ack
@@ -375,6 +382,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
@@ -382,7 +391,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -417,6 +426,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = '${{ steps.args.outputs.abba }}' !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
@@ -424,7 +435,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -476,7 +487,7 @@ jobs:
   reth-bench:
     needs: reth-bench-ack
     name: reth-bench
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, available]
     timeout-minutes: 120
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
@@ -494,11 +505,12 @@ jobs:
       BENCH_BASELINE_ARGS: ${{ needs.reth-bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.reth-bench-ack.outputs.feature-args }}
       BENCH_ABBA: ${{ needs.reth-bench-ack.outputs.abba }}
+      BENCH_OTLP: ${{ needs.reth-bench-ack.outputs.otlp }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
       BENCH_NO_SLACK: ${{ needs.reth-bench-ack.outputs.no-slack }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -559,6 +571,8 @@ jobs:
             const rethNPNote = !rethNP ? ', reth_newPayload: `disabled`' : '';
             const abbaEnabled = (process.env.BENCH_ABBA || 'true') !== 'false';
             const abbaNote = !abbaEnabled ? ', abba: `disabled`' : '';
+            const otlpEnabled = (process.env.BENCH_OTLP || 'true') !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
@@ -566,7 +580,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? 'blocks: `big`' : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${noSlackNote}${coresNote}${rethNPNote}${abbaNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -712,11 +726,16 @@ jobs:
       - name: Check if snapshot needs update
         id: snapshot-check
         run: |
-          if .github/scripts/bench-reth-snapshot.sh --check; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-          fi
+          set +e
+          .github/scripts/bench-reth-snapshot.sh --check
+          rc=$?
+          set -e
+          case "$rc" in
+            0)  echo "needed=false" >> "$GITHUB_OUTPUT" ;;
+            10) echo "needed=true"  >> "$GITHUB_OUTPUT" ;;
+            *)  echo "::error::Snapshot check failed (exit $rc)"
+                exit "$rc" ;;
+          esac
 
       - name: Update status (snapshot needed)
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
@@ -725,7 +744,7 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Building binaries & downloading snapshot...'});
+            await s({github, context, status: 'Building binaries (snapshot update pending)...'});
 
       - name: Prepare source dirs
         run: |
@@ -745,12 +764,11 @@ jobs:
           fi
           git -C ../reth-feature checkout "$FEATURE_REF"
 
-      - name: Build binaries and download snapshot in parallel
+      - name: Build binaries
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
-          SNAPSHOT_NEEDED: ${{ steps.snapshot-check.outputs.needed }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
@@ -760,20 +778,22 @@ jobs:
           .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
           PID_FEATURE=$!
 
-          PID_SNAPSHOT=
-          if [ "$SNAPSHOT_NEEDED" = "true" ]; then
-            .github/scripts/bench-reth-snapshot.sh &
-            PID_SNAPSHOT=$!
-          fi
-
           FAIL=0
           wait $PID_BASELINE || FAIL=1
           wait $PID_FEATURE || FAIL=1
-          [ -n "$PID_SNAPSHOT" ] && { wait $PID_SNAPSHOT || FAIL=1; }
           if [ $FAIL -ne 0 ]; then
-            echo "::error::One or more parallel tasks failed (builds / snapshot download)"
+            echo "::error::One or more build tasks failed"
             exit 1
           fi
+
+      - name: Download snapshot
+        id: snapshot-download
+        if: steps.snapshot-check.outputs.needed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/reth
+        run: .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -831,15 +851,15 @@ jobs:
         run: |
           set -euo pipefail
           MC="mc --config-dir /home/ubuntu/.mc"
-          BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous-big-blocks.tar.zst"
+          BUCKET="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.tar.zst"
           BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
           rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
           echo "Downloading big blocks from $BUCKET..."
           $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
           echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
           # Verify expected directory structure
-          if [ ! -d "$BIG_BLOCKS_DIR/gas-ramp-dir" ] || [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
-            echo "::error::Big blocks archive missing expected gas-ramp-dir/ or payloads/ directories"
+          if [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
+            echo "::error::Big blocks archive missing expected payloads/ directory"
             ls -laR "$BIG_BLOCKS_DIR"
             exit 1
           fi
@@ -1051,11 +1071,6 @@ jobs:
           fi
           if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
-            # Read gas ramp blocks count from first baseline run (same for all runs)
-            GAS_RAMP_FILE="$BENCH_WORK_DIR/baseline-1/gas_ramp_blocks.txt"
-            if [ -f "$GAS_RAMP_FILE" ]; then
-              SUMMARY_ARGS="$SUMMARY_ARGS --gas-ramp-blocks $(cat "$GAS_RAMP_FILE" | tr -d '[:space:]')"
-            fi
           fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
@@ -1195,10 +1210,21 @@ jobs:
                 comment_id: parseInt(ackCommentId),
                 body,
               });
-            } else {
-              // No PR — write results to job summary
-              await core.summary.addRaw(body).write();
             }
+
+      - name: Write job summary
+        if: success()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const jobSummary = require('./.github/scripts/bench-job-summary.js');
+            await jobSummary({
+              core,
+              context,
+              chartSha: '${{ steps.push-charts.outputs.sha }}',
+              grafanaUrl: '${{ steps.metrics.outputs.grafana-url }}',
+              runId: '${{ github.run_id }}',
+            });
 
       - name: Send Slack notification (success)
         if: success() && env.BENCH_NO_SLACK != 'true'
@@ -1219,7 +1245,8 @@ jobs:
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
             const steps_status = [
-              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),
@@ -1254,7 +1281,8 @@ jobs:
           script: |
             const abba = (process.env.BENCH_ABBA || 'true') !== 'false';
             const steps_status = [
-              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
               ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
               ...(abba ? [['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}']] : []),

@@ -1,4 +1,42 @@
 //! Types and traits for validating blocks and payloads.
+//!
+//! # Validation pipeline
+//!
+//! When the engine processes a new payload (`engine_newPayload`), validation happens in phases:
+//!
+//! ## Phase 1 – Payload conversion
+//! [`PayloadValidator::convert_payload_to_block`] decodes the execution payload (RLP, hashing)
+//! into a [`SealedBlock`]. This runs on a background thread concurrently with state setup.
+//!
+//! ## Phase 2 – Pre-execution consensus
+//! - [`HeaderValidator::validate_header`] — standalone header checks (hash, gas, base fee,
+//!   fork-specific fields)
+//! - [`Consensus::validate_block_pre_execution`] — body vs header (tx root, ommer hash, withdrawals
+//!   root)
+//! - [`HeaderValidator::validate_header_against_parent`] — sequential checks (block number,
+//!   timestamp, gas limit, base fee vs parent)
+//!
+//! ## Phase 3 – Execution
+//! Block transactions are executed via the EVM. Receipt roots are computed incrementally.
+//!
+//! ## Phase 4 – Post-execution consensus
+//! - [`FullConsensus::validate_block_post_execution`] — gas used, receipt root, logs bloom,
+//!   requests hash
+//! - [`PayloadValidator::validate_block_post_execution_with_hashed_state`] — network-specific
+//!   (no-op on L1, used by OP Stack)
+//!
+//! ## Payload attributes validation (`engine_forkchoiceUpdated`)
+//! When the CL provides payload attributes to start building a block:
+//! - [`PayloadValidator::validate_payload_attributes_against_header`] — ensures timestamp ordering
+//!
+//! If validation passes, a payload build job is started. If it fails,
+//! `INVALID_PAYLOAD_ATTRIBUTES` is returned without rolling back the forkchoice update.
+//!
+//! [`HeaderValidator::validate_header`]: reth_consensus::HeaderValidator::validate_header
+//! [`Consensus::validate_block_pre_execution`]: reth_consensus::Consensus::validate_block_pre_execution
+//! [`HeaderValidator::validate_header_against_parent`]: reth_consensus::HeaderValidator::validate_header_against_parent
+//! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
+//! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
 use crate::tree::{
     cached_state::{CacheStats, CachedStateProvider},
@@ -563,14 +601,14 @@ where
 
         let block = convert_to_block(input)?;
         let transaction_root = is_payload.then(|| {
-            let block = block.clone();
+            let body = block.body().clone();
             let parent_span = Span::current();
             let num_hash = block.num_hash();
             self.payload_processor.executor().spawn_blocking_named("payload-tx-root", move || {
                 let _span =
                     debug_span!(target: "engine::tree::payload_validator", parent: parent_span, "payload_tx_root", block = ?num_hash)
                         .entered();
-                block.body().calculate_tx_root()
+                body.calculate_tx_root()
             })
         });
         let block = block.with_senders(senders);

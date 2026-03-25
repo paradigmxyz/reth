@@ -8,12 +8,12 @@ use crate::{
     PayloadJob,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::BlockTimestamp;
+use alloy_primitives::{BlockTimestamp, B256};
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use std::{
     fmt,
@@ -123,11 +123,14 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Returns a receiver that will receive the payload id.
     pub fn send_new_payload(
         &self,
-        attr: T::PayloadBuilderAttributes,
+        parent: B256,
+        attr: T::PayloadAttributes,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         let job_span = debug_span!(parent: Span::current(), "payload_job");
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, job_span, tx));
+        let _ = self
+            .to_service
+            .send(PayloadServiceCommand::BuildNewPayload(parent, attr, job_span, tx));
         rx
     }
 
@@ -200,7 +203,7 @@ pub struct PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -233,7 +236,7 @@ impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [`PayloadBuilderHandle`] to interact
@@ -376,7 +379,7 @@ where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     type Output = ();
@@ -422,18 +425,17 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(attr, job_span, tx) => {
-                        let id = attr.payload_id();
+                    PayloadServiceCommand::BuildNewPayload(parent, attr, job_span, tx) => {
+                        let id = attr.payload_id(&parent);
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {
-                            debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
+                            debug!(target: "payload_builder", %id, %parent, "Payload job already in progress, ignoring.");
                         } else {
-                            let parent = attr.parent();
                             let start = Instant::now();
                             let job_result = {
                                 let _entered = job_span.enter();
-                                this.generator.new_payload_job(attr.clone())
+                                this.generator.new_payload_job(parent, attr.clone(), id)
                             };
 
                             match job_result {
@@ -500,7 +502,8 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
     BuildNewPayload(
-        T::PayloadBuilderAttributes,
+        B256,
+        T::PayloadAttributes,
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
@@ -524,8 +527,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BuildNewPayload(f0, _, f1) => {
-                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
+            Self::BuildNewPayload(f0, f1, _, f2) => {
+                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).field(&f2).finish()
             }
             Self::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()

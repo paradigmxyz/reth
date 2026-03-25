@@ -41,14 +41,6 @@ use crate::{
     FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader, SignedTransaction,
 };
 
-/// Bincode-compatible header type serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
-    pub use super::{
-        recovered::serde_bincode_compat::RecoveredBlock, sealed::serde_bincode_compat::SealedBlock,
-    };
-}
-
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 

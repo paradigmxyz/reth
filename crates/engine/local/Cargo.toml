@@ -41,5 +41,4 @@ workspace = true
 op = [
     "dep:op-alloy-rpc-types-engine",
     "reth-payload-primitives/op",
-    "reth-primitives-traits/op",
 ]

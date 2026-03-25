@@ -67,3 +67,6 @@ impl reth_codecs::Compact for StorageEntry {
         (Self { key, value }, out)
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StorageEntry);

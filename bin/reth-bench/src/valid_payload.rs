@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use serde::Deserialize;
 use std::time::Duration;
@@ -167,16 +168,28 @@ where
 /// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
 ///
 /// Returns `(version, versioned_params, execution_data)`.
+///
+/// `wait_for_persistence` controls how `wait_for_persistence` is passed to
+/// `reth_newPayload` on a per-block basis.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
+    wait_for_persistence: WaitForPersistence,
+    no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let block_number = block.header.number;
+    let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
+
     if let Some(rlp) = rlp {
         return Ok((
             None,
-            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),))?,
+            serde_json::to_value((
+                RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),
+                wait_for_persistence,
+                no_wait_for_caches.then_some(false),
+            ))?,
         ));
     }
     let block = block
@@ -194,7 +207,14 @@ pub(crate) fn block_to_new_payload(
         payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
 
     if reth_new_payload {
-        Ok((None, serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data),))?))
+        Ok((
+            None,
+            serde_json::to_value((
+                RethNewPayloadInput::ExecutionData(execution_data),
+                wait_for_persistence,
+                no_wait_for_caches.then_some(false),
+            ))?,
+        ))
     } else {
         Ok((Some(version), params))
     }
