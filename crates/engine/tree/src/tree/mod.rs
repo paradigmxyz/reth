@@ -204,6 +204,25 @@ impl<T> TreeOutcome<T> {
     }
 }
 
+/// Result of trying to insert a new payload in [`EngineApiTreeHandler`].
+#[derive(Debug)]
+pub struct TryInsertPayloadResult {
+    /// - `Valid`: Payload successfully validated and inserted
+    /// - `Syncing`: Parent missing, payload buffered for later
+    /// - Error status: Payload is invalid
+    pub status: PayloadStatus,
+    /// Whether the block was already seen
+    pub already_seen: bool,
+}
+
+impl TryInsertPayloadResult {
+    /// Convert the result into a [`TreeOutcome`].
+    #[inline]
+    pub fn into_outcome(self) -> TreeOutcome<PayloadStatus> {
+        TreeOutcome::new(self.status).with_already_seen(self.already_seen)
+    }
+}
+
 /// Events that are triggered by Tree Chain
 #[derive(Debug)]
 pub enum TreeEvent {
@@ -648,13 +667,12 @@ where
         // record pre-execution phase duration
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
-        let (status, already_seen) = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?
+        let mut outcome = if self.backfill_sync_state.is_idle() {
+            self.try_insert_payload(payload)?.into_outcome()
         } else {
-            (self.try_buffer_payload(payload)?, false)
+            TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
 
-        let mut outcome = TreeOutcome::new(status).with_already_seen(already_seen);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
             // Only create the canonical event if this block isn't already the canonical head
@@ -672,18 +690,11 @@ where
     }
 
     /// Processes a payload during normal sync operation.
-    ///
-    /// Returns:
-    /// - Status:
-    ///   - `Valid`: Payload successfully validated and inserted
-    ///   - `Syncing`: Parent missing, payload buffered for later
-    ///   - Error status: Payload is invalid
-    /// - Whether the block was already seen
     #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<(PayloadStatus, bool), InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -710,14 +721,21 @@ where
                     }
                 };
 
-                Ok((PayloadStatus::new(status, latest_valid_hash), already_seen))
+                Ok(TryInsertPayloadResult {
+                    status: PayloadStatus::new(status, latest_valid_hash),
+                    already_seen,
+                })
             }
-            Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok((self.on_insert_block_error(error)?, false)),
-                InsertPayloadError::Payload(error) => {
-                    Ok((self.on_new_payload_error(error, num_hash, parent_hash)?, false))
-                }
-            },
+            Err(error) => {
+                let status = match error {
+                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
+                    InsertPayloadError::Payload(error) => {
+                        self.on_new_payload_error(error, num_hash, parent_hash)?
+                    }
+                };
+
+                Ok(TryInsertPayloadResult { status, already_seen: false })
+            }
         }
     }
 
