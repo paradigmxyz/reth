@@ -9,7 +9,7 @@
 //! arguments to the `engine_forkchoiceUpdated` method. This type should be used to define and
 //! _spawn_ payload jobs.
 //!
-//! [PayloadBuilderAttributes] can be implemented for payload attributes types that _describe_
+//! [PayloadAttributes] can be implemented for payload attributes types that _describe_
 //! running payload jobs.
 //!
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
@@ -17,9 +17,8 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -36,7 +35,7 @@ use reth_ethereum::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
             validate_version_specific_fields, AddOnsContext, EngineApiValidator, EngineTypes,
             FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
-            NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            NodeTypes, PayloadAttributes, PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -58,10 +57,10 @@ use reth_ethereum::{
     EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
 
 /// A custom payload attributes type.
@@ -82,6 +81,10 @@ pub enum CustomError {
 }
 
 impl PayloadAttributes for CustomPayloadAttributes {
+    fn payload_id(&self, parent_hash: &B256) -> PayloadId {
+        self.inner.payload_id(parent_hash)
+    }
+
     fn timestamp(&self) -> u64 {
         self.inner.timestamp()
     }
@@ -95,51 +98,6 @@ impl PayloadAttributes for CustomPayloadAttributes {
     }
 }
 
-/// New type around the payload builder attributes type
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CustomPayloadBuilderAttributes(EthPayloadBuilderAttributes);
-
-impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
-    type RpcPayloadAttributes = CustomPayloadAttributes;
-    type Error = Infallible;
-
-    fn try_new(
-        parent: B256,
-        attributes: CustomPayloadAttributes,
-        _version: u8,
-    ) -> Result<Self, Infallible> {
-        Ok(Self(EthPayloadBuilderAttributes::new(parent, attributes.inner)))
-    }
-
-    fn payload_id(&self) -> PayloadId {
-        self.0.id
-    }
-
-    fn parent(&self) -> B256 {
-        self.0.parent
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.0.timestamp
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.0.parent_beacon_block_root
-    }
-
-    fn suggested_fee_recipient(&self) -> Address {
-        self.0.suggested_fee_recipient
-    }
-
-    fn prev_randao(&self) -> B256 {
-        self.0.prev_randao
-    }
-
-    fn withdrawals(&self) -> &Withdrawals {
-        &self.0.withdrawals
-    }
-}
-
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
 /// payload builder attributes type.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -150,7 +108,6 @@ impl PayloadTypes for CustomEngineTypes {
     type ExecutionData = ExecutionData;
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
-    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -358,7 +315,7 @@ where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
-    type Attributes = CustomPayloadBuilderAttributes;
+    type Attributes = CustomPayloadAttributes;
     type BuiltPayload = EthBuiltPayload;
 
     fn try_build(
@@ -366,13 +323,13 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments { cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig { parent_header, attributes } = config;
+        let PayloadConfig { parent_header, attributes, payload_id } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
         self.inner.try_build(BuildArguments {
             cached_reads,
-            config: PayloadConfig { parent_header, attributes: attributes.0 },
+            config: PayloadConfig { parent_header, attributes: attributes.inner, payload_id },
             cancel,
             best_payload,
         })
@@ -382,8 +339,12 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_header, attributes } = config;
-        self.inner.build_empty_payload(PayloadConfig { parent_header, attributes: attributes.0 })
+        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        self.inner.build_empty_payload(PayloadConfig {
+            parent_header,
+            attributes: attributes.inner,
+            payload_id,
+        })
     }
 }
 

@@ -127,9 +127,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .into());
                     }
 
+                    let attributes = this.next_env_attributes(&parent)?;
+
                     let mut evm_env = this
                         .evm_config()
-                        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
+                        .next_evm_env(&parent, &attributes)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
 
@@ -205,7 +207,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let ctx = this
                         .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
+                        .context_for_next_block(&parent, attributes)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
                     let map_err = |e: EthApiError| -> Self::Error {
@@ -477,7 +479,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     .map_err(Self::Error::from_eth_err)?;
             }
 
-            let mut tx_env = this.create_txn_env(&evm_env, request.clone(), &mut db)?;
+            // Read fields from request before consuming it in create_txn_env
+            let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+
+            let mut tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
 
             // we want to disable this in eth_createAccessList, since this is common practice used
             // by other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
@@ -491,20 +497,21 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
 
+            // Disable additional fee charges (e.g. L2 operator fees),
+            // consistent with prepare_call_env and estimate_gas_with.
+            evm_env.cfg_env.disable_fee_charge = true;
+
             // Disable EIP-7825 transaction gas limit cap so that the gas limit
             // fallback (block gas limit) is not rejected when it exceeds the
             // per-tx cap (2^24 ≈ 16.7M post-Osaka).
             evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
-            if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
+            if !request_has_gas_limit && tx_env.gas_price() > 0 {
                 let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
                 // limit
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
             }
-
-            // can consume the list since we're not using the request anymore
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
 
             let mut inspector = AccessListInspector::new(initial);
 

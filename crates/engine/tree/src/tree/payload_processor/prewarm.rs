@@ -39,7 +39,7 @@ use std::sync::{
     mpsc::{self, channel, Receiver, Sender},
     Arc,
 };
-use tracing::{debug, debug_span, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
@@ -165,7 +165,7 @@ where
                     tx_count += 1;
                     let parent_span = Span::current();
                     s.spawn(move |_| {
-                        let _enter = debug_span!(
+                        let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
                             "prewarm_tx",

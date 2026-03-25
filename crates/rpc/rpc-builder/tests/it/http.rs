@@ -441,10 +441,10 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
-    DebugApiClient::<TransactionRequest>::raw_header(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_header(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::raw_block(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
-    DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
 }
 

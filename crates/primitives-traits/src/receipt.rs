@@ -1,6 +1,6 @@
 //! Receipt abstraction
 
-use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
@@ -29,7 +29,6 @@ pub trait Receipt:
     + Typed2718
     + MaybeSerde
     + InMemorySize
-    + MaybeSerdeBincodeCompat
 {
 }
 
@@ -49,7 +48,6 @@ impl<T> Receipt for T where
         + Typed2718
         + MaybeSerde
         + InMemorySize
-        + MaybeSerdeBincodeCompat
 {
 }
 

@@ -42,6 +42,7 @@ pub trait EstimateCall: Call {
     ///
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
+    ///  - `disable_fee_charge` is set to `true`
     ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
@@ -61,6 +62,10 @@ pub trait EstimateCall: Call {
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
+
+        // Disable additional fee charges (e.g. L2 operator fees) for gas estimation,
+        // consistent with `prepare_call_env` for `eth_call`.
+        evm_env.cfg_env.disable_fee_charge = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

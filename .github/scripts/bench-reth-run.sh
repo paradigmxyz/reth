@@ -11,6 +11,8 @@
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
+#               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
+#               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 set -euo pipefail
 
 LABEL="$1"
@@ -118,9 +120,18 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
-# Big blocks mode requires the testing API and skip-invalid-transactions
+# Gate flag on binary support (older baselines may not have it).
+# Uses --help which exits immediately via clap without node init.
+SYNC_STATE_IDLE=false
+if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
+  RETH_ARGS+=(--debug.startup-sync-state-idle)
+  SYNC_STATE_IDLE=true
+fi
+
+# Big blocks mode requires the testing API, skip-invalid-transactions, and
+# skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
 if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --testing.skip-invalid-transactions)
+  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size max --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
 fi
 
 # Append per-label extra node args (baseline or feature)
@@ -139,6 +150,14 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
   RETH_ARGS+=(--metrics "$BENCH_METRICS_ADDR")
 fi
 
+# OTLP traces and logs export
+if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+fi
+if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+fi
+
 # Tracy profiling: add --log.tracy flags and set environment
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   RETH_ARGS+=(--log.tracy --log.tracy.filter "${BENCH_TRACY_FILTER:-debug}")
@@ -149,16 +168,29 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+SUDO_ENV=()
+if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
+  SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
+  SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
+fi
+
+# Limit reth memory to 95% of available RAM to prevent OOM kills
+TOTAL_MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+MEM_LIMIT=$(( TOTAL_MEM_KB * 95 / 100 * 1024 ))
+echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 1024 ))MB)"
+
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo taskset -c "$RETH_CPUS" nice -n -20 \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
+  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+    env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
 
@@ -171,7 +203,7 @@ for i in $(seq 1 60); do
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
     > /dev/null 2>&1; then
-    echo "reth (${LABEL}) is ready after ${i}s"
+    echo "reth (${LABEL}) RPC is up after ${i}s"
     break
   fi
   if [ "$i" -eq 60 ]; then
@@ -182,6 +214,29 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Wait for the pipeline to finish (eth_syncing returns false) so the
+# engine is in live mode and can accept newPayload calls.
+# Only possible when --debug.startup-sync-state-idle is supported.
+if [ "$SYNC_STATE_IDLE" = "true" ]; then
+  for i in $(seq 1 300); do
+    SYNC_RESULT=$(curl -sf http://127.0.0.1:8545 -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null || true)
+    if [ -n "$SYNC_RESULT" ] && jq -e '.result == false' <<< "$SYNC_RESULT" > /dev/null 2>&1; then
+      echo "reth (${LABEL}) pipeline finished after ${i}s, engine is live"
+      break
+    fi
+    if [ "$i" -eq 300 ]; then
+      echo "::error::reth (${LABEL}) pipeline did not finish within 300s"
+      cat "$LOG"
+      exit 1
+    fi
+    sleep 1
+  done
+else
+  echo "reth (${LABEL}) binary does not support --debug.startup-sync-state-idle, skipping sync wait"
+fi
+
 # Run reth-bench with high priority but as the current user so output
 # files are not root-owned (avoids EACCES on next checkout).
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
@@ -189,19 +244,15 @@ BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 # Build optional flags
 EXTRA_BENCH_ARGS=()
 if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
-  EXTRA_BENCH_ARGS+=(--reth-new-payload)
+  EXTRA_BENCH_ARGS+=(--reth-new-payload --wait-for-persistence)
 fi
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
 
 if [ "$BIG_BLOCKS" = "true" ]; then
-  # Big blocks mode: replay pre-generated payloads with gas ramp
+  # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
-  # Count gas ramp blocks for reporting
-  GAS_RAMP_COUNT=$(find "$BIG_BLOCKS_DIR/gas-ramp-dir" -name '*.json' | wc -l)
-  echo "$GAS_RAMP_COUNT" > "$OUTPUT_DIR/gas_ramp_blocks.txt"
-  echo "Gas ramp blocks: $GAS_RAMP_COUNT"
 
   # Start tracy-capture so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then
@@ -214,7 +265,6 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
     "${EXTRA_BENCH_ARGS[@]}" \
-    --gas-ramp-dir "$BIG_BLOCKS_DIR/gas-ramp-dir" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \

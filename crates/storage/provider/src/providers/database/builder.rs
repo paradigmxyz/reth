@@ -106,8 +106,10 @@ impl<N> ProviderFactoryBuilder<N> {
         let db = open_db_read_only(db_dir, db_args)?;
         let static_file_provider =
             StaticFileProvider::read_only(static_files_dir, watch_static_files)?;
-        let rocksdb_provider =
-            RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?;
+        let rocksdb_provider = RocksDBProvider::builder(&rocksdb_dir)
+            .with_default_tables()
+            .with_read_only(true)
+            .build()?;
         ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)
             .map_err(Into::into)
     }

@@ -177,17 +177,24 @@ where
                 }
             }
 
+            provider_rw.commit()?;
+            debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+
+            // Run the pruner in a separate provider so it reads committed RocksDB state
+            // that includes the history entries written by save_blocks above.
+            //
+            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
+            // must be able to read anything written by save_blocks.
             if self.pruner.is_pruning_needed(last.number) {
                 debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
                 let prune_start = Instant::now();
+                let provider_rw = self.provider.database_provider_rw()?;
                 let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
+                provider_rw.commit()?;
+                debug!(target: "engine::persistence", tip=?last.number, "Finished pruning after saving blocks");
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
-
-            provider_rw.commit()?;
         }
-
-        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(block_count as f64);
@@ -453,5 +460,53 @@ mod tests {
             let result = rx.recv().unwrap();
             assert_eq!(last_hash, result.last_block.unwrap().hash);
         }
+    }
+
+    /// Verifies that committing `save_blocks` history before running the pruner
+    /// prevents the pruner from overwriting new entries.
+    ///
+    /// Previously, both `save_blocks` and the pruner pushed `RocksDB` batches before
+    /// a single commit. Both read committed state, so the pruner didn't see the
+    /// new entries and its batch overwrote them. The fix commits `save_blocks`
+    /// first, then runs the pruner against committed state in a separate provider.
+    #[test]
+    fn test_save_blocks_then_prune_preserves_new_history() {
+        use reth_db::{models::ShardedKey, tables, BlockNumberList};
+        use reth_provider::RocksDBProviderFactory;
+
+        reth_tracing::init_test_tracing();
+
+        let provider_factory = create_test_provider_factory();
+        let tracked_addr = alloy_primitives::Address::from([0xBE; 20]);
+
+        // Phase 1: Establish baseline history for blocks 0..20.
+        let rocksdb = provider_factory.rocksdb_provider();
+        {
+            let mut batch = rocksdb.batch();
+            let initial_blocks: Vec<u64> = (0..20).collect();
+            let shard = BlockNumberList::new_pre_sorted(initial_blocks.iter().copied());
+            batch
+                .put::<tables::AccountsHistory>(ShardedKey::new(tracked_addr, u64::MAX), &shard)
+                .unwrap();
+            batch.commit().unwrap();
+        }
+
+        // Phase 2: Simulate the fixed on_save_blocks flow.
+        // Step 1: save_blocks appends new entries 20..25 and commits immediately.
+        let mut batch1 = rocksdb.batch();
+        batch1.append_account_history_shard(tracked_addr, 20..25u64).unwrap();
+        batch1.commit().unwrap();
+
+        // Step 2: Pruner runs AFTER commit, so it reads state that includes 20..25.
+        // Prunes entries ≤ 14, leaving [15..25).
+        let mut batch2 = rocksdb.batch();
+        batch2.prune_account_history_to(tracked_addr, 14).unwrap();
+        batch2.commit().unwrap();
+
+        // Verify new entries survived pruning.
+        let shards = rocksdb.account_history_shards(tracked_addr).unwrap();
+        let entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+        let expected: Vec<u64> = (15..25).collect();
+        assert_eq!(entries, expected, "new entries 20..25 must survive pruning");
     }
 }
