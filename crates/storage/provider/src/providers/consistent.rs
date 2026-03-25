@@ -1099,7 +1099,10 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             range,
             |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
             |index_range, block_state| {
-                Ok(block_state.executed_block_receipts_by_index_range(index_range))
+                Ok(block_state.executed_block_receipts_ref()[index_range]
+                    .iter()
+                    .cloned()
+                    .collect())
             },
         )
     }

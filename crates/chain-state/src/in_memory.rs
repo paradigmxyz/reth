@@ -673,14 +673,6 @@ impl<N: NodePrimitives> BlockState<N> {
         self.receipts()
     }
 
-    /// Returns a vector of `Receipt` cloned only for the requested tx index range.
-    pub fn executed_block_receipts_by_index_range(
-        &self,
-        index_range: std::ops::RangeInclusive<usize>,
-    ) -> Vec<N::Receipt> {
-        self.executed_block_receipts_ref()[index_range].to_vec()
-    }
-
     /// Returns an iterator over __parent__ `BlockStates`.
     ///
     /// The block state order is newest to oldest (highest to lowest):
