@@ -106,9 +106,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alloy-chains"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9247f0a399ef71aeb68f497b2b8fb348014f742b50d3b83b1e00dfe1b7d64b3d"
+checksum = "f4e9e31d834fe25fe991b8884e4b9f0e59db4a97d86e05d1464d6899c013cd62"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -6166,9 +6166,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
+checksum = "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
 
 [[package]]
 name = "num-integer"
@@ -7832,7 +7832,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=a9bd71604490aae7ec0983612e44bfa1e5f85d71#a9bd71604490aae7ec0983612e44bfa1e5f85d71"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7852,7 +7852,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=a9bd71604490aae7ec0983612e44bfa1e5f85d71#a9bd71604490aae7ec0983612e44bfa1e5f85d71"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9516,7 +9516,7 @@ version = "1.11.3"
 [[package]]
 name = "reth-primitives-traits"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=a9bd71604490aae7ec0983612e44bfa1e5f85d71#a9bd71604490aae7ec0983612e44bfa1e5f85d71"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10569,7 +10569,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=a9bd71604490aae7ec0983612e44bfa1e5f85d71#a9bd71604490aae7ec0983612e44bfa1e5f85d71"
 dependencies = [
  "zstd",
 ]
@@ -12707,9 +12707,9 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.13.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a559e63b5d8004e12f9bce88af5c6d939c58de839b7532cfe9653846cedd2a9e"
+checksum = "da36089a805484bcccfffe0739803392c8298778a2d2f09febf76fac5ad9025b"
 
 [[package]]
 name = "unicode-truncate"

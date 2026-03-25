@@ -750,4 +750,3 @@ reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "9bc2dba" }
 
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
-
