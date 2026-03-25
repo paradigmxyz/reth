@@ -3,7 +3,6 @@ set -uo pipefail
 
 crates_to_check=(
     reth-primitives
-    reth-primitives-traits
     reth-network-peers
     reth-trie-common
     reth-trie-sparse

@@ -254,7 +254,6 @@ jobs:
         uses: taiki-e/install-action@cargo-hack
       - run: |
           cargo hack check \
-            --package reth-primitives-traits \
             --package reth-primitives \
             --feature-powerset \
             --depth 2

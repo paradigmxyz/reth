@@ -394,7 +394,7 @@ reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
 reth-primitives = { path = "crates/primitives", default-features = false, features = ["__internal"] }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "2ea7e57681ac6167398fa48e60b72377b3c761f8", default-features = false }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "a9bd71604490aae7ec0983612e44bfa1e5f85d71", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -704,9 +704,9 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "2ea7e57681ac6167398fa48e60b72377b3c761f8" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "2ea7e57681ac6167398fa48e60b72377b3c761f8" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "2ea7e57681ac6167398fa48e60b72377b3c761f8" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "a9bd71604490aae7ec0983612e44bfa1e5f85d71" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "a9bd71604490aae7ec0983612e44bfa1e5f85d71" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "a9bd71604490aae7ec0983612e44bfa1e5f85d71" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
