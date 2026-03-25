@@ -1244,7 +1244,6 @@ async fn test_fcu_back_from_synthetic_sibling_to_original_head_recanonicalizes_h
                 state: synthetic_state,
                 payload_attrs: None,
                 tx: tx1,
-                version: EngineApiMessageVersion::default(),
             }
             .into(),
         ))
@@ -1281,7 +1280,6 @@ async fn test_fcu_back_from_synthetic_sibling_to_original_head_recanonicalizes_h
                 state: target_state,
                 payload_attrs: None,
                 tx: tx2,
-                version: EngineApiMessageVersion::default(),
             }
             .into(),
         ))
