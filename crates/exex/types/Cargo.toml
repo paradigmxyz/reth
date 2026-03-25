@@ -26,11 +26,8 @@ serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
-reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
-arbitrary.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["std"] }
 bincode.workspace = true
-rand.workspace = true
 
 [features]
 default = []
@@ -39,7 +36,6 @@ serde = [
     "reth-execution-types/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
-    "rand/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",

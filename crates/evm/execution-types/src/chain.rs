@@ -618,9 +618,6 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Chain};
-        use arbitrary::Arbitrary;
-        use rand::Rng;
-        use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -635,15 +632,8 @@ pub(super) mod serde_bincode_compat {
                 chain: Chain,
             }
 
-            let mut bytes = [0u8; 1024];
-            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
-                chain: Chain::new(
-                    vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                        .unwrap()],
-                    Default::default(),
-                    BTreeMap::new(),
-                ),
+                chain: Chain::new(vec![Default::default()], Default::default(), BTreeMap::new()),
             };
 
             let encoded = bincode::serialize(&data).unwrap();
