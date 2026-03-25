@@ -2,7 +2,10 @@ use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
 use linked_hash_set::LinkedHashSet;
 use secp256k1::SecretKey;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 /// A sync-able tree
 pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
@@ -18,6 +21,10 @@ pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
     unresolved_links: LinkedHashSet<String>,
     /// Unresolved nodes of the tree
     unresolved_nodes: LinkedHashSet<String>,
+    /// Already emitted link hashes for current root revision.
+    seen_links: HashSet<String>,
+    /// Already emitted enr hashes for current root revision.
+    seen_nodes: HashSet<String>,
 }
 
 // === impl SyncTree ===
@@ -31,6 +38,8 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             sync_state: SyncState::Pending,
             unresolved_links: Default::default(),
             unresolved_nodes: Default::default(),
+            seen_links: Default::default(),
+            seen_nodes: Default::default(),
         }
     }
 
@@ -63,15 +72,24 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         match self.sync_state {
             SyncState::Pending => {
                 self.sync_state = SyncState::Enr;
-                return Some(SyncAction::Link(self.root.link_root.clone()))
+                let link = self.root.link_root.clone();
+                if self.seen_links.insert(link.clone()) {
+                    return Some(SyncAction::Link(link))
+                }
             }
             SyncState::Enr => {
                 self.sync_state = SyncState::Active;
-                return Some(SyncAction::Enr(self.root.enr_root.clone()))
+                let enr = self.root.enr_root.clone();
+                if self.seen_nodes.insert(enr.clone()) {
+                    return Some(SyncAction::Enr(enr))
+                }
             }
             SyncState::Link => {
                 self.sync_state = SyncState::Active;
-                return Some(SyncAction::Link(self.root.link_root.clone()))
+                let link = self.root.link_root.clone();
+                if self.seen_links.insert(link.clone()) {
+                    return Some(SyncAction::Link(link))
+                }
             }
             SyncState::Active => {
                 if now > self.root_updated + update_timeout {
@@ -82,12 +100,19 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             SyncState::RootUpdate => return None,
         }
 
-        if let Some(link) = self.unresolved_links.pop_front() {
-            return Some(SyncAction::Link(link))
+        while let Some(link) = self.unresolved_links.pop_front() {
+            if self.seen_links.insert(link.clone()) {
+                return Some(SyncAction::Link(link))
+            }
         }
 
-        let enr = self.unresolved_nodes.pop_front()?;
-        Some(SyncAction::Enr(enr))
+        while let Some(enr) = self.unresolved_nodes.pop_front() {
+            if self.seen_nodes.insert(enr.clone()) {
+                return Some(SyncAction::Enr(enr))
+            }
+        }
+
+        None
     }
 
     /// Updates the root and returns what changed
@@ -104,17 +129,21 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             // only ENR changed
             (false, true) => {
                 self.unresolved_nodes.clear();
+                self.seen_nodes.clear();
                 SyncState::Enr
             }
             // only LINK changed
             (true, false) => {
                 self.unresolved_links.clear();
+                self.seen_links.clear();
                 SyncState::Link
             }
             // both changed
             (false, false) => {
                 self.unresolved_nodes.clear();
                 self.unresolved_links.clear();
+                self.seen_nodes.clear();
+                self.seen_links.clear();
                 SyncState::Pending
             }
         };
@@ -244,5 +273,51 @@ mod tests {
             Some(SyncAction::Enr(hash)) => assert_eq!(hash, new_root.enr_root),
             other => panic!("expected second Enr action, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn link_self_cycle_emits_once() {
+        let mut tree = make_tree();
+        advance_to_active(&mut tree);
+        let now = Instant::now();
+        let timeout = Duration::from_secs(60 * 60 * 24);
+
+        let cycle = "CYCLE_LINK".to_string();
+        tree.extend_children(ResolveKind::Link, [cycle.clone()]);
+
+        match tree.poll(now, timeout) {
+            Some(SyncAction::Link(hash)) => assert_eq!(hash, cycle),
+            other => panic!("expected Link action, got {:?}", other),
+        }
+
+        // Simulate cached branch resolution that points back to itself.
+        tree.extend_children(ResolveKind::Link, ["CYCLE_LINK".to_string()]);
+        assert!(tree.poll(now, timeout).is_none());
+    }
+
+    #[test]
+    fn link_cycle_a_b_a_stops() {
+        let mut tree = make_tree();
+        advance_to_active(&mut tree);
+        let now = Instant::now();
+        let timeout = Duration::from_secs(60 * 60 * 24);
+
+        let a = "A_LINK".to_string();
+        let b = "B_LINK".to_string();
+
+        tree.extend_children(ResolveKind::Link, [a.clone()]);
+        match tree.poll(now, timeout) {
+            Some(SyncAction::Link(hash)) => assert_eq!(hash, a),
+            other => panic!("expected first Link action, got {:?}", other),
+        }
+
+        tree.extend_children(ResolveKind::Link, [b.clone()]);
+        match tree.poll(now, timeout) {
+            Some(SyncAction::Link(hash)) => assert_eq!(hash, b),
+            other => panic!("expected second Link action, got {:?}", other),
+        }
+
+        tree.extend_children(ResolveKind::Link, ["A_LINK".to_string()]);
+        assert!(tree.poll(now, timeout).is_none());
     }
 }
