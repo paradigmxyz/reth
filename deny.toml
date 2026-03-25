@@ -91,5 +91,4 @@ allow-git = [
     "https://github.com/alloy-rs/hardforks",
     "https://github.com/paradigmxyz/jsonrpsee",
     "https://github.com/DaniPopes/slotmap.git",
-    "https://github.com/paradigmxyz/reth-core",
 ]
