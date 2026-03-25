@@ -361,6 +361,7 @@ impl TestHarness {
 }
 
 struct BlockchainProviderTestHarness {
+    #[allow(clippy::type_complexity)]
     tree: EngineApiTreeHandler<
         EthPrimitives,
         BlockchainProvider<MockNodeTypesWithDB>,

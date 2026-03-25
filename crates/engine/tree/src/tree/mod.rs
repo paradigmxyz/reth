@@ -2964,17 +2964,13 @@ where
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
-        if canonical.is_none() {
-            if let Some(number) = self.provider.block_number(hash)? {
-                if self
-                    .provider
-                    .block_hash(number)?
-                    .is_some_and(|canonical_hash| canonical_hash == hash)
-                {
-                    canonical =
-                        self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
-                }
-            }
+        if canonical.is_none() &&
+            let Some(number) = self.provider.block_number(hash)? &&
+            self.provider
+                .block_hash(number)?
+                .is_some_and(|canonical_hash| canonical_hash == hash)
+        {
+            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
         }
 
         Ok(canonical)
