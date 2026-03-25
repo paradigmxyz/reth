@@ -180,17 +180,26 @@ pub struct TreeOutcome<T> {
     pub outcome: T,
     /// An optional event to tell the caller to do something.
     pub event: Option<TreeEvent>,
+    /// Whether the block was already seen, meaning no real execution happened during this
+    /// `newPayload` call.
+    pub already_seen: bool,
 }
 
 impl<T> TreeOutcome<T> {
     /// Create new tree outcome.
     pub const fn new(outcome: T) -> Self {
-        Self { outcome, event: None }
+        Self { outcome, event: None, already_seen: false }
     }
 
     /// Set event on the outcome.
     pub fn with_event(mut self, event: TreeEvent) -> Self {
         self.event = Some(event);
+        self
+    }
+
+    /// Set the `already_seen` flag on the outcome.
+    pub const fn with_already_seen(mut self, value: bool) -> Self {
+        self.already_seen = value;
         self
     }
 }
@@ -639,13 +648,13 @@ where
         // record pre-execution phase duration
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
-        let status = if self.backfill_sync_state.is_idle() {
+        let (status, already_seen) = if self.backfill_sync_state.is_idle() {
             self.try_insert_payload(payload)?
         } else {
-            self.try_buffer_payload(payload)?
+            (self.try_buffer_payload(payload)?, false)
         };
 
-        let mut outcome = TreeOutcome::new(status);
+        let mut outcome = TreeOutcome::new(status).with_already_seen(already_seen);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
             // Only create the canonical event if this block isn't already the canonical head
@@ -665,14 +674,16 @@ where
     /// Processes a payload during normal sync operation.
     ///
     /// Returns:
-    /// - `Valid`: Payload successfully validated and inserted
-    /// - `Syncing`: Parent missing, payload buffered for later
-    /// - Error status: Payload is invalid
+    /// - Status:
+    ///   - `Valid`: Payload successfully validated and inserted
+    ///   - `Syncing`: Parent missing, payload buffered for later
+    ///   - Error status: Payload is invalid
+    /// - Whether the block was already seen
     #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<(PayloadStatus, bool), InsertBlockFatalError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -680,29 +691,31 @@ where
 
         match self.insert_payload(payload) {
             Ok(status) => {
-                let status = match status {
+                let (status, already_seen) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
                         self.try_connect_buffered_blocks(num_hash)?;
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, false)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, true)
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) => {
+                        (PayloadStatusEnum::Syncing, false)
+                    }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                         // not known to be invalid, but we don't know anything else
-                        PayloadStatusEnum::Syncing
+                        (PayloadStatusEnum::Syncing, true)
                     }
                 };
 
-                Ok(PayloadStatus::new(status, latest_valid_hash))
+                Ok((PayloadStatus::new(status, latest_valid_hash), already_seen))
             }
             Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
+                InsertPayloadError::Block(error) => Ok((self.on_insert_block_error(error)?, false)),
                 InsertPayloadError::Payload(error) => {
-                    Ok(self.on_new_payload_error(error, num_hash, parent_hash)?)
+                    Ok((self.on_new_payload_error(error, num_hash, parent_hash)?, false))
                 }
             },
         }
