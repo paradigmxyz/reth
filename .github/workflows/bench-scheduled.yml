@@ -3,7 +3,8 @@
 # Two modes:
 #   nightly — Compares the previous nightly Docker build against the current one.
 #             Runs daily after docker.yml produces a new nightly image.
-#   hourly  — Compares main HEAD against main~1 to catch regressions quickly.
+#   hourly  — Compares main HEAD against the last benchmarked commit to catch
+#             regressions quickly. Falls back to HEAD~1 on first run.
 #             Skips if no new commits or if a previous run is still in progress.
 #
 # State is persisted between runs via GitHub Actions cache: each successful
@@ -13,7 +14,7 @@ on:
   schedule:
     # Nightly: compares previous vs current nightly Docker build
     - cron: "30 5 * * *"
-    # Hourly: compares main HEAD vs HEAD~1, skips if no new commits
+    # Hourly: compares main HEAD vs last benchmarked commit, skips if no new commits
     - cron: "0 * * * *"
   workflow_dispatch:
     inputs:

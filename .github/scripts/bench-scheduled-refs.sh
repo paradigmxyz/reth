@@ -6,8 +6,9 @@
 #   nightly — Queries the latest successful scheduled docker.yml run via
 #             GitHub API to find the nightly Docker image commit. Compares
 #             with the last successful feature ref to detect staleness.
-#   hourly  — Compares origin/main HEAD against origin/main~1. Checks for
-#             in-progress sibling runs to avoid overlap.
+#   hourly  — Compares origin/main HEAD against the last successfully
+#             benchmarked commit (falls back to HEAD~1 on first run).
+#             Checks for in-progress sibling runs to avoid overlap.
 #
 # Usage: bench-scheduled-refs.sh <force> <mode>
 #   force — "true" to run even if no new commit (bypass skip logic)
@@ -39,13 +40,11 @@ echo "Mode: $MODE, Force: $FORCE"
 # ==========================================================================
 if [ "$MODE" = "hourly" ]; then
 
-  # --- Step 1: Resolve refs from git ---
+  # --- Step 1: Resolve feature ref from git ---
   echo "::group::Resolving hourly refs from git"
   git fetch origin main --quiet
   FEATURE_REF=$(git rev-parse origin/main)
-  BASELINE_REF=$(git rev-parse origin/main~1)
-  echo "Feature (HEAD):   $FEATURE_REF"
-  echo "Baseline (HEAD~1): $BASELINE_REF"
+  echo "Feature (HEAD): $FEATURE_REF"
   echo "::endgroup::"
 
   # --- Step 2: Check for in-progress sibling runs ---
@@ -82,11 +81,17 @@ if [ "$MODE" = "hourly" ]; then
   fi
   echo "::endgroup::"
 
-  # --- Step 4: Skip logic ---
-  echo "::group::Resolving skip logic"
+  # --- Step 4: Determine baseline and skip logic ---
+  echo "::group::Resolving baseline and skip logic"
   if [ "$SHOULD_SKIP" = "true" ]; then
+    BASELINE_REF=$(git rev-parse origin/main~1)
     echo "Already marked skip (sibling in progress)"
+  elif [ -z "$LAST_FEATURE_REF" ]; then
+    # First run: no previous state, fall back to HEAD~1
+    BASELINE_REF=$(git rev-parse origin/main~1)
+    echo "First run — using HEAD~1 as baseline"
   elif [ "$LAST_FEATURE_REF" = "$FEATURE_REF" ]; then
+    BASELINE_REF="$LAST_FEATURE_REF"
     if [ "$FORCE" = "true" ] || [ "$FORCE" = "--force" ]; then
       echo "No new commits on main, but force=true — running anyway"
     else
@@ -94,7 +99,9 @@ if [ "$MODE" = "hourly" ]; then
       echo "No new commits on main since last run — will skip"
     fi
   else
-    echo "New commit(s) on main detected"
+    # Normal case: use last benchmarked commit as baseline
+    BASELINE_REF="$LAST_FEATURE_REF"
+    echo "New commit(s) on main detected — comparing against last benchmarked commit"
   fi
 
   echo "Baseline: $BASELINE_REF"
