@@ -7825,6 +7825,7 @@ dependencies = [
  "serde",
  "snmalloc-rs",
  "thiserror 2.0.18",
+ "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "tracy-client",
 ]

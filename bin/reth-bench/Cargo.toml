@@ -86,7 +86,7 @@ jemalloc = [
     "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
 ]
-jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+jemalloc-prof = ["jemalloc", "reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator", "tracy"]
 tracy = [
     "reth-node-core/tracy",
