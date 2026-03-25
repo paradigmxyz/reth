@@ -79,10 +79,16 @@ where
                     target: "consensus::debug-client",
                     %err,
                     url=%self.url,
-                    "Failed to subscribe to blocks",
+                    "Failed to subscribe to blocks, retrying in 5s",
                 );
             }) else {
-                return
+                // Exit if the receiver has been dropped (e.g. during shutdown) so we
+                // don't keep retrying after the consumer is gone.
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue
             };
 
             while let Some(res) = stream.next().await {
