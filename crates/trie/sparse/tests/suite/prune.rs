@@ -348,3 +348,37 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     let root_after = trie.root();
     assert_eq!(root_after, root_before, "root must not change after prune");
 }
+
+/// Pruning after a dirty update should preserve correctness and not panic during root recompute.
+///
+/// This reproduces a case where a lower-subtrie root can be removed by prune while the trie still
+/// has pending dirty prefixes from a prior update.
+pub(super) fn test_prune_after_dirty_update_keeps_root_stable<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut key_1 = B256::ZERO;
+    key_1.0[0] = 0x5d;
+    key_1.0[1] = 0xa0;
+
+    let mut key_2 = B256::ZERO;
+    key_2.0[0] = 0x5e;
+
+    let storage: BTreeMap<B256, U256> =
+        BTreeMap::from([(key_1, U256::from(1)), (key_2, U256::from(2))]);
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+
+    // Cache initial hashes so prune can convert nodes to blinded hashes.
+    let _ = trie.root();
+
+    // Mark the 0x5d subtree dirty without recomputing root afterwards.
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(key_1, U256::from(3))]));
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+
+    // Prune while retaining only the sibling subtree.
+    trie.prune(&[Nibbles::unpack(key_2)]);
+
+    // Recompute root: this used to panic for one implementation.
+    let root_after = trie.root();
+    let root_after_second = trie.root();
+    assert_eq!(root_after, root_after_second, "root should be stable after dirty update + prune");
+}

@@ -1529,14 +1529,24 @@ impl ParallelSparseTrie {
         }) {
             let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0]);
 
-            // Skip unrevealed/blinded subtries - nothing to prune
-            let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
-                continue;
+            // Skip unrevealed/blinded subtries - nothing to prune.
+            let should_clear = {
+                let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
+                    continue;
+                };
+
+                // Retain only nodes/values not descended from any pruned root.
+                subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
+                subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
+
+                // If prune removed the node at `subtrie.path`, the subtrie can no longer be
+                // represented as revealed and must be blinded.
+                !subtrie.nodes.contains_key(&subtrie.path)
             };
 
-            // Retain only nodes/values not descended from any pruned root.
-            subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
-            subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
+            if should_clear {
+                self.lower_subtries[subtrie_idx].clear();
+            }
         }
 
         // Branch node masks pruning

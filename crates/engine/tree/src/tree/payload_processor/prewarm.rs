@@ -12,10 +12,9 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateProvider, SavedCache},
-    payload_processor::{bal, multiproof::MultiProofMessage, PayloadExecutionCache},
+    payload_processor::{bal, multiproof::MultiProofMessage},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    ExecutionEnv, StateProviderBuilder,
+    CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;

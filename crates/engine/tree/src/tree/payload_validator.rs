@@ -39,14 +39,13 @@
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
 use crate::tree::{
-    cached_state::{CacheStats, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    CacheWaitDurations, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
+    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
@@ -69,6 +68,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
+use reth_execution_cache::CacheStats;
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };

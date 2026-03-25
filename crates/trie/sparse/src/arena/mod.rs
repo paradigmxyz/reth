@@ -2051,29 +2051,35 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
-    /// cached RLP. If the node has no cached RLP (e.g. it was never hashed), the parent slot
-    /// is left dangling — this is safe because the parent will also be removed during pruning.
+    /// Removes a pruned node from the arena and blinds the parent's child slot with `cached_rlp`.
+    ///
+    /// Callers must only invoke this for nodes whose cached RLP is available.
     fn remove_pruned_node(
         arena: &mut NodeArena,
         cursor: &ArenaCursor,
         idx: Index,
         nibble: Option<u8>,
+        cached_rlp: RlpNode,
     ) -> ArenaSparseNode {
         trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
-        let node = arena.remove(idx).expect("node must exist to be pruned");
-        let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
 
-        if let Some(rlp_node) = rlp_node {
+        {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
             let child_nibble = nibble.expect("non-root child");
             let parent_branch = arena[parent_idx].branch_mut();
             let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
                 .expect("child nibble not found in parent state_mask");
-            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            debug_assert!(
+                matches!(
+                    parent_branch.children[child_idx],
+                    ArenaSparseNodeBranchChild::Revealed(revealed_idx) if revealed_idx == idx
+                ),
+                "parent child slot at nibble {child_nibble} does not point to pruned node"
+            );
+            parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Blinded(cached_rlp);
         }
 
-        node
+        arena.remove(idx).expect("node must exist to be pruned")
     }
 
     /// Reveals a single proof node using a pre-computed [`SeekResult`] from
@@ -2720,11 +2726,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
+                    // Pruning requires replacing the parent edge with a blinded hash. If this
+                    // node has no cached RLP yet (dirty), skip pruning it in this pass.
+                    let Some(cached_rlp) = self.upper_arena[head_idx]
+                        .state_ref()
+                        .and_then(|state| state.cached_rlp_node())
+                        .cloned()
+                    else {
+                        continue;
+                    };
+
                     Self::remove_pruned_node(
                         &mut self.upper_arena,
                         &cursor,
                         head_idx,
                         head_path.last(),
+                        cached_rlp,
                     );
                     pruned += 1;
                 }
@@ -2733,11 +2750,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     retained_idx = subtrie_range.end;
 
                     if subtrie_range.is_empty() {
+                        // A subtrie can only be removed if its root has a cached RLP to install
+                        // as a blinded child in the parent branch.
+                        let Some(cached_rlp) = self.upper_arena[head_idx]
+                            .state_ref()
+                            .and_then(|state| state.cached_rlp_node())
+                            .cloned()
+                        else {
+                            continue;
+                        };
+
                         let removed = Self::remove_pruned_node(
                             &mut self.upper_arena,
                             &cursor,
                             head_idx,
                             head_path.last(),
+                            cached_rlp,
                         );
                         let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
                         pruned += s.num_leaves as usize;

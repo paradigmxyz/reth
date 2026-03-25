@@ -26,6 +26,7 @@ members = [
     "crates/engine/invalid-block-hooks/",
     "crates/engine/local",
     "crates/engine/primitives/",
+    "crates/engine/execution-cache/",
     "crates/engine/tree/",
     "crates/engine/util/",
     "crates/era",
@@ -76,7 +77,6 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/payload/util/",
-    "crates/primitives/",
     "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
@@ -342,6 +342,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-local = { path = "crates/engine/local" }
+reth-execution-cache = { path = "crates/engine/execution-cache" }
 reth-engine-primitives = { path = "crates/engine/primitives", default-features = false }
 reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-util = { path = "crates/engine/util" }
@@ -393,7 +394,6 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = ["__internal"] }
 reth-primitives-traits = { version = "0.1.0", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
@@ -445,7 +445,7 @@ alloy-dyn-abi = "1.5.6"
 alloy-primitives = { version = "1.5.6", default-features = false, features = ["map-foldhash"] }
 alloy-sol-types = { version = "1.5.6", default-features = false }
 
-alloy-chains = { version = "0.2.5", default-features = false }
+alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
 alloy-evm = { version = "0.29.2", default-features = false }
@@ -643,6 +643,7 @@ ethereum_ssz_derive = "0.10.1"
 # allocators
 jemalloc_pprof = { version = "0.8", default-features = false }
 tikv-jemalloc-ctl = "0.6"
+tikv-jemalloc-sys = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = { version = "0.18.0", features = ["demangle"] }
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
@@ -689,7 +690,7 @@ snap = "1.1.1"
 socket2 = { version = "0.6", default-features = false }
 sysinfo = { version = "0.38", default-features = false }
 tracing-journald = "0.3"
-tracing-logfmt = "=0.3.5"
+tracing-logfmt = "0.3.7"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
