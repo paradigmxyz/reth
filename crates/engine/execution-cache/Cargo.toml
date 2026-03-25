@@ -32,8 +32,8 @@ revm-state.workspace = true
 
 [features]
 test-utils = [
-	"reth-primitives-traits/test-utils",
-	"reth-revm/test-utils",
-	"reth-provider/test-utils",
-	"reth-trie/test-utils"
+    "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie/test-utils",
 ]
