@@ -309,7 +309,7 @@ impl NodeState {
             timing.execution_ms = stats.execution_duration.as_millis(),
             timing.state_read_ms = stats.state_read_duration.as_millis(),
             timing.state_hash_ms = stats.state_hash_duration.as_millis(),
-            timing.commit_ms = info.commit_duration.as_millis(),
+            timing.commit_ms = info.commit_duration.map(|d| d.as_millis()),
             timing.total_ms = info.total_duration.as_millis(),
             throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
             state_reads.accounts = stats.accounts_read,

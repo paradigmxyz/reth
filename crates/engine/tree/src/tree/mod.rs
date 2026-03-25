@@ -1849,7 +1849,7 @@ where
                 if total_duration > threshold.expect("checked above") {
                     self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
                         stats,
-                        commit_duration: commit_dur,
+                        commit_duration: Some(commit_dur),
                         total_duration,
                     }));
                 }
@@ -2820,8 +2820,20 @@ where
 
         let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
 
-        // Store timing stats for detailed block logging after persistence
+        // Emit slow block event immediately after execution so it appears even when
+        // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
+        // The commit_duration is unknown at this point so we use Duration::ZERO.
         if let Some(stats) = timing_stats {
+            if let Some(threshold) = self.config.slow_block_threshold() {
+                let total_duration = stats.execution_duration + stats.state_hash_duration;
+                if total_duration > threshold {
+                    self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
+                        stats: stats.clone(),
+                        commit_duration: None,
+                        total_duration,
+                    }));
+                }
+            }
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
