@@ -7832,8 +7832,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf1df733d93427eb197cf80a7aaa68bff8949e1b59d34cde1ad410351a24136d"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7853,8 +7852,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d14acf8feadf1eed0734d1766b55b6c19a374d4cb140bc862880f96da33e7e5a"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9517,7 +9515,8 @@ version = "1.11.3"
 
 [[package]]
 name = "reth-primitives-traits"
-version = "1.11.3"
+version = "0.1.0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9536,17 +9535,13 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "quanta",
- "rand 0.8.5",
- "rand 0.9.2",
  "rayon",
- "reth-chainspec",
  "reth-codecs",
  "revm-bytecode",
  "revm-primitives",
  "revm-state",
  "secp256k1 0.30.0",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -10574,8 +10569,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3be2e9bda3e45c5d87cfbe811676bfb9cb1f0e6fa82d1dd6a3e8cd996512f236"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2ea7e57681ac6167398fa48e60b72377b3c761f8#2ea7e57681ac6167398fa48e60b72377b3c761f8"
 dependencies = [
  "zstd",
 ]
