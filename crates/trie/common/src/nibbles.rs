@@ -175,17 +175,28 @@ impl From<PackedStoredNibbles> for StoredNibbles {
     }
 }
 
+fn encode_packed_nibbles_33(nibbles: &Nibbles) -> [u8; 33] {
+    assert!(nibbles.len() <= 64);
+    let mut buf = [0u8; 33];
+    nibbles.pack_to(&mut buf[..32]);
+    buf[32] = nibbles.len() as u8;
+    buf
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+fn decode_packed_nibbles_33(buf: &[u8]) -> Nibbles {
+    let nibble_count = buf[32] as usize;
+    let packed_len = nibble_count.div_ceil(2);
+    Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)
+}
+
 impl PackedStoredNibbles {
     /// Encodes the nibbles into a fixed-size `[u8; 33]` array.
     ///
     /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
     /// and the 33rd byte stores the actual nibble count.
     pub fn to_compact_array(&self) -> [u8; 33] {
-        assert!(self.0.len() <= 64);
-        let mut buf = [0u8; 33];
-        self.0.pack_to(&mut buf[..32]);
-        buf[32] = self.0.len() as u8;
-        buf
+        encode_packed_nibbles_33(&self.0)
     }
 }
 
@@ -195,19 +206,13 @@ impl reth_codecs::Compact for PackedStoredNibbles {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.0.len() <= 64);
-
-        let mut packed = [0u8; 32];
-        self.0.pack_to(&mut packed);
+        let packed = encode_packed_nibbles_33(&self.0);
         buf.put_slice(&packed);
-        buf.put_u8(self.0.len() as u8);
-        33
+        packed.len()
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        let nibble_count = buf[32] as usize;
-        let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        (Self(decode_packed_nibbles_33(buf)), &buf[33..])
     }
 }
 
@@ -265,11 +270,7 @@ impl PackedStoredNibblesSubKey {
     /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
     /// and the 33rd byte stores the actual nibble count.
     pub fn to_compact_array(&self) -> [u8; 33] {
-        assert!(self.0.len() <= 64);
-        let mut buf = [0u8; 33];
-        self.0.pack_to(&mut buf[..32]);
-        buf[32] = self.0.len() as u8;
-        buf
+        encode_packed_nibbles_33(&self.0)
     }
 }
 
@@ -279,19 +280,13 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.0.len() <= 64);
-
-        let mut packed = [0u8; 32];
-        self.0.pack_to(&mut packed);
+        let packed = encode_packed_nibbles_33(&self.0);
         buf.put_slice(&packed);
-        buf.put_u8(self.0.len() as u8);
-        33
+        packed.len()
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        let nibble_count = buf[32] as usize;
-        let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        (Self(decode_packed_nibbles_33(buf)), &buf[33..])
     }
 }
 
