@@ -41,7 +41,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
-    multiproof::{SparseTrieHandle, StateRootComputeOutcome},
+    multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -1951,7 +1951,7 @@ pub trait EngineValidator<
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-    ) -> Option<SparseTrieHandle>;
+    ) -> Option<StateRootHandle>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2025,16 +2025,17 @@ where
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-    ) -> Option<SparseTrieHandle> {
+    ) -> Option<StateRootHandle> {
         let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
         let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(anchor_hash))
                 .with_lazy_overlay(lazy_overlay);
 
-        Some(self.payload_processor.spawn_sparse_trie_handle(
+        Some(self.payload_processor.spawn_state_root(
             overlay_factory,
             parent_state_root,
+            false,
             &self.config,
         ))
     }

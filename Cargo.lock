@@ -7628,6 +7628,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-tasks",
+ "reth-trie-parallel",
  "serde",
  "tokio",
  "tracing",

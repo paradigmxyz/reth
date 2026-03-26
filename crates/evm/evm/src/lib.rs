@@ -146,7 +146,7 @@ pub use alloy_evm::{
 /// }
 ///
 /// // Finish block building and get the outcome (block)
-/// let outcome = builder.finish(state_provider)?;
+/// let outcome = builder.finish(state_provider, None)?;
 /// let block = outcome.block;
 /// ```
 ///
@@ -399,7 +399,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// }
     ///
     /// // Complete block building
-    /// let outcome = builder.finish(state_provider)?;
+    /// let outcome = builder.finish(state_provider, None)?;
     /// ```
     fn builder_for_next_block<'a, DB: Database + 'a>(
         &'a self,

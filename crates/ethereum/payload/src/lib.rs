@@ -22,7 +22,7 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
@@ -119,6 +119,7 @@ where
         let args = BuildArguments::new(
             Default::default(),
             Default::default(),
+            None,
             config,
             Default::default(),
             None,
@@ -157,7 +158,14 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, execution_cache, config, cancel, best_payload } = args;
+    let BuildArguments {
+        mut cached_reads,
+        execution_cache,
+        trie_handle,
+        config,
+        cancel,
+        best_payload,
+    } = args;
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
     let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
@@ -205,6 +213,12 @@ where
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
         PayloadBuilderError::Internal(err.into())
     })?;
+
+    // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
+    // to the background trie pipeline for incremental state root computation.
+    if let Some(ref handle) = trie_handle {
+        builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    }
 
     // initialize empty blob sidecars at first. If cancun is active then this will be populated by
     // blob sidecars if any.
@@ -378,8 +392,25 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(state_provider.as_ref())?;
+    let BlockBuilderOutcome { execution_result, block, .. } = if let Some(mut handle) = trie_handle
+    {
+        // Drop the state hook, which drops the StateHookSender and triggers
+        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
+        builder.executor_mut().set_state_hook(None);
+
+        // The sparse trie has been computing incrementally alongside tx execution.
+        // This recv() waits for the final root hash — most work is already done.
+        let outcome = handle.state_root().map_err(PayloadBuilderError::other)?;
+
+        debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+
+        builder.finish(
+            state_provider.as_ref(),
+            Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+        )?
+    } else {
+        builder.finish(state_provider.as_ref(), None)?
+    };
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

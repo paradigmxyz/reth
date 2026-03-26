@@ -20,8 +20,8 @@ pub mod root;
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 
-/// Sparse trie task interface types shared between the engine tree and the payload builder.
-pub mod sparse;
+/// State root task interface types shared between the engine tree and the payload builder.
+pub mod state_root_task;
 
 /// Async value encoder for V2 proofs.
 pub(crate) mod value_encoder;

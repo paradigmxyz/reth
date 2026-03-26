@@ -24,6 +24,7 @@ use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -177,6 +178,7 @@ where
             pending_block: None,
             cached_reads,
             execution_cache: input.cache,
+            trie_handle: input.trie_handle,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -327,6 +329,8 @@ where
     cached_reads: Option<CachedReads>,
     /// Optional execution cache shared with the engine.
     execution_cache: Option<SavedCache>,
+    /// Optional sparse trie handle for async state root computation.
+    trie_handle: Option<StateRootHandle>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -353,6 +357,7 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
+        let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
         self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
@@ -360,6 +365,7 @@ where
             let args = BuildArguments {
                 cached_reads,
                 execution_cache,
+                trie_handle,
                 config: payload_config,
                 cancel,
                 best_payload,
@@ -494,6 +500,7 @@ where
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
+                trie_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -823,6 +830,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cached_reads: CachedReads,
     /// Optional execution cache shared with the engine.
     pub execution_cache: Option<SavedCache>,
+    /// Optional sparse trie handle for async state root computation.
+    pub trie_handle: Option<StateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -836,11 +845,12 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     pub const fn new(
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
+        trie_handle: Option<StateRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, config, cancel, best_payload }
+        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
     }
 }
 

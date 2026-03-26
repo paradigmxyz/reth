@@ -1,40 +1,16 @@
 //! Multiproof task related functionality.
 
-use crossbeam_channel::Sender as CrossbeamSender;
-use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 
-pub use reth_trie_parallel::sparse::{
-    evm_state_to_hashed_post_state, MultiProofMessage, Source, SparseTrieHandle,
-    StateRootComputeOutcome,
+pub use reth_trie_parallel::state_root_task::{
+    evm_state_to_hashed_post_state, MultiProofMessage, Source, StateHookSender,
+    StateRootComputeOutcome, StateRootHandle,
 };
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
-
-/// A wrapper for the sender that signals completion when dropped.
-///
-/// This type is intended to be used in combination with the evm executor statehook.
-/// This should trigger once the block has been executed (after) the last state update has been
-/// sent. This triggers the exit condition of the multi proof task.
-#[derive(Deref, Debug)]
-pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
-
-impl StateHookSender {
-    /// Creates a new [`StateHookSender`] wrapping the given channel sender.
-    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
-        Self(inner)
-    }
-}
-
-impl Drop for StateHookSender {
-    fn drop(&mut self) {
-        // Send completion signal when the sender is dropped
-        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
-    }
-}
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]

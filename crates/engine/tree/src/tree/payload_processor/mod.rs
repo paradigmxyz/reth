@@ -9,7 +9,6 @@ use crate::tree::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
-use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use multiproof::*;
@@ -25,7 +24,7 @@ use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
-use reth_revm::{db::BundleState, state::EvmState};
+use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
@@ -268,12 +267,18 @@ where
 
         let span = Span::current();
 
-        let state_root_handle = self.spawn_state_root(multiproof_provider_factory, &env, config);
+        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        let state_root_handle = self.spawn_state_root(
+            multiproof_provider_factory,
+            env.parent_state_root,
+            halve_workers,
+            config,
+        );
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
-            Some(state_root_handle.to_multi_proof.clone()),
+            Some(state_root_handle.updates_tx().clone()),
             bal,
         );
 
@@ -319,11 +324,15 @@ where
     ///   state root.
     ///
     /// The state hook **must** be dropped after execution to signal the end of state updates.
+    ///
+    /// When `halve_workers` is true, the proof worker pool is halved (for small blocks where
+    /// fewer transactions produce fewer state changes and most workers would be idle).
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_state_root<F>(
-        &mut self,
+        &self,
         multiproof_provider_factory: F,
-        env: &ExecutionEnv<Evm>,
+        parent_state_root: B256,
+        halve_workers: bool,
         config: &TreeConfig,
     ) -> StateRootHandle
     where
@@ -333,12 +342,11 @@ where
             + Sync
             + 'static,
     {
-        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
+        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         let (state_root_tx, state_root_rx) = channel();
@@ -347,11 +355,11 @@ where
             proof_handle,
             state_root_tx,
             from_multi_proof,
-            env.parent_state_root,
+            parent_state_root,
             config.multiproof_chunk_size(),
         );
 
-        StateRootHandle::new(to_multi_proof, state_root_rx)
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -663,49 +671,6 @@ where
         });
     }
 
-    /// Spawns a sparse trie pipeline and returns a [`SparseTrieHandle`] suitable for passing
-    /// to the payload builder.
-    ///
-    /// Like [`Self::spawn_state_root`], but returns a [`SparseTrieHandle`] instead of a
-    /// [`StateRootHandle`] and always uses full proof workers (transaction count is unknown
-    /// at FCU time).
-    pub fn spawn_sparse_trie_handle<F>(
-        &self,
-        multiproof_provider_factory: F,
-        parent_state_root: B256,
-        config: &TreeConfig,
-    ) -> SparseTrieHandle
-    where
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-    {
-        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
-
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        #[cfg(feature = "trie-debug")]
-        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, false);
-
-        let (state_root_tx, state_root_rx) = channel();
-
-        self.spawn_sparse_trie_task(
-            proof_handle,
-            state_root_tx,
-            from_multi_proof,
-            parent_state_root,
-            config.multiproof_chunk_size(),
-        );
-
-        SparseTrieHandle {
-            cached_trie_state_root: parent_state_root,
-            updates_tx: to_multi_proof,
-            state_root_rx,
-        }
-    }
-
     /// Updates the execution cache with the post-execution state from an inserted block.
     ///
     /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
@@ -779,67 +744,6 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         }
         let _ = execute_tx.send(tx);
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-    }
-}
-
-/// Handle to a background state root computation task.
-///
-/// Unlike [`PayloadHandle`], this does not include transaction iteration or cache prewarming.
-/// It only provides access to the state root computation via [`Self::state_hook`] and
-/// [`Self::state_root`].
-///
-/// Created by [`PayloadProcessor::spawn_state_root`].
-#[derive(Debug)]
-pub struct StateRootHandle {
-    /// Channel for evm state updates to the multiproof pipeline.
-    to_multi_proof: CrossbeamSender<MultiProofMessage>,
-    /// Receiver for the computed state root.
-    state_root_rx: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
-}
-
-impl StateRootHandle {
-    /// Creates a new state root handle.
-    pub const fn new(
-        to_multi_proof: CrossbeamSender<MultiProofMessage>,
-        state_root_rx: mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-    ) -> Self {
-        Self { to_multi_proof, state_root_rx: Some(state_root_rx) }
-    }
-
-    /// Returns a state hook that streams state updates to the background state root task.
-    ///
-    /// The hook must be dropped after execution completes to signal the end of state updates.
-    pub fn state_hook(&self) -> impl OnStateHook {
-        let to_multi_proof = StateHookSender::new(self.to_multi_proof.clone());
-
-        move |source: StateChangeSource, state: &EvmState| {
-            let _ =
-                to_multi_proof.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
-        }
-    }
-
-    /// Awaits the state root computation result.
-    ///
-    /// # Panics
-    ///
-    /// If called more than once.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
-        self.state_root_rx
-            .take()
-            .expect("state_root already taken")
-            .recv()
-            .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
-    }
-
-    /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
-    ///
-    /// # Panics
-    ///
-    /// If called more than once.
-    pub const fn take_state_root_rx(
-        &mut self,
-    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
-        self.state_root_rx.take().expect("state_root already taken")
     }
 }
 
