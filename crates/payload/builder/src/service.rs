@@ -533,11 +533,7 @@ pub struct BuildNewPayload<T> {
     ///
     /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
     pub cache: Option<SavedCache>,
-    /// Optional handle to a background sparse trie computation.
-    ///
-    /// When provided, the payload builder can stream state updates into the sparse trie
-    /// pipeline and receive the computed state root without blocking on
-    /// `state_root_with_updates()`.
+    /// Optional handle to a background sparse trie task.
     pub trie_handle: Option<SparseTrieHandle>,
 }
 

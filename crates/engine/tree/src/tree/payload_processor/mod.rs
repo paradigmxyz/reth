@@ -666,7 +666,9 @@ where
     /// Spawns a sparse trie pipeline and returns a [`SparseTrieHandle`] suitable for passing
     /// to the payload builder.
     ///
-    /// This reuses the same [`SparseTrieCacheTask`] machinery as [`Self::spawn_state_root`].
+    /// Like [`Self::spawn_state_root`], but returns a [`SparseTrieHandle`] instead of a
+    /// [`StateRootHandle`] and always uses full proof workers (transaction count is unknown
+    /// at FCU time).
     pub fn spawn_sparse_trie_handle<F>(
         &self,
         multiproof_provider_factory: F,
