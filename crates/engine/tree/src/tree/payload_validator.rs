@@ -68,7 +68,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::CacheStats;
+use reth_execution_cache::{CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -1941,6 +1941,9 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Returns [`SavedCache`] for the given block hash.
+    fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2003,6 +2006,10 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
+        Some(self.payload_processor.cache_for(block_hash))
     }
 }
 

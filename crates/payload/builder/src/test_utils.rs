@@ -1,12 +1,12 @@
 //! Utils for testing purposes.
 
 use crate::{
-    traits::KeepPayloadJobAlive, EthBuiltPayload, PayloadBuilderHandle, PayloadBuilderService,
-    PayloadJob, PayloadJobGenerator,
+    service::BuildNewPayload, traits::KeepPayloadJobAlive, EthBuiltPayload, PayloadBuilderHandle,
+    PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
 
 use alloy_consensus::Block;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
@@ -57,11 +57,10 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 
     fn new_payload_job(
         &self,
-        _parent: B256,
-        attr: EthPayloadAttributes,
+        input: BuildNewPayload<EthPayloadAttributes>,
         _id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        Ok(TestPayloadJob { attr })
+        Ok(TestPayloadJob { attr: input.attributes })
     }
 }
 

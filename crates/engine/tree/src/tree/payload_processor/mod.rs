@@ -520,7 +520,7 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
-    fn cache_for(&self, parent_hash: B256) -> SavedCache {
+    pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
             cache

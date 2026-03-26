@@ -26,6 +26,7 @@ use reth_evm::{
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_cache::CachedStateProvider;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
@@ -115,7 +116,13 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
+        let args = BuildArguments::new(
+            Default::default(),
+            Default::default(),
+            config,
+            Default::default(),
+            None,
+        );
 
         default_ethereum_payload(
             self.evm_config.clone(),
@@ -150,10 +157,17 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { mut cached_reads, execution_cache, config, cancel, best_payload } = args;
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
-    let state_provider = client.state_by_block_hash(parent_header.hash())?;
+    let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
+    if let Some(execution_cache) = execution_cache {
+        state_provider = Box::new(CachedStateProvider::new(
+            state_provider,
+            execution_cache.cache().clone(),
+            execution_cache.metrics().clone(),
+        ));
+    }
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let mut db =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
