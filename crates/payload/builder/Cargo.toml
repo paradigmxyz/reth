@@ -44,9 +44,9 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 
 [features]
 test-utils = [
-	"reth-chain-state/test-utils",
-	"reth-primitives-traits/test-utils",
-	"tokio/rt",
-	"reth-execution-cache/test-utils",
-	"reth-trie-parallel/test-utils"
+    "reth-chain-state/test-utils",
+    "reth-primitives-traits/test-utils",
+    "tokio/rt",
+    "reth-execution-cache/test-utils",
+    "reth-trie-parallel/test-utils",
 ]
