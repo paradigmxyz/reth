@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
-        DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        StateRootComputeOutcome, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -26,8 +26,6 @@ use reth_trie_parallel::{
     },
     root::ParallelStateRootError,
 };
-#[cfg(feature = "trie-debug")]
-use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     errors::SparseTrieResult, ConfigurableSparseTrie, DeferredDrops, LeafUpdate,
     RevealableSparseTrie, SparseStateTrie, SparseTrie,
@@ -861,20 +859,6 @@ enum SparseTrieTaskMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
-}
-
-/// Outcome of the state root computation, including the state root itself with
-/// the trie updates.
-#[derive(Debug, Clone)]
-pub struct StateRootComputeOutcome {
-    /// The state root.
-    pub state_root: B256,
-    /// The trie updates.
-    pub trie_updates: Arc<TrieUpdates>,
-    /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
-    /// and `Some(address)` for storage tries.
-    #[cfg(feature = "trie-debug")]
-    pub debug_recorders: Vec<(Option<B256>, TrieDebugRecorder)>,
 }
 
 #[cfg(test)]

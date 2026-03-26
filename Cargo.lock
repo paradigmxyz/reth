@@ -9503,6 +9503,7 @@ dependencies = [
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-primitives-traits",
+ "reth-trie-parallel",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -10559,6 +10560,8 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "1.11.3"
 dependencies = [
+ "alloy-eip7928",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
@@ -10578,6 +10581,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "reth-trie-sparse",
+ "revm-state",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

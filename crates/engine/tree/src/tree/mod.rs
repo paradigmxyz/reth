@@ -3101,12 +3101,23 @@ where
             None
         };
 
+        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
+            self.payload_validator.sparse_trie_handle_for(
+                state.head_block_hash,
+                head.state_root(),
+                &self.state,
+            )
+        } else {
+            None
+        };
+
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
         let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
             parent_hash: state.head_block_hash,
             attributes,
             cache,
+            trie_handle,
         });
 
         // Client software MUST respond to this method call in the following way:

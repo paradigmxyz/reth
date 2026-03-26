@@ -153,6 +153,8 @@ pub struct TreeConfig {
     state_root_task_timeout: Option<Duration>,
     /// Whether to share execution cache with the payload builder.
     share_execution_cache_with_payload_builder: bool,
+    /// Whether to share sparse trie with the payload builder.
+    share_sparse_trie_with_payload_builder: bool,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -189,6 +191,7 @@ impl Default for TreeConfig {
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
             share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -224,6 +227,7 @@ impl TreeConfig {
         slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
         share_execution_cache_with_payload_builder: bool,
+        share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -252,6 +256,7 @@ impl TreeConfig {
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
             share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -569,6 +574,11 @@ impl TreeConfig {
         self.share_execution_cache_with_payload_builder
     }
 
+    /// Returns whether to share sparse trie with the payload builder.
+    pub const fn share_sparse_trie_with_payload_builder(&self) -> bool {
+        self.share_sparse_trie_with_payload_builder
+    }
+
     /// Setter for whether to share execution cache with the payload builder.
     pub const fn with_share_execution_cache_with_payload_builder(
         mut self,
@@ -576,6 +586,15 @@ impl TreeConfig {
     ) -> Self {
         self.share_execution_cache_with_payload_builder =
             share_execution_cache_with_payload_builder;
+        self
+    }
+
+    /// Setter for whether to share sparse trie with the payload builder.
+    pub const fn with_share_sparse_trie_with_payload_builder(
+        mut self,
+        share_sparse_trie_with_payload_builder: bool,
+    ) -> Self {
+        self.share_sparse_trie_with_payload_builder = share_sparse_trie_with_payload_builder;
         self
     }
 

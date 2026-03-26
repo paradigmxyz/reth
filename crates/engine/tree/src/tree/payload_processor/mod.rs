@@ -2,10 +2,7 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
-        sparse_trie::StateRootComputeOutcome,
-    },
+    payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateMetrics, ExecutionCache, PayloadExecutionCache, SavedCache,
     StateProviderBuilder, TreeConfig, WaitForCaches,
@@ -664,6 +661,47 @@ where
             drop(guard);
             executor.spawn_drop(deferred);
         });
+    }
+
+    /// Spawns a sparse trie pipeline and returns a [`SparseTrieHandle`] suitable for passing
+    /// to the payload builder.
+    ///
+    /// This reuses the same [`SparseTrieCacheTask`] machinery as [`Self::spawn_state_root`].
+    pub fn spawn_sparse_trie_handle<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        config: &TreeConfig,
+    ) -> SparseTrieHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
+
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+        #[cfg(feature = "trie-debug")]
+        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, false);
+
+        let (state_root_tx, state_root_rx) = channel();
+
+        self.spawn_sparse_trie_task(
+            proof_handle,
+            state_root_tx,
+            from_multi_proof,
+            parent_state_root,
+            config.multiproof_chunk_size(),
+        );
+
+        SparseTrieHandle {
+            cached_trie_state_root: parent_state_root,
+            updates_tx: to_multi_proof,
+            state_root_rx,
+        }
     }
 
     /// Updates the execution cache with the post-execution state from an inserted block.
