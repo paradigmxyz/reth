@@ -1027,6 +1027,13 @@ Engine:
 
           Note: this should only be enabled if node would not be requested to process any payloads in parallel with payload building.
 
+      --engine.share-sparse-trie-with-payload-builder
+          Whether to share the sparse trie pipeline with the payload builder.
+
+          When enabled, the engine spawns a sparse trie computation pipeline at FCU time and passes it to the payload builder, enabling incremental state root computation during payload building instead of a blocking `state_root_with_updates()` call.
+
+          Note: this should only be enabled if node would not be requested to process any payloads in parallel with payload building.
+
 ERA:
       --era.enable
           Enable import from ERA1 files
