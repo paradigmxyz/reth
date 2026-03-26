@@ -209,16 +209,16 @@ where
     ));
     let mut total_fees = U256::ZERO;
 
-    builder.apply_pre_execution_changes().map_err(|err| {
-        warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
-        PayloadBuilderError::Internal(err.into())
-    })?;
-
     // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
     // to the background trie pipeline for incremental state root computation.
     if let Some(ref handle) = trie_handle {
         builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
     }
+
+    builder.apply_pre_execution_changes().map_err(|err| {
+        warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // initialize empty blob sidecars at first. If cancun is active then this will be populated by
     // blob sidecars if any.
@@ -400,14 +400,20 @@ where
 
         // The sparse trie has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.
-        let outcome = handle.state_root().map_err(PayloadBuilderError::other)?;
-
-        debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
-
-        builder.finish(
-            state_provider.as_ref(),
-            Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
-        )?
+        // Fall back to sync state root if the trie pipeline fails.
+        match handle.state_root() {
+            Ok(outcome) => {
+                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                builder.finish(
+                    state_provider.as_ref(),
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                )?
+            }
+            Err(err) => {
+                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
+                builder.finish(state_provider.as_ref(), None)?
+            }
+        }
     } else {
         builder.finish(state_provider.as_ref(), None)?
     };
