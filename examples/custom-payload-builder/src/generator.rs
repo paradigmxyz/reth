@@ -4,13 +4,12 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
 use reth_ethereum::{
-    evm::revm::primitives::B256,
     node::api::Block,
     primitives::SealedHeader,
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::Runtime,
 };
-use reth_payload_builder::{PayloadBuilderError, PayloadId, PayloadJobGenerator};
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadId, PayloadJobGenerator};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -60,29 +59,28 @@ where
     /// `engine_forkchoiceUpdatedV1`
     fn new_payload_job(
         &self,
-        parent: B256,
-        attributes: Builder::Attributes,
+        input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if parent.is_zero() {
+        let parent_block = if input.parent_hash.is_zero() {
             // use latest block if parent is zero: genesis block
             self.client
                 .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(parent))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(input.parent_hash))?
                 .seal_slow()
         } else {
             let block = self
                 .client
-                .find_block_by_hash(parent, BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(parent))?;
+                .find_block_by_hash(input.parent_hash, BlockSource::Any)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(input.parent_hash))?;
 
             // we already know the hash, so we can seal it
-            block.seal_unchecked(parent)
+            block.seal_unchecked(input.parent_hash)
         };
         let hash = parent_block.hash();
         let header = SealedHeader::new(parent_block.header().clone(), hash);
 
-        let config = PayloadConfig::new(Arc::new(header), attributes, id);
+        let config = PayloadConfig::new(Arc::new(header), input.attributes, id);
         Ok(EmptyBlockPayloadJob {
             _executor: self.executor.clone(),
             builder: self.builder.clone(),

@@ -1020,6 +1020,13 @@ Engine:
 
           [default: 1s]
 
+      --engine.share-execution-cache-with-payload-builder
+          Whether to share execution cache with the payload builder.
+
+          When enabled, each payload job will get an instance of cross-block execution cache from the engine.
+
+          Note: this should only be enabled if node would not be requested to process any payloads in parallel with payload building.
+
 ERA:
       --era.enable
           Enable import from ERA1 files

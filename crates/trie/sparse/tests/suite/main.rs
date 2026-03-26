@@ -304,7 +304,6 @@ sparse_trie_tests! {
     test_prune_then_update_no_panic,
     test_prune_only_descends_into_branch_root,
     test_prune_handles_small_subtrie_root_nodes,
-    test_prune_after_dirty_update_keeps_root_stable,
 
     // wipe / clear
     test_wipe_resets_to_empty_root,

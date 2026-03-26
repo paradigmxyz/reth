@@ -23,7 +23,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -3079,12 +3079,12 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: T::PayloadAttributes,
+        attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
-            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+            self.payload_validator.validate_payload_attributes_against_header(&attributes, head)
         {
             warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
@@ -3095,10 +3095,19 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
+        let cache = if self.config.share_execution_cache_with_payload_builder() {
+            self.payload_validator.cache_for(state.head_block_hash)
+        } else {
+            None
+        };
+
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
-        let pending_payload_id =
-            self.payload_builder.send_new_payload(state.head_block_hash, attrs);
+        let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
+            parent_hash: state.head_block_hash,
+            attributes,
+            cache,
+        });
 
         // Client software MUST respond to this method call in the following way:
         // {
