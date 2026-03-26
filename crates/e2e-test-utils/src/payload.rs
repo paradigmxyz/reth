@@ -1,4 +1,3 @@
-use alloy_primitives::B256;
 use futures_util::StreamExt;
 use reth_node_api::{BlockBody, PayloadAttributes, PayloadKind};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
@@ -33,17 +32,10 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         })
     }
 
-    /// Creates a new payload job from static attributes
-    pub async fn new_payload(&mut self) -> eyre::Result<(T::PayloadAttributes, PayloadId)> {
+    /// Generates the next payload attributes
+    pub fn next_attributes(&mut self) -> T::PayloadAttributes {
         self.timestamp += 1;
-        let attributes = (self.attributes_generator)(self.timestamp);
-        let parent_hash = B256::ZERO;
-        let payload_id = self
-            .payload_builder
-            .send_new_payload(parent_hash, attributes.clone())
-            .await
-            .unwrap()?;
-        Ok((attributes, payload_id))
+        (self.attributes_generator)(self.timestamp)
     }
 
     /// Asserts that the next event is a payload attributes event

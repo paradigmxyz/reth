@@ -50,7 +50,6 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
-mod cached_state;
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -65,13 +64,15 @@ mod trie_updates;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
-pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+pub use reth_execution_cache::{
+    CachedStateMetrics, CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+};
 
 pub mod state;
 
@@ -178,18 +179,46 @@ pub struct TreeOutcome<T> {
     pub outcome: T,
     /// An optional event to tell the caller to do something.
     pub event: Option<TreeEvent>,
+    /// Whether the block was already seen, meaning no real execution happened during this
+    /// `newPayload` call.
+    pub already_seen: bool,
 }
 
 impl<T> TreeOutcome<T> {
     /// Create new tree outcome.
     pub const fn new(outcome: T) -> Self {
-        Self { outcome, event: None }
+        Self { outcome, event: None, already_seen: false }
     }
 
     /// Set event on the outcome.
     pub fn with_event(mut self, event: TreeEvent) -> Self {
         self.event = Some(event);
         self
+    }
+
+    /// Set the `already_seen` flag on the outcome.
+    pub const fn with_already_seen(mut self, value: bool) -> Self {
+        self.already_seen = value;
+        self
+    }
+}
+
+/// Result of trying to insert a new payload in [`EngineApiTreeHandler`].
+#[derive(Debug)]
+pub struct TryInsertPayloadResult {
+    /// - `Valid`: Payload successfully validated and inserted
+    /// - `Syncing`: Parent missing, payload buffered for later
+    /// - Error status: Payload is invalid
+    pub status: PayloadStatus,
+    /// Whether the block was already seen
+    pub already_seen: bool,
+}
+
+impl TryInsertPayloadResult {
+    /// Convert the result into a [`TreeOutcome`].
+    #[inline]
+    pub fn into_outcome(self) -> TreeOutcome<PayloadStatus> {
+        TreeOutcome::new(self.status).with_already_seen(self.already_seen)
     }
 }
 
@@ -629,13 +658,12 @@ where
         // record pre-execution phase duration
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
-        let status = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?
+        let mut outcome = if self.backfill_sync_state.is_idle() {
+            self.try_insert_payload(payload)?.into_outcome()
         } else {
-            self.try_buffer_payload(payload)?
+            TreeOutcome::new(self.try_buffer_payload(payload)?)
         };
 
-        let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
             // Only create the canonical event if this block isn't already the canonical head
@@ -653,16 +681,11 @@ where
     }
 
     /// Processes a payload during normal sync operation.
-    ///
-    /// Returns:
-    /// - `Valid`: Payload successfully validated and inserted
-    /// - `Syncing`: Parent missing, payload buffered for later
-    /// - Error status: Payload is invalid
     #[instrument(level = "debug", target = "engine::tree", skip_all)]
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -670,31 +693,40 @@ where
 
         match self.insert_payload(payload) {
             Ok(status) => {
-                let status = match status {
+                let (status, already_seen) = match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
                         self.try_connect_buffered_blocks(num_hash)?;
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, false)
                     }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
                         latest_valid_hash = Some(block_hash);
-                        PayloadStatusEnum::Valid
+                        (PayloadStatusEnum::Valid, true)
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) => {
+                        (PayloadStatusEnum::Syncing, false)
+                    }
                     InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                         // not known to be invalid, but we don't know anything else
-                        PayloadStatusEnum::Syncing
+                        (PayloadStatusEnum::Syncing, true)
                     }
                 };
 
-                Ok(PayloadStatus::new(status, latest_valid_hash))
+                Ok(TryInsertPayloadResult {
+                    status: PayloadStatus::new(status, latest_valid_hash),
+                    already_seen,
+                })
             }
-            Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
-                InsertPayloadError::Payload(error) => {
-                    Ok(self.on_new_payload_error(error, num_hash, parent_hash)?)
-                }
-            },
+            Err(error) => {
+                let status = match error {
+                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
+                    InsertPayloadError::Payload(error) => {
+                        self.on_new_payload_error(error, num_hash, parent_hash)?
+                    }
+                };
+
+                Ok(TryInsertPayloadResult { status, already_seen: false })
+            }
         }
     }
 
@@ -1288,7 +1320,8 @@ where
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
             // Wait for any in-progress persistence to complete (blocking)
-            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+            if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
+                debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
             }
@@ -1847,7 +1880,7 @@ where
                 if total_duration > threshold.expect("checked above") {
                     self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
                         stats,
-                        commit_duration: commit_dur,
+                        commit_duration: Some(commit_dur),
                         total_duration,
                     }));
                 }
@@ -2818,8 +2851,19 @@ where
 
         let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
 
-        // Store timing stats for detailed block logging after persistence
+        // Emit slow block event immediately after execution so it appears even when
+        // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
         if let Some(stats) = timing_stats {
+            if let Some(threshold) = self.config.slow_block_threshold() {
+                let total_duration = stats.execution_duration + stats.state_hash_duration;
+                if total_duration > threshold {
+                    self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
+                        stats: stats.clone(),
+                        commit_duration: None,
+                        total_duration,
+                    }));
+                }
+            }
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 

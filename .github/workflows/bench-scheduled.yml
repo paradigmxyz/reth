@@ -1,19 +1,25 @@
-# Nightly regression benchmark.
+# Scheduled regression benchmarks (nightly + hourly).
 #
-# Compares the previous nightly build against the current nightly build to
-# detect performance regressions. Runs daily after docker.yml produces a new
-# nightly image at 01:00 UTC.
+# Two modes:
+#   nightly — Compares the previous nightly Docker build against the current one.
+#             Runs daily after docker.yml produces a new nightly image.
+#   hourly  — Compares main HEAD against the last benchmarked commit to catch
+#             regressions quickly. Falls back to HEAD~1 on first run.
+#             Skips if no new commits or if a previous run is still in progress.
 #
 # State is persisted between runs via GitHub Actions cache: each successful
 # run saves the feature commit SHA so the next run knows what to compare against.
 
 on:
   schedule:
-    - cron: "30 5 * * *" # 06:30 UTC daily
+    # Nightly: compares previous vs current nightly Docker build
+    - cron: "30 5 * * *"
+    # Hourly: compares main HEAD vs last benchmarked commit, skips if no new commits
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "Force run even if no new nightly (bypass skip logic)"
+        description: "Force run even if no new commit (bypass skip logic)"
         required: false
         default: false
         type: boolean
@@ -22,6 +28,14 @@ on:
         required: false
         default: true
         type: boolean
+      mode:
+        description: "Benchmark mode"
+        required: false
+        default: "nightly"
+        type: choice
+        options:
+          - nightly
+          - hourly
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,44 +49,105 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1: Resolve nightly refs, check staleness, manage state
+  # Job 1: Resolve refs, check staleness, manage state
   # ---------------------------------------------------------------------------
   resolve-refs:
     name: resolve-refs
     runs-on: ubuntu-latest
     outputs:
+      mode: ${{ steps.mode.outputs.mode }}
       baseline-ref: ${{ steps.refs.outputs.baseline-ref }}
       feature-ref: ${{ steps.refs.outputs.feature-ref }}
       should-skip: ${{ steps.refs.outputs.should-skip }}
       is-stale: ${{ steps.refs.outputs.is-stale }}
       stale-age-hours: ${{ steps.refs.outputs.stale-age-hours }}
       nightly-created: ${{ steps.refs.outputs.nightly-created }}
+      long-running: ${{ steps.refs.outputs.long-running }}
     steps:
       - uses: actions/checkout@v6
         with:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
+          fetch-depth: 2
 
-      - name: Restore nightly state
+      - name: Detect mode
+        id: mode
+        run: |
+          # Maps cron schedules to modes (must match the schedule entries above)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode || 'nightly' }}"
+          elif [ "${{ github.event.schedule }}" = "30 5 * * *" ]; then
+            MODE="nightly"
+          else
+            MODE="hourly"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Detected mode: $MODE"
+
+      - name: Restore state cache
         id: state-cache
         uses: actions/cache/restore@v4
         with:
-          path: .nightly-state
-          key: bench-scheduled-state-dummy
+          path: .${{ steps.mode.outputs.mode == 'hourly' && 'hourly' || 'nightly' }}-state
+          key: bench-${{ steps.mode.outputs.mode }}-state-dummy
           restore-keys: |
-            bench-scheduled-state-
+            bench-${{ steps.mode.outputs.mode }}-state-
 
-      - name: Resolve nightly refs
+      - name: Resolve refs
         id: refs
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           FORCE="${{ inputs.force || 'false' }}"
-          .github/scripts/bench-scheduled-refs.sh "$FORCE"
+          MODE="${{ steps.mode.outputs.mode }}"
+          .github/scripts/bench-scheduled-refs.sh "$FORCE" "$MODE"
+
+      - name: Alert on long-running hourly
+        if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true'
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) return;
+
+            const repo = '${{ github.repository }}';
+            const runUrl = `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
+            const blocks = [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: ':warning: Hourly Bench: previous run still in progress', emoji: true },
+              },
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: 'A previous hourly benchmark run is still in progress. This invocation will be skipped.\nThis may indicate a long-running or stuck job.',
+                },
+              },
+              {
+                type: 'actions',
+                elements: [{
+                  type: 'button',
+                  text: { type: 'plain_text', text: 'View Run :github:', emoji: true },
+                  url: runUrl,
+                  action_id: 'ci_button',
+                }],
+              },
+            ];
+            await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ channel, blocks, text: 'Hourly bench: previous run still in progress', unfurl_links: false }),
+            });
 
       - name: Alert on stale nightly
-        if: steps.refs.outputs.is-stale == 'true'
+        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true'
         uses: actions/github-script@v8
         env:
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
@@ -146,7 +221,7 @@ jobs:
             }
 
       - name: Fail on stale nightly
-        if: steps.refs.outputs.is-stale == 'true'
+        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true'
         run: |
           echo "::error::Nightly build is stale (>24h old). Aborting."
           exit 1
@@ -167,7 +242,8 @@ jobs:
       SCHELK_MOUNT: /reth-bench
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ""
-      BENCH_ACTOR: "nightly-regression"
+      BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
+      BENCH_ACTOR: "${{ needs.resolve-refs.outputs.mode }}-regression"
       BENCH_BLOCKS: "2000"
       BENCH_WARMUP_BLOCKS: "500"
       BENCH_SAMPLY: "false"
@@ -273,8 +349,8 @@ jobs:
         run: |
           BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
           FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
-          echo "baseline-name=nightly-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "feature-name=nightly-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
           echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
 
@@ -390,7 +466,7 @@ jobs:
 
       - name: Start metrics proxy
         run: |
-          BENCH_ID="nightly-${{ github.run_id }}"
+          BENCH_ID="${BENCH_MODE}-${{ github.run_id }}"
           BENCH_REFERENCE_EPOCH=$(date +%s)
           echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
           echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
@@ -519,7 +595,7 @@ jobs:
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
       - name: Generate charts
-        if: success()
+        if: success() && env.BENCH_MODE != 'hourly'
         env:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
@@ -545,7 +621,7 @@ jobs:
 
       - name: Push charts
         id: push-charts
-        if: success()
+        if: success() && env.BENCH_MODE != 'hourly'
         run: |
           RUN_ID=${{ github.run_id }}
           CHART_DIR="nightly/${RUN_ID}"
@@ -591,7 +667,9 @@ jobs:
             const featureLink = `[\`${summary.feature.name}\`](${commitUrl}/${summary.feature.ref})`;
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
 
-            let md = `# ${emoji} Nightly Regression: ${label}\n\n`;
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            let md = `# ${emoji} ${modeLabel}: ${label}\n\n`;
             md += `**Baseline:** ${baselineLink}\n`;
             md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
             md += blocksLabel(summary).map(p => `**${p.key}:** ${p.value}`).join(' · ') + '\n\n';
@@ -671,9 +749,19 @@ jobs:
               return;
             }
 
-            // Only notify on significant changes (regression OR improvement)
+            // Filter notifications based on mode
             const changes = summary.changes || {};
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
             const hasSignificant = Object.values(changes).some(c => c.sig === 'good' || c.sig === 'bad');
+
+            // Hourly mode: only notify on regressions
+            if (mode === 'hourly' && !hasRegression) {
+              core.info('Hourly mode: no regression detected, skipping Slack notification');
+              return;
+            }
+
+            // Nightly mode: notify on any significant change (regression or improvement)
             if (!hasSignificant) {
               core.info('No significant changes detected, skipping nightly Slack notification');
               return;
@@ -697,8 +785,9 @@ jobs:
 
             function cell(text) { return { type: 'raw_text', text: String(text) || ' ' }; }
 
+            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
-              '*Nightly Regression*',
+              `*${modeLabel}*`,
               '',
               `*Baseline:* ${baselineLink}`,
               `*Feature:* ${featureLink}`,
@@ -714,7 +803,7 @@ jobs:
             const blocks = [
               {
                 type: 'header',
-                text: { type: 'plain_text', text: `${headerEmoji} Nightly: ${label}`, emoji: true },
+                text: { type: 'plain_text', text: `${headerEmoji} ${modeLabel}: ${label}`, emoji: true },
               },
               {
                 type: 'section',
@@ -744,7 +833,7 @@ jobs:
               },
             ];
 
-            const text = `Nightly Regression: ${summary.baseline.name} vs ${summary.feature.name}`;
+            const text = `${modeLabel}: ${summary.baseline.name} vs ${summary.feature.name}`;
             const resp = await fetch('https://slack.com/api/chat.postMessage', {
               method: 'POST',
               headers: {
@@ -812,14 +901,17 @@ jobs:
             const repo = `${context.repo.owner}/${context.repo.repo}`;
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
 
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const modeLabel = mode === 'hourly' ? 'Hourly' : 'Nightly';
+
             const blocks = [
               {
                 type: 'header',
-                text: { type: 'plain_text', text: ':rotating_light: Nightly Bench Failed', emoji: true },
+                text: { type: 'plain_text', text: `:rotating_light: ${modeLabel} Bench Failed`, emoji: true },
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*Nightly regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
               },
               {
                 type: 'actions',
@@ -841,7 +933,7 @@ jobs:
               body: JSON.stringify({
                 channel,
                 blocks,
-                text: `Nightly bench failed while ${failedStep}`,
+                text: `${modeLabel} bench failed while ${failedStep}`,
                 unfurl_links: false,
               }),
             });
@@ -862,11 +954,13 @@ jobs:
     steps:
       - name: Write state file
         run: |
-          mkdir -p .nightly-state
-          echo "${{ needs.resolve-refs.outputs.feature-ref }}" > .nightly-state/last-feature-ref
+          MODE="${{ needs.resolve-refs.outputs.mode }}"
+          STATE_DIR=".${MODE}-state"
+          mkdir -p "$STATE_DIR"
+          echo "${{ needs.resolve-refs.outputs.feature-ref }}" > "$STATE_DIR/last-feature-ref"
 
-      - name: Save nightly state
+      - name: Save state
         uses: actions/cache/save@v4
         with:
-          path: .nightly-state
-          key: bench-scheduled-state-${{ needs.resolve-refs.outputs.feature-ref }}
+          path: .${{ needs.resolve-refs.outputs.mode }}-state
+          key: bench-${{ needs.resolve-refs.outputs.mode }}-state-${{ needs.resolve-refs.outputs.feature-ref }}

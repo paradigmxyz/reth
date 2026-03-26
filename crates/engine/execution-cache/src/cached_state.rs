@@ -87,7 +87,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// The const generic `PREWARM` controls whether every cache miss is populated. This is only
 /// relevant for pre-warm transaction execution with the intention to pre-populate the cache with
 /// data for regular block execution. During regular block execution the cache doesn't need to be
-/// populated because the actual EVM database [`State`](revm::database::State) also caches
+/// populated because the actual EVM database `State` also caches
 /// internally during block execution and the cache is then updated after the block with the entire
 /// [`BundleState`] output of that block which contains all accessed accounts, code, storage. See
 /// also [`ExecutionCache::insert_state`].
@@ -230,7 +230,7 @@ impl CachedStateMetrics {
     }
 
     /// Records a new execution cache creation with its duration.
-    pub(crate) fn record_cache_creation(&self, duration: Duration) {
+    pub fn record_cache_creation(&self, duration: Duration) {
         self.execution_cache_created_total.increment(1);
         self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
     }
@@ -254,51 +254,63 @@ pub struct CacheStats {
 }
 
 impl CacheStats {
-    pub(crate) fn record_account_hit(&self) {
+    /// Records an account cache hit.
+    pub fn record_account_hit(&self) {
         self.account_hits.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn record_account_miss(&self) {
+    /// Records an account cache miss.
+    pub fn record_account_miss(&self) {
         self.account_misses.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn account_hits(&self) -> usize {
+    /// Returns the number of account cache hits.
+    pub fn account_hits(&self) -> usize {
         self.account_hits.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn account_misses(&self) -> usize {
+    /// Returns the number of account cache misses.
+    pub fn account_misses(&self) -> usize {
         self.account_misses.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn record_storage_hit(&self) {
+    /// Records a storage cache hit.
+    pub fn record_storage_hit(&self) {
         self.storage_hits.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn record_storage_miss(&self) {
+    /// Records a storage cache miss.
+    pub fn record_storage_miss(&self) {
         self.storage_misses.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn storage_hits(&self) -> usize {
+    /// Returns the number of storage cache hits.
+    pub fn storage_hits(&self) -> usize {
         self.storage_hits.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn storage_misses(&self) -> usize {
+    /// Returns the number of storage cache misses.
+    pub fn storage_misses(&self) -> usize {
         self.storage_misses.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn record_code_hit(&self) {
+    /// Records a code cache hit.
+    pub fn record_code_hit(&self) {
         self.code_hits.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn record_code_miss(&self) {
+    /// Records a code cache miss.
+    pub fn record_code_miss(&self) {
         self.code_misses.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn code_hits(&self) -> usize {
+    /// Returns the number of code cache hits.
+    pub fn code_hits(&self) -> usize {
         self.code_hits.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn code_misses(&self) -> usize {
+    /// Returns the number of code cache misses.
+    pub fn code_misses(&self) -> usize {
         self.code_misses.load(Ordering::Relaxed)
     }
 }
@@ -318,7 +330,7 @@ impl CacheStats {
 ///
 /// Collisions (evicting a different key) don't change size since they replace an existing entry.
 #[derive(Debug)]
-pub(crate) struct CacheStatsHandler {
+pub struct CacheStatsHandler {
     collisions: AtomicU64,
     size: AtomicUsize,
     capacity: usize,
@@ -326,42 +338,42 @@ pub(crate) struct CacheStatsHandler {
 
 impl CacheStatsHandler {
     /// Creates a new stats handler with all counters initialized to zero.
-    pub(crate) const fn new(capacity: usize) -> Self {
+    pub const fn new(capacity: usize) -> Self {
         Self { collisions: AtomicU64::new(0), size: AtomicUsize::new(0), capacity }
     }
 
     /// Returns the number of cache collisions.
-    pub(crate) fn collisions(&self) -> u64 {
+    pub fn collisions(&self) -> u64 {
         self.collisions.load(Ordering::Relaxed)
     }
 
     /// Returns the current size (number of entries).
-    pub(crate) fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.size.load(Ordering::Relaxed)
     }
 
     /// Returns the capacity (maximum number of entries).
-    pub(crate) const fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.capacity
     }
 
     /// Increments the size counter. Called on cache insert.
-    pub(crate) fn increment_size(&self) {
+    pub fn increment_size(&self) {
         let _ = self.size.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Decrements the size counter. Called on cache remove.
-    pub(crate) fn decrement_size(&self) {
+    pub fn decrement_size(&self) {
         let _ = self.size.fetch_sub(1, Ordering::Relaxed);
     }
 
     /// Resets size to zero. Called on cache clear.
-    pub(crate) fn reset_size(&self) {
+    pub fn reset_size(&self) {
         self.size.store(0, Ordering::Relaxed);
     }
 
     /// Resets collision counter to zero (but not size).
-    pub(crate) fn reset_stats(&self) {
+    pub fn reset_stats(&self) {
         self.collisions.store(0, Ordering::Relaxed);
     }
 }
@@ -762,12 +774,12 @@ impl ExecutionCache {
     }
 
     /// Insert code into cache.
-    fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
+    pub fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
         self.0.code_cache.insert(hash, code);
     }
 
     /// Insert account into cache.
-    fn insert_account(&self, address: Address, account: Option<Account>) {
+    pub fn insert_account(&self, address: Address, account: Option<Account>) {
         self.0.account_cache.insert(address, account);
     }
 
@@ -869,7 +881,7 @@ impl ExecutionCache {
     ///
     /// We do not clear the bytecodes cache, because its mapping can never change, as it's
     /// `keccak256(bytecode) => bytecode`.
-    pub(crate) fn clear(&self) {
+    pub fn clear(&self) {
         self.0.storage_cache.clear();
         self.0.account_cache.clear();
 
@@ -879,7 +891,7 @@ impl ExecutionCache {
 
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
     /// and resets the hit/miss/collision counters.
-    pub(crate) fn update_metrics(&self, metrics: &CachedStateMetrics) {
+    pub fn update_metrics(&self, metrics: &CachedStateMetrics) {
         metrics.code_cache_size.set(self.0.code_stats.size() as f64);
         metrics.code_cache_capacity.set(self.0.code_stats.capacity() as f64);
         metrics.code_cache_collisions.set(self.0.code_stats.collisions() as f64);
@@ -964,7 +976,7 @@ impl SavedCache {
     ///
     /// Note: This can be expensive with large cached state. Use
     /// `with_disable_cache_metrics(true)` to skip.
-    pub(crate) fn update_metrics(&self) {
+    pub fn update_metrics(&self) {
         if self.disable_cache_metrics {
             return
         }
@@ -973,15 +985,16 @@ impl SavedCache {
 
     /// Clears all caches, resetting them to empty state,
     /// and updates the hash of the block this cache belongs to.
-    pub(crate) fn clear_with_hash(&mut self, hash: B256) {
+    pub fn clear_with_hash(&mut self, hash: B256) {
         self.hash = hash;
         self.caches.clear();
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 impl SavedCache {
-    fn clone_guard_for_test(&self) -> Arc<()> {
+    /// Clones the usage guard for testing availability tracking.
+    pub fn clone_guard_for_test(&self) -> Arc<()> {
         self.usage_guard.clone()
     }
 }

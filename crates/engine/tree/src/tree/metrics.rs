@@ -448,11 +448,17 @@ impl NewPayloadStatusMetrics {
             Ok(outcome) => match outcome.outcome.status {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
-                    self.new_payload_total_gas.record(gas_used as f64);
-                    self.new_payload_total_gas_last.set(gas_used as f64);
-                    let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
-                    self.new_payload_gas_per_second.record(gas_per_second);
-                    self.new_payload_gas_per_second_last.set(gas_per_second);
+                    if !outcome.already_seen {
+                        self.new_payload_total_gas.record(gas_used as f64);
+                        self.new_payload_total_gas_last.set(gas_used as f64);
+                        let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
+                        self.new_payload_gas_per_second.record(gas_per_second);
+                        self.new_payload_gas_per_second_last.set(gas_per_second);
+
+                        self.new_payload_latency.record(elapsed);
+                        self.new_payload_last.set(elapsed);
+                        self.gas_bucket.record(gas_used, elapsed);
+                    }
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
@@ -461,9 +467,6 @@ impl NewPayloadStatusMetrics {
             Err(_) => self.new_payload_error.increment(1),
         }
         self.new_payload_messages.increment(1);
-        self.new_payload_latency.record(elapsed);
-        self.new_payload_last.set(elapsed);
-        self.gas_bucket.record(gas_used, elapsed);
         if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
             self.forkchoice_updated_new_payload_time_diff
                 .record(start - latest_forkchoice_updated_at);
