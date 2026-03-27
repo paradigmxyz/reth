@@ -329,7 +329,7 @@ where
     cached_reads: Option<CachedReads>,
     /// Optional execution cache shared with the engine.
     execution_cache: Option<SavedCache>,
-    /// Optional sparse trie handle for async state root computation.
+    /// Optional state root task handle, shared with the engine.
     trie_handle: Option<StateRootHandle>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
@@ -830,7 +830,12 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cached_reads: CachedReads,
     /// Optional execution cache shared with the engine.
     pub execution_cache: Option<SavedCache>,
-    /// Optional sparse trie handle for async state root computation.
+    /// Optional state root task handle, shared with the engine.
+    ///
+    /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
+    /// block until this task completes. The trie is anchored at the built block's state
+    /// root, so if the next `newPayload` is not on top of that block, the trie cache is
+    /// invalidated.
     pub trie_handle: Option<StateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
