@@ -1328,7 +1328,17 @@ fn streaming_download_and_extract(
         let response = match client.get(url).send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
+                let err = eyre::Error::from(e);
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    warn!(target: "reth::cli",
+                        url = %url,
+                        attempt,
+                        max = MAX_DOWNLOAD_RETRIES,
+                        err = %err,
+                        "Streaming request failed, retrying"
+                    );
+                }
+                last_error = Some(err);
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 }
@@ -1355,6 +1365,15 @@ fn streaming_download_and_extract(
         match result {
             Ok(()) => return Ok(()),
             Err(e) => {
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    warn!(target: "reth::cli",
+                        url = %url,
+                        attempt,
+                        max = MAX_DOWNLOAD_RETRIES,
+                        err = %e,
+                        "Streaming extraction failed, retrying"
+                    );
+                }
                 last_error = Some(e);
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
