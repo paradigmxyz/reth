@@ -1,7 +1,7 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 pub mod api;
-use alloy_eips::BlockId;
+use alloy_eips::{eip2718::Eip2718Error, BlockId};
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
@@ -65,8 +65,8 @@ pub enum EthApiError {
     #[error("empty transaction data")]
     EmptyRawTransactionData,
     /// When decoding a signed transaction fails
-    #[error("failed to decode signed transaction")]
-    FailedToDecodeSignedTransaction,
+    #[error("failed to decode signed transaction: {0}")]
+    FailedToDecodeSignedTransaction(Eip2718Error),
     /// When the transaction signature is invalid
     #[error("invalid transaction signature")]
     InvalidTransactionSignature,
@@ -276,7 +276,7 @@ impl EthApiError {
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
-            EthApiError::FailedToDecodeSignedTransaction |
+            EthApiError::FailedToDecodeSignedTransaction(_) |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
