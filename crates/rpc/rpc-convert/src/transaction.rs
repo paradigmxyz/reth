@@ -58,7 +58,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
-pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+pub trait HeaderConverter<Consensus, Rpc>: Send + Sync + Unpin + Clone + 'static {
     /// An associated RPC conversion error.
     type Err: error::Error;
 
@@ -84,6 +84,21 @@ where
         block_size: usize,
     ) -> Result<Rpc, Self::Err> {
         Ok(Rpc::from_consensus_header(header, block_size))
+    }
+}
+
+impl<Consensus, Rpc, F> HeaderConverter<Consensus, Rpc> for F
+where
+    F: Fn(SealedHeader<Consensus>, usize) -> Rpc + Send + Sync + Unpin + Clone + 'static,
+{
+    type Err = Infallible;
+
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err> {
+        Ok(self(header, block_size))
     }
 }
 
