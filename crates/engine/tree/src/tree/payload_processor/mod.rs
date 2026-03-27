@@ -470,7 +470,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<StateRootMessage>>,
         bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
@@ -547,7 +547,7 @@ where
         &self,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-        from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
+        from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
     ) {

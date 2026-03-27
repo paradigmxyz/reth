@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
-        StateRootComputeOutcome, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
+        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -116,7 +116,7 @@ where
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
         executor: &Runtime,
-        updates: CrossbeamReceiver<MultiProofMessage>,
+        updates: CrossbeamReceiver<StateRootMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -162,7 +162,7 @@ where
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
-        updates: CrossbeamReceiver<MultiProofMessage>,
+        updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
         metrics: MultiProofTaskMetrics,
     ) {
@@ -173,22 +173,22 @@ where
             total_idle_time += idle_start.elapsed();
 
             let msg = match message {
-                MultiProofMessage::PrefetchProofs(targets) => {
+                StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                MultiProofMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(_, state) => {
                     let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
-                MultiProofMessage::FinishedStateUpdates => {
+                StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                MultiProofMessage::BlockAccessList(_) => {
+                StateRootMessage::BlockAccessList(_) => {
                     idle_start = Instant::now();
                     continue;
                 }
-                MultiProofMessage::HashedStateUpdate(state) => {
+                StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
@@ -895,8 +895,8 @@ mod tests {
             );
         });
 
-        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
-        updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
+        updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 
         let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {

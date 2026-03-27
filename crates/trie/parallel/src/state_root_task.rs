@@ -36,7 +36,7 @@ impl From<StateChangeSource> for Source {
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub enum MultiProofMessage {
+pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
@@ -81,7 +81,7 @@ pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
     cached_trie_state_root: B256,
     /// Channel for streaming state updates and proof targets into the sparse trie pipeline.
-    updates_tx: crossbeam_channel::Sender<MultiProofMessage>,
+    updates_tx: crossbeam_channel::Sender<StateRootMessage>,
     /// Receiver for the final state root result.
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
@@ -91,7 +91,7 @@ impl StateRootHandle {
     /// Creates a new [`StateRootHandle`].
     pub const fn new(
         cached_trie_state_root: B256,
-        updates_tx: crossbeam_channel::Sender<MultiProofMessage>,
+        updates_tx: crossbeam_channel::Sender<StateRootMessage>,
         state_root_rx: std::sync::mpsc::Receiver<
             Result<StateRootComputeOutcome, ParallelStateRootError>,
         >,
@@ -105,7 +105,7 @@ impl StateRootHandle {
     }
 
     /// Returns a reference to the updates sender channel.
-    pub const fn updates_tx(&self) -> &crossbeam_channel::Sender<MultiProofMessage> {
+    pub const fn updates_tx(&self) -> &crossbeam_channel::Sender<StateRootMessage> {
         &self.updates_tx
     }
 
@@ -116,7 +116,7 @@ impl StateRootHandle {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
         move |source: StateChangeSource, state: &EvmState| {
-            let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
         }
     }
 
@@ -151,11 +151,11 @@ impl StateRootHandle {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub struct StateHookSender(crossbeam_channel::Sender<MultiProofMessage>);
+pub struct StateHookSender(crossbeam_channel::Sender<StateRootMessage>);
 
 impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
-    pub const fn new(inner: crossbeam_channel::Sender<MultiProofMessage>) -> Self {
+    pub const fn new(inner: crossbeam_channel::Sender<StateRootMessage>) -> Self {
         Self(inner)
     }
 }
@@ -163,7 +163,7 @@ impl StateHookSender {
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
-        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
+        let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
     }
 }
 
