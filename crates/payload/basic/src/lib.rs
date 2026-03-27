@@ -835,7 +835,7 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
     /// block until this task completes. The trie is anchored at the built block's state
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
-    /// invalidated.
+    /// invalidated and cleared.
     pub trie_handle: Option<StateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
