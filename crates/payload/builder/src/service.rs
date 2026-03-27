@@ -158,6 +158,17 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         }
     }
 
+    /// Same as [`Self::resolve_kind`] but returns the underlying future.
+    pub async fn resolve_kind_fut(
+        &self,
+        id: PayloadId,
+        kind: PayloadKind,
+    ) -> Result<Option<PayloadFuture<T::BuiltPayload>>, PayloadBuilderError> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx))?;
+        rx.await.map_err(Into::into)
+    }
+
     /// Sends a message to the service to subscribe to payload events.
     /// Returns a receiver that will receive them.
     pub async fn subscribe(&self) -> Result<PayloadEvents<T>, PayloadBuilderError> {
