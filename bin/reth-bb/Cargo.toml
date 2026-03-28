@@ -30,10 +30,13 @@ reth-provider.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-ethereum-forks.workspace = true
 reth-revm.workspace = true
 reth-consensus.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
+reth-storage-errors.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
@@ -53,7 +56,9 @@ async-trait.workspace = true
 derive_more.workspace = true
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+revm.workspace = true
 revm-primitives.workspace = true
+alloy-hardforks.workspace = true
 metrics.workspace = true
 
 # std
