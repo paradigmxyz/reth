@@ -8,7 +8,7 @@ use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
@@ -56,6 +56,16 @@ struct Overlay {
     hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
+/// Cache key for [`OverlayStateProviderFactory::overlay_cache`].
+///
+/// Includes both tip number and canonical tip hash so cache entries remain fork-aware across
+/// same-height reorgs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct OverlayCacheKey {
+    db_tip_block: BlockNumber,
+    db_tip_hash: B256,
+}
+
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 ///
 /// Either provides immediate pre-computed overlay data, or a lazy overlay that computes
@@ -101,9 +111,11 @@ pub struct OverlayStateProviderFactory<F> {
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
-    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
-    /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
+    /// A cache which maps canonical db tip identity -> [`Overlay`].
+    ///
+    /// The key includes both tip number and hash so same-height reorgs do not accidentally reuse
+    /// stale overlays from the previous canonical fork.
+    overlay_cache: Arc<DashMap<OverlayCacheKey, Overlay>>,
 }
 
 impl<F> OverlayStateProviderFactory<F> {
@@ -240,6 +252,15 @@ where
             .as_ref()
             .map(|chk| chk.block_number)
             .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })
+    }
+
+    /// Returns the cache key representing the current canonical db tip.
+    fn get_db_tip_cache_key(&self, provider: &F::Provider) -> ProviderResult<OverlayCacheKey> {
+        let db_tip_block = self.get_db_tip_block_number(provider)?;
+        let db_tip_hash = provider
+            .block_hash(db_tip_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(db_tip_block.into()))?;
+        Ok(OverlayCacheKey { db_tip_block, db_tip_hash })
     }
 
     /// Returns whether or not it is required to collect reverts, and validates that there are
@@ -415,21 +436,21 @@ where
             return Ok(Overlay { trie_updates, hashed_post_state })
         }
 
-        let db_tip_block = self.get_db_tip_block_number(provider)?;
+        let cache_key = self.get_db_tip_cache_key(provider)?;
 
         // If the overlay is present in the cache then return it directly.
-        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
+        if let Some(entry) = self.overlay_cache.get(&cache_key) {
             return Ok(entry.value().clone());
         }
 
         // If the overlay is not present then we need to calculate a new one.
         // DashMap's entry API handles the race condition internally.
         let mut cache_miss = false;
-        let overlay = match self.overlay_cache.entry(db_tip_block) {
+        let overlay = match self.overlay_cache.entry(cache_key) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
                 cache_miss = true;
-                let overlay = self.calculate_overlay(provider, db_tip_block)?;
+                let overlay = self.calculate_overlay(provider, cache_key.db_tip_block)?;
                 entry.insert(overlay.clone());
                 overlay
             }
@@ -591,5 +612,86 @@ where
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{test_utils::create_test_provider_factory, BlockWriter, StageCheckpointWriter};
+    use alloy_primitives::Bytes;
+    use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_primitives_traits::{block::TestBlock, RecoveredBlock, SealedBlock};
+    use reth_stages_types::{StageCheckpoint, StageId};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn overlay_cache_is_fork_aware_for_same_height_reorg() {
+        let provider_factory = create_test_provider_factory();
+
+        let genesis_block = SealedBlock::<Block>::seal_parts(
+            provider_factory.chain_spec().genesis_header().clone(),
+            BlockBody::default(),
+        );
+        let genesis_hash = genesis_block.hash();
+        let genesis_block = RecoveredBlock::new_sealed(genesis_block, vec![]);
+
+        let mut block_a = Block::default();
+        block_a.header_mut().parent_hash = genesis_hash;
+        block_a.header_mut().number = 1;
+        let block_a = RecoveredBlock::new_sealed(SealedBlock::seal_slow(block_a), vec![]);
+        let block_a_hash = block_a.hash();
+
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw.insert_block(&genesis_block).unwrap();
+            provider_rw.insert_block(&block_a).unwrap();
+            provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let overlay_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), ChangesetCache::new())
+                .with_block_hash(Some(genesis_hash));
+
+        {
+            let provider = provider_factory.provider().unwrap();
+            overlay_factory.get_overlay(&provider).unwrap();
+        }
+        assert_eq!(overlay_factory.overlay_cache.len(), 1);
+
+        let mut block_b = Block::default();
+        block_b.header_mut().parent_hash = genesis_hash;
+        block_b.header_mut().number = 1;
+        block_b.header_mut().extra_data = Bytes::from_static(b"reorg");
+        let block_b = RecoveredBlock::new_sealed(SealedBlock::seal_slow(block_b), vec![]);
+        let block_b_hash = block_b.hash();
+        assert_ne!(block_a_hash, block_b_hash);
+
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw.remove_blocks_above(0).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw.insert_block(&block_b).unwrap();
+            provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        {
+            let provider = provider_factory.provider().unwrap();
+            overlay_factory.get_overlay(&provider).unwrap();
+        }
+
+        assert_eq!(overlay_factory.overlay_cache.len(), 2);
+
+        let cached_tip_hashes: BTreeSet<_> =
+            overlay_factory.overlay_cache.iter().map(|entry| entry.key().db_tip_hash).collect();
+        assert!(cached_tip_hashes.contains(&block_a_hash));
+        assert!(cached_tip_hashes.contains(&block_b_hash));
     }
 }
