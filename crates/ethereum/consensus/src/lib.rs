@@ -45,11 +45,9 @@ pub struct EthBeaconConsensus<ChainSpec> {
     max_extra_data_size: usize,
     /// When true, skips the gas limit change validation between parent and child blocks.
     skip_gas_limit_ramp_check: bool,
-    /// When true, skips the blob gas used check (for big-block testing where merged blocks
-    /// exceed single-block blob limits).
+    /// When true, skips the blob gas used check in header validation.
     skip_blob_gas_used_check: bool,
-    /// When true, skips the requests hash validation in post-execution (for big-block testing
-    /// where merged blocks produce different execution requests than the original blocks).
+    /// When true, skips the requests hash check in post-execution validation.
     skip_requests_hash_check: bool,
 }
 
@@ -82,13 +80,13 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
-    /// Disables the blob gas used check for big-block testing.
+    /// Disables the blob gas used check in header validation.
     pub const fn with_skip_blob_gas_used_check(mut self, skip: bool) -> Self {
         self.skip_blob_gas_used_check = skip;
         self
     }
 
-    /// Disables the requests hash validation in post-execution for big-block testing.
+    /// Disables the requests hash check in post-execution validation.
     pub const fn with_skip_requests_hash_check(mut self, skip: bool) -> Self {
         self.skip_requests_hash_check = skip;
         self
@@ -119,10 +117,10 @@ where
             receipt_root_bloom,
         );
 
-        if self.skip_requests_hash_check &&
-            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
-        {
-            return Ok(());
+        if self.skip_requests_hash_check {
+            if let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res {
+                return Ok(());
+            }
         }
 
         res

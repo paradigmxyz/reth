@@ -67,10 +67,7 @@ pub use block_buffer::BlockBuffer;
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
-pub use payload_validator::{
-    BasicEngineValidator, BasicEngineValidatorBlockExecutor, EngineValidator,
-    EngineValidatorBlockExecutor, ExecuteBlockCtx, ExecuteBlockOutcome,
-};
+pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
@@ -1483,7 +1480,12 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            BeaconEngineMessage::ForkchoiceUpdated {
+                                state,
+                                payload_attrs,
+                                tx,
+                                ..
+                            } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();

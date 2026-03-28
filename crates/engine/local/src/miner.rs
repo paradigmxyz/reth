@@ -6,7 +6,9 @@ use eyre::OptionExt;
 use futures_util::{stream::Fuse, Stream, StreamExt};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
+};
 use reth_primitives_traits::{HeaderTy, SealedHeaderFor};
 use reth_storage_api::BlockReader;
 use reth_transaction_pool::TransactionPool;
@@ -212,7 +214,10 @@ where
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
         let state = self.forkchoice_state();
-        let res = self.to_engine.fork_choice_updated(state, None).await?;
+        let res = self
+            .to_engine
+            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
+            .await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
@@ -229,6 +234,7 @@ where
             .fork_choice_updated(
                 self.forkchoice_state(),
                 Some(self.payload_attributes_builder.build(&self.last_header)),
+                EngineApiMessageVersion::default(),
             )
             .await?;
 
