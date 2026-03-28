@@ -285,6 +285,36 @@ impl<St> MultiplexInner<St> {
     }
 }
 
+impl<St> MultiplexInner<St>
+where
+    St: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Sends all buffered messages from [`out_buffer`](Self::out_buffer) on the connection.
+    ///
+    /// Returns [`Poll::Ready`]`(Ok(()))` once the buffer is fully drained, or
+    /// [`Poll::Pending`] if the connection is not ready to accept more data.
+    fn poll_drain_out_buffer(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), P2PStreamError>> {
+        loop {
+            match self.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = self.out_buffer.pop_front() {
+                        if let Err(err) = self.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(err))
+                        }
+                    } else {
+                        return Poll::Ready(Ok(()))
+                    }
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 /// Represents a protocol in the multiplexer that is used as the primary protocol.
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
@@ -651,13 +681,9 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
-        }
-        if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err))
-        }
-        Poll::Ready(Ok(()))
+        // Drain buffered satellite messages before accepting new sends.
+        ready!(this.inner.poll_drain_out_buffer(cx).map_err(Into::into))?;
+        this.primary.st.poll_ready_unpin(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
@@ -665,11 +691,15 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_flush_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        ready!(this.inner.poll_drain_out_buffer(cx).map_err(Into::into))?;
+        this.inner.conn.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_close_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        ready!(this.inner.poll_drain_out_buffer(cx).map_err(Into::into))?;
+        this.inner.conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
