@@ -1472,6 +1472,10 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
                         self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(

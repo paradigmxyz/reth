@@ -613,6 +613,32 @@ async fn test_engine_request_during_backfill() {
     assert!(resp.payload_status.is_syncing());
 }
 
+#[tokio::test]
+async fn test_insert_executed_block_updates_tree_state_and_emits_event() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let block = test_harness
+        .block_builder
+        .get_executed_blocks(1..2)
+        .next()
+        .expect("expected one executed block");
+    let block_hash = block.recovered_block().hash();
+
+    let _ = test_harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(block)))
+        .unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.block_count(), 1);
+
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::CanonicalBlockAdded(added, _)) => {
+            assert_eq!(added.recovered_block().hash(), block_hash);
+        }
+        _ => panic!("Unexpected event: {event:#?}"),
+    }
+}
+
 #[test]
 fn test_disconnected_payload() {
     let s = include_str!("../../test-data/holesky/2.rlp");
