@@ -2006,6 +2006,40 @@ mod forkchoice_updated_tests {
         test_harness.tree.update_reorg_metrics(2, Some(NumHash::new(60, B256::random())));
     }
 
+    #[test]
+    fn test_backfill_action_deferred_while_persistence_active() {
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+
+        let (_persistence_tx, persistence_rx) = crossbeam_channel::bounded(1);
+        test_harness
+            .tree
+            .persistence_state
+            .start_save(BlockNumHash::new(1, B256::random()), persistence_rx);
+
+        let deferred_action = BackfillAction::Start(B256::random().into());
+        test_harness.tree.emit_event(EngineApiEvent::BackfillAction(deferred_action.clone()));
+
+        assert_eq!(test_harness.tree.backfill_sync_state, BackfillSyncState::Idle);
+        assert_eq!(test_harness.tree.deferred_backfill_action, Some(deferred_action.clone()));
+        assert!(matches!(
+            test_harness.from_tree_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        test_harness.tree.persistence_state.finish(B256::random(), 1);
+        test_harness.tree.try_emit_deferred_backfill_action();
+
+        assert_eq!(test_harness.tree.backfill_sync_state, BackfillSyncState::Pending);
+        assert_eq!(test_harness.tree.deferred_backfill_action, None);
+
+        match test_harness.from_tree_rx.try_recv() {
+            Ok(EngineApiEvent::BackfillAction(action)) => {
+                assert_eq!(action, deferred_action);
+            }
+            other => panic!("Unexpected event: {other:?}"),
+        }
+    }
+
     /// Test that engine termination persists all blocks and signals completion.
     #[test]
     fn test_engine_termination_with_everything_persisted() {

@@ -284,6 +284,8 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
+    /// Backfill action deferred while persistence is in progress.
+    deferred_backfill_action: Option<BackfillAction>,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -324,6 +326,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("deferred_backfill_action", &self.deferred_backfill_action)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
@@ -385,6 +388,7 @@ where
             persistence,
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
+            deferred_backfill_action: None,
             state,
             canonical_in_memory_state,
             payload_builder,
@@ -505,6 +509,8 @@ where
             // - After engine messages: new blocks may have been inserted that exceed the
             //   persistence threshold
             // - After persistence completion: we can now persist more blocks if needed
+            self.try_emit_deferred_backfill_action();
+
             if let Err(err) = self.advance_persistence() {
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
@@ -1892,7 +1898,7 @@ where
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
 
-        if event.is_backfill_action() {
+        if let EngineApiEvent::BackfillAction(action) = event {
             debug_assert_eq!(
                 self.backfill_sync_state,
                 BackfillSyncState::Idle,
@@ -1900,20 +1906,41 @@ where
             );
 
             if self.persistence_state.in_progress() {
-                // backfill sync and persisting data are mutually exclusive, so we can't start
-                // backfill while we're still persisting
-                debug!(target: "engine::tree", "skipping backfill file while persistence task is active");
+                // backfill sync and persistence are mutually exclusive, defer the handoff until
+                // persistence is completed.
+                debug!(target: "engine::tree", "deferring backfill action while persistence task is active");
+                self.deferred_backfill_action = Some(action);
                 return
             }
+
+            // If we can emit a backfill action now, any previously deferred action is obsolete.
+            self.deferred_backfill_action = None;
 
             self.backfill_sync_state = BackfillSyncState::Pending;
             self.metrics.engine.pipeline_runs.increment(1);
             debug!(target: "engine::tree", "emitting backfill action event");
+
+            let _ = self.outgoing.send(EngineApiEvent::BackfillAction(action)).inspect_err(
+                |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
+            );
+            return
         }
 
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
+    }
+
+    /// Emits a deferred backfill action when both persistence and backfill are idle.
+    fn try_emit_deferred_backfill_action(&mut self) {
+        if self.persistence_state.in_progress() || !self.backfill_sync_state.is_idle() {
+            return
+        }
+
+        if let Some(action) = self.deferred_backfill_action.take() {
+            debug!(target: "engine::tree", "emitting deferred backfill action event");
+            self.emit_event(EngineApiEvent::BackfillAction(action));
+        }
     }
 
     /// Returns true if the canonical chain length minus the last persisted
