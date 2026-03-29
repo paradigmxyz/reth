@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-codecs.workspace = true
 reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
@@ -41,4 +42,5 @@ std = [
     "reth-prune-types/std",
     "reth-static-file-types/std",
     "revm-state/std",
+    "reth-codecs/std",
 ]

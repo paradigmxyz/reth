@@ -7,10 +7,11 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
@@ -260,14 +261,13 @@ struct RuntimeInner {
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
+    /// Named single-thread worker map. Each unique name gets a dedicated OS thread
+    /// that is reused across all tasks submitted under that name.
+    worker_map: WorkerMap,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
-    /// Handle to the quanta upkeep thread that periodically refreshes the cached
-    /// high-resolution timestamp used by [`quanta::Instant::recent()`].
-    /// Dropped when the runtime is dropped, stopping the upkeep thread.
-    _quanta_upkeep: Option<quanta::Handle>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -474,6 +474,34 @@ impl Runtime {
         self.0.handle.spawn_blocking(func)
     }
 
+    /// Moves the given value to a dedicated background thread for deallocation.
+    ///
+    /// This is useful when dropping a value is expensive (e.g. large nested collections)
+    /// and should not block the current task. Uses a persistent named thread (`"drop"`)
+    /// to avoid thread creation overhead on hot paths.
+    pub fn spawn_drop<T: Send + 'static>(&self, value: T) {
+        self.spawn_blocking_named("drop", move || drop(value));
+    }
+
+    /// Spawns a blocking closure on a dedicated, named OS thread.
+    ///
+    /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
+    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
+    /// is created lazily on first use and its OS thread name is set to `name`.
+    ///
+    /// This is useful for tasks that benefit from running on a stable thread, e.g. for
+    /// thread-local state reuse or to avoid thread creation overhead on hot paths.
+    ///
+    /// Returns a [`LazyHandle`](crate::LazyHandle) handle that resolves on first access and caches
+    /// the result.
+    pub fn spawn_blocking_named<F, R>(&self, name: &'static str, func: F) -> crate::LazyHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
+    }
+
     /// Spawns the task onto the runtime.
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
@@ -548,35 +576,6 @@ impl Runtime {
     /// This spawns a critical task onto the runtime.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical_with_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(Shutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let panicked_tasks_tx = self.0.task_events_tx.clone();
-        let on_shutdown = self.0.on_shutdown.clone();
-        let fut = f(on_shutdown);
-
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .map(drop)
-            .in_current_span();
-
-        self.0.handle.spawn(task)
-    }
-
-    /// This spawns a critical task onto the runtime.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
     /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     ///
     /// # Example
@@ -584,7 +583,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program
@@ -632,7 +631,7 @@ impl Runtime {
     /// ```no_run
     /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+    /// executor.spawn_with_graceful_shutdown_signal(async move |shutdown| {
     ///     // await the shutdown signal
     ///     let guard = shutdown.await;
     ///     // do work before exiting the program
@@ -762,28 +761,31 @@ impl RuntimeBuilder {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
-            let cpu_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(default_threads)
-                .thread_name(|i| format!("cpu-{i:02}"))
-                .build()?;
+            let cpu_pool = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(default_threads)
+                    .thread_name(|i| format!("cpu-{i:02}")),
+            )?;
 
-            let rpc_raw = rayon::ThreadPoolBuilder::new()
-                .num_threads(rpc_threads)
-                .thread_name(|i| format!("rpc-{i:02}"))
-                .build()?;
+            let rpc_raw = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(rpc_threads)
+                    .thread_name(|i| format!("rpc-{i:02}")),
+            )?;
             let rpc_pool = BlockingTaskPool::new(rpc_raw);
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
-            let storage_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(storage_threads)
-                .thread_name(|i| format!("storage-{i:02}"))
-                .build()?;
+            let storage_pool = build_pool_with_panic_handler(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(storage_threads)
+                    .thread_name(|i| format!("storage-{i:02}")),
+            )?;
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
             let proof_storage_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_storage_worker_threads)
@@ -791,7 +793,7 @@ impl RuntimeBuilder {
             )?;
 
             let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
             let proof_account_worker_pool = WorkerPool::from_builder(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(proof_account_worker_threads)
@@ -835,8 +837,6 @@ impl RuntimeBuilder {
             result
         });
 
-        let quanta_upkeep = quanta::Upkeep::new(Duration::from_millis(1)).start().ok();
-
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
             handle,
@@ -858,8 +858,8 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
             prewarming_pool,
+            worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
-            _quanta_upkeep: quanta_upkeep,
         };
 
         Ok(Runtime(Arc::new(inner)))

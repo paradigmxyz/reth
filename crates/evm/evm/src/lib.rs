@@ -146,7 +146,7 @@ pub use alloy_evm::{
 /// }
 ///
 /// // Finish block building and get the outcome (block)
-/// let outcome = builder.finish(state_provider)?;
+/// let outcome = builder.finish(state_provider, None)?;
 /// let block = outcome.block;
 /// ```
 ///
@@ -315,7 +315,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>
+    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
@@ -328,7 +328,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>, Self::Error> {
+    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>, Self::Error>
+    {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
         Ok(self.create_executor(evm, ctx))
@@ -356,7 +357,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     ) -> impl BlockBuilder<
         Primitives = Self::Primitives,
-        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>,
+        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>,
     >
     where
         DB: Database,
@@ -398,7 +399,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// }
     ///
     /// // Complete block building
-    /// let outcome = builder.finish(state_provider)?;
+    /// let outcome = builder.finish(state_provider, None)?;
     /// ```
     fn builder_for_next_block<'a, DB: Database + 'a>(
         &'a self,
@@ -408,7 +409,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<
         impl BlockBuilder<
             Primitives = Self::Primitives,
-            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>,
+            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>,
         >,
         Self::Error,
     > {

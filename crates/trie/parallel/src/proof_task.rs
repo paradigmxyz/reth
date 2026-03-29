@@ -16,8 +16,7 @@
 //!    The job carries a `ProofResultContext` so the worker knows how to send the result back.
 //! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
 //!    provided `ProofResultSender`.
-//! 3. The multiproof task receives the message, uses `sequence_number` to keep proofs in order, and
-//!    proceeds with its state-root logic.
+//! 3. The multiproof task receives the message and proceeds with its state-root logic.
 //!
 //! Each job gets its own direct channel so results go straight back to the multiproof task. That
 //! keeps ordering decisions in one place and lets workers run independently.
@@ -31,7 +30,6 @@
 
 use crate::{
     root::ParallelStateRootError,
-    targets_v2::MultiProofTargetsV2,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -49,7 +47,8 @@ use reth_trie::{
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
     trie_cursor::TrieCursorFactory,
-    DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
+    ProofV2Target,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -167,7 +166,7 @@ impl ProofWorkerHandle {
         let storage_avail = storage_available_workers.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
             storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -205,7 +204,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
         let account_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -334,15 +333,10 @@ impl ProofWorkerHandle {
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
 
                 if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
-                    let ProofResultContext {
-                        sender: result_tx,
-                        sequence_number: seq,
-                        state,
-                        start_time: start,
-                    } = input.into_proof_result_sender();
+                    let ProofResultContext { sender: result_tx, state, start_time: start } =
+                        input.into_proof_result_sender();
 
                     let _ = result_tx.send(ProofResultMessage {
-                        sequence_number: seq,
                         result: Err(ParallelStateRootError::Provider(error.clone())),
                         elapsed: start.elapsed(),
                         state,
@@ -390,12 +384,26 @@ impl ProofWorkerHandle {
 pub struct ProofTaskCtx<Factory> {
     /// The factory for creating state providers.
     factory: Factory,
+    /// Maximum random jitter to apply before each proof computation (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
 }
 
 impl<Factory> ProofTaskCtx<Factory> {
     /// Creates a new [`ProofTaskCtx`] with the given factory.
     pub const fn new(factory: Factory) -> Self {
-        Self { factory }
+        Self {
+            factory,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
+        }
+    }
+
+    /// Sets the maximum proof jitter duration (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn with_proof_jitter(mut self, jitter: Option<Duration>) -> Self {
+        self.proof_jitter = jitter;
+        self
     }
 }
 
@@ -535,8 +543,6 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
-    /// Sequence number for ordering proofs
-    pub sequence_number: u64,
     /// The proof calculation result
     pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
@@ -553,8 +559,6 @@ pub struct ProofResultMessage {
 pub struct ProofResultContext {
     /// Channel sender for result delivery
     pub sender: ProofResultSender,
-    /// Sequence number for proof ordering
-    pub sequence_number: u64,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
@@ -565,11 +569,10 @@ impl ProofResultContext {
     /// Creates a new proof result context.
     pub const fn new(
         sender: ProofResultSender,
-        sequence_number: u64,
         state: HashedPostState,
         start_time: Instant,
     ) -> Self {
-        Self { sender, sequence_number, state, start_time }
+        Self { sender, state, start_time }
     }
 }
 
@@ -717,6 +720,19 @@ where
 
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
+
+            #[cfg(feature = "trie-debug")]
+            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    jitter_us = jitter.as_micros(),
+                    "Storage worker applying proof jitter"
+                );
+                std::thread::sleep(jitter);
+            }
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
@@ -991,6 +1007,19 @@ where
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
+            #[cfg(feature = "trie-debug")]
+            if let Some(max_jitter) = self.task_ctx.proof_jitter {
+                let jitter =
+                    Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    jitter_us = jitter.as_micros(),
+                    "Account worker applying proof jitter"
+                );
+                std::thread::sleep(jitter);
+            }
+
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
@@ -1108,27 +1137,15 @@ where
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
 
-        let ProofResultContext {
-            sender: result_tx,
-            sequence_number: seq,
-            state,
-            start_time: start,
-        } = proof_result_sender;
+        let ProofResultContext { sender: result_tx, state, start_time: start } =
+            proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
 
         // Send result to MultiProofTask
-        if result_tx
-            .send(ProofResultMessage {
-                sequence_number: seq,
-                result,
-                elapsed: total_elapsed,
-                state,
-            })
-            .is_err()
-        {
+        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1219,8 +1236,8 @@ where
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &Vec<proof_v2::Target>,
-    mut storage_targets: B256Map<Vec<proof_v2::Target>>,
+    account_targets: &[ProofV2Target],
+    mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1261,28 +1278,6 @@ fn dispatch_v2_storage_proofs(
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
 
-    // If there are any targeted accounts which did not have storage targets then we generate a
-    // single proof target for them so that we get their root.
-    for target in account_targets {
-        let hashed_address = target.key();
-        if storage_proof_receivers.contains_key(&hashed_address) {
-            continue
-        }
-
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
-
-        storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
-
-        storage_proof_receivers.insert(hashed_address, result_rx);
-    }
-
     Ok(storage_proof_receivers)
 }
 
@@ -1292,12 +1287,12 @@ pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
     pub hashed_address: B256,
     /// The set of proof targets
-    pub targets: Vec<proof_v2::Target>,
+    pub targets: Vec<ProofV2Target>,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<proof_v2::Target>) -> Self {
+    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
         Self { hashed_address, targets }
     }
 }

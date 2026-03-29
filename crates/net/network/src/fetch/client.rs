@@ -11,6 +11,7 @@ use reth_network_p2p::{
     error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    receipts::client::{ReceiptsClient, ReceiptsFut},
     BlockClient,
 };
 use reth_network_peers::PeerId;
@@ -93,6 +94,24 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
         if self
             .request_tx
             .send(DownloadRequest::GetBlockBodies { request, response, priority, range_hint })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+}
+
+impl<N: NetworkPrimitives> ReceiptsClient for FetchClient<N> {
+    type Receipt = N::Receipt;
+    type Output = ReceiptsFut<N::Receipt>;
+
+    fn get_receipts_with_priority(&self, request: Vec<B256>, priority: Priority) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetReceipts { request, response, priority })
             .is_ok()
         {
             Box::pin(FlattenedResponse::from(rx))

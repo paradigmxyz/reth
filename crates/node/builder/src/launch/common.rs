@@ -472,6 +472,7 @@ where
     pub async fn create_provider_factory<N, Evm>(
         &self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
@@ -489,13 +490,18 @@ where
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics, statistics, and default tables
-        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
-            .with_default_tables()
-            .with_metrics()
-            .with_statistics()
-            .build()?;
+        // Use the provided RocksDB provider or create a new one
+        let rocksdb_provider = if let Some(provider) = rocksdb_provider {
+            provider
+        } else {
+            RocksDBProvider::builder(self.data_dir().rocksdb())
+                .with_default_tables()
+                .with_metrics()
+                .with_statistics()
+                .build()?
+        };
 
+        let prune_config = self.prune_config();
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -503,7 +509,8 @@ where
             rocksdb_provider,
             self.task_executor().clone(),
         )?
-        .with_prune_modes(self.prune_modes())
+        .with_prune_modes(prune_config.segments)
+        .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_changeset_cache(changeset_cache);
 
         // Check consistency between the database and static files, returning
@@ -557,13 +564,10 @@ where
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking_task(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
+            self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
+                let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                let _ = tx.send(result);
+            });
             rx.await?.inspect_err(|err| {
                 error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
@@ -576,12 +580,14 @@ where
     pub async fn with_provider_factory<N, Evm>(
         self,
         changeset_cache: ChangesetCache,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
+        let factory =
+            self.create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -1105,7 +1111,7 @@ where
         // If engine events are provided, spawn listener for new payload reporting
         let ethstats_for_events = ethstats.clone();
         let task_executor = self.task_executor().clone();
-        task_executor.spawn_task(Box::pin(async move {
+        task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
@@ -1128,10 +1134,10 @@ where
                     }
                 }
             }
-        }));
+        });
 
         // Spawn main ethstats service
-        task_executor.spawn_task(Box::pin(async move { ethstats.run().await }));
+        task_executor.spawn_task(async move { ethstats.run().await });
 
         Ok(())
     }
@@ -1306,6 +1312,7 @@ mod tests {
                     bodies_distance: None,
                     receipts_log_filter: None,
                     bodies_before: None,
+                    minimum_distance: None,
                 },
                 ..NodeConfig::test()
             };

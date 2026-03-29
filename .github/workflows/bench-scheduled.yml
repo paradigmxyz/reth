@@ -1,0 +1,966 @@
+# Scheduled regression benchmarks (nightly + hourly).
+#
+# Two modes:
+#   nightly — Compares the previous nightly Docker build against the current one.
+#             Runs daily after docker.yml produces a new nightly image.
+#   hourly  — Compares main HEAD against the last benchmarked commit to catch
+#             regressions quickly. Falls back to HEAD~1 on first run.
+#             Skips if no new commits or if a previous run is still in progress.
+#
+# State is persisted between runs via GitHub Actions cache: each successful
+# run saves the feature commit SHA so the next run knows what to compare against.
+
+on:
+  schedule:
+    # Nightly: compares previous vs current nightly Docker build
+    - cron: "30 5 * * *"
+    # Hourly: compares main HEAD vs last benchmarked commit, skips if no new commits
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force run even if no new commit (bypass skip logic)"
+        required: false
+        default: false
+        type: boolean
+      no_slack:
+        description: "Suppress Slack notifications"
+        required: false
+        default: true
+        type: boolean
+      mode:
+        description: "Benchmark mode"
+        required: false
+        default: "nightly"
+        type: choice
+        options:
+          - nightly
+          - hourly
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+
+name: bench-scheduled
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Resolve refs, check staleness, manage state
+  # ---------------------------------------------------------------------------
+  resolve-refs:
+    name: resolve-refs
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      baseline-ref: ${{ steps.refs.outputs.baseline-ref }}
+      feature-ref: ${{ steps.refs.outputs.feature-ref }}
+      should-skip: ${{ steps.refs.outputs.should-skip }}
+      is-stale: ${{ steps.refs.outputs.is-stale }}
+      stale-age-hours: ${{ steps.refs.outputs.stale-age-hours }}
+      nightly-created: ${{ steps.refs.outputs.nightly-created }}
+      long-running: ${{ steps.refs.outputs.long-running }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+          fetch-depth: 2
+
+      - name: Detect mode
+        id: mode
+        run: |
+          # Maps cron schedules to modes (must match the schedule entries above)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode || 'nightly' }}"
+          elif [ "${{ github.event.schedule }}" = "30 5 * * *" ]; then
+            MODE="nightly"
+          else
+            MODE="hourly"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Detected mode: $MODE"
+
+      - name: Restore state cache
+        id: state-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .${{ steps.mode.outputs.mode == 'hourly' && 'hourly' || 'nightly' }}-state
+          key: bench-${{ steps.mode.outputs.mode }}-state-dummy
+          restore-keys: |
+            bench-${{ steps.mode.outputs.mode }}-state-
+
+      - name: Resolve refs
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          FORCE="${{ inputs.force || 'false' }}"
+          MODE="${{ steps.mode.outputs.mode }}"
+          .github/scripts/bench-scheduled-refs.sh "$FORCE" "$MODE"
+
+      - name: Alert on long-running hourly
+        if: steps.mode.outputs.mode == 'hourly' && steps.refs.outputs.long-running == 'true'
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) return;
+
+            const repo = '${{ github.repository }}';
+            const runUrl = `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
+            const blocks = [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: ':warning: Hourly Bench: previous run still in progress', emoji: true },
+              },
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: 'A previous hourly benchmark run is still in progress. This invocation will be skipped.\nThis may indicate a long-running or stuck job.',
+                },
+              },
+              {
+                type: 'actions',
+                elements: [{
+                  type: 'button',
+                  text: { type: 'plain_text', text: 'View Run :github:', emoji: true },
+                  url: runUrl,
+                  action_id: 'ci_button',
+                }],
+              },
+            ];
+            await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ channel, blocks, text: 'Hourly bench: previous run still in progress', unfurl_links: false }),
+            });
+
+      - name: Alert on stale nightly
+        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true'
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) {
+              core.warning('Slack credentials not set, skipping stale nightly alert');
+              return;
+            }
+
+            const ageHours = '${{ steps.refs.outputs.stale-age-hours }}';
+            const created = '${{ steps.refs.outputs.nightly-created }}';
+            const featureRef = '${{ steps.refs.outputs.feature-ref }}';
+            const shortSha = featureRef.slice(0, 8);
+            const repo = '${{ github.repository }}';
+            const runUrl = `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
+
+            const blocks = [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: ':rotating_light: Nightly Regression: nightly build is stale', emoji: true },
+              },
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: [
+                    '*Nightly regression did not run* — nightly build is stale',
+                    '',
+                    `The latest nightly image was built from a commit that is *${ageHours}h old* (threshold: 24h).`,
+                    `This means today's nightly docker build likely failed and no new image was produced.`,
+                    '',
+                    `Stale commit: \`${shortSha}\` (built at ${created})`,
+                    '',
+                    '*Action required:* Check the <https://github.com/' + repo + '/actions/workflows/docker.yml|docker.yml> workflow for failures.',
+                  ].join('\n'),
+                },
+              },
+              {
+                type: 'actions',
+                elements: [
+                  {
+                    type: 'button',
+                    text: { type: 'plain_text', text: 'View Run :github:', emoji: true },
+                    url: runUrl,
+                    action_id: 'ci_button',
+                  },
+                ],
+              },
+            ];
+
+            const resp = await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                channel,
+                blocks,
+                text: 'Nightly regression: nightly build is stale',
+                unfurl_links: false,
+              }),
+            });
+            const data = await resp.json();
+            if (!data.ok) {
+              core.warning(`Slack API error: ${JSON.stringify(data)}`);
+            }
+
+      - name: Fail on stale nightly
+        if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true'
+        run: |
+          echo "::error::Nightly build is stale (>24h old). Aborting."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Run the benchmark
+  # ---------------------------------------------------------------------------
+  bench-scheduled:
+    needs: resolve-refs
+    if: |
+      needs.resolve-refs.outputs.should-skip != 'true' &&
+      needs.resolve-refs.outputs.is-stale != 'true'
+    name: bench-scheduled
+    runs-on: [self-hosted, Linux, X64, available]
+    timeout-minutes: 120
+    env:
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      SCHELK_MOUNT: /reth-bench
+      BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
+      BENCH_PR: ""
+      BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
+      BENCH_ACTOR: "${{ needs.resolve-refs.outputs.mode }}-regression"
+      BENCH_BLOCKS: "2000"
+      BENCH_WARMUP_BLOCKS: "500"
+      BENCH_SAMPLY: "false"
+      BENCH_CORES: "0"
+      BENCH_BIG_BLOCKS: "false"
+      BENCH_RETH_NEW_PAYLOAD: "true"
+      BENCH_WAIT_TIME: ""
+      BENCH_BASELINE_ARGS: ""
+      BENCH_FEATURE_ARGS: ""
+      BENCH_ABBA: "true"
+      BENCH_COMMENT_ID: ""
+      BENCH_NO_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.no_slack == true && 'true' || 'false' }}
+      BENCH_METRICS_ADDR: "127.0.0.1:9100"
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
+      FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
+    steps:
+      - name: Clean up previous bench-work
+        run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ needs.resolve-refs.outputs.feature-ref }}
+
+      - name: Resolve job URL
+        id: job-url
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const job = jobs.jobs.find(j => j.name === 'bench-scheduled');
+            const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            core.exportVariable('BENCH_JOB_URL', jobUrl);
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # apt packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          # uv (Python package manager)
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+          fi
+
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # thin-provisioning-tools (era_invalidate, required by schelk)
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+      - name: Check dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          missing=()
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
+            command -v "$cmd" &>/dev/null || missing+=("$cmd")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required tools: ${missing[*]}"
+            exit 1
+          fi
+          echo "All dependencies found"
+
+      - name: Resolve display names
+        id: refs
+        run: |
+          BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
+          FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
+          echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Check if snapshot needs update
+        id: snapshot-check
+        run: |
+          set +e
+          .github/scripts/bench-reth-snapshot.sh --check
+          rc=$?
+          set -e
+          case "$rc" in
+            0)  echo "needed=false" >> "$GITHUB_OUTPUT" ;;
+            10) echo "needed=true"  >> "$GITHUB_OUTPUT" ;;
+            *)  echo "::error::Snapshot check failed (exit $rc)"
+                exit "$rc" ;;
+          esac
+
+      - name: Prepare source dirs
+        run: |
+          if [ -d ../reth-baseline ]; then
+            git -C ../reth-baseline fetch origin "$BASELINE_REF"
+          else
+            git clone . ../reth-baseline
+          fi
+          git -C ../reth-baseline checkout "$BASELINE_REF"
+
+          if [ -d ../reth-feature ]; then
+            git -C ../reth-feature fetch origin "$FEATURE_REF"
+          else
+            git clone . ../reth-feature
+          fi
+          git -C ../reth-feature checkout "$FEATURE_REF"
+
+      - name: Build binaries
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+        run: |
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
+
+          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "$BASELINE_REF" &
+          PID_BASELINE=$!
+          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "$FEATURE_REF" &
+          PID_FEATURE=$!
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or more build tasks failed"
+            exit 1
+          fi
+
+      - name: Download snapshot
+        id: snapshot-download
+        if: steps.snapshot-check.outputs.needed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/reth
+        run: .github/scripts/bench-reth-snapshot.sh
+
+      # System tuning for reproducible benchmarks
+      - name: System setup
+        run: |
+          sudo cpupower frequency-set -g performance || true
+          # Disable turbo boost (Intel and AMD paths)
+          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+          echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+          sudo swapoff -a || true
+          echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
+          # Disable SMT (hyperthreading)
+          for cpu in /sys/devices/system/cpu/cpu*/topology/thread_siblings_list; do
+            first=$(cut -d, -f1 < "$cpu" | cut -d- -f1)
+            current=$(echo "$cpu" | grep -o 'cpu[0-9]*' | grep -o '[0-9]*')
+            if [ "$current" != "$first" ]; then
+              echo 0 | sudo tee "/sys/devices/system/cpu/cpu${current}/online" || true
+            fi
+          done
+          echo "Online CPUs: $(nproc)"
+          # Disable transparent huge pages
+          for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
+            [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
+          done || true
+          # Prevent deep C-states
+          sudo sh -c 'exec 3<>/dev/cpu_dma_latency; echo -ne "\x00\x00\x00\x00" >&3; sleep infinity' &
+          # Move all IRQs to core 0
+          for irq in /proc/irq/*/smp_affinity_list; do
+            echo 0 | sudo tee "$irq" 2>/dev/null || true
+          done
+          # Stop noisy background services
+          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          echo "=== Benchmark environment ==="
+          uname -r
+          lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+          cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || cat /sys/kernel/mm/transparent_hugepages/enabled 2>/dev/null || echo "THP: unknown"
+          free -h
+
+      - name: Pre-flight cleanup
+        run: |
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          rm -rf "$BENCH_WORK_DIR"
+          mkdir -p "$BENCH_WORK_DIR"
+
+      - name: Start metrics proxy
+        run: |
+          BENCH_ID="${BENCH_MODE}-${{ github.run_id }}"
+          BENCH_REFERENCE_EPOCH=$(date +%s)
+          echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
+          echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
+
+          LABELS_FILE="/tmp/bench-metrics-labels.json"
+          echo '{}' > "$LABELS_FILE"
+          echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
+
+          python3 .github/scripts/bench-metrics-proxy.py \
+            --labels "$LABELS_FILE" \
+            --upstream "http://${BENCH_METRICS_ADDR}/" \
+            --subnet 10.10.0.0/24 \
+            --port 9090 &
+          PROXY_PID=$!
+          echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
+          echo "Metrics proxy started (PID $PROXY_PID)"
+
+      # Interleaved run order (B-F-F-B) to reduce systematic bias
+      - name: "Run benchmark: baseline (1/2)"
+        id: run-baseline-1
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
+
+      - name: "Run benchmark: feature (1/2)"
+        id: run-feature-1
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+
+      - name: "Run benchmark: feature (2/2)"
+        id: run-feature-2
+        run: |
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+
+      - name: "Run benchmark: baseline (2/2)"
+        id: run-baseline-2
+        run: |
+          LAST_RUN_START=$(date +%s)
+          echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
+          cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+
+      - name: Stop metrics proxy & generate Grafana URL
+        id: metrics
+        if: "!cancelled()"
+        run: |
+          kill "$BENCH_METRICS_PROXY_PID" 2>/dev/null || true
+
+          LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
+          FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
+          TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=ef57fux92e9z4e&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
+          echo "Grafana URL: ${GRAFANA_URL}"
+
+      - name: Scan logs for errors
+        if: "!cancelled()"
+        run: |
+          ERRORS_FILE="$BENCH_WORK_DIR/errors.md"
+          found=false
+          for run_dir in baseline-1 feature-1 feature-2 baseline-2; do
+            LOG="$BENCH_WORK_DIR/$run_dir/node.log"
+            if [ ! -f "$LOG" ]; then continue; fi
+
+            panics=$(grep -c -E 'panicked at' "$LOG" || true)
+            errors=$(grep -c ' ERROR ' "$LOG" || true)
+
+            if [ "$panics" -gt 0 ] || [ "$errors" -gt 0 ]; then
+              if [ "$found" = false ]; then
+                printf '### ⚠️ Node Errors\n\n' >> "$ERRORS_FILE"
+                found=true
+              fi
+              printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
+              if [ "$panics" -gt 0 ]; then
+                printf '**Panics:**\n```\n' >> "$ERRORS_FILE"
+                grep -E 'panicked at' "$LOG" | head -10 >> "$ERRORS_FILE"
+                printf '```\n' >> "$ERRORS_FILE"
+              fi
+              if [ "$errors" -gt 0 ]; then
+                printf '**Errors (first 20):**\n```\n' >> "$ERRORS_FILE"
+                grep ' ERROR ' "$LOG" | head -20 >> "$ERRORS_FILE"
+                printf '```\n' >> "$ERRORS_FILE"
+              fi
+              printf '\n</details>\n\n' >> "$ERRORS_FILE"
+            fi
+          done
+
+      - name: Parse results
+        id: results
+        if: success()
+        env:
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+        run: |
+          SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
+          SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
+
+          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
+          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
+          BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
+          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
+
+          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          if [ -n "$GRAFANA_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          # shellcheck disable=SC2086
+          python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
+
+      - name: Generate charts
+        if: success() && env.BENCH_MODE != 'hourly'
+        env:
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+        run: |
+          CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
+          FEATURE_CSVS="$BENCH_WORK_DIR/feature-1/combined_latency.csv"
+          BASELINE_CSVS="$BENCH_WORK_DIR/baseline-1/combined_latency.csv"
+          FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          BASELINE_CSVS="$BASELINE_CSVS $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --feature $FEATURE_CSVS"
+          CHART_ARGS="$CHART_ARGS --baseline $BASELINE_CSVS"
+          CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
+          CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
+          # shellcheck disable=SC2086
+          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+
+      - name: Upload results
+        if: "!cancelled()"
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-scheduled-results
+          path: ${{ env.BENCH_WORK_DIR }}
+
+      - name: Push charts
+        id: push-charts
+        if: success() && env.BENCH_MODE != 'hourly'
+        run: |
+          RUN_ID=${{ github.run_id }}
+          CHART_DIR="nightly/${RUN_ID}"
+          CHARTS_REPO="https://x-access-token:${{ secrets.DEREK_TOKEN }}@github.com/decofe/reth-bench-charts.git"
+
+          TMP_DIR=$(mktemp -d)
+          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            true
+          else
+            git init "${TMP_DIR}"
+            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+          fi
+
+          mkdir -p "${TMP_DIR}/${CHART_DIR}"
+          cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+          git -C "${TMP_DIR}" add "${CHART_DIR}"
+          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
+            commit -m "nightly bench charts for run ${RUN_ID}"
+          git -C "${TMP_DIR}" push origin HEAD:main
+          echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          rm -rf "${TMP_DIR}"
+
+      - name: Write job summary
+        if: success()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const { verdict, metricRows, waitTimeRows, blocksLabel } = require('./.github/scripts/bench-utils');
+
+            let summary;
+            try {
+              summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
+            } catch (e) {
+              await core.summary.addRaw('⚠️ Benchmark completed but failed to load summary.').write();
+              return;
+            }
+
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            const commitUrl = `https://github.com/${repo}/commit`;
+            const { emoji, label } = verdict(summary.changes);
+            const baselineLink = `[\`${summary.baseline.name}\`](${commitUrl}/${summary.baseline.ref})`;
+            const featureLink = `[\`${summary.feature.name}\`](${commitUrl}/${summary.feature.ref})`;
+            const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
+
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            let md = `# ${emoji} ${modeLabel}: ${label}\n\n`;
+            md += `**Baseline:** ${baselineLink}\n`;
+            md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
+            md += blocksLabel(summary).map(p => `**${p.key}:** ${p.value}`).join(' · ') + '\n\n';
+
+            const rows = metricRows(summary);
+            md += `| Metric | Baseline | Feature | Change |\n`;
+            md += `|--------|----------|---------|--------|\n`;
+            for (const r of rows) {
+              md += `| ${r.label} | ${r.baseline} | ${r.feature} | ${r.change} |\n`;
+            }
+            md += '\n';
+
+            const wtRows = waitTimeRows(summary);
+            if (wtRows.length > 0) {
+              md += `### Wait Time Breakdown\n\n`;
+              md += `| Metric | Baseline | Feature |\n`;
+              md += `|--------|----------|--------|\n`;
+              for (const r of wtRows) {
+                md += `| ${r.title} | ${r.baseline} | ${r.feature} |\n`;
+              }
+              md += '\n';
+            }
+
+            // Charts
+            const chartSha = '${{ steps.push-charts.outputs.sha }}';
+            if (chartSha) {
+              const runId = '${{ github.run_id }}';
+              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/nightly/${runId}`;
+              const charts = [
+                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
+                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+              ];
+              md += `### Charts\n\n`;
+              for (const chart of charts) {
+                md += `<details><summary>${chart.label}</summary>\n\n`;
+                md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+                md += `</details>\n\n`;
+              }
+            }
+
+            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
+            if (grafanaUrl) {
+              md += `### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n\n`;
+            }
+
+            try {
+              const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
+              if (errors.trim()) md += '\n' + errors + '\n';
+            } catch {}
+
+            await core.summary.addRaw(md).write();
+
+      - name: Send Slack notification (success)
+        if: success() && env.BENCH_NO_SLACK != 'true'
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel } = require('./.github/scripts/bench-utils');
+
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) {
+              core.info('Slack credentials not set, skipping notification');
+              return;
+            }
+
+            let summary;
+            try {
+              summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
+            } catch (e) {
+              core.warning('Could not read summary.json for Slack notification');
+              return;
+            }
+
+            // Filter notifications based on mode
+            const changes = summary.changes || {};
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
+            const hasSignificant = Object.values(changes).some(c => c.sig === 'good' || c.sig === 'bad');
+
+            // Hourly mode: only notify on regressions
+            if (mode === 'hourly' && !hasRegression) {
+              core.info('Hourly mode: no regression detected, skipping Slack notification');
+              return;
+            }
+
+            // Nightly mode: notify on any significant change (regression or improvement)
+            if (!hasSignificant) {
+              core.info('No significant changes detected, skipping nightly Slack notification');
+              return;
+            }
+
+            const SLACK_VERDICT = {
+              '⚠️': ':warning:',
+              '❌': ':x:',
+              '✅': ':white_check_mark:',
+              '⚪': ':white_circle:',
+            };
+
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            const { emoji, label } = verdict(changes);
+            const headerEmoji = SLACK_VERDICT[emoji] || emoji;
+            const commitUrl = `https://github.com/${repo}/commit`;
+            const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
+            const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
+            const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
+
+            function cell(text) { return { type: 'raw_text', text: String(text) || ' ' }; }
+
+            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            const sectionText = [
+              `*${modeLabel}*`,
+              '',
+              `*Baseline:* ${baselineLink}`,
+              `*Feature:* ${featureLink}`,
+              blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | '),
+            ].join('\n');
+
+            const rows = metricRows(summary);
+            const tableRows = [
+              [cell('Metric'), cell('Baseline'), cell('Feature'), cell('Change')],
+              ...rows.map(r => [cell(r.label), cell(r.baseline), cell(r.feature), cell(r.change || ' ')]),
+            ];
+
+            const blocks = [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: `${headerEmoji} ${modeLabel}: ${label}`, emoji: true },
+              },
+              {
+                type: 'section',
+                text: { type: 'mrkdwn', text: sectionText },
+              },
+              {
+                type: 'table',
+                column_settings: [{ align: 'left' }, { align: 'right' }, { align: 'right' }, { align: 'right' }],
+                rows: tableRows,
+              },
+              {
+                type: 'actions',
+                elements: [
+                  {
+                    type: 'button',
+                    text: { type: 'plain_text', text: 'CI :github:', emoji: true },
+                    url: jobUrl,
+                    action_id: 'ci_button',
+                  },
+                  {
+                    type: 'button',
+                    text: { type: 'plain_text', text: 'Diff :github:', emoji: true },
+                    url: diffUrl,
+                    action_id: 'diff_button',
+                  },
+                ],
+              },
+            ];
+
+            const text = `${modeLabel}: ${summary.baseline.name} vs ${summary.feature.name}`;
+            const resp = await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ channel, blocks, text, unfurl_links: false }),
+            });
+            const data = await resp.json();
+            if (!data.ok) {
+              core.warning(`Slack API error: ${JSON.stringify(data)}`);
+              return;
+            }
+
+            // Post wait time breakdown as threaded reply
+            const wtRows = waitTimeRows(summary);
+            if (data.ts && wtRows.length > 0) {
+              const waitTableRows = [
+                [cell('Wait Time'), cell('Baseline'), cell('Feature')],
+                ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
+              ];
+              await fetch('https://slack.com/api/chat.postMessage', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  channel,
+                  thread_ts: data.ts,
+                  blocks: [{
+                    type: 'table',
+                    column_settings: [{ align: 'left' }, { align: 'right' }, { align: 'right' }],
+                    rows: waitTableRows,
+                  }],
+                  text: 'Wait time breakdown',
+                  unfurl_links: false,
+                }),
+              });
+            }
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) return;
+
+            const steps_status = [
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['downloading snapshot', '${{ steps.snapshot-download.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
+
+            const mode = process.env.BENCH_MODE || 'nightly';
+            const modeLabel = mode === 'hourly' ? 'Hourly' : 'Nightly';
+
+            const blocks = [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: `:rotating_light: ${modeLabel} Bench Failed`, emoji: true },
+              },
+              {
+                type: 'section',
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
+              },
+              {
+                type: 'actions',
+                elements: [{
+                  type: 'button',
+                  text: { type: 'plain_text', text: 'View Logs :github:', emoji: true },
+                  url: jobUrl,
+                  action_id: 'ci_button',
+                }],
+              },
+            ];
+
+            await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                channel,
+                blocks,
+                text: `${modeLabel} bench failed while ${failedStep}`,
+                unfurl_links: false,
+              }),
+            });
+
+      - name: Restore system settings
+        if: always()
+        run: |
+          sudo systemctl start irqbalance cron atd 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Save state on success
+  # ---------------------------------------------------------------------------
+  save-state:
+    needs: [resolve-refs, bench-scheduled]
+    if: success()
+    name: save-state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write state file
+        run: |
+          MODE="${{ needs.resolve-refs.outputs.mode }}"
+          STATE_DIR=".${MODE}-state"
+          mkdir -p "$STATE_DIR"
+          echo "${{ needs.resolve-refs.outputs.feature-ref }}" > "$STATE_DIR/last-feature-ref"
+
+      - name: Save state
+        uses: actions/cache/save@v4
+        with:
+          path: .${{ needs.resolve-refs.outputs.mode }}-state
+          key: bench-${{ needs.resolve-refs.outputs.mode }}-state-${{ needs.resolve-refs.outputs.feature-ref }}

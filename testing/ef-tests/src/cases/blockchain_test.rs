@@ -17,7 +17,7 @@ use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
@@ -258,10 +258,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Compute and check the post state root
         let hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-        let (computed_state_root, _) = StateRoot::overlay_root_with_updates(
-            provider.tx_ref(),
-            &hashed_state.clone_into_sorted(),
-        )
+        let sorted = hashed_state.clone_into_sorted();
+        let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
+            StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
+                provider.tx_ref(),
+                &sorted,
+            )
+        })
         .map_err(|err| Error::block_failed(block_number, err))?;
         if computed_state_root != block.state_root {
             return Err(Error::block_failed(

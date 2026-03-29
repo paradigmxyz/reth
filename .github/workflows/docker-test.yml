@@ -6,7 +6,7 @@ on:
       hive_target:
         required: true
         type: string
-        description: "Docker bake target to build (e.g. hive-stable, hive-edge)"
+        description: "Docker bake target to build (e.g. hive)"
       artifact_name:
         required: false
         type: string
@@ -76,7 +76,7 @@ jobs:
             *.dockerfile=Dockerfile
 
       - name: Upload reth image
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: ./artifacts

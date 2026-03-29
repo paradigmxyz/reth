@@ -23,13 +23,11 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangesetEntry, NodePrimitivesProvider, StorageChangeSetReader,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
@@ -184,12 +182,10 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
         self.database.rocksdb_provider()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }
@@ -559,7 +555,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         let provider = self.consistent_provider()?;
-        provider.ensure_canonical_block(block_number)?;
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -715,7 +710,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changeset(block_number)
     }
 
@@ -724,14 +719,14 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
         block_number: BlockNumber,
         address: Address,
         storage_key: B256,
-    ) -> ProviderResult<Option<ChangesetEntry>> {
+    ) -> ProviderResult<Option<StorageEntry>> {
         self.consistent_provider()?.get_storage_before_block(block_number, address, storage_key)
     }
 
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
 

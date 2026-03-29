@@ -25,7 +25,7 @@ mod submit;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
-        .run(|builder, args| async move {
+        .run(async move |builder, args| {
             // launch the node
             let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
@@ -38,7 +38,7 @@ fn main() {
 
             println!("Spawning trace task!");
             // Spawn an async block to listen for transactions.
-            node.task_executor.spawn_task(Box::pin(async move {
+            node.task_executor.spawn_task(async move {
                 // Waiting for new transactions
                 while let Some(event) = pending_transactions.next().await {
                     let tx = event.transaction;
@@ -58,7 +58,7 @@ fn main() {
                         }
                     }
                 }
-            }));
+            });
 
             node_exit_future.await
         })

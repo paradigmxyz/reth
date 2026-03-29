@@ -424,8 +424,7 @@ impl TestStageDB {
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                     if cursor
                         .seek_by_key_subkey(address, entry.key)?
-                        .filter(|e| e.key == entry.key)
-                        .is_some()
+                        .is_some_and(|e| e.key == entry.key)
                     {
                         cursor.delete_current()?;
                     }
@@ -434,8 +433,7 @@ impl TestStageDB {
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
                         .seek_by_key_subkey(hashed_address, hashed_entry.key)?
-                        .filter(|e| e.key == hashed_entry.key)
-                        .is_some()
+                        .is_some_and(|e| e.key == hashed_entry.key)
                     {
                         cursor.delete_current()?;
                     }

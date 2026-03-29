@@ -29,13 +29,28 @@ variable "VERGEN_GIT_DIRTY" {
   default = "false"
 }
 
+// Enable PGO+BOLT optimization (Linux only)
+variable "USE_PGO_BOLT" {
+  default = "false"
+}
+
+// Optional path to pre-collected merged.profdata in build context.
+variable "PGO_PROFDATA" {
+  default = ""
+}
+
+// Whether to strip debug symbols in PGO build path.
+variable "STRIP_SYMBOLS" {
+  default = "true"
+}
+
 // Common settings for all targets
 group "default" {
   targets = ["ethereum"]
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling"]
+  targets = ["ethereum", "ethereum-profiling"]
 }
 
 // Base target with shared configuration
@@ -43,11 +58,14 @@ target "_base" {
   dockerfile = "Dockerfile.depot"
   platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE      = "${BUILD_PROFILE}"
-    FEATURES           = "${FEATURES}"
-    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE       = "${BUILD_PROFILE}"
+    FEATURES            = "${FEATURES}"
+    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
+    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
+    USE_PGO_BOLT        = "${USE_PGO_BOLT}"
+    PGO_PROFDATA        = "${PGO_PROFDATA}"
+    STRIP_SYMBOLS       = "${STRIP_SYMBOLS}"
   }
   secret = [
     {
@@ -82,17 +100,6 @@ target "ethereum-profiling" {
   tags = ["${REGISTRY}/reth:nightly-profiling"]
 }
 
-target "ethereum-edge-profiling" {
-  inherits = ["_base_profiling"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc-prof edge"
-  }
-  tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
-}
-
 // Hive test targets — single-platform, hivetests profile, tar output
 target "_base_hive" {
   inherits  = ["_base"]
@@ -106,22 +113,11 @@ variable "HIVE_OUTPUT_DIR" {
   default = "./artifacts"
 }
 
-target "hive-stable" {
+target "hive" {
   inherits = ["_base_hive"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
-  }
-  tags   = ["reth:local"]
-  output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
-}
-
-target "hive-edge" {
-  inherits = ["_base_hive"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-    FEATURES      = "edge"
   }
   tags   = ["reth:local"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]

@@ -22,6 +22,7 @@ exclude_crates=(
   reth-downloaders
   reth-e2e-test-utils
   reth-engine-service
+  reth-execution-cache
   reth-engine-tree
   reth-engine-util
   reth-eth-wire

@@ -9,9 +9,9 @@ use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
-    Receipts, SharedTransactions, Transactions,
+    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
+    NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData,
+    PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -65,6 +65,48 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Other(RawCapabilityMessage),
 }
 
+impl<N: NetworkPrimitives> PeerMessage<N> {
+    /// Returns a static string identifying the message variant for logging.
+    pub const fn message_kind(&self) -> &'static str {
+        match self {
+            Self::NewBlockHashes(_) => "NewBlockHashes",
+            Self::NewBlock(_) => "NewBlock",
+            Self::ReceivedTransaction(_) => "ReceivedTransaction",
+            Self::SendTransactions(_) => "SendTransactions",
+            Self::PooledTransactions(_) => "PooledTransactions",
+            Self::EthRequest(_) => "EthRequest",
+            Self::BlockRangeUpdated(_) => "BlockRangeUpdated",
+            Self::Other(_) => "Other",
+        }
+    }
+
+    /// Returns `true` if this message is a broadcast (block/transaction announcement or
+    /// propagation) rather than a request/response.
+    pub const fn is_broadcast(&self) -> bool {
+        matches!(
+            self,
+            Self::NewBlockHashes(_) |
+                Self::NewBlock(_) |
+                Self::SendTransactions(_) |
+                Self::PooledTransactions(_)
+        )
+    }
+
+    /// Returns the number of items in the message payload, if applicable.
+    pub fn message_item_count(&self) -> usize {
+        match self {
+            Self::NewBlockHashes(msg) => msg.len(),
+            Self::ReceivedTransaction(msg) => msg.len(),
+            Self::SendTransactions(msg) => msg.len(),
+            Self::PooledTransactions(msg) => msg.len(),
+            Self::NewBlock(_) |
+            Self::EthRequest(_) |
+            Self::BlockRangeUpdated(_) |
+            Self::Other(_) => 1,
+        }
+    }
+}
+
 /// Request Variants that only target block related data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockRequest {
@@ -77,6 +119,11 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies(GetBlockBodies),
+
+    /// Requests receipts from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetReceipts(GetReceipts),
 }
 
 /// Corresponding variant for [`PeerRequest`].

@@ -9,7 +9,17 @@ use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -55,7 +65,7 @@ pub struct PooledTransactions<T = PooledTransaction>(
 impl<T: Encodable2718> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.
     pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
-        self.0.iter().map(|tx| tx.trie_hash())
+        self.iter().map(|tx| tx.trie_hash())
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -335,8 +335,6 @@ impl SparseNodeType {
 pub enum SparseNode {
     /// Empty trie node.
     Empty,
-    /// The hash of the node that was not revealed.
-    Hash(B256),
     /// Sparse leaf node with remaining key suffix.
     Leaf {
         /// Remaining key suffix for the leaf node.
@@ -357,32 +355,39 @@ pub enum SparseNode {
         state_mask: TrieMask,
         /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
         state: SparseNodeState,
+        /// The mask of the children that are blinded.
+        blinded_mask: TrieMask,
+        /// The hashes of the children that are blinded.
+        blinded_hashes: Box<[B256; 16]>,
     },
 }
 
 impl SparseNode {
-    /// Create new sparse node from [`TrieNode`].
-    pub fn from_node(node: TrieNode) -> Self {
-        match node {
-            TrieNode::EmptyRoot => Self::Empty,
-            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
-            TrieNode::Extension(ext) => Self::new_ext(ext.key),
-            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
-        }
-    }
+    /// Create new [`SparseNode::Branch`] from state mask and blinded nodes.
+    #[cfg(test)]
+    pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
+        let mut blinded_mask = TrieMask::default();
+        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
 
-    /// Create new [`SparseNode::Branch`] from state mask.
-    pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, state: SparseNodeState::Dirty }
+        for (nibble, hash) in blinded_children {
+            blinded_mask.set_bit(*nibble);
+            blinded_hashes[*nibble as usize] = *hash;
+        }
+        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded_mask, blinded_hashes }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
-    pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
+    pub fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
         let state_mask = TrieMask::new(
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, state: SparseNodeState::Dirty }
+        Self::Branch {
+            state_mask,
+            state: SparseNodeState::Dirty,
+            blinded_mask: TrieMask::default(),
+            blinded_hashes: Box::new([B256::ZERO; 16]),
+        }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
@@ -395,16 +400,10 @@ impl SparseNode {
         Self::Leaf { key, state: SparseNodeState::Dirty }
     }
 
-    /// Returns `true` if the node is a hash node.
-    pub const fn is_hash(&self) -> bool {
-        matches!(self, Self::Hash(_))
-    }
-
     /// Returns the cached [`RlpNode`] of the node, if it's available.
     pub fn cached_rlp_node(&self) -> Option<Cow<'_, RlpNode>> {
         match &self {
             Self::Empty => None,
-            Self::Hash(hash) => Some(Cow::Owned(RlpNode::word_rlp(hash))),
             Self::Leaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
@@ -415,7 +414,6 @@ impl SparseNode {
     pub fn cached_hash(&self) -> Option<B256> {
         match &self {
             Self::Empty => None,
-            Self::Hash(hash) => Some(*hash),
             Self::Leaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_hash(),
@@ -424,11 +422,11 @@ impl SparseNode {
 
     /// Sets the hash of the node for testing purposes.
     ///
-    /// For [`SparseNode::Empty`] and [`SparseNode::Hash`] nodes, this method panics.
+    /// For [`SparseNode::Empty`] nodes, this method panics.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_state(&mut self, new_state: SparseNodeState) {
         match self {
-            Self::Empty | Self::Hash(_) => {
+            Self::Empty => {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
             Self::Leaf { state, .. } |
@@ -439,10 +437,17 @@ impl SparseNode {
         }
     }
 
+    /// Sets the state of the node and returns a new node with the same state.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_state(mut self, state: SparseNodeState) -> Self {
+        self.set_state(state);
+        self
+    }
+
     /// Returns the memory size of this node in bytes.
     pub const fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Empty | Self::Branch { .. } => core::mem::size_of::<Self>(),
             Self::Leaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }
