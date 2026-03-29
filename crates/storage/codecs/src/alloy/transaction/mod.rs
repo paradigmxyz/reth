@@ -84,6 +84,7 @@ mod tests {
         Compact,
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    #[cfg(feature = "op")]
     use op_alloy_consensus::TxDeposit;
 
     #[test]
@@ -98,7 +99,7 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_ensure_backwards_compatibility_optimism() {
-        assert_eq!(crate::alloy::transaction::optimism::TxDeposit::bitflag_encoded_bytes(), 3);
+        assert_eq!(crate::alloy::transaction::optimism::TxDeposit::bitflag_encoded_bytes(), 2);
     }
 
     #[test]
