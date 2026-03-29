@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use serde::Deserialize;
 use std::time::Duration;
@@ -168,22 +169,25 @@ where
 ///
 /// Returns `(version, versioned_params, execution_data)`.
 ///
-/// When `no_wait_for_persistence` or `no_wait_for_caches` is `true` and using `reth_newPayload`,
-/// passes the corresponding `wait_for_*: false` to skip that wait.
+/// `wait_for_persistence` controls how `wait_for_persistence` is passed to
+/// `reth_newPayload` on a per-block basis.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
-    no_wait_for_persistence: bool,
+    wait_for_persistence: WaitForPersistence,
     no_wait_for_caches: bool,
 ) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    let block_number = block.header.number;
+    let wait_for_persistence = wait_for_persistence.rpc_value(block_number);
+
     if let Some(rlp) = rlp {
         return Ok((
             None,
             serde_json::to_value((
                 RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp),
-                no_wait_for_persistence.then_some(false),
+                wait_for_persistence,
                 no_wait_for_caches.then_some(false),
             ))?,
         ));
@@ -207,7 +211,7 @@ pub(crate) fn block_to_new_payload(
             None,
             serde_json::to_value((
                 RethNewPayloadInput::ExecutionData(execution_data),
-                no_wait_for_persistence.then_some(false),
+                wait_for_persistence,
                 no_wait_for_caches.then_some(false),
             ))?,
         ))

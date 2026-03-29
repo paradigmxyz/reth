@@ -29,9 +29,13 @@
 //! use std::sync::Arc;
 //! use std::task::{Context, Poll};
 //! use alloy_consensus::{Header, Block};
+//! use alloy_primitives::B256;
+//! use reth_payload_builder::PayloadId;
 //! use alloy_primitives::U256;
-//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives_traits::SealedBlock;
+//! use alloy_rpc_types::engine::PayloadAttributes;
+//! use reth_payload_builder::BuildNewPayload;
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;
@@ -40,19 +44,20 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
-//!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
+//! fn new_payload_job(&self, input: BuildNewPayload<PayloadAttributes>, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
+//!         Ok(EmptyBlockPayloadJob{ attributes: input.attributes, parent: input.parent_hash })
 //!     }
 //!
 //! }
 //!
 //! /// A [PayloadJob] that builds empty blocks.
 //! pub struct EmptyBlockPayloadJob {
-//!   attributes: EthPayloadBuilderAttributes,
+//!   attributes: PayloadAttributes,
+//!   parent: B256,
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
-//!    type PayloadAttributes = EthPayloadBuilderAttributes;
+//!    type PayloadAttributes = PayloadAttributes;
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
 //!    type BuiltPayload = EthBuiltPayload;
 //!
@@ -60,18 +65,18 @@
 //!     // NOTE: some fields are omitted here for brevity
 //!     let block = Block {
 //!         header: Header {
-//!             parent_hash: self.attributes.parent,
+//!             parent_hash: self.parent,
 //!             timestamp: self.attributes.timestamp,
 //!             beneficiary: self.attributes.suggested_fee_recipient,
 //!             ..Default::default()
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
+//!     let payload = EthBuiltPayload::new(Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
 //!     Ok(payload)
 //! }
 //!
-//! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
+//! fn payload_attributes(&self) -> Result<PayloadAttributes, PayloadBuilderError> {
 //!     Ok(self.attributes.clone())
 //! }
 //!
@@ -120,12 +125,11 @@ pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_builder_primitives::PayloadBuilderError;
 pub use reth_payload_primitives::PayloadKind;
 pub use service::{
-    PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
+    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand,
+    PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]
-pub use reth_ethereum_engine_primitives::{
-    BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes,
-};
+pub use reth_ethereum_engine_primitives::{BlobSidecars, EthBuiltPayload};

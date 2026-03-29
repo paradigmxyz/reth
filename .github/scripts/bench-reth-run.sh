@@ -18,7 +18,11 @@ set -euo pipefail
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
-DATADIR="$SCHELK_MOUNT/datadir"
+DATADIR_NAME="datadir"
+if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+  DATADIR_NAME="datadir-big-blocks"
+fi
+DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
@@ -244,7 +248,7 @@ BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 # Build optional flags
 EXTRA_BENCH_ARGS=()
 if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
-  EXTRA_BENCH_ARGS+=(--reth-new-payload)
+  EXTRA_BENCH_ARGS+=(--reth-new-payload --wait-for-persistence)
 fi
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
@@ -252,7 +256,7 @@ fi
 
 if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
-  BIG_BLOCKS_DIR="${BENCH_WORK_DIR}/big-blocks"
+  BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
 
   # Start tracy-capture so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then

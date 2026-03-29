@@ -80,6 +80,18 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
         }
     }
 
+    /// Returns `true` if this message is a broadcast (block/transaction announcement or
+    /// propagation) rather than a request/response.
+    pub const fn is_broadcast(&self) -> bool {
+        matches!(
+            self,
+            Self::NewBlockHashes(_) |
+                Self::NewBlock(_) |
+                Self::SendTransactions(_) |
+                Self::PooledTransactions(_)
+        )
+    }
+
     /// Returns the number of items in the message payload, if applicable.
     pub fn message_item_count(&self) -> usize {
         match self {

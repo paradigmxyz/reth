@@ -4,7 +4,7 @@ use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::SealedBlock;
 use reth_rpc_api::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus};
 use tracing::trace;
@@ -67,7 +67,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
         self.beacon_engine_handle
-            .fork_choice_updated(forkchoice_state, None, EngineApiMessageVersion::V3)
+            .fork_choice_updated(forkchoice_state, None)
             .await
             .map_err(|e| EngineApiError::from(e).into())
     }

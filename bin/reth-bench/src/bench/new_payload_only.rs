@@ -52,7 +52,7 @@ impl Command {
             is_optimism,
             use_reth_namespace,
             rlp_blocks,
-            no_wait_for_persistence,
+            wait_for_persistence,
             no_wait_for_caches,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
@@ -129,7 +129,7 @@ impl Command {
                 is_optimism,
                 rlp,
                 use_reth_namespace,
-                no_wait_for_persistence,
+                wait_for_persistence,
                 no_wait_for_caches,
             )?;
 

@@ -87,7 +87,6 @@ reth-network-peers.workspace = true
 
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
-alloy-rlp.workspace = true
 reth-db-common.workspace = true
 reth-tracing.workspace = true
 

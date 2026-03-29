@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
-        DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
+        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -26,8 +26,6 @@ use reth_trie_parallel::{
     },
     root::ParallelStateRootError,
 };
-#[cfg(feature = "trie-debug")]
-use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     errors::SparseTrieResult, ConfigurableSparseTrie, DeferredDrops, LeafUpdate,
     RevealableSparseTrie, SparseStateTrie, SparseTrie,
@@ -118,7 +116,7 @@ where
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
         executor: &Runtime,
-        updates: CrossbeamReceiver<MultiProofMessage>,
+        updates: CrossbeamReceiver<StateRootMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -128,9 +126,10 @@ where
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
+        let hashing_metrics = metrics.clone();
         executor.spawn_blocking_named("trie-hashing", move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
-            Self::run_hashing_task(updates, hashed_state_tx)
+            Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 
         Self {
@@ -163,31 +162,44 @@ where
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
-        updates: CrossbeamReceiver<MultiProofMessage>,
+        updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        metrics: MultiProofTaskMetrics,
     ) {
+        let mut total_idle_time = std::time::Duration::ZERO;
+        let mut idle_start = Instant::now();
+
         while let Ok(message) = updates.recv() {
+            total_idle_time += idle_start.elapsed();
+
             let msg = match message {
-                MultiProofMessage::PrefetchProofs(targets) => {
+                StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                MultiProofMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(_, state) => {
                     let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
-                MultiProofMessage::FinishedStateUpdates => {
+                StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                MultiProofMessage::BlockAccessList(_) => continue,
-                MultiProofMessage::HashedStateUpdate(state) => {
+                StateRootMessage::BlockAccessList(_) => {
+                    idle_start = Instant::now();
+                    continue;
+                }
+                StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
             }
+
+            idle_start = Instant::now();
         }
+
+        metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
     }
 
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
@@ -247,13 +259,14 @@ where
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        let mut total_idle_time = std::time::Duration::ZERO;
+        let mut idle_start = Instant::now();
+
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
-                    self.metrics
-                        .sparse_trie_channel_wait_duration_histogram
-                        .record(t.elapsed());
+                    let wake = Instant::now();
 
                     let update = match message {
                         Ok(m) => m,
@@ -264,11 +277,17 @@ where
                         }
                     };
 
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+
                     self.on_message(update);
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
+                    total_idle_time += phase_end.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
                         .record(phase_end.duration_since(t));
@@ -331,7 +350,11 @@ where
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
+
+            idle_start = Instant::now();
         }
+
+        self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
@@ -838,20 +861,6 @@ enum SparseTrieTaskMessage {
     FinishedStateUpdates,
 }
 
-/// Outcome of the state root computation, including the state root itself with
-/// the trie updates.
-#[derive(Debug, Clone)]
-pub struct StateRootComputeOutcome {
-    /// The state root.
-    pub state_root: B256,
-    /// The trie updates.
-    pub trie_updates: Arc<TrieUpdates>,
-    /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
-    /// and `Some(address)` for storage tries.
-    #[cfg(feature = "trie-debug")]
-    pub debug_recorders: Vec<(Option<B256>, TrieDebugRecorder)>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,11 +891,12 @@ mod tests {
             SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
                 updates_rx,
                 hashed_state_tx,
+                MultiProofTaskMetrics::default(),
             );
         });
 
-        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
-        updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
+        updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 
         let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {

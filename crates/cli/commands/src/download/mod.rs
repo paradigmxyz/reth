@@ -1328,7 +1328,17 @@ fn streaming_download_and_extract(
         let response = match client.get(url).send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
+                let err = eyre::Error::from(e);
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    warn!(target: "reth::cli",
+                        url = %url,
+                        attempt,
+                        max = MAX_DOWNLOAD_RETRIES,
+                        err = %err,
+                        "Streaming request failed, retrying"
+                    );
+                }
+                last_error = Some(err);
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 }
@@ -1355,6 +1365,15 @@ fn streaming_download_and_extract(
         match result {
             Ok(()) => return Ok(()),
             Err(e) => {
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    warn!(target: "reth::cli",
+                        url = %url,
+                        attempt,
+                        max = MAX_DOWNLOAD_RETRIES,
+                        err = %e,
+                        "Streaming extraction failed, retrying"
+                    );
+                }
                 last_error = Some(e);
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
@@ -1520,6 +1539,7 @@ fn blocking_process_modular_archive(
     }
 
     let format = CompressionFormat::from_url(&archive.file_name)?;
+    let mut last_error: Option<eyre::Error> = None;
     for attempt in 1..=MAX_DOWNLOAD_RETRIES {
         cleanup_output_files(target_dir, &archive.output_files);
 
@@ -1527,13 +1547,31 @@ fn blocking_process_modular_archive(
             let cache_dir = cache_dir.ok_or_else(|| eyre::eyre!("Missing cache directory"))?;
             let archive_path = cache_dir.join(&archive.file_name);
             let part_path = cache_dir.join(format!("{}.part", archive.file_name));
-            let (downloaded_path, _downloaded_size) =
-                resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())?;
-            let file = fs::open(&downloaded_path)?;
-            extract_archive_raw(file, format, target_dir)?;
+            let result =
+                resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())
+                    .and_then(|(downloaded_path, _)| {
+                        let file = fs::open(&downloaded_path)?;
+                        extract_archive_raw(file, format, target_dir)
+                    });
             let _ = fs::remove_file(&archive_path);
             let _ = fs::remove_file(&part_path);
+
+            if let Err(e) = result {
+                warn!(target: "reth::cli",
+                    file = %archive.file_name,
+                    component = %planned.component,
+                    attempt,
+                    err = %e,
+                    "Download or extraction failed, retrying"
+                );
+                last_error = Some(e);
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                }
+                continue;
+            }
         } else {
+            // streaming_download_and_extract already has its own internal retry loop
             streaming_download_and_extract(
                 &archive.url,
                 format,
@@ -1551,6 +1589,13 @@ fn blocking_process_modular_archive(
         }
 
         warn!(target: "reth::cli", file = %archive.file_name, component = %planned.component, attempt, "Extracted files failed integrity checks, retrying");
+    }
+
+    if let Some(e) = last_error {
+        return Err(e.wrap_err(format!(
+            "Failed after {} attempts for {}",
+            MAX_DOWNLOAD_RETRIES, archive.file_name
+        )));
     }
 
     eyre::bail!(

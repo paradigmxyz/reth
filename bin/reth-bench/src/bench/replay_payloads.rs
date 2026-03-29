@@ -22,6 +22,7 @@ use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
 use reth_node_api::EngineApiMessageVersion;
+use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
 use std::{
     path::PathBuf,
@@ -81,12 +82,22 @@ pub struct Command {
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 
-    /// Skip waiting for in-flight persistence before processing.
+    /// Control when `reth_newPayload` waits for in-flight persistence.
     ///
-    /// Only works with `--reth-new-payload`. When set, passes `wait_for_persistence: false`
-    /// to the `reth_newPayload` endpoint.
-    #[arg(long, default_value = "false", verbatim_doc_comment, requires = "reth_new_payload")]
-    no_wait_for_persistence: bool,
+    /// Accepts `always` (default — wait on every block), `never`, or a number N
+    /// to wait every N blocks and skip the rest.
+    ///
+    /// Requires `--reth-new-payload`.
+    #[arg(
+        long = "wait-for-persistence",
+        value_name = "MODE",
+        num_args = 0..=1,
+        default_missing_value = "always",
+        value_parser = clap::value_parser!(WaitForPersistence),
+        requires = "reth_new_payload",
+        verbatim_doc_comment
+    )]
+    wait_for_persistence: Option<WaitForPersistence>,
 
     /// Skip waiting for execution cache and sparse trie locks before processing.
     ///
@@ -207,7 +218,12 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let (version, params) = if self.reth_new_payload {
+            let use_reth = self.reth_new_payload;
+            let (version, params) = if use_reth {
+                let wait_for_persistence = self
+                    .wait_for_persistence
+                    .unwrap_or(WaitForPersistence::Never)
+                    .rpc_value(block_number);
                 let reth_data = ExecutionData {
                     payload: execution_payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::v4(
@@ -224,7 +240,7 @@ impl Command {
                     None,
                     serde_json::to_value((
                         RethNewPayloadInput::ExecutionData(reth_data),
-                        self.no_wait_for_persistence.then_some(false),
+                        wait_for_persistence,
                         self.no_wait_for_caches.then_some(false),
                     ))?,
                 )

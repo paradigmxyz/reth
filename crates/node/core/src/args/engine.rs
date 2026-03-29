@@ -45,6 +45,8 @@ pub struct DefaultEngineValues {
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
+    share_execution_cache_with_payload_builder: bool,
+    share_sparse_trie_with_payload_builder: bool,
 }
 
 impl DefaultEngineValues {
@@ -204,6 +206,18 @@ impl DefaultEngineValues {
         self.state_root_task_timeout = v;
         self
     }
+
+    /// Set whether to share the execution cache with the payload builder by default
+    pub const fn with_share_execution_cache_with_payload_builder(mut self, v: bool) -> Self {
+        self.share_execution_cache_with_payload_builder = v;
+        self
+    }
+
+    /// Set whether to share the sparse trie with the payload builder by default
+    pub const fn with_share_sparse_trie_with_payload_builder(mut self, v: bool) -> Self {
+        self.share_sparse_trie_with_payload_builder = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -233,6 +247,8 @@ impl Default for DefaultEngineValues {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
+            share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
         }
     }
 }
@@ -398,6 +414,36 @@ pub struct EngineArgs {
     )]
     pub state_root_task_timeout: Option<Duration>,
 
+    /// Whether to share execution cache with the payload builder.
+    ///
+    /// When enabled, each payload job will get an instance of cross-block execution cache from the
+    /// engine.
+    ///
+    /// Note: this should only be enabled if node would not be requested to process any payloads in
+    /// parallel with payload building.
+    #[arg(
+        long = "engine.share-execution-cache-with-payload-builder",
+        default_value_t = DefaultEngineValues::get_global().share_execution_cache_with_payload_builder,
+    )]
+    pub share_execution_cache_with_payload_builder: bool,
+
+    /// Whether to share the sparse trie with the payload builder.
+    ///
+    /// Replaces the payload builder's blocking `state_root_with_updates()` call with the
+    /// sparse trie, computing the state root concurrently with transaction execution.
+    ///
+    /// The engine and payload builder contend for the same trie — if a builder task is
+    /// still running when `newPayload` arrives, the engine will block until the trie is
+    /// stored back.
+    ///
+    /// The builder also anchors the trie at the built block's state root, so if the next
+    /// `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
+    #[arg(
+        long = "engine.share-sparse-trie-with-payload-builder",
+        default_value_t = DefaultEngineValues::get_global().share_sparse_trie_with_payload_builder,
+    )]
+    pub share_sparse_trie_with_payload_builder: bool,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -440,6 +486,8 @@ impl Default for EngineArgs {
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -472,6 +520,8 @@ impl Default for EngineArgs {
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -503,7 +553,13 @@ impl EngineArgs {
             .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
-            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()));
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_share_execution_cache_with_payload_builder(
+                self.share_execution_cache_with_payload_builder,
+            )
+            .with_share_sparse_trie_with_payload_builder(
+                self.share_sparse_trie_with_payload_builder,
+            );
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -561,6 +617,8 @@ mod tests {
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -635,5 +693,20 @@ mod tests {
         ])
         .args;
         assert_eq!(args.slow_block_threshold, Some(Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn test_parse_share_sparse_trie_flag() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.share_sparse_trie_with_payload_builder);
+        assert!(!args.tree_config().share_sparse_trie_with_payload_builder());
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.share-sparse-trie-with-payload-builder",
+        ])
+        .args;
+        assert!(args.share_sparse_trie_with_payload_builder);
+        assert!(args.tree_config().share_sparse_trie_with_payload_builder());
     }
 }
