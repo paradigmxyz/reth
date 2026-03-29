@@ -41,7 +41,10 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -537,6 +540,7 @@ where
         let (mut exec_witness, lowest_block_number) = self
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                db.database.0.enable_access_tracking();
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
@@ -547,8 +551,20 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+                let ExecutionWitnessRecord { hashed_state, codes, mut keys, lowest_block_number } =
                     witness_record;
+                let tracked_keys = db.database.0.tracked_keys();
+                if !tracked_keys.is_empty() {
+                    let mut seen = HashSet::with_capacity(keys.len() + tracked_keys.len());
+                    for key in &keys {
+                        seen.insert(key.as_ref().to_vec());
+                    }
+                    for key in tracked_keys {
+                        if seen.insert(key.as_ref().to_vec()) {
+                            keys.push(key);
+                        }
+                    }
+                }
 
                 let state = db
                     .database
