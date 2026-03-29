@@ -286,7 +286,7 @@ mod mantle_compact_roundtrip_tests {
     use op_alloy_consensus::TxDeposit as AlloyTxDeposit;
 
     /// Simulate a typical Mantle mainnet deposit tx (Limb era):
-    /// eth_value=0, eth_tx_value=None, input=260 bytes (Bedrock setL1BlockValues)
+    /// `eth_value=0`, `eth_tx_value=None`, input=260 bytes (Bedrock `setL1BlockValues`)
     ///
     /// This is the exact scenario that causes the 243-byte bug on op-reth-rpc41.
     #[test]
@@ -346,7 +346,7 @@ mod mantle_compact_roundtrip_tests {
         assert_eq!(original.input, restored.input, "input CONTENT mismatch");
     }
 
-    /// Test with eth_value=200, eth_tx_value=Some(300) — non-zero Mantle extension fields
+    /// Test with `eth_value=200`, `eth_tx_value=Some(300)` — non-zero Mantle extension fields
     #[test]
     fn test_compact_roundtrip_mantle_deposit_tx_nonzero_fields() {
         let original = AlloyTxDeposit {
@@ -372,7 +372,7 @@ mod mantle_compact_roundtrip_tests {
         assert_eq!(original, restored, "full tx mismatch");
     }
 
-    /// Test eth_tx_value=Some(0) — edge case where Option is Some but value is zero
+    /// Test `eth_tx_value=Some(0)` — edge case where Option is Some but value is zero
     #[test]
     fn test_compact_roundtrip_eth_tx_value_some_zero() {
         let original = AlloyTxDeposit {
@@ -407,7 +407,7 @@ mod mantle_compact_roundtrip_tests {
         );
     }
 
-    /// CRITICAL GUARD TEST: The Compact bitfield for TxDeposit MUST be exactly 2 bytes.
+    /// CRITICAL GUARD TEST: The Compact bitfield for `TxDeposit` MUST be exactly 2 bytes.
     ///
     /// If this test fails, you have changed a field type in the `TxDeposit` struct in a way
     /// that changes the bitfield size. This WILL break all existing on-disk data for every
