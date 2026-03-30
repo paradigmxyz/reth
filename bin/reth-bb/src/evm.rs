@@ -17,21 +17,19 @@
 //!   segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
-use alloy_consensus::Transaction;
-use alloy_eips::{eip7685::Requests, Encodable2718};
+use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, ExecutableTx, OnStateHook, StateDB,
     },
-    eth::{
-        receipt_builder::ReceiptBuilder, EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext,
-        EthTxResult,
-    },
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
     Database, EthEvm, EthEvmFactory, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use alloy_primitives::{Address, Bytes, Log, B256};
+use alloy_primitives::{Address, Bytes, B256};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm_ethereum::RethReceiptBuilder;
 use revm::{
     context::{BlockEnv, TxEnv},
     context_interface::result::{EVMError, HaltReason, ResultAndState},
@@ -238,29 +236,37 @@ impl EvmFactory for BbEvmFactory {
 /// end-of-block logic: post-execution system calls, withdrawal balance
 /// increments) and a new one is constructed for the next segment (applying
 /// its start-of-block logic: EIP-2935/EIP-4788 system calls).
-pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec, R>
+///
+/// Gas counters reset at each boundary so that each segment's real gas limit
+/// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
+/// are applied to receipts and totals in `finish()`.
+pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: Database,
-    R: ReceiptBuilder,
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
-    inner: Option<EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R>>,
+    inner: Option<EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder>>,
     plan: Option<BbEvmPlan>,
     /// Requests accumulated from segments that have been finished at
     /// boundaries. Merged into the final result in `finish()`.
     accumulated_requests: Requests,
+    /// Cumulative gas used by all segments that have been finished at
+    /// boundaries. Added to receipts and the final gas total in `finish()`.
+    gas_used_offset: u64,
+    /// Cumulative blob gas used by all segments that have been finished at
+    /// boundaries.
+    blob_gas_used_offset: u64,
+    /// Number of receipts from segments that have already had their
+    /// cumulative_gas_used fixed up. Used to avoid double-adjusting.
+    receipts_fixed_up: usize,
 }
 
-impl<'a, DB, I, P, Spec, R> BbBlockExecutor<'a, DB, I, P, Spec, R>
+impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: StateDB,
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    R: ReceiptBuilder<
-            Transaction: Transaction + Encodable2718,
-            Receipt: alloy_consensus::TxReceipt<Log = Log>,
-        > + Clone,
     BbEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -269,25 +275,33 @@ where
         Spec = SpecId,
         BlockEnv = BlockEnv,
     >,
-    TxEnv:
-        alloy_evm::FromRecoveredTx<R::Transaction> + alloy_evm::FromTxWithEncoded<R::Transaction>,
+    TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     pub(crate) fn new(
         mut evm: BbEvm<DB, I, P>,
         ctx: EthBlockExecutionCtx<'a>,
         spec: Spec,
-        receipt_builder: R,
+        receipt_builder: RethReceiptBuilder,
     ) -> Self {
         let plan = evm.take_plan();
         let inner = EthBlockExecutor::new(evm, ctx, spec, receipt_builder);
-        Self { inner: Some(inner), plan, accumulated_requests: Requests::default() }
+        Self {
+            inner: Some(inner),
+            plan,
+            accumulated_requests: Requests::default(),
+            gas_used_offset: 0,
+            blob_gas_used_offset: 0,
+            receipts_fixed_up: 0,
+        }
     }
 
-    fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R> {
+    fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
-    fn inner_mut(&mut self) -> &mut EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R> {
+    fn inner_mut(
+        &mut self,
+    ) -> &mut EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
     }
 
@@ -335,8 +349,7 @@ where
 
         // Clone the next segment's data before we consume inner.
         let new_segment = &plan.segments[seg_idx];
-        let mut new_block_env = new_segment.evm_env.block_env.clone();
-        new_block_env.gas_limit = u64::MAX;
+        let new_block_env = new_segment.evm_env.block_env.clone();
         let mut new_cfg_env = new_segment.evm_env.cfg_env.clone();
         new_cfg_env.disable_base_fee = true;
         let new_ctx = EthBlockExecutionCtx {
@@ -357,34 +370,40 @@ where
         inner.ctx = prev_ctx;
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder.clone();
-        let (mut evm, result) = inner.finish()?;
+        let (mut evm, mut result) = inner.finish()?;
 
-        // Save accumulated receipts and gas, accumulate requests.
-        let saved_receipts = result.receipts;
-        let saved_gas_used = result.gas_used;
-        let saved_blob_gas_used = result.blob_gas_used;
+        // Fix up cumulative_gas_used on this segment's receipts (those added
+        // after the last boundary) to account for gas consumed by prior
+        // segments, then update the offset.
+        if self.gas_used_offset > 0 {
+            for receipt in &mut result.receipts[self.receipts_fixed_up..] {
+                receipt.cumulative_gas_used += self.gas_used_offset;
+            }
+        }
+        self.receipts_fixed_up = result.receipts.len();
+        self.gas_used_offset += result.gas_used;
+        self.blob_gas_used_offset += result.blob_gas_used;
         self.accumulated_requests.extend(result.requests);
 
         trace!(
             target: "engine::bb::evm",
-            "Finished segment {prev_seg_idx}, receipts={}, gas_used={saved_gas_used}",
-            saved_receipts.len(),
+            "Finished segment {prev_seg_idx}, receipts={}, gas_used={}",
+            result.receipts.len(),
+            result.gas_used,
         );
 
-        // Swap EVM env to the next segment's values.
+        // Swap EVM env to the next segment's values (using real gas_limit).
         let ctx = evm.ctx_mut();
         ctx.block = new_block_env;
         ctx.cfg = new_cfg_env;
 
-        // Build a new inner executor for the next segment.
+        // Build a new inner executor for the next segment. gas_used starts
+        // at 0 so the per-transaction gas check uses this segment's real
+        // gas_limit correctly.
         let mut new_inner = EthBlockExecutor::new(evm, new_ctx, spec, receipt_builder);
 
-        // Re-inject accumulated receipts and gas counters so the big block
-        // produces one unified receipt list with cumulative gas spanning all
-        // segments.
-        new_inner.receipts = saved_receipts;
-        new_inner.gas_used = saved_gas_used;
-        new_inner.blob_gas_used = saved_blob_gas_used;
+        // Carry forward receipts from prior segments.
+        new_inner.receipts = result.receipts;
 
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788).
         new_inner.apply_pre_execution_changes()?;
@@ -396,16 +415,12 @@ where
     }
 }
 
-impl<'a, DB, I, P, Spec, R> BlockExecutor for BbBlockExecutor<'a, DB, I, P, Spec, R>
+impl<'a, DB, I, P, Spec> BlockExecutor for BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: StateDB,
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    R: ReceiptBuilder<
-            Transaction: Transaction + Encodable2718,
-            Receipt: alloy_consensus::TxReceipt<Log = Log>,
-        > + Clone,
     BbEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -414,14 +429,12 @@ where
         Spec = SpecId,
         BlockEnv = BlockEnv,
     >,
-    TxEnv:
-        alloy_evm::FromRecoveredTx<R::Transaction> + alloy_evm::FromTxWithEncoded<R::Transaction>,
+    TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
-    type Transaction = R::Transaction;
-    type Receipt = R::Receipt;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = BbEvm<DB, I, P>;
-    type Result =
-        EthTxResult<HaltReason, <R::Transaction as alloy_consensus::TransactionEnvelope>::TxType>;
+    type Result = EthTxResult<HaltReason, alloy_consensus::TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Swap the EVM's block_env and executor ctx to the first segment's
@@ -430,8 +443,7 @@ where
         // block header's block_number (which is synthetic) would be used,
         // writing to wrong EIP-2935 slots and corrupting state.
         if let Some(seg0) = self.plan.as_ref().map(|p| &p.segments[0]) {
-            let mut block_env = seg0.evm_env.block_env.clone();
-            block_env.gas_limit = u64::MAX;
+            let block_env = seg0.evm_env.block_env.clone();
             let mut cfg_env = seg0.evm_env.cfg_env.clone();
             cfg_env.disable_base_fee = true;
             let seg0_ctx = EthBlockExecutionCtx {
@@ -489,6 +501,16 @@ where
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
+        if self.gas_used_offset > 0 {
+            // Fix up cumulative_gas_used on the final segment's receipts
+            // (those added after the last boundary).
+            for receipt in &mut result.receipts[self.receipts_fixed_up..] {
+                receipt.cumulative_gas_used += self.gas_used_offset;
+            }
+            result.gas_used += self.gas_used_offset;
+            result.blob_gas_used += self.blob_gas_used_offset;
+        }
+
         // Merge requests accumulated from earlier segment boundaries into
         // the final result.
         if !self.accumulated_requests.is_empty() {
@@ -524,14 +546,14 @@ where
 /// Block executor factory that uses [`BbEvmFactory`] to produce [`BbEvm`]
 /// instances and [`BbBlockExecutor`] for boundary-aware execution.
 #[derive(Debug, Clone)]
-pub struct BbBlockExecutorFactory<R, Spec> {
-    receipt_builder: R,
+pub struct BbBlockExecutorFactory<Spec> {
+    receipt_builder: RethReceiptBuilder,
     spec: Spec,
     evm_factory: BbEvmFactory,
 }
 
-impl<R, Spec> BbBlockExecutorFactory<R, Spec> {
-    pub fn new(receipt_builder: R, spec: Spec, evm_factory: BbEvmFactory) -> Self {
+impl<Spec> BbBlockExecutorFactory<Spec> {
+    pub fn new(receipt_builder: RethReceiptBuilder, spec: Spec, evm_factory: BbEvmFactory) -> Self {
         Self { receipt_builder, spec, evm_factory }
     }
 
@@ -543,24 +565,20 @@ impl<R, Spec> BbBlockExecutorFactory<R, Spec> {
         &self.spec
     }
 
-    pub const fn receipt_builder(&self) -> &R {
+    pub const fn receipt_builder(&self) -> &RethReceiptBuilder {
         &self.receipt_builder
     }
 }
 
-impl<R, Spec> BlockExecutorFactory for BbBlockExecutorFactory<R, Spec>
+impl<Spec> BlockExecutorFactory for BbBlockExecutorFactory<Spec>
 where
-    R: ReceiptBuilder<
-            Transaction: Transaction + Encodable2718,
-            Receipt: alloy_consensus::TxReceipt<Log = Log>,
-        > + 'static,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + 'static,
-    TxEnv: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type EvmFactory = BbEvmFactory;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
-    type Transaction = R::Transaction;
-    type Receipt = R::Receipt;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -575,6 +593,6 @@ where
         DB: StateDB + 'a,
         I: Inspector<EthEvmContext<DB>> + 'a,
     {
-        BbBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder)
     }
 }

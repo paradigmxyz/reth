@@ -65,7 +65,7 @@ pub struct BbEvmConfig<C = ChainSpec> {
     /// Shared map of pending big-block metadata.
     pub pending: BigBlockMap,
     /// Block executor factory with the big-block EVM factory.
-    executor_factory: BbBlockExecutorFactory<RethReceiptBuilder, Arc<C>>,
+    executor_factory: BbBlockExecutorFactory<Arc<C>>,
     /// Block assembler.
     block_assembler: EthBlockAssembler<C>,
 }
@@ -97,7 +97,7 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = BbBlockExecutorFactory<RethReceiptBuilder, Arc<C>>;
+    type BlockExecutorFactory = BbBlockExecutorFactory<Arc<C>>;
     type BlockAssembler = EthBlockAssembler<C>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -195,13 +195,6 @@ where
             // original blocks may have gas prices below the big block's
             // effective basefee.
             env.cfg_env.disable_base_fee = true;
-
-            // Disable the per-tx gas_limit check: set gas_limit high enough
-            // that no transaction is rejected. Each segment has its own real
-            // gas_limit, but the inflated values at boundaries handle that.
-            // We just need the initial value to be large enough for the
-            // first segment's transactions.
-            env.block_env.gas_limit = u64::MAX;
 
             // Now stage the plan on the factory (removes the entry).
             self.stage_plan_for_payload(&payload_hash);
