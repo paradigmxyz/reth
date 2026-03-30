@@ -2000,18 +2000,29 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold and
-    /// backfill is not running.
+    /// Returns true if there are enough blocks ready to persist beyond the
+    /// [`memory_block_buffer_target`](TreeConfig::memory_block_buffer_target) and backfill is not
+    /// running.
+    ///
+    /// The number of blocks ready to persist is the gap between the persist target
+    /// (`canonical_head - memory_block_buffer_target`) and the last persisted block. Persistence
+    /// triggers when this gap exceeds
+    /// [`persistence_threshold`](TreeConfig::persistence_threshold).
     pub const fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        let last_persisted = self.persistence_state.last_persisted_block.number;
+        let canonical_head = self.state.tree_state.canonical_block_number();
+
+        // The persist target is how far back from the head we persist, respecting the
+        // memory buffer. Blocks between the target and the head stay in memory.
+        let persist_target =
+            canonical_head.saturating_sub(self.config.memory_block_buffer_target());
+
+        persist_target.saturating_sub(last_persisted) > self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range

@@ -87,13 +87,15 @@ pub fn has_enough_parallelism() -> bool {
 /// The configuration of the engine tree.
 #[derive(Debug, Clone)]
 pub struct TreeConfig {
-    /// Maximum number of blocks to be kept only in memory without triggering
-    /// persistence.
+    /// Number of blocks that must accumulate past the
+    /// [`memory_block_buffer_target`] before triggering persistence.
     persistence_threshold: u64,
-    /// How close to the canonical head we persist blocks. Represents the ideal
+    /// How close to the canonical head we persist blocks. Represents the
     /// number of most recent blocks to keep in memory for quick access and reorgs.
+    /// Blocks within this distance from the canonical head are never persisted.
     ///
-    /// Note: this should be less than or equal to `persistence_threshold`.
+    /// This can be set independently of `persistence_threshold` — any combination
+    /// of values is valid.
     memory_block_buffer_target: u64,
     /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
     persistence_backpressure_threshold: u64,
