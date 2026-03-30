@@ -304,6 +304,7 @@ impl TestHarness {
                 BeaconEngineMessage::ForkchoiceUpdated {
                     state: fcu_state,
                     payload_attrs: None,
+                    version: reth_payload_primitives::EngineApiMessageVersion::default(),
                     tx,
                 }
                 .into(),
@@ -603,6 +604,7 @@ async fn test_engine_request_during_backfill() {
                     finalized_block_hash: B256::random(),
                 },
                 payload_attrs: None,
+                version: reth_payload_primitives::EngineApiMessageVersion::default(),
                 tx,
             }
             .into(),
@@ -1088,6 +1090,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
                     finalized_block_hash: B256::ZERO,
                 },
                 payload_attrs: None,
+                version: reth_payload_primitives::EngineApiMessageVersion::default(),
                 tx,
             }
             .into(),
