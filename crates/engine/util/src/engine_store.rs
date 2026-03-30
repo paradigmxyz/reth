@@ -5,6 +5,7 @@ use futures::{Stream, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, ExecutionPayload};
 use reth_fs_util as fs;
 use reth_payload_primitives::PayloadTypes;
+use reth_tracing::Traced;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -128,7 +129,7 @@ impl<S> EngineStoreStream<S> {
 
 impl<S, T> Stream for EngineStoreStream<S>
 where
-    S: Stream<Item = BeaconEngineMessage<T>>,
+    S: Stream<Item = Traced<BeaconEngineMessage<T>>>,
     T: PayloadTypes,
 {
     type Item = S::Item;
@@ -137,9 +138,9 @@ where
         let mut this = self.project();
         let next = ready!(this.stream.poll_next_unpin(cx));
         if let Some(msg) = &next &&
-            let Err(error) = this.store.on_message(msg, SystemTime::now())
+            let Err(error) = this.store.on_message(msg.untraced(), SystemTime::now())
         {
-            error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
+            error!(target: "engine::stream::store", msg = ?msg.untraced(), %error, "Error handling Engine API message");
         }
         Poll::Ready(next)
     }

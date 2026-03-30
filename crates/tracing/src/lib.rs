@@ -69,6 +69,8 @@ mod layers;
 pub mod log_handle;
 mod test_tracer;
 mod throttle;
+mod traced;
+pub use traced::Traced;
 
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;

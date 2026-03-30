@@ -20,6 +20,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_tracing::Traced;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -97,7 +98,7 @@ impl<S, T: PayloadTypes, Provider, Evm, Validator> EngineReorg<S, T, Provider, E
 
 impl<S, T, Provider, Evm, Validator> Stream for EngineReorg<S, T, Provider, Evm, Validator>
 where
-    S: Stream<Item = BeaconEngineMessage<T>>,
+    S: Stream<Item = Traced<BeaconEngineMessage<T>>>,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
@@ -132,7 +133,7 @@ where
 
             if let EngineReorgState::Reorg { queue } = &mut this.state {
                 match queue.pop_front() {
-                    Some(msg) => return Poll::Ready(Some(msg)),
+                    Some(msg) => return Poll::Ready(Some(Traced::new(msg))),
                     None => {
                         *this.forkchoice_states_forwarded = 0;
                         *this.state = EngineReorgState::Forward;
@@ -141,83 +142,87 @@ where
             }
 
             let next = ready!(this.stream.poll_next_unpin(cx));
-            let item = match (next, &this.last_forkchoice_state) {
-                (
-                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
-                    Some(last_forkchoice_state),
-                ) if this.forkchoice_states_forwarded > this.frequency &&
-                        // Only enter reorg state if new payload attaches to current head.
-                        last_forkchoice_state.head_block_hash == payload.parent_hash() =>
-                {
-                    // Enter the reorg state.
-                    // The current payload will be immediately forwarded by being in front of the
-                    // queue. Then we attempt to reorg the current head by generating a payload that
-                    // attaches to the head's parent and is based on the non-conflicting
-                    // transactions (txs from block `n + 1` that are valid at block `n` according to
-                    // consensus checks) from the current payload as well as the corresponding
-                    // forkchoice state. We will rely on CL to reorg us back to canonical chain.
-                    // TODO: This is an expensive blocking operation, ideally it's spawned as a task
-                    // so that the stream could yield the control back.
-                    let reorg_block = match create_reorg_head(
-                        this.provider,
-                        this.evm_config,
-                        this.payload_validator,
-                        *this.depth,
-                        payload.clone(),
-                    ) {
-                        Ok(result) => result,
-                        Err(error) => {
-                            error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
-                            // Forward the payload and attempt to create reorg on top of
-                            // the next one
-                            return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
-                                payload,
-                                tx,
-                            }))
-                        }
-                    };
-                    let reorg_forkchoice_state = ForkchoiceState {
-                        finalized_block_hash: last_forkchoice_state.finalized_block_hash,
-                        safe_block_hash: last_forkchoice_state.safe_block_hash,
-                        head_block_hash: reorg_block.hash(),
-                    };
+            let Some(traced_msg) = next else { return Poll::Ready(None) };
 
-                    let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
-                    let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
-                    this.reorg_responses.extend([
-                        Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
-                        Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
-                    ]);
+            if let Some(last_forkchoice_state) = this.last_forkchoice_state.as_ref()
+                && *this.forkchoice_states_forwarded > *this.frequency
+                && let BeaconEngineMessage::NewPayload { payload, .. } = traced_msg.untraced()
+                // Only enter reorg state if new payload attaches to current head.
+                && last_forkchoice_state.head_block_hash == payload.parent_hash()
+            {
+                let (_entered, msg) = traced_msg.enter_traced();
+                let BeaconEngineMessage::NewPayload { payload, tx } = msg else {
+                    unreachable!("validated as NewPayload above")
+                };
 
-                    let queue = VecDeque::from([
-                        // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx },
-                        // Reorg payload
-                        BeaconEngineMessage::NewPayload {
-                            payload: T::block_to_payload(reorg_block),
-                            tx: reorg_payload_tx,
-                        },
-                        // Reorg forkchoice state
-                        BeaconEngineMessage::ForkchoiceUpdated {
-                            state: reorg_forkchoice_state,
-                            payload_attrs: None,
-                            tx: reorg_fcu_tx,
-                        },
-                    ]);
-                    *this.state = EngineReorgState::Reorg { queue };
-                    continue
-                }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
-                    // Record last forkchoice state forwarded to the engine.
-                    // We do not care if it's valid since engine should be able to handle
-                    // reorgs that rely on invalid forkchoice state.
-                    *this.last_forkchoice_state = Some(state);
-                    *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
-                }
-                (item, _) => item,
-            };
-            return Poll::Ready(item)
+                // Enter the reorg state.
+                // The current payload will be immediately forwarded by being in front of the
+                // queue. Then we attempt to reorg the current head by generating a payload that
+                // attaches to the head's parent and is based on the non-conflicting
+                // transactions (txs from block `n + 1` that are valid at block `n` according to
+                // consensus checks) from the current payload as well as the corresponding
+                // forkchoice state. We will rely on CL to reorg us back to canonical chain.
+                // TODO: This is an expensive blocking operation, ideally it's spawned as a task
+                // so that the stream could yield the control back.
+                let reorg_block = match create_reorg_head(
+                    this.provider,
+                    this.evm_config,
+                    this.payload_validator,
+                    *this.depth,
+                    payload.clone(),
+                ) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
+                        // Forward the payload and attempt to create reorg on top of
+                        // the next one
+                        return Poll::Ready(Some(Traced::new(BeaconEngineMessage::NewPayload {
+                            payload,
+                            tx,
+                        })))
+                    }
+                };
+                let reorg_forkchoice_state = ForkchoiceState {
+                    finalized_block_hash: last_forkchoice_state.finalized_block_hash,
+                    safe_block_hash: last_forkchoice_state.safe_block_hash,
+                    head_block_hash: reorg_block.hash(),
+                };
+
+                let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
+                let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
+                this.reorg_responses.extend([
+                    Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
+                    Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
+                ]);
+
+                let queue = VecDeque::from([
+                    // Current payload
+                    BeaconEngineMessage::NewPayload { payload, tx },
+                    // Reorg payload
+                    BeaconEngineMessage::NewPayload {
+                        payload: T::block_to_payload(reorg_block),
+                        tx: reorg_payload_tx,
+                    },
+                    // Reorg forkchoice state
+                    BeaconEngineMessage::ForkchoiceUpdated {
+                        state: reorg_forkchoice_state,
+                        payload_attrs: None,
+                        tx: reorg_fcu_tx,
+                    },
+                ]);
+                *this.state = EngineReorgState::Reorg { queue };
+                continue
+            }
+
+            if let BeaconEngineMessage::ForkchoiceUpdated { state, .. } = traced_msg.untraced() {
+                // Record last forkchoice state forwarded to the engine.
+                // We do not care if it's valid since engine should be able to handle
+                // reorgs that rely on invalid forkchoice state.
+                *this.last_forkchoice_state = Some(*state);
+                *this.forkchoice_states_forwarded += 1;
+            }
+
+            return Poll::Ready(Some(traced_msg))
         }
     }
 }

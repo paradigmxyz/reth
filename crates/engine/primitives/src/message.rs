@@ -15,6 +15,7 @@ use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
+use reth_tracing::Traced;
 use std::time::Duration;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -242,7 +243,7 @@ pub struct ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {
-    to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
+    to_engine: UnboundedSender<Traced<BeaconEngineMessage<Payload>>>,
 }
 
 impl<Payload> ConsensusEngineHandle<Payload>
@@ -250,7 +251,7 @@ where
     Payload: PayloadTypes,
 {
     /// Creates a new beacon consensus engine handle.
-    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Payload>>) -> Self {
+    pub const fn new(to_engine: UnboundedSender<Traced<BeaconEngineMessage<Payload>>>) -> Self {
         Self { to_engine }
     }
 
@@ -262,7 +263,7 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        let _ = self.to_engine.send(Traced::new(BeaconEngineMessage::NewPayload { payload, tx }));
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
@@ -279,12 +280,12 @@ where
         wait_for_caches: bool,
     ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::RethNewPayload {
+        let _ = self.to_engine.send(Traced::new(BeaconEngineMessage::RethNewPayload {
             payload,
             wait_for_persistence,
             wait_for_caches,
             tx,
-        });
+        }));
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
@@ -312,11 +313,11 @@ where
         payload_attrs: Option<Payload::PayloadAttributes>,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
+        let _ = self.to_engine.send(Traced::new(BeaconEngineMessage::ForkchoiceUpdated {
             state,
             payload_attrs,
             tx,
-        });
+        }));
         rx
     }
 }

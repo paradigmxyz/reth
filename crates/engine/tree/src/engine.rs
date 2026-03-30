@@ -13,6 +13,7 @@ use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
+use reth_tracing::Traced;
 use std::{
     fmt::Display,
     task::{ready, Context, Poll},
@@ -67,8 +68,7 @@ impl<T, S, D> EngineHandler<T, S, D> {
 impl<T, S, D> ChainHandler for EngineHandler<T, S, D>
 where
     T: EngineRequestHandler<Block = D::Block>,
-    S: Stream + Send + Sync + Unpin + 'static,
-    <S as Stream>::Item: Into<T::Request>,
+    S: Stream<Item = Traced<T::Request>> + Send + Sync + Unpin + 'static,
     D: BlockDownloader,
 {
     type Event = T::Event;
@@ -95,7 +95,7 @@ where
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
                             HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
-                        }
+                        };
                     }
                     RequestHandlerEvent::Download(req) => {
                         // delegate download request to the downloader
@@ -107,9 +107,9 @@ where
             // pop the next incoming request
             if let Poll::Ready(Some(req)) = self.incoming_requests.poll_next_unpin(cx) {
                 // and delegate the request to the handler
-                self.handler.on_event(FromEngine::Request(req.into()));
+                self.handler.on_event(FromEngine::Request(req));
                 // skip downloading in this iteration to allow the handler to process the request
-                continue
+                continue;
             }
 
             // advance the downloader
@@ -118,10 +118,10 @@ where
                     // delegate the downloaded blocks to the handler
                     self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
                 }
-                continue
+                continue;
             }
 
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }
@@ -201,7 +201,7 @@ where
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
         let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
-            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
+            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError));
         };
 
         let ev = match ev {
@@ -269,7 +269,7 @@ impl<T: PayloadTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
     for FromEngine<EngineApiRequest<T, N>, N::Block>
 {
     fn from(req: EngineApiRequest<T, N>) -> Self {
-        Self::Request(req)
+        Self::Request(Traced::new(req))
     }
 }
 
@@ -303,8 +303,8 @@ impl<N: NodePrimitives> From<ConsensusEngineEvent<N>> for EngineApiEvent<N> {
 pub enum FromEngine<Req, B: Block> {
     /// Event from the top level orchestrator.
     Event(FromOrchestrator),
-    /// Request from the engine.
-    Request(Req),
+    /// Request from the engine, wrapped in [`Traced`] to propagate the sender's span.
+    Request(Traced<Req>),
     /// Downloaded blocks from the network.
     DownloadedBlocks(Vec<SealedBlock<B>>),
 }
@@ -313,7 +313,7 @@ impl<Req: Display, B: Block> Display for FromEngine<Req, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Event(ev) => write!(f, "Event({ev:?})"),
-            Self::Request(req) => write!(f, "Request({req})"),
+            Self::Request(req) => write!(f, "Request({})", req.untraced()),
             Self::DownloadedBlocks(blocks) => {
                 write!(f, "DownloadedBlocks({} blocks)", blocks.len())
             }

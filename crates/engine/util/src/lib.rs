@@ -11,6 +11,7 @@
 use futures::{Future, Stream};
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_payload_primitives::PayloadTypes;
+use reth_tracing::Traced;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -31,7 +32,9 @@ type MaybeReorgResult<S, T, Provider, Evm, Validator, E> =
     Result<Either<EngineReorg<S, T, Provider, Evm, Validator>, S>, E>;
 
 /// The collection of stream extensions for engine API message stream.
-pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMessage<T>> {
+pub trait EngineMessageStreamExt<T: PayloadTypes>:
+    Stream<Item = Traced<BeaconEngineMessage<T>>>
+{
     /// Skips the specified number of [`BeaconEngineMessage::ForkchoiceUpdated`] messages from the
     /// engine message stream.
     fn skip_fcu(self, count: usize) -> EngineSkipFcu<Self>
@@ -166,6 +169,6 @@ pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMes
 impl<T, S> EngineMessageStreamExt<T> for S
 where
     T: PayloadTypes,
-    S: Stream<Item = BeaconEngineMessage<T>>,
+    S: Stream<Item = Traced<BeaconEngineMessage<T>>>,
 {
 }

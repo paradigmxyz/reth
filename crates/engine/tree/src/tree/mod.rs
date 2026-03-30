@@ -37,6 +37,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tracing::Traced;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -1534,33 +1535,36 @@ where
                     return Ok(ops::ControlFlow::Break(()))
                 }
             },
-            FromEngine::Request(request) => {
+            FromEngine::Request(traced_request) => {
+                return traced_request.take_in_span(|request| {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
-                        let block_num_hash = block.recovered_block().num_hash();
-                        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
-                            // outdated block that can be skipped
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
+                            let block_num_hash = block.recovered_block().num_hash();
+                            if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
+                                // outdated block that can be skipped
+                                return Ok(ops::ControlFlow::Continue(()))
+                            }
 
-                        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
-                        let now = Instant::now();
+                            debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
+                            let now = Instant::now();
 
-                        // if the parent is the canonical head, we can insert the block as the
-                        // pending block
-                        if self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash()
-                        {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
-                        }
+                            // if the parent is the canonical head, we can insert the block as the
+                            // pending block
+                            if self.state.tree_state.canonical_block_hash() ==
+                                block.recovered_block().parent_hash()
+                            {
+                                debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                                self.canonical_in_memory_state.set_pending_block(block.clone());
+                            }
 
-                        self.state.tree_state.insert_executed(block.clone());
-                        self.payload_validator.on_inserted_executed_block(block.clone());
-                        self.metrics.engine.inserted_already_executed_blocks.increment(1);
-                        self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
-                        ));
+                            self.state.tree_state.insert_executed(block.clone());
+                            self.payload_validator.on_inserted_executed_block(block.clone());
+                            self.metrics.engine.inserted_already_executed_blocks.increment(1);
+                            self.emit_event(EngineApiEvent::BeaconConsensus(
+                                ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ));
+
+                            Ok(ops::ControlFlow::Continue(()))
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -1722,8 +1726,11 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                         }
+
+                        Ok(ops::ControlFlow::Continue(()))
                     }
                 }
+                })
             }
             FromEngine::DownloadedBlocks(blocks) => {
                 if let Some(event) = self.on_downloaded(blocks)? {

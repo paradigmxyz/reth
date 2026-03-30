@@ -12,12 +12,13 @@ use crate::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
-use futures::Stream;
+use futures::{stream::Map, Stream, StreamExt};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -26,6 +27,7 @@ use reth_provider::{
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::Runtime;
+use reth_tracing::Traced;
 use reth_trie_db::ChangesetCache;
 use std::sync::Arc;
 
@@ -68,7 +70,12 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
 ) -> ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
-        S,
+        Map<
+            S,
+            fn(
+                Traced<BeaconEngineMessage<N::Payload>>,
+            ) -> Traced<EngineApiRequest<N::Payload, N::Primitives>>,
+        >,
         BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
     >,
     PipelineSync<N>,
@@ -76,7 +83,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block> + 'static,
-    S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
+    S: Stream<Item = Traced<BeaconEngineMessage<N::Payload>>> + Send + Sync + Unpin + 'static,
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
@@ -102,6 +109,15 @@ where
     );
 
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
+
+    fn map_to_request<P: PayloadTypes, N: NodePrimitives>(
+        msg: Traced<BeaconEngineMessage<P>>,
+    ) -> Traced<EngineApiRequest<P, N>> {
+        msg.map(Into::into)
+    }
+    let incoming_requests =
+        incoming_requests.map(map_to_request::<N::Payload, N::Primitives> as fn(_) -> _);
+
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
     let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
