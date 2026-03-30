@@ -18,12 +18,11 @@
 
 use crate::evm_config::BigBlockSegment;
 use alloy_consensus::Transaction;
-use alloy_eips::Encodable2718;
+use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_evm::{
     block::{
-        state_changes::post_block_balance_increments, BlockExecutionError, BlockExecutionResult,
-        BlockExecutor, BlockExecutorFactory, BlockExecutorFor, BlockValidationError, ExecutableTx,
-        OnStateHook, StateDB,
+        BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
+        BlockExecutorFor, ExecutableTx, OnStateHook, StateDB,
     },
     eth::{
         receipt_builder::ReceiptBuilder, EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext,
@@ -36,7 +35,6 @@ use alloy_primitives::{Address, Bytes, Log, B256};
 use revm::{
     context::{BlockEnv, TxEnv},
     context_interface::result::{EVMError, HaltReason, ResultAndState},
-    database::DatabaseCommitExt,
     handler::PrecompileProvider,
     inspector::NoOpInspector,
     interpreter::InterpreterResult,
@@ -58,12 +56,6 @@ pub(crate) struct BbEvmPlan {
     pub(crate) next_segment: usize,
     /// Number of user transactions executed so far.
     pub(crate) tx_counter: usize,
-    /// Whether EIP-4788 (Cancun beacon roots) is active.
-    pub(crate) cancun_active: bool,
-    /// Whether EIP-2935 (Prague block hashes) is active.
-    pub(crate) prague_active: bool,
-    /// Chain spec for computing withdrawal balance increments.
-    pub(crate) chain_spec: Arc<dyn alloy_hardforks::EthereumHardforks + Send + Sync>,
     /// Block hashes to seed for inter-segment BLOCKHASH resolution.
     /// Includes both prior block hashes and inter-segment hashes.
     pub(crate) block_hashes_to_seed: Vec<(u64, B256)>,
@@ -71,12 +63,7 @@ pub(crate) struct BbEvmPlan {
 
 impl BbEvmPlan {
     /// Creates a new `BbEvmPlan` from segments and hardfork flags.
-    pub(crate) fn new(
-        segments: Vec<BigBlockSegment>,
-        cancun_active: bool,
-        prague_active: bool,
-        chain_spec: Arc<dyn alloy_hardforks::EthereumHardforks + Send + Sync>,
-    ) -> Self {
+    pub(crate) fn new(segments: Vec<BigBlockSegment>) -> Self {
         // Pre-compute all inter-segment block hashes.
         let mut block_hashes_to_seed = Vec::new();
         for seg_idx in 1..segments.len() {
@@ -86,15 +73,7 @@ impl BbEvmPlan {
             block_hashes_to_seed.push((finished_block_number, finished_block_hash));
         }
 
-        Self {
-            segments,
-            next_segment: 1,
-            tx_counter: 0,
-            cancun_active,
-            prague_active,
-            chain_spec,
-            block_hashes_to_seed,
-        }
+        Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
     }
 }
 
@@ -104,8 +83,6 @@ impl std::fmt::Debug for BbEvmPlan {
             .field("segments", &self.segments)
             .field("next_segment", &self.next_segment)
             .field("tx_counter", &self.tx_counter)
-            .field("cancun_active", &self.cancun_active)
-            .field("prague_active", &self.prague_active)
             .field("block_hashes_to_seed", &self.block_hashes_to_seed)
             .finish()
     }
@@ -256,13 +233,22 @@ impl EvmFactory for BbEvmFactory {
 
 /// Block executor that wraps [`EthBlockExecutor`] and handles segment-boundary
 /// changes for big-block execution.
+///
+/// At segment boundaries, the inner executor is finished (applying its
+/// end-of-block logic: post-execution system calls, withdrawal balance
+/// increments) and a new one is constructed for the next segment (applying
+/// its start-of-block logic: EIP-2935/EIP-4788 system calls).
 pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec, R>
 where
     DB: Database,
     R: ReceiptBuilder,
 {
-    inner: EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R>,
+    /// The inner executor. `None` transiently during `apply_segment_boundary`.
+    inner: Option<EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R>>,
     plan: Option<BbEvmPlan>,
+    /// Requests accumulated from segments that have been finished at
+    /// boundaries. Merged into the final result in `finish()`.
+    accumulated_requests: Requests,
 }
 
 impl<'a, DB, I, P, Spec, R> BbBlockExecutor<'a, DB, I, P, Spec, R>
@@ -271,7 +257,20 @@ where
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    R: ReceiptBuilder,
+    R: ReceiptBuilder<
+            Transaction: Transaction + Encodable2718,
+            Receipt: alloy_consensus::TxReceipt<Log = Log>,
+        > + Clone,
+    BbEvm<DB, I, P>: Evm<
+        DB = DB,
+        Tx = TxEnv,
+        HaltReason = HaltReason,
+        Error = EVMError<DB::Error>,
+        Spec = SpecId,
+        BlockEnv = BlockEnv,
+    >,
+    TxEnv:
+        alloy_evm::FromRecoveredTx<R::Transaction> + alloy_evm::FromTxWithEncoded<R::Transaction>,
 {
     pub(crate) fn new(
         mut evm: BbEvm<DB, I, P>,
@@ -281,7 +280,15 @@ where
     ) -> Self {
         let plan = evm.take_plan();
         let inner = EthBlockExecutor::new(evm, ctx, spec, receipt_builder);
-        Self { inner, plan }
+        Self { inner: Some(inner), plan, accumulated_requests: Requests::default() }
+    }
+
+    fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R> {
+        self.inner.as_ref().expect("inner executor must exist")
+    }
+
+    fn inner_mut(&mut self) -> &mut EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, R> {
+        self.inner.as_mut().expect("inner executor must exist")
     }
 
     fn maybe_apply_boundary(&mut self) -> Result<(), BlockExecutionError> {
@@ -305,8 +312,6 @@ where
         let plan = self.plan.as_mut().expect("plan must exist");
         let seg_idx = plan.next_segment;
         let prev_seg_idx = seg_idx - 1;
-        let cancun_active = plan.cancun_active;
-        let prague_active = plan.prague_active;
 
         debug!(
             target: "engine::bb::evm",
@@ -315,74 +320,78 @@ where
             "Applying segment boundary"
         );
 
-        // 1. Apply post-execution system calls (EIP-7002/7251) for the finished segment while its
-        //    block env is still active.
-        if prague_active {
-            let _requests =
-                self.inner.system_caller.apply_post_execution_changes(&mut self.inner.evm)?;
-            trace!(target: "engine::bb::evm", "Applied post-execution system calls for finished segment");
-        }
-
-        // 2. Apply withdrawal balance increments for the finished segment.
+        // Swap the inner executor's ctx to the finished segment's values so
+        // that finish() applies the correct withdrawals and post-execution
+        // system calls for that segment.
         let prev_segment = &plan.segments[prev_seg_idx];
-        let balance_increments = post_block_balance_increments(
-            &*plan.chain_spec,
-            &prev_segment.evm_env.block_env,
-            prev_segment.ctx.ommers,
-            prev_segment.ctx.withdrawals.as_deref(),
-        );
+        let prev_ctx = EthBlockExecutionCtx {
+            parent_hash: prev_segment.ctx.parent_hash,
+            parent_beacon_block_root: prev_segment.ctx.parent_beacon_block_root,
+            ommers: prev_segment.ctx.ommers,
+            withdrawals: prev_segment.ctx.withdrawals.clone(),
+            extra_data: prev_segment.ctx.extra_data.clone(),
+            tx_count_hint: prev_segment.ctx.tx_count_hint,
+        };
 
-        if !balance_increments.is_empty() {
-            trace!(
-                target: "engine::bb::evm",
-                count = balance_increments.len(),
-                "Applying withdrawal balance increments"
-            );
-            self.inner
-                .evm
-                .db_mut()
-                .increment_balances(balance_increments)
-                .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
-        }
-
-        // 3. Swap block and cfg environments.
-        // Set gas_limit to u64::MAX to disable the per-segment gas check.
-        // Re-execution in a big-block context changes state across segments,
-        // which can cause transactions to consume different gas amounts than
-        // in their original blocks. Using u64::MAX avoids spurious rejections
-        // while keeping receipt cumulative_gas_used correct (it tracks actual
-        // gas consumed, not the limit). The GASLIMIT opcode will return
-        // u64::MAX, which is acceptable for a benchmarking tool.
+        // Clone the next segment's data before we consume inner.
         let new_segment = &plan.segments[seg_idx];
         let mut new_block_env = new_segment.evm_env.block_env.clone();
         new_block_env.gas_limit = u64::MAX;
         let mut new_cfg_env = new_segment.evm_env.cfg_env.clone();
         new_cfg_env.disable_base_fee = true;
-        let parent_hash = new_segment.ctx.parent_hash;
-        let parent_beacon_block_root = new_segment.ctx.parent_beacon_block_root;
-        let block_number = new_segment.evm_env.block_env.number.saturating_to::<u64>();
+        let new_ctx = EthBlockExecutionCtx {
+            parent_hash: new_segment.ctx.parent_hash,
+            parent_beacon_block_root: new_segment.ctx.parent_beacon_block_root,
+            ommers: new_segment.ctx.ommers,
+            withdrawals: new_segment.ctx.withdrawals.clone(),
+            extra_data: new_segment.ctx.extra_data.clone(),
+            tx_count_hint: new_segment.ctx.tx_count_hint,
+        };
 
-        let ctx = self.inner.evm.ctx_mut();
+        plan.next_segment += 1;
+
+        // Finish the inner executor for the completed segment. This applies
+        // post-execution system calls (EIP-7002/7251) and withdrawal balance
+        // increments via EthBlockExecutor::finish().
+        let mut inner = self.inner.take().expect("inner executor must exist");
+        inner.ctx = prev_ctx;
+        let spec = inner.spec.clone();
+        let receipt_builder = inner.receipt_builder.clone();
+        let (mut evm, result) = inner.finish()?;
+
+        // Save accumulated receipts and gas, accumulate requests.
+        let saved_receipts = result.receipts;
+        let saved_gas_used = result.gas_used;
+        let saved_blob_gas_used = result.blob_gas_used;
+        self.accumulated_requests.extend(result.requests);
+
+        trace!(
+            target: "engine::bb::evm",
+            "Finished segment {prev_seg_idx}, receipts={}, gas_used={saved_gas_used}",
+            saved_receipts.len(),
+        );
+
+        // Swap EVM env to the next segment's values.
+        let ctx = evm.ctx_mut();
         ctx.block = new_block_env;
         ctx.cfg = new_cfg_env;
 
-        // 4. Apply EIP-2935 blockhashes contract call.
-        if prague_active && block_number != 0 {
-            self.inner
-                .system_caller
-                .apply_blockhashes_contract_call(parent_hash, &mut self.inner.evm)?;
-            trace!(target: "engine::bb::evm", "Applied EIP-2935");
-        }
+        // Build a new inner executor for the next segment.
+        let mut new_inner = EthBlockExecutor::new(evm, new_ctx, spec, receipt_builder);
 
-        // 5. Apply EIP-4788 beacon root contract call.
-        if cancun_active && block_number != 0 {
-            self.inner
-                .system_caller
-                .apply_beacon_root_contract_call(parent_beacon_block_root, &mut self.inner.evm)?;
-            trace!(target: "engine::bb::evm", "Applied EIP-4788");
-        }
+        // Re-inject accumulated receipts and gas counters so the big block
+        // produces one unified receipt list with cumulative gas spanning all
+        // segments.
+        new_inner.receipts = saved_receipts;
+        new_inner.gas_used = saved_gas_used;
+        new_inner.blob_gas_used = saved_blob_gas_used;
 
-        plan.next_segment += 1;
+        // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788).
+        new_inner.apply_pre_execution_changes()?;
+
+        trace!(target: "engine::bb::evm", "Started segment {seg_idx}");
+
+        self.inner = Some(new_inner);
         Ok(())
     }
 }
@@ -394,9 +403,9 @@ where
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
     R: ReceiptBuilder<
-        Transaction: Transaction + Encodable2718,
-        Receipt: alloy_consensus::TxReceipt<Log = Log>,
-    >,
+            Transaction: Transaction + Encodable2718,
+            Receipt: alloy_consensus::TxReceipt<Log = Log>,
+        > + Clone,
     BbEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -420,18 +429,12 @@ where
         // correct block number and parent hash. Without this, the outer big
         // block header's block_number (which is synthetic) would be used,
         // writing to wrong EIP-2935 slots and corrupting state.
-        if let Some(plan) = &self.plan {
-            let seg0 = &plan.segments[0];
+        if let Some(seg0) = self.plan.as_ref().map(|p| &p.segments[0]) {
             let mut block_env = seg0.evm_env.block_env.clone();
             block_env.gas_limit = u64::MAX;
             let mut cfg_env = seg0.evm_env.cfg_env.clone();
             cfg_env.disable_base_fee = true;
-
-            let ctx = self.inner.evm.ctx_mut();
-            ctx.block = block_env;
-            ctx.cfg = cfg_env;
-
-            self.inner.ctx = EthBlockExecutionCtx {
+            let seg0_ctx = EthBlockExecutionCtx {
                 parent_hash: seg0.ctx.parent_hash,
                 parent_beacon_block_root: seg0.ctx.parent_beacon_block_root,
                 ommers: seg0.ctx.ommers,
@@ -439,9 +442,15 @@ where
                 extra_data: seg0.ctx.extra_data.clone(),
                 tx_count_hint: seg0.ctx.tx_count_hint,
             };
+
+            let inner = self.inner_mut();
+            let evm_ctx = inner.evm.ctx_mut();
+            evm_ctx.block = block_env;
+            evm_ctx.cfg = cfg_env;
+            inner.ctx = seg0_ctx;
         }
 
-        self.inner.apply_pre_execution_changes()
+        self.inner_mut().apply_pre_execution_changes()
     }
 
     fn execute_transaction_without_commit(
@@ -449,11 +458,11 @@ where
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
         self.maybe_apply_boundary()?;
-        self.inner.execute_transaction_without_commit(tx)
+        self.inner_mut().execute_transaction_without_commit(tx)
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
-        let gas_used = self.inner.commit_transaction(output)?;
+        let gas_used = self.inner_mut().commit_transaction(output)?;
         if let Some(plan) = &mut self.plan {
             plan.tx_counter += 1;
         }
@@ -465,11 +474,9 @@ where
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         // Swap the inner executor's ctx to the last segment's ctx so that
         // EthBlockExecutor::finish() applies the correct withdrawal balance
-        // increments. Without this, finish() would use the big block's outer
-        // ctx which has different (wrong) withdrawals.
-        if let Some(plan) = &self.plan {
-            let last_seg = &plan.segments[plan.segments.len() - 1];
-            self.inner.ctx = EthBlockExecutionCtx {
+        // increments and post-execution system calls.
+        if let Some(last_seg) = self.plan.as_ref().map(|p| p.segments.last().unwrap()) {
+            let last_ctx = EthBlockExecutionCtx {
                 parent_hash: last_seg.ctx.parent_hash,
                 parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
                 ommers: last_seg.ctx.ommers,
@@ -477,24 +484,36 @@ where
                 extra_data: last_seg.ctx.extra_data.clone(),
                 tx_count_hint: last_seg.ctx.tx_count_hint,
             };
+            self.inner_mut().ctx = last_ctx;
         }
-        self.inner.finish()
+        let inner = self.inner.take().expect("inner executor must exist");
+        let (evm, mut result) = inner.finish()?;
+
+        // Merge requests accumulated from earlier segment boundaries into
+        // the final result.
+        if !self.accumulated_requests.is_empty() {
+            let mut merged = self.accumulated_requests;
+            merged.extend(result.requests);
+            result.requests = merged;
+        }
+
+        Ok((evm, result))
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-        self.inner.set_state_hook(hook);
+        self.inner_mut().set_state_hook(hook);
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
-        self.inner.evm_mut()
+        self.inner_mut().evm_mut()
     }
 
     fn evm(&self) -> &Self::Evm {
-        self.inner.evm()
+        self.inner().evm()
     }
 
     fn receipts(&self) -> &[Self::Receipt] {
-        self.inner.receipts()
+        self.inner().receipts()
     }
 }
 

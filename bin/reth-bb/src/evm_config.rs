@@ -273,14 +273,7 @@ where
             "Staging multi-segment plan"
         );
 
-        // Determine hardfork activation.
-        let chain_spec = self.inner.chain_spec().clone();
-        let first_env = &segments[0].evm_env;
-        let spec_id = *first_env.spec_id();
-        let cancun_active = spec_id >= SpecId::CANCUN;
-        let prague_active = spec_id >= SpecId::PRAGUE;
-
-        let mut plan = BbEvmPlan::new(segments, cancun_active, prague_active, chain_spec);
+        let mut plan = BbEvmPlan::new(segments);
 
         // Add prior block hashes to the seeding list.
         plan.block_hashes_to_seed.extend(bb.prior_block_hashes);
