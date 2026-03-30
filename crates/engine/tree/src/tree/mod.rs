@@ -485,7 +485,7 @@ where
     ///
     /// This is the case when persistence is already running and the gap between the canonical tip
     /// and the last persisted block has reached the configured threshold.
-    fn should_backpressure(&self) -> bool {
+    const fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
             self.persistence_gap() >= self.config.persistence_backpressure_threshold()
     }
