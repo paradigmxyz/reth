@@ -71,7 +71,8 @@ use reth_trie::{
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+    reverts::AccountInfoRevert, AccountRevert, PlainStateReverts, PlainStorageChangeset,
+    PlainStorageRevert, StateChangeset,
 };
 use std::{
     cmp::Ordering,
@@ -212,6 +213,51 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+}
+
+#[derive(Default)]
+struct HistoryTransitions {
+    accounts: BTreeMap<Address, Vec<BlockNumber>>,
+    storages: BTreeMap<(Address, B256), Vec<BlockNumber>>,
+}
+
+impl HistoryTransitions {
+    fn extend_from_block_reverts(
+        &mut self,
+        block_number: BlockNumber,
+        block_reverts: &[(Address, AccountRevert)],
+    ) -> BTreeMap<Address, BTreeSet<B256>> {
+        let mut wiped_storage = BTreeMap::default();
+
+        for (address, account_revert) in block_reverts {
+            if !matches!(account_revert.account, AccountInfoRevert::DoNothing) {
+                self.accounts.entry(*address).or_default().push(block_number);
+            }
+
+            let mut reverted_storage_keys = BTreeSet::new();
+            for storage_key in account_revert.storage.keys() {
+                let key = B256::from(storage_key.to_be_bytes());
+                self.storages.entry((*address, key)).or_default().push(block_number);
+                reverted_storage_keys.insert(key);
+            }
+
+            if account_revert.wipe_storage {
+                wiped_storage.insert(*address, reverted_storage_keys);
+            }
+        }
+
+        wiped_storage
+    }
+
+    fn extend_from_reverts(
+        &mut self,
+        first_block_number: BlockNumber,
+        block_reverts: &[Vec<(Address, AccountRevert)>],
+    ) {
+        for (block_idx, block_reverts) in block_reverts.iter().enumerate() {
+            self.extend_from_block_reverts(first_block_number + block_idx as u64, block_reverts);
+        }
+    }
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -510,6 +556,70 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
     }
 
+    fn write_history_indices_from_transitions(
+        &self,
+        history_transitions: HistoryTransitions,
+    ) -> ProviderResult<()> {
+        let HistoryTransitions { accounts, storages } = history_transitions;
+        let storage_settings = self.cached_storage_settings();
+        if storage_settings.storage_v2 {
+            self.with_rocksdb_batch(|mut batch| {
+                for (address, blocks) in accounts {
+                    batch.append_account_history_shard(address, blocks)?;
+                }
+                Ok(((), Some(batch.into_inner())))
+            })?;
+
+            self.with_rocksdb_batch(|mut batch| {
+                for ((address, key), blocks) in storages {
+                    batch.append_storage_history_shard(address, key, blocks)?;
+                }
+                Ok(((), Some(batch.into_inner())))
+            })?;
+        } else {
+            self.insert_account_history_index(accounts)?;
+            self.insert_storage_history_index(storages)?;
+        }
+
+        Ok(())
+    }
+
+    fn extend_wiped_storage_history_transitions(
+        &self,
+        block_number: BlockNumber,
+        wiped_storage: BTreeMap<Address, BTreeSet<B256>>,
+        history_transitions: &mut HistoryTransitions,
+    ) -> ProviderResult<()> {
+        if wiped_storage.is_empty() {
+            return Ok(())
+        }
+
+        let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        for (address, mut reverted_storage_keys) in wiped_storage {
+            let Some((_, entry)) = plain_storage.seek_exact(address)? else { continue };
+
+            if reverted_storage_keys.insert(entry.key) {
+                history_transitions
+                    .storages
+                    .entry((address, entry.key))
+                    .or_default()
+                    .push(block_number);
+            }
+
+            while let Some(entry) = plain_storage.next_dup_val()? {
+                if reverted_storage_keys.insert(entry.key) {
+                    history_transitions
+                        .storages
+                        .entry((address, entry.key))
+                        .or_default()
+                        .push(block_number);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Writes executed blocks and state to storage.
     ///
     /// This method parallelizes static file (SF) writes with MDBX writes.
@@ -563,6 +673,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let precompute_history_indices = save_mode.with_state() && !rocksdb_enabled;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -634,6 +745,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut history_transitions =
+                precompute_history_indices.then(HistoryTransitions::default);
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -643,6 +757,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+
+                    if let Some(history_transitions) = history_transitions.as_mut() {
+                        // Reuse the execution reverts while the previous plain-state view is still
+                        // visible, avoiding a second changeset read after write_state().
+                        for (block_idx, block_reverts) in
+                            execution_output.state.reverts.iter().enumerate()
+                        {
+                            let block_number = recovered_block.number() + block_idx as u64;
+                            let wiped_storage = history_transitions
+                                .extend_from_block_reverts(block_number, block_reverts);
+                            self.extend_wiped_storage_history_transitions(
+                                block_number,
+                                wiped_storage,
+                                history_transitions,
+                            )?;
+                        }
+                    }
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
@@ -689,7 +820,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Full mode: update history indices
             if save_mode.with_state() {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                if let Some(history_transitions) = history_transitions {
+                    self.write_history_indices_from_transitions(history_transitions)?;
+                } else {
+                    self.update_history_indices(first_number..=last_block_number)?;
+                }
                 timings.update_history_indices = start.elapsed();
             }
 
@@ -3374,16 +3509,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        let storage_settings = self.cached_storage_settings();
-        if !storage_settings.storage_v2 {
-            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
-            self.insert_account_history_index(indices)?;
+        if self.cached_storage_settings().storage_v2 {
+            return Ok(())
         }
 
-        if !storage_settings.storage_v2 {
-            let indices = self.changed_storages_and_blocks_with_range(range)?;
-            self.insert_storage_history_index(indices)?;
-        }
+        let history_transitions = HistoryTransitions {
+            accounts: self.changed_accounts_and_blocks_with_range(range.clone())?,
+            storages: self.changed_storages_and_blocks_with_range(range)?,
+        };
+
+        self.insert_account_history_index(history_transitions.accounts)?;
+        self.insert_storage_history_index(history_transitions.storages)?;
 
         Ok(())
     }
@@ -3644,21 +3780,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // This is necessary because with edge storage, changesets are written to static files
         // whose index isn't updated until commit, making them invisible to subsequent reads
         // within the same transaction.
-        let (account_transitions, storage_transitions) = {
-            let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
-            let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
-            for (block_idx, block_reverts) in execution_outcome.bundle.reverts.iter().enumerate() {
-                let block_number = first_number + block_idx as u64;
-                for (address, account_revert) in block_reverts {
-                    account_transitions.entry(*address).or_default().push(block_number);
-                    for storage_key in account_revert.storage.keys() {
-                        let key = B256::from(storage_key.to_be_bytes());
-                        storage_transitions.entry((*address, key)).or_default().push(block_number);
-                    }
-                }
-            }
-            (account_transitions, storage_transitions)
-        };
+        let mut history_transitions = HistoryTransitions::default();
+        history_transitions.extend_from_reverts(first_number, &execution_outcome.bundle.reverts);
 
         // Insert the blocks
         for block in blocks {
@@ -3675,29 +3798,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        // Note: For MDBX we use insert_*_history_index. For RocksDB we use
-        // append_*_history_shard which handles read-merge-write internally.
-        let storage_settings = self.cached_storage_settings();
-        if storage_settings.storage_v2 {
-            self.with_rocksdb_batch(|mut batch| {
-                for (address, blocks) in account_transitions {
-                    batch.append_account_history_shard(address, blocks)?;
-                }
-                Ok(((), Some(batch.into_inner())))
-            })?;
-        } else {
-            self.insert_account_history_index(account_transitions)?;
-        }
-        if storage_settings.storage_v2 {
-            self.with_rocksdb_batch(|mut batch| {
-                for ((address, key), blocks) in storage_transitions {
-                    batch.append_storage_history_shard(address, key, blocks)?;
-                }
-                Ok(((), Some(batch.into_inner())))
-            })?;
-        } else {
-            self.insert_storage_history_index(storage_transitions)?;
-        }
+        self.write_history_indices_from_transitions(history_transitions)?;
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
