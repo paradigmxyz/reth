@@ -117,10 +117,10 @@ where
             receipt_root_bloom,
         );
 
-        if self.skip_requests_hash_check {
-            if let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res {
-                return Ok(());
-            }
+        if self.skip_requests_hash_check &&
+            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
+        {
+            return Ok(());
         }
 
         res

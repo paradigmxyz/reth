@@ -85,6 +85,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
     "alloy-evm/asm-keccak",
+    "revm/asm-keccak",
     "revm-primitives/asm-keccak",
 ]
 
