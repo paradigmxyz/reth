@@ -499,9 +499,9 @@ where
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap
-            //    exceeds the backpressure threshold we only block on the persistence receiver,
-            //    leaving new engine requests sitting in the unbounded upstream channel.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
+            //    the backpressure threshold we only block on the persistence receiver, leaving new
+            //    engine requests sitting in the unbounded upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
