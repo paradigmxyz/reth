@@ -154,7 +154,8 @@ where
                 finalized_block_hash: head_block_hash,
             };
 
-            match engine.fork_choice_updated(state, None).await {
+            match engine.fork_choice_updated(state, None, EngineApiMessageVersion::default()).await
+            {
                 Ok(response) => match response.payload_status.status {
                     PayloadStatusEnum::Valid => Outcome::<T> {
                         peer: peer_id,
