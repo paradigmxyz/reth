@@ -9619,6 +9619,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "codspeed-criterion-compat",
  "eyre",
  "itertools 0.14.0",
  "metrics",
