@@ -15,7 +15,8 @@ pub mod transaction;
 
 pub use rpc::*;
 pub use transaction::{
-    RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx, TxInfoMapper,
+    FromConsensusTx, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx,
+    TxInfoMapper,
 };
 
 pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};

@@ -3440,7 +3440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4253,8 +4253,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
- "windows-result 0.3.4",
+ "windows-link 0.2.1",
+ "windows-result 0.4.1",
 ]
 
 [[package]]
@@ -4806,7 +4806,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5159,7 +5159,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7567,7 +7567,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
- "reth-rpc-convert",
+ "reth-rpc-convert 1.11.3",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-tasks",
@@ -9286,7 +9286,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-prune-types",
- "reth-rpc-convert",
+ "reth-rpc-convert 1.11.3",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-stages-types",
@@ -9745,7 +9745,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-rpc-api",
- "reth-rpc-convert",
+ "reth-rpc-convert 1.11.3",
  "reth-rpc-engine-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
@@ -9878,6 +9878,19 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-convert"
+version = "0.1.0"
+source = "git+https://github.com/theochap/reth-core?branch=feat%2Frpc-convert-traits#04dfb9aabdb4f382336f20a2738807221909c886"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-signer",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "reth-rpc-convert"
 version = "1.11.3"
 dependencies = [
  "alloy-consensus",
@@ -9894,6 +9907,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth-evm",
  "reth-primitives-traits",
+ "reth-rpc-convert 0.1.0",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -9984,7 +9998,7 @@ dependencies = [
  "reth-node-api",
  "reth-primitives-traits",
  "reth-revm",
- "reth-rpc-convert",
+ "reth-rpc-convert 1.11.3",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-storage-api",
@@ -10027,7 +10041,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-revm",
- "reth-rpc-convert",
+ "reth-rpc-convert 1.11.3",
  "reth-rpc-server-types",
  "reth-storage-api",
  "reth-tasks",
@@ -11012,7 +11026,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11860,7 +11874,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13164,7 +13178,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
