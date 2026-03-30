@@ -101,8 +101,7 @@ where
         runtime,
     );
 
-    let engine_handler =
-        EngineApiRequestHandler::new(to_tree_tx, from_tree);
+    let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
     let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);

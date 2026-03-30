@@ -403,7 +403,7 @@ where
     /// own thread.
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
-    /// end of an [`EngineApiEvent`] unbounded channel to receive events from the engine.
+    /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
