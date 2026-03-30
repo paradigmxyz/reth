@@ -299,41 +299,53 @@ impl NodeState {
             0.0
         };
 
-        warn!(
-            target: "reth::slow_block",
-            message = "Slow block",
-            block.number = stats.block_number,
-            block.hash = ?stats.block_hash,
-            block.gas_used = stats.gas_used,
-            block.tx_count = stats.tx_count,
-            timing.execution_ms = stats.execution_duration.as_millis(),
-            timing.state_read_ms = stats.state_read_duration.as_millis(),
-            timing.state_hash_ms = stats.state_hash_duration.as_millis(),
-            timing.commit_ms = info.commit_duration.as_millis(),
-            timing.total_ms = info.total_duration.as_millis(),
-            throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
-            state_reads.accounts = stats.accounts_read,
-            state_reads.storage_slots = stats.storage_read,
-            state_reads.code = stats.code_read,
-            state_reads.code_bytes = stats.code_bytes_read,
-            state_writes.accounts = stats.accounts_changed,
-            state_writes.accounts_deleted = stats.accounts_deleted,
-            state_writes.storage_slots = stats.storage_slots_changed,
-            state_writes.storage_slots_deleted = stats.storage_slots_deleted,
-            state_writes.code = stats.bytecodes_changed,
-            state_writes.code_bytes = stats.code_bytes_written,
-            state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
-            state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
-            cache.account.hits = stats.account_cache_hits,
-            cache.account.misses = stats.account_cache_misses,
-            cache.account.hit_rate = format!("{:.2}", hit_rate(stats.account_cache_hits, stats.account_cache_misses)),
-            cache.storage.hits = stats.storage_cache_hits,
-            cache.storage.misses = stats.storage_cache_misses,
-            cache.storage.hit_rate = format!("{:.2}", hit_rate(stats.storage_cache_hits, stats.storage_cache_misses)),
-            cache.code.hits = stats.code_cache_hits,
-            cache.code.misses = stats.code_cache_misses,
-            cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
-        );
+        // Macro for the shared fields — commit_ms is only included when known
+        // (after persistence), omitted entirely for the immediate post-execution emit.
+        macro_rules! log_slow_block_fields {
+            ($($commit_field:tt)*) => {
+                warn!(
+                    target: "reth::slow_block",
+                    message = "Slow block",
+                    block.number = stats.block_number,
+                    block.hash = ?stats.block_hash,
+                    block.gas_used = stats.gas_used,
+                    block.tx_count = stats.tx_count,
+                    timing.execution_ms = stats.execution_duration.as_millis(),
+                    timing.state_read_ms = stats.state_read_duration.as_millis(),
+                    timing.state_hash_ms = stats.state_hash_duration.as_millis(),
+                    $($commit_field)*
+                    timing.total_ms = info.total_duration.as_millis(),
+                    throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
+                    state_reads.accounts = stats.accounts_read,
+                    state_reads.storage_slots = stats.storage_read,
+                    state_reads.code = stats.code_read,
+                    state_reads.code_bytes = stats.code_bytes_read,
+                    state_writes.accounts = stats.accounts_changed,
+                    state_writes.accounts_deleted = stats.accounts_deleted,
+                    state_writes.storage_slots = stats.storage_slots_changed,
+                    state_writes.storage_slots_deleted = stats.storage_slots_deleted,
+                    state_writes.code = stats.bytecodes_changed,
+                    state_writes.code_bytes = stats.code_bytes_written,
+                    state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
+                    state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
+                    cache.account.hits = stats.account_cache_hits,
+                    cache.account.misses = stats.account_cache_misses,
+                    cache.account.hit_rate = format!("{:.2}", hit_rate(stats.account_cache_hits, stats.account_cache_misses)),
+                    cache.storage.hits = stats.storage_cache_hits,
+                    cache.storage.misses = stats.storage_cache_misses,
+                    cache.storage.hit_rate = format!("{:.2}", hit_rate(stats.storage_cache_hits, stats.storage_cache_misses)),
+                    cache.code.hits = stats.code_cache_hits,
+                    cache.code.misses = stats.code_cache_misses,
+                    cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
+                );
+            }
+        }
+
+        if let Some(commit_dur) = info.commit_duration {
+            log_slow_block_fields!(timing.commit_ms = commit_dur.as_millis(),);
+        } else {
+            log_slow_block_fields!();
+        }
     }
 
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {

@@ -302,8 +302,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Preconditions
     ///
-    /// Must be called after `root()` to ensure all nodes have computed hashes.
-    /// Calling on a trie without computed hashes will result in limited or no pruning.
+    /// Must be called only after `root()` has computed hashes for the current trie state.
+    /// Calling `prune` on a dirty trie is a hard error and may panic.
     ///
     /// # Returns
     ///

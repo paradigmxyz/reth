@@ -35,6 +35,7 @@
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives_traits::SealedBlock;
 //! use alloy_rpc_types::engine::PayloadAttributes;
+//! use reth_payload_builder::BuildNewPayload;
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;
@@ -43,8 +44,8 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, parent: B256, attr: PayloadAttributes, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
-//!         Ok(EmptyBlockPayloadJob{ attributes: attr, parent })
+//! fn new_payload_job(&self, input: BuildNewPayload<PayloadAttributes>, _id: PayloadId) -> Result<Self::Job, PayloadBuilderError> {
+//!         Ok(EmptyBlockPayloadJob{ attributes: input.attributes, parent: input.parent_hash })
 //!     }
 //!
 //! }
@@ -124,7 +125,8 @@ pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_builder_primitives::PayloadBuilderError;
 pub use reth_payload_primitives::PayloadKind;
 pub use service::{
-    PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
+    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand,
+    PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 

@@ -16,12 +16,13 @@ use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
+    evm::primitives::{ConfigureEvm, NextBlockEnvAttributes},
     node::{
         api::{node::FullNodeTypes, NodeTypes},
         builder::{components::PayloadServiceBuilder, BuilderContext},
         core::cli::config::PayloadBuilderConfig,
         node::EthereumAddOns,
-        EthEngineTypes, EthEvmConfig, EthereumNode,
+        EthEngineTypes, EthereumNode,
     },
     pool::{PoolTransaction, TransactionPool},
     provider::CanonStateSubscriptions,
@@ -37,7 +38,7 @@ pub mod job;
 #[non_exhaustive]
 pub struct CustomPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool, EthEvmConfig> for CustomPayloadBuilder
+impl<Node, Pool, Evm> PayloadServiceBuilder<Node, Pool, Evm> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -49,12 +50,14 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
         + 'static,
+    Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
+        + 'static,
 {
     async fn spawn_payload_builder_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig,
+        evm_config: Evm,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         tracing::info!("Spawning a custom payload builder");
 

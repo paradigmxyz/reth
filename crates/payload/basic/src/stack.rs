@@ -153,13 +153,22 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments {
+            cached_reads,
+            execution_cache,
+            trie_handle,
+            config,
+            cancel,
+            best_payload,
+        } = args;
         let PayloadConfig { parent_header, attributes, payload_id } = config;
 
         match attributes {
             Either::Left(left_attr) => {
                 let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
                     cached_reads,
+                    execution_cache,
+                    trie_handle,
                     config: PayloadConfig { parent_header, attributes: left_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
@@ -175,6 +184,8 @@ where
             Either::Right(right_attr) => {
                 let right_args = BuildArguments {
                     cached_reads,
+                    execution_cache,
+                    trie_handle,
                     config: PayloadConfig { parent_header, attributes: right_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {

@@ -14,7 +14,7 @@ use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
 };
-use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt, fmt::Debug, marker::PhantomData};
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
-pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+pub trait HeaderConverter<Consensus, Rpc>: Send + Sync + Unpin + Clone + 'static {
     /// An associated RPC conversion error.
     type Err: error::Error;
 
@@ -84,6 +84,21 @@ where
         block_size: usize,
     ) -> Result<Rpc, Self::Err> {
         Ok(Rpc::from_consensus_header(header, block_size))
+    }
+}
+
+impl<Consensus, Rpc, F> HeaderConverter<Consensus, Rpc> for F
+where
+    F: Fn(SealedHeader<Consensus>, usize) -> Rpc + Send + Sync + Unpin + Clone + 'static,
+{
+    type Err = Infallible;
+
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err> {
+        Ok(self(header, block_size))
     }
 }
 
@@ -280,7 +295,7 @@ where
 /// One should prefer to implement [`IntoRpcTx`] for `Tx` to get the `RpcTxConverter` implementation
 /// for free, thanks to the blanket implementation, unless the conversion requires more context. For
 /// example, some configuration parameters or access handles to database, network, etc.
-pub trait RpcTxConverter<Tx, RpcTx, TxInfo>: Clone + Debug + Unpin + Send + Sync + 'static {
+pub trait RpcTxConverter<Tx, RpcTx, TxInfo>: Clone + Unpin + Send + Sync + 'static {
     /// An associated error that can happen during the conversion.
     type Err;
 
@@ -308,7 +323,7 @@ where
 
 impl<Tx, RpcTx, F, TxInfo, E> RpcTxConverter<Tx, RpcTx, TxInfo> for F
 where
-    F: Fn(Tx, Address, TxInfo) -> Result<RpcTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
+    F: Fn(Tx, Address, TxInfo) -> Result<RpcTx, E> + Clone + Unpin + Send + Sync + 'static,
 {
     type Err = E;
 
@@ -332,7 +347,7 @@ where
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait SimTxConverter<TxReq, SimTx>: Clone + Debug + Unpin + Send + Sync + 'static {
+pub trait SimTxConverter<TxReq, SimTx>: Clone + Unpin + Send + Sync + 'static {
     /// An associated error that can occur during the conversion.
     type Err: Error;
 
@@ -357,7 +372,7 @@ impl<TxReq, SimTx, F, E> SimTxConverter<TxReq, SimTx> for F
 where
     TxReq: Debug,
     E: Error,
-    F: Fn(TxReq) -> Result<SimTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
+    F: Fn(TxReq) -> Result<SimTx, E> + Clone + Unpin + Send + Sync + 'static,
 {
     type Err = E;
 
@@ -507,7 +522,6 @@ pub enum TransactionConversionError {
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
 ///   object.
-#[derive(Debug)]
 pub struct RpcConverter<
     Network,
     Evm,
@@ -526,6 +540,14 @@ pub struct RpcConverter<
     tx_env_converter: TxEnv,
     sim_tx_converter: SimTx,
     rpc_tx_converter: RpcTx,
+}
+
+impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> fmt::Debug
+    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RpcConverter").finish_non_exhaustive()
+    }
 }
 
 impl<Network, Evm, Receipt> RpcConverter<Network, Evm, Receipt> {

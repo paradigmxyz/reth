@@ -820,8 +820,9 @@ where
     ///
     /// # Preconditions
     ///
-    /// Node hashes must be computed via `root()` before calling this method. Otherwise, nodes
-    /// cannot be converted to hash stubs and pruning will have no effect.
+    /// All revealed account and storage tries must already have computed hashes via `root()`
+    /// / `storage_root()` for their current state. Pruning a dirty revealed trie is a hard
+    /// error and may panic.
     #[cfg(feature = "std")]
     #[instrument(
         level = "debug",

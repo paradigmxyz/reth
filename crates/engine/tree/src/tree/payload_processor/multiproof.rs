@@ -1,119 +1,16 @@
 //! Multiproof task related functionality.
 
-use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{keccak256, B256};
-use crossbeam_channel::Sender as CrossbeamSender;
-use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_revm::state::EvmState;
-use reth_trie::{HashedPostState, HashedStorage};
-use reth_trie_common::MultiProofTargetsV2;
-use std::sync::Arc;
-use tracing::trace;
 
-/// Source of state changes, either from EVM execution or from a Block Access List.
-#[derive(Clone, Copy)]
-pub enum Source {
-    /// State changes from EVM execution.
-    Evm(StateChangeSource),
-    /// State changes from Block Access List (EIP-7928).
-    BlockAccessList,
-}
-
-impl std::fmt::Debug for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Evm(source) => source.fmt(f),
-            Self::BlockAccessList => f.write_str("BlockAccessList"),
-        }
-    }
-}
-
-impl From<StateChangeSource> for Source {
-    fn from(source: StateChangeSource) -> Self {
-        Self::Evm(source)
-    }
-}
+pub use reth_trie_parallel::state_root_task::{
+    evm_state_to_hashed_post_state, Source, StateHookSender, StateRootComputeOutcome,
+    StateRootHandle, StateRootMessage,
+};
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
-
-/// Messages used internally by the multi proof task.
-#[derive(Debug)]
-pub enum MultiProofMessage {
-    /// Prefetch proof targets
-    PrefetchProofs(MultiProofTargetsV2),
-    /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
-    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
-    HashedStateUpdate(HashedPostState),
-    /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
-    ///
-    /// When received, the task generates a single state update from the BAL and processes it.
-    /// No further messages are expected after receiving this variant.
-    BlockAccessList(Arc<alloy_eip7928::BlockAccessList>),
-    /// Signals state update stream end.
-    ///
-    /// This is triggered by block execution, indicating that no additional state updates are
-    /// expected.
-    FinishedStateUpdates,
-}
-
-/// A wrapper for the sender that signals completion when dropped.
-///
-/// This type is intended to be used in combination with the evm executor statehook.
-/// This should trigger once the block has been executed (after) the last state update has been
-/// sent. This triggers the exit condition of the multi proof task.
-#[derive(Deref, Debug)]
-pub struct StateHookSender(CrossbeamSender<MultiProofMessage>);
-
-impl StateHookSender {
-    /// Creates a new [`StateHookSender`] wrapping the given channel sender.
-    pub const fn new(inner: CrossbeamSender<MultiProofMessage>) -> Self {
-        Self(inner)
-    }
-}
-
-impl Drop for StateHookSender {
-    fn drop(&mut self) {
-        // Send completion signal when the sender is dropped
-        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
-    }
-}
-
-pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
-}
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
