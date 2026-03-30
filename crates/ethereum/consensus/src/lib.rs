@@ -49,9 +49,6 @@ pub struct EthBeaconConsensus<ChainSpec> {
     skip_blob_gas_used_check: bool,
     /// When true, skips the requests hash check in post-execution validation.
     skip_requests_hash_check: bool,
-    /// When true, skips all post-execution validation (gas used, receipt root,
-    /// logs bloom, requests hash).
-    skip_post_execution_validation: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
@@ -63,7 +60,6 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             skip_gas_limit_ramp_check: false,
             skip_blob_gas_used_check: false,
             skip_requests_hash_check: false,
-            skip_post_execution_validation: false,
         }
     }
 
@@ -96,13 +92,6 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
-    /// Disables all post-execution validation (gas used, receipt root, logs
-    /// bloom, requests hash).
-    pub const fn with_skip_post_execution_validation(mut self, skip: bool) -> Self {
-        self.skip_post_execution_validation = skip;
-        self
-    }
-
     /// Returns the chain spec associated with this consensus engine.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
@@ -120,10 +109,6 @@ where
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
-        if self.skip_post_execution_validation {
-            return Ok(());
-        }
-
         let res = validate_block_post_execution(
             block,
             &self.chain_spec,
