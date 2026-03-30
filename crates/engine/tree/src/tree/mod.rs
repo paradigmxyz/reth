@@ -501,15 +501,16 @@ where
             //    landed, absorb the result now so the gap calculation below is fresh.
             // 2. Decide how to wait for the next event. When the canonical-to-persisted gap
             //    exceeds the backpressure threshold we only block on the persistence receiver,
-            //    leaving new engine requests sitting in the bounded upstream channel.
+            //    leaving new engine requests sitting in the unbounded upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
             // The net effect: when the persistence gap exceeds the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This delays
-            // replies and, more importantly, prevents executing further blocks that would
-            // pile up in the persistence queue - where each block carries heavier state
-            // (eg. trie updates) than the raw payload sitting in the engine channel.
+            // processing incoming messages and let them queue in the channel. This is only a
+            // soft form of backpressure: it delays replies and, more importantly, prevents
+            // executing further blocks that would pile up in the persistence queue - where each
+            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
+            // engine channel.
             //
             // Standard Ethereum CLs won't truly back off - the engine API has no
             // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
