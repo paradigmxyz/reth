@@ -13,7 +13,7 @@
 //!
 //! - [`BbEvm`] is a thin delegating wrapper around [`EthEvm`], carrying the plan but performing no
 //!   boundary logic.
-//! - [`BbBlockExecutor`] wraps [`EthBlockExecutor`] and intercepts [`execute_transaction`] to apply
+//! - [`BbBlockExecutor`] wraps [`EthBlockExecutor`] and intercepts `execute_transaction` to apply
 //!   segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
