@@ -6,6 +6,9 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
+/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
+
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
@@ -43,6 +46,16 @@ const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn assert_backpressure_threshold_invariant(
+    persistence_threshold: u64,
+    persistence_backpressure_threshold: u64,
+) {
+    debug_assert!(
+        persistence_backpressure_threshold > persistence_threshold,
+        "persistence_backpressure_threshold must be greater than persistence_threshold",
+    );
+}
 
 const fn default_cross_block_cache_size() -> usize {
     if cfg!(test) {
@@ -82,6 +95,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
+    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
     block_buffer_limit: u32,
@@ -164,9 +179,14 @@ pub struct TreeConfig {
 
 impl Default for TreeConfig {
     fn default() -> Self {
+        assert_backpressure_threshold_invariant(
+            DEFAULT_PERSISTENCE_THRESHOLD,
+            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+        );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
@@ -204,6 +224,7 @@ impl TreeConfig {
     pub const fn new(
         persistence_threshold: u64,
         memory_block_buffer_target: u64,
+        persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
@@ -229,9 +250,14 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        assert_backpressure_threshold_invariant(
+            persistence_threshold,
+            persistence_backpressure_threshold,
+        );
         Self {
             persistence_threshold,
             memory_block_buffer_target,
+            persistence_backpressure_threshold,
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
@@ -270,6 +296,11 @@ impl TreeConfig {
     /// Return the memory block buffer target.
     pub const fn memory_block_buffer_target(&self) -> u64 {
         self.memory_block_buffer_target
+    }
+
+    /// Return the persistence backpressure threshold.
+    pub const fn persistence_backpressure_threshold(&self) -> u64 {
+        self.persistence_backpressure_threshold
     }
 
     /// Return the block buffer limit.
@@ -368,6 +399,10 @@ impl TreeConfig {
     /// Setter for persistence threshold.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
+        assert_backpressure_threshold_invariant(
+            self.persistence_threshold,
+            self.persistence_backpressure_threshold,
+        );
         self
     }
 
@@ -377,6 +412,19 @@ impl TreeConfig {
         memory_block_buffer_target: u64,
     ) -> Self {
         self.memory_block_buffer_target = memory_block_buffer_target;
+        self
+    }
+
+    /// Setter for persistence backpressure threshold.
+    pub const fn with_persistence_backpressure_threshold(
+        mut self,
+        persistence_backpressure_threshold: u64,
+    ) -> Self {
+        self.persistence_backpressure_threshold = persistence_backpressure_threshold;
+        assert_backpressure_threshold_invariant(
+            self.persistence_threshold,
+            self.persistence_backpressure_threshold,
+        );
         self
     }
 
@@ -609,5 +657,20 @@ impl TreeConfig {
     pub const fn with_proof_jitter(mut self, proof_jitter: Option<Duration>) -> Self {
         self.proof_jitter = proof_jitter;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TreeConfig;
+
+    #[test]
+    #[should_panic(
+        expected = "persistence_backpressure_threshold must be greater than persistence_threshold"
+    )]
+    fn rejects_backpressure_threshold_at_or_below_persistence_threshold() {
+        let _ = TreeConfig::default()
+            .with_persistence_threshold(4)
+            .with_persistence_backpressure_threshold(4);
     }
 }

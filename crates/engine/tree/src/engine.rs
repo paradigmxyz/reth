@@ -195,7 +195,6 @@ where
     type Block = N::Block;
 
     fn on_event(&mut self, event: FromEngine<Self::Request, Self::Block>) {
-        // delegate to the tree
         let _ = self.to_tree.send(event);
     }
 
