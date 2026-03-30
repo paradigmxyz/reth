@@ -256,9 +256,6 @@ where
     /// Cumulative blob gas used by all segments that have been finished at
     /// boundaries.
     blob_gas_used_offset: u64,
-    /// Number of receipts from segments that have already had their
-    /// cumulative_gas_used fixed up. Used to avoid double-adjusting.
-    receipts_fixed_up: usize,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -291,7 +288,6 @@ where
             accumulated_requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
-            receipts_fixed_up: 0,
         }
     }
 
@@ -370,17 +366,11 @@ where
         inner.ctx = prev_ctx;
         let spec = inner.spec.clone();
         let receipt_builder = inner.receipt_builder.clone();
-        let (mut evm, mut result) = inner.finish()?;
+        let (mut evm, result) = inner.finish()?;
 
-        // Fix up cumulative_gas_used on this segment's receipts (those added
-        // after the last boundary) to account for gas consumed by prior
-        // segments, then update the offset.
-        if self.gas_used_offset > 0 {
-            for receipt in &mut result.receipts[self.receipts_fixed_up..] {
-                receipt.cumulative_gas_used += self.gas_used_offset;
-            }
-        }
-        self.receipts_fixed_up = result.receipts.len();
+        // Receipts already have globally-correct cumulative_gas_used (fixed
+        // up in commit_transaction). Update the offset with this segment's
+        // gas so that subsequent segments' receipts are adjusted correctly.
         self.gas_used_offset += result.gas_used;
         self.blob_gas_used_offset += result.blob_gas_used;
         self.accumulated_requests.extend(result.requests);
@@ -475,6 +465,17 @@ where
 
     fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
         let gas_used = self.inner_mut().commit_transaction(output)?;
+
+        // Fix up cumulative_gas_used on the just-committed receipt so that
+        // the receipt root task (which reads receipts incrementally) sees
+        // globally-correct values across all segments.
+        let offset = self.gas_used_offset;
+        if offset > 0 {
+            if let Some(receipt) = self.inner_mut().receipts.last_mut() {
+                receipt.cumulative_gas_used += offset;
+            }
+        }
+
         if let Some(plan) = &mut self.plan {
             plan.tx_counter += 1;
         }
@@ -501,15 +502,11 @@ where
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
-        if self.gas_used_offset > 0 {
-            // Fix up cumulative_gas_used on the final segment's receipts
-            // (those added after the last boundary).
-            for receipt in &mut result.receipts[self.receipts_fixed_up..] {
-                receipt.cumulative_gas_used += self.gas_used_offset;
-            }
-            result.gas_used += self.gas_used_offset;
-            result.blob_gas_used += self.blob_gas_used_offset;
-        }
+        // Receipts already have globally-correct cumulative_gas_used (fixed
+        // up in commit_transaction). Add the offset to the totals so they
+        // reflect gas across all segments.
+        result.gas_used += self.gas_used_offset;
+        result.blob_gas_used += self.blob_gas_used_offset;
 
         // Merge requests accumulated from earlier segment boundaries into
         // the final result.
