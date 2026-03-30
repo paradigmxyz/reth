@@ -60,6 +60,12 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Highest persisted tip that still needs a pruning pass.
+    ///
+    /// Save results are sent as soon as their durability commit lands. Pruning then runs only once
+    /// the action queue goes idle, and this watermark is clamped on reorgs so deferred pruning
+    /// never runs ahead of persisted history.
+    pending_prune_tip: Option<u64>,
 }
 
 impl<N> PersistenceService<N>
@@ -81,6 +87,7 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            pending_prune_tip: None,
         }
     }
 }
@@ -92,37 +99,86 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
+        loop {
+            let action = match self.incoming.recv() {
+                Ok(action) => action,
+                Err(_) => {
+                    self.run_pending_prune()?;
+                    return Ok(())
+                }
+            };
+
+            self.on_action(action)?;
+
+            while let Ok(action) = self.incoming.try_recv() {
+                self.on_action(action)?;
+            }
+
+            self.run_pending_prune()?;
+        }
+    }
+
+    fn on_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                self.pending_prune_tip = self.pending_prune_tip.map(|tip| tip.min(new_tip_num));
+
+                // send new sync metrics based on removed blocks
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let result = self.on_save_blocks(blocks)?;
+                let result_number = result.last_block.map(|b| b.number);
+
+                let _ = sender.send(result);
+
+                if let Some(block_number) = result_number {
+                    // send new sync metrics based on saved blocks
                     let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
-                }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
-
-                    let _ = sender.send(result);
-
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                    }
-                }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: block_number });
                 }
             }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
         }
+
+        Ok(())
+    }
+
+    fn run_pending_prune(&mut self) -> Result<(), PersistenceError> {
+        let Some(tip_block_number) = self.pending_prune_tip.take() else { return Ok(()) };
+
+        if !self.pruner.is_pruning_needed(tip_block_number) {
+            return Ok(())
+        }
+
+        debug!(
+            target: "engine::persistence",
+            tip = tip_block_number,
+            "Running deferred pruner after durability reply"
+        );
+
+        let prune_start = Instant::now();
+        let provider_rw = self.provider.database_provider_rw()?;
+        let _ = self.pruner.run_with_provider(&provider_rw, tip_block_number)?;
+        provider_rw.commit()?;
+
+        debug!(
+            target: "engine::persistence",
+            tip = tip_block_number,
+            "Finished deferred pruning"
+        );
+        self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+
         Ok(())
     }
 
@@ -180,20 +236,8 @@ where
             provider_rw.commit()?;
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
-            // Run the pruner in a separate provider so it reads committed RocksDB state
-            // that includes the history entries written by save_blocks above.
-            //
-            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
-            // must be able to read anything written by save_blocks.
-            if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
-                let prune_start = Instant::now();
-                let provider_rw = self.provider.database_provider_rw()?;
-                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
-                provider_rw.commit()?;
-                debug!(target: "engine::persistence", tip=?last.number, "Finished pruning after saving blocks");
-                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
-            }
+            self.pending_prune_tip =
+                Some(self.pending_prune_tip.map_or(last.number, |tip| tip.max(last.number)));
         }
 
         let elapsed = start_time.elapsed();
@@ -378,8 +422,42 @@ mod tests {
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_prune::Pruner;
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        Pruner,
+    };
+    use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
     use tokio::sync::mpsc::unbounded_channel;
+
+    #[derive(Debug)]
+    struct BlockingSegment {
+        started: crossbeam_channel::Sender<()>,
+        release: crossbeam_channel::Receiver<()>,
+    }
+
+    impl<Provider> Segment<Provider> for BlockingSegment {
+        fn segment(&self) -> PruneSegment {
+            PruneSegment::TransactionLookup
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            Some(PruneMode::Full)
+        }
+
+        fn purpose(&self) -> PrunePurpose {
+            PrunePurpose::User
+        }
+
+        fn prune(
+            &self,
+            _provider: &Provider,
+            _input: PruneInput,
+        ) -> Result<SegmentOutput, PrunerError> {
+            let _ = self.started.send(());
+            let _ = self.release.recv();
+            Ok(SegmentOutput::done())
+        }
+    }
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
@@ -460,6 +538,50 @@ mod tests {
             let result = rx.recv().unwrap();
             assert_eq!(last_hash, result.last_block.unwrap().hash);
         }
+    }
+
+    #[test]
+    fn test_save_blocks_replies_before_deferred_prune_finishes() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let (prune_started_tx, prune_started_rx) = crossbeam_channel::bounded(1);
+        let (release_prune_tx, release_prune_rx) = crossbeam_channel::bounded(1);
+
+        let pruner = Pruner::new_with_factory(
+            provider.clone(),
+            vec![Box::new(BlockingSegment {
+                started: prune_started_tx,
+                release: release_prune_rx,
+            })],
+            1,
+            1,
+            None,
+            finished_exex_height_rx,
+        );
+
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle =
+            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks = test_block_builder.get_executed_blocks(0..2).collect::<Vec<_>>();
+        let last_hash = blocks.last().unwrap().recovered_block().hash();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.save_blocks(blocks, tx).unwrap();
+
+        let result = rx.recv_timeout(Duration::from_secs(10)).expect("save result should arrive");
+        assert_eq!(last_hash, result.last_block.unwrap().hash);
+
+        prune_started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("deferred prune should start after the reply is sent");
+
+        release_prune_tx.send(()).unwrap();
+        drop(handle);
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner
