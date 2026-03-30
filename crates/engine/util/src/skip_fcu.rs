@@ -45,9 +45,7 @@ where
         loop {
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match next {
-                Some(BeaconEngineMessage::ForkchoiceUpdated {
-                    state, payload_attrs, tx, ..
-                }) => {
+                Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
                         tracing::warn!(target: "engine::stream::skip_fcu", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
@@ -55,12 +53,7 @@ where
                         continue
                     }
                     *this.skipped = 0;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                        version: reth_payload_primitives::EngineApiMessageVersion::default(),
-                    })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 next => next,
             };

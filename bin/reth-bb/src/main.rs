@@ -37,7 +37,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNetworkBuilder,
     EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
 };
-use reth_payload_primitives::{EngineApiMessageVersion, ExecutionPayload};
+use reth_payload_primitives::ExecutionPayload;
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
 use reth_rpc_api::{RethNewPayloadInput, RethPayloadStatus};
@@ -137,7 +137,7 @@ impl BbRethEngineApiServer for BbRethEngineApiHandler {
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving reth_forkchoiceUpdated");
         self.engine
-            .fork_choice_updated(forkchoice_state, None, EngineApiMessageVersion::V3)
+            .fork_choice_updated(forkchoice_state, None)
             .await
             .map_err(|e| EngineApiError::from(e).into())
     }

@@ -1480,12 +1480,7 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated {
-                                state,
-                                payload_attrs,
-                                tx,
-                                ..
-                            } => {
+                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();

@@ -12,7 +12,7 @@ use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
+use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
     HeaderProvider, StageCheckpointReader,
@@ -139,11 +139,7 @@ where
             .inner
             .add_ons_handle
             .beacon_engine_handle
-            .fork_choice_updated(
-                self.current_forkchoice_state()?,
-                Some(eth_attr.clone()),
-                EngineApiMessageVersion::default(),
-            )
+            .fork_choice_updated(self.current_forkchoice_state()?, Some(eth_attr.clone()))
             .await?
             .payload_id
             .unwrap();
@@ -299,7 +295,6 @@ where
                     finalized_block_hash: current_head,
                 },
                 None,
-                EngineApiMessageVersion::default(),
             )
             .await?;
 
