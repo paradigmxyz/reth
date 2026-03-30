@@ -584,6 +584,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
+    /// Bench-only helper for measuring history-index generation in isolation.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn benchmark_history_indices(
+        &self,
+        blocks: &[ExecutedBlock<N::Primitives>],
+    ) -> ProviderResult<()> {
+        let Some(first_number) = blocks.first().map(|block| block.recovered_block().number())
+        else {
+            return Ok(())
+        };
+        let last_block_number = blocks.last().expect("checked above").recovered_block().number();
+        self.update_history_indices(first_number..=last_block_number)
+    }
+
     fn extend_wiped_storage_history_transitions(
         &self,
         block_number: BlockNumber,

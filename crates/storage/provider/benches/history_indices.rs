@@ -10,8 +10,10 @@ use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use reth_provider::{
-    test_utils::create_test_provider_factory, SaveBlocksMode, StorageSettings, StorageSettingsCache,
+    test_utils::create_test_provider_factory, OriginalValuesKnown, SaveBlocksMode,
+    StateWriteConfig, StateWriter, StorageSettings, StorageSettingsCache,
 };
+use reth_storage_api::WriteStateInput;
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::sync::Arc;
@@ -98,6 +100,7 @@ fn bench_save_blocks_history_indices(c: &mut Criterion) {
             || {
                 let factory = create_test_provider_factory();
                 factory.set_storage_settings_cache(StorageSettings::v1());
+                let blocks = blocks.clone();
 
                 let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
                     SealedHeader::new(
@@ -125,10 +128,30 @@ fn bench_save_blocks_history_indices(c: &mut Criterion) {
                 provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
                 provider_rw.commit().unwrap();
 
-                (factory.provider_rw().unwrap(), blocks.clone())
+                let provider_rw = factory.provider_rw().unwrap();
+                provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::BlocksOnly).unwrap();
+
+                for block in &blocks {
+                    provider_rw
+                        .write_state(
+                            WriteStateInput::Single {
+                                outcome: block.execution_outcome(),
+                                block: block.recovered_block().number,
+                            },
+                            OriginalValuesKnown::No,
+                            StateWriteConfig {
+                                write_receipts: false,
+                                write_account_changesets: true,
+                                write_storage_changesets: true,
+                            },
+                        )
+                        .unwrap();
+                }
+
+                (provider_rw, blocks)
             },
             |(provider_rw, blocks)| {
-                provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+                provider_rw.benchmark_history_indices(&blocks).unwrap();
             },
             BatchSize::LargeInput,
         );
