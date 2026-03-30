@@ -20,16 +20,16 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, Database, Evm as _, EvmEnv, ExecutableTxIterator,
+    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, ExecutableTxIterator,
     NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::primitives::hardfork::SpecId;
 use std::sync::Arc;
-use tracing::{debug, trace};
+use tracing::debug;
 
-use alloy_evm::{block::BlockExecutorFactory as _, eth::spec::EthExecutorSpec, EthEvmFactory};
+use alloy_evm::{eth::spec::EthExecutorSpec, EthEvmFactory};
 use reth_evm::{EvmEnvFor, ExecutionCtxFor};
 
 // ---------------------------------------------------------------------------
@@ -56,8 +56,9 @@ pub(crate) struct BigBlockSegment {
 /// Wraps [`EthEvmConfig`] and a shared [`BigBlockMap`]. When a big-block
 /// payload is received, the plan is staged on the [`BbBlockExecutorFactory`]
 /// and consumed when the executor is created. Block hashes for inter-segment
-/// BLOCKHASH resolution are seeded into the `State` database via the
-/// overridden [`ConfigureEvm::create_executor`].
+/// BLOCKHASH resolution are reseeded into `State::block_hashes` at each
+/// segment boundary via a [`BlockHashSeeder`](crate::evm::BlockHashSeeder)
+/// callback injected in [`ConfigureEvm::create_executor`].
 #[derive(Debug, Clone)]
 pub struct BbEvmConfig<C = ChainSpec> {
     /// The inner Ethereum EVM configuration (used for env computation).
@@ -85,6 +86,23 @@ impl<C> BbEvmConfig<C> {
         let block_assembler = inner.block_assembler.clone();
 
         Self { inner, pending, executor_factory, block_assembler }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block hash seeder for State<DB>
+// ---------------------------------------------------------------------------
+
+/// Reseeds `State::block_hashes` with the given hashes.
+///
+/// This is used as a [`BlockHashSeeder`](crate::evm::BlockHashSeeder) callback,
+/// injected into [`BbBlockExecutor`](crate::evm::BbBlockExecutor) from
+/// `ConfigureEvm::create_executor` where the concrete `State<DB>` type is known.
+/// At each segment boundary the executor calls this to populate the ring buffer
+/// with the 256 block hashes relevant to the new segment's block number window.
+fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashes: &[(u64, B256)]) {
+    for &(number, hash) in hashes {
+        state.block_hashes.insert(number, hash);
     }
 }
 
@@ -139,7 +157,7 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        mut evm: reth_evm::EvmFor<Self, &'a mut revm::database::State<DB>, I>,
+        evm: reth_evm::EvmFor<Self, &'a mut revm::database::State<DB>, I>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl alloy_evm::block::BlockExecutorFor<
         'a,
@@ -151,28 +169,16 @@ where
         DB: Database,
         I: reth_evm::InspectorFor<Self, &'a mut revm::database::State<DB>> + 'a,
     {
-        // Seed block hashes from the plan into State::block_hashes before
-        // the executor is created. We have access to State<DB> here because
-        // create_executor explicitly takes &mut State<DB> as the DB type.
-        //
-        // The plan is staged on the factory and will be consumed by
-        // create_executor below, so we peek at it here without taking it.
-        {
-            let staged = self.executor_factory.staged_plan.lock().unwrap();
-            if let Some(plan) = staged.as_ref() {
-                for &(number, hash) in &plan.block_hashes_to_seed {
-                    evm.db_mut().block_hashes.insert(number, hash);
-                    trace!(
-                        target: "engine::bb::evm",
-                        number,
-                        ?hash,
-                        "Seeded block hash into State"
-                    );
-                }
-            }
-        }
-
-        self.block_executor_factory().create_executor(evm, ctx)
+        // Use create_executor_with_seeder to inject a concrete seeder that
+        // can reseed State::block_hashes at segment boundaries. The seeder
+        // is a function pointer that knows the concrete State<DB> type,
+        // allowing the generic BbBlockExecutor to reseed without additional
+        // trait bounds on DB.
+        self.executor_factory.create_executor_with_seeder(
+            evm,
+            ctx,
+            Some(seed_state_block_hashes::<DB>),
+        )
     }
 }
 
@@ -278,16 +284,7 @@ where
         // Add prior block hashes to the seeding list.
         plan.block_hashes_to_seed.extend(bb.prior_block_hashes);
 
-        // The BlockHashCache is a fixed-size 256-slot array indexed by
-        // `block_number % 256`. When more than 256 hashes are seeded,
-        // entries with colliding indices overwrite each other. Keep only
-        // the 256 highest block numbers since BLOCKHASH only looks back
-        // 256 blocks from the current block.
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
-        if plan.block_hashes_to_seed.len() > 256 {
-            let excess = plan.block_hashes_to_seed.len() - 256;
-            plan.block_hashes_to_seed.drain(..excess);
-        }
 
         self.executor_factory.stage_plan(plan);
     }

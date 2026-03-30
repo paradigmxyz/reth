@@ -61,6 +61,18 @@ impl BbEvmPlan {
 
         Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
     }
+
+    /// Returns the 256 block hashes relevant to a segment with the given block
+    /// number. BLOCKHASH can look back 256 blocks, so we select entries in
+    /// `[block_number - 256, block_number)`.
+    pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
+        let min = block_number.saturating_sub(256);
+        self.block_hashes_to_seed
+            .iter()
+            .copied()
+            .filter(|(n, _)| *n >= min && *n < block_number)
+            .collect()
+    }
 }
 
 impl std::fmt::Debug for BbEvmPlan {
@@ -89,6 +101,14 @@ impl std::fmt::Debug for BbEvmPlan {
 /// Gas counters reset at each boundary so that each segment's real gas limit
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
+
+/// Function pointer that seeds block hashes into the DB's block hash cache.
+///
+/// Injected from `ConfigureEvm::create_executor` where the concrete `State<DB>`
+/// type is known, allowing `BbBlockExecutor` to reseed the ring buffer at
+/// segment boundaries without requiring additional trait bounds on `DB`.
+pub(crate) type BlockHashSeeder<DB> = fn(&mut DB, &[(u64, B256)]);
+
 pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: Database,
@@ -109,6 +129,9 @@ where
     /// cycles at segment boundaries. Each inner executor receives a
     /// forwarding hook that delegates to this shared instance.
     shared_hook: Arc<Mutex<Option<Box<dyn OnStateHook>>>>,
+    /// Callback to reseed block hashes into the DB's cache at segment
+    /// boundaries. See [`BlockHashSeeder`].
+    block_hash_seeder: Option<BlockHashSeeder<DB>>,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -133,6 +156,7 @@ where
         spec: Spec,
         receipt_builder: RethReceiptBuilder,
         plan: Option<BbEvmPlan>,
+        block_hash_seeder: Option<BlockHashSeeder<DB>>,
     ) -> Self {
         let inner = EthBlockExecutor::new(evm, ctx, spec, receipt_builder);
         Self {
@@ -142,6 +166,7 @@ where
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
             shared_hook: Arc::new(Mutex::new(None)),
+            block_hash_seeder,
         }
     }
 
@@ -163,6 +188,15 @@ where
         &mut self,
     ) -> &mut EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
+    }
+
+    fn reseed_block_hashes_for(&mut self, block_number: u64) {
+        let Some(seeder) = self.block_hash_seeder else { return };
+        let hashes = match &self.plan {
+            Some(plan) => plan.hashes_for_block(block_number),
+            None => return,
+        };
+        seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
     }
 
     fn maybe_apply_boundary(&mut self) -> Result<(), BlockExecutionError> {
@@ -272,12 +306,22 @@ where
             new_inner.set_state_hook(self.forwarding_hook());
         }
 
+        self.inner = Some(new_inner);
+
+        // Reseed the block hash cache for the new segment's 256-block window
+        // before applying pre-execution changes (which may use BLOCKHASH).
+        let new_block_number = self.plan.as_ref().unwrap().segments[seg_idx]
+            .evm_env
+            .block_env
+            .number
+            .saturating_to::<u64>();
+        self.reseed_block_hashes_for(new_block_number);
+
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788).
-        new_inner.apply_pre_execution_changes()?;
+        self.inner_mut().apply_pre_execution_changes()?;
 
         trace!(target: "engine::bb::evm", "Started segment {seg_idx}");
 
-        self.inner = Some(new_inner);
         Ok(())
     }
 }
@@ -311,6 +355,7 @@ where
         // writing to wrong EIP-2935 slots and corrupting state.
         if let Some(seg0) = self.plan.as_ref().map(|p| &p.segments[0]) {
             let block_env = seg0.evm_env.block_env.clone();
+            let block_number = block_env.number.saturating_to::<u64>();
             let mut cfg_env = seg0.evm_env.cfg_env.clone();
             cfg_env.disable_base_fee = true;
             let seg0_ctx = EthBlockExecutionCtx {
@@ -327,6 +372,8 @@ where
             evm_ctx.block = block_env;
             evm_ctx.cfg = cfg_env;
             inner.ctx = seg0_ctx;
+
+            self.reseed_block_hashes_for(block_number);
         }
 
         self.inner_mut().apply_pre_execution_changes()
@@ -478,6 +525,21 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
     fn take_plan(&self) -> Option<BbEvmPlan> {
         self.staged_plan.lock().unwrap().take()
     }
+
+    pub(crate) fn create_executor_with_seeder<'a, DB, I>(
+        &'a self,
+        evm: EthEvm<DB, I, PrecompilesMap>,
+        ctx: EthBlockExecutionCtx<'a>,
+        block_hash_seeder: Option<BlockHashSeeder<DB>>,
+    ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>
+    where
+        Spec: alloy_evm::eth::spec::EthExecutorSpec,
+        DB: StateDB + 'a,
+        I: Inspector<EthEvmContext<DB>> + 'a,
+    {
+        let plan = self.take_plan();
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, plan, block_hash_seeder)
+    }
 }
 
 impl<Spec> BlockExecutorFactory for BbBlockExecutorFactory<Spec>
@@ -504,6 +566,6 @@ where
         I: Inspector<EthEvmContext<DB>> + 'a,
     {
         let plan = self.take_plan();
-        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, plan)
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, plan, None)
     }
 }
