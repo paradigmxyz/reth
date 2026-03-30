@@ -155,9 +155,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
-        // find the corresponding block number
-        let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
+        // Use the block number from the peer's status (eth/69+) if available,
+        // otherwise fall back to a local lookup by hash.
+        let block_number = status.latest_block.unwrap_or_else(|| {
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default()
+        });
         self.state_fetcher.new_active_peer(
             peer,
             status.blockhash,
