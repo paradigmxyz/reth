@@ -21,7 +21,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, OnStateHook, StateDB,
+        BlockExecutorFor, ExecutableTx, OnStateHook, StateChangeSource, StateDB,
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
@@ -256,6 +256,10 @@ where
     /// Cumulative blob gas used by all segments that have been finished at
     /// boundaries.
     blob_gas_used_offset: u64,
+    /// Shared state hook that survives inner executor finish/reconstruct
+    /// cycles at segment boundaries. Each inner executor receives a
+    /// forwarding hook that delegates to this shared instance.
+    shared_hook: Arc<Mutex<Option<Box<dyn OnStateHook>>>>,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -288,7 +292,18 @@ where
             accumulated_requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
+            shared_hook: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Creates a forwarding `OnStateHook` that delegates to the shared hook.
+    fn forwarding_hook(&self) -> Option<Box<dyn OnStateHook>> {
+        let shared = self.shared_hook.clone();
+        Some(Box::new(move |source: StateChangeSource, state: &revm::state::EvmState| {
+            if let Some(hook) = shared.lock().unwrap().as_mut() {
+                hook.on_state(source, state);
+            }
+        }))
     }
 
     fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
@@ -394,6 +409,12 @@ where
 
         // Carry forward receipts from prior segments.
         new_inner.receipts = result.receipts;
+
+        // Re-install the forwarding state hook so the parallel state root
+        // task continues to receive state changes.
+        if self.shared_hook.lock().unwrap().is_some() {
+            new_inner.set_state_hook(self.forwarding_hook());
+        }
 
         // Apply pre-execution changes for the new segment (EIP-2935, EIP-4788).
         new_inner.apply_pre_execution_changes()?;
@@ -520,7 +541,16 @@ where
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-        self.inner_mut().set_state_hook(hook);
+        if self.plan.is_some() {
+            // Store the real hook in the shared slot and give the inner
+            // executor a lightweight forwarder. This way the hook survives
+            // inner executor finish/reconstruct cycles at segment boundaries.
+            *self.shared_hook.lock().unwrap() = hook;
+            let fwd = self.forwarding_hook();
+            self.inner_mut().set_state_hook(fwd);
+        } else {
+            self.inner_mut().set_state_hook(hook);
+        }
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
