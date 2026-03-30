@@ -64,8 +64,7 @@ impl BbEvmPlan {
     pub(crate) fn new(segments: Vec<BigBlockSegment>) -> Self {
         // Pre-compute all inter-segment block hashes.
         let mut block_hashes_to_seed = Vec::new();
-        for seg_idx in 1..segments.len() {
-            let seg = &segments[seg_idx];
+        for seg in segments.iter().skip(1) {
             let finished_block_number = seg.evm_env.block_env.number.saturating_to::<u64>() - 1;
             let finished_block_hash = seg.ctx.parent_hash;
             block_hashes_to_seed.push((finished_block_number, finished_block_hash));
@@ -102,17 +101,17 @@ pub struct BbEvm<DB: Database, I, P = PrecompilesMap> {
 
 impl<DB: Database, I, P> BbEvm<DB, I, P> {
     /// Returns a reference to the plan, if any.
-    pub(crate) fn plan(&self) -> Option<&BbEvmPlan> {
+    pub(crate) const fn plan(&self) -> Option<&BbEvmPlan> {
         self.plan.as_ref()
     }
 
     /// Takes the plan out of this EVM, leaving `None` in its place.
-    pub(crate) fn take_plan(&mut self) -> Option<BbEvmPlan> {
+    pub(crate) const fn take_plan(&mut self) -> Option<BbEvmPlan> {
         self.plan.take()
     }
 
     /// Provides a mutable reference to the inner EVM context.
-    pub(crate) fn ctx_mut(&mut self) -> &mut EthEvmContext<DB> {
+    pub(crate) const fn ctx_mut(&mut self) -> &mut EthEvmContext<DB> {
         self.inner.ctx_mut()
     }
 }
@@ -181,7 +180,7 @@ where
 #[derive(Debug, Clone)]
 pub struct BbEvmFactory {
     inner: EthEvmFactory,
-    /// Staged plan to inject into the next created BbEvm.
+    /// Staged plan to inject into the next created `BbEvm`.
     pub(crate) staged_plan: Arc<Mutex<Option<BbEvmPlan>>>,
 }
 
@@ -306,11 +305,11 @@ where
         }))
     }
 
-    fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
+    const fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
-    fn inner_mut(
+    const fn inner_mut(
         &mut self,
     ) -> &mut EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
@@ -380,7 +379,7 @@ where
         let mut inner = self.inner.take().expect("inner executor must exist");
         inner.ctx = prev_ctx;
         let spec = inner.spec.clone();
-        let receipt_builder = inner.receipt_builder.clone();
+        let receipt_builder = inner.receipt_builder;
         let (mut evm, result) = inner.finish()?;
 
         // Receipts already have globally-correct cumulative_gas_used (fixed
@@ -491,10 +490,10 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 {
-            if let Some(receipt) = self.inner_mut().receipts.last_mut() {
-                receipt.cumulative_gas_used += offset;
-            }
+        if offset > 0 &&
+            let Some(receipt) = self.inner_mut().receipts.last_mut()
+        {
+            receipt.cumulative_gas_used += offset;
         }
 
         if let Some(plan) = &mut self.plan {
@@ -580,7 +579,11 @@ pub struct BbBlockExecutorFactory<Spec> {
 }
 
 impl<Spec> BbBlockExecutorFactory<Spec> {
-    pub fn new(receipt_builder: RethReceiptBuilder, spec: Spec, evm_factory: BbEvmFactory) -> Self {
+    pub const fn new(
+        receipt_builder: RethReceiptBuilder,
+        spec: Spec,
+        evm_factory: BbEvmFactory,
+    ) -> Self {
         Self { receipt_builder, spec, evm_factory }
     }
 
