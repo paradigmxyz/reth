@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 # reth
+reth-execution-cache.workspace = true
+reth-trie-parallel.workspace = true
 reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-builder-primitives.workspace = true

@@ -22,10 +22,11 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_cache::CachedStateProvider;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
@@ -115,7 +116,14 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
+        let args = BuildArguments::new(
+            Default::default(),
+            Default::default(),
+            None,
+            config,
+            Default::default(),
+            None,
+        );
 
         default_ethereum_payload(
             self.evm_config.clone(),
@@ -150,10 +158,24 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments {
+        mut cached_reads,
+        execution_cache,
+        trie_handle,
+        config,
+        cancel,
+        best_payload,
+    } = args;
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
-    let state_provider = client.state_by_block_hash(parent_header.hash())?;
+    let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
+    if let Some(execution_cache) = execution_cache {
+        state_provider = Box::new(CachedStateProvider::new(
+            state_provider,
+            execution_cache.cache().clone(),
+            execution_cache.metrics().clone(),
+        ));
+    }
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let mut db =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
@@ -186,6 +208,12 @@ where
         builder.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
+
+    // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
+    // to the background trie pipeline for incremental state root computation.
+    if let Some(ref handle) = trie_handle {
+        builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    }
 
     builder.apply_pre_execution_changes().map_err(|err| {
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
@@ -364,8 +392,31 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(state_provider.as_ref())?;
+    let BlockBuilderOutcome { execution_result, block, .. } = if let Some(mut handle) = trie_handle
+    {
+        // Drop the state hook, which drops the StateHookSender and triggers
+        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
+        builder.executor_mut().set_state_hook(None);
+
+        // The sparse trie has been computing incrementally alongside tx execution.
+        // This recv() waits for the final root hash — most work is already done.
+        // Fall back to sync state root if the trie pipeline fails.
+        match handle.state_root() {
+            Ok(outcome) => {
+                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                builder.finish(
+                    state_provider.as_ref(),
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                )?
+            }
+            Err(err) => {
+                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
+                builder.finish(state_provider.as_ref(), None)?
+            }
+        }
+    } else {
+        builder.finish(state_provider.as_ref(), None)?
+    };
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

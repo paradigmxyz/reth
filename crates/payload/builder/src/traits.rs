@@ -1,12 +1,13 @@
 //! Trait abstractions used by the payload crate.
 
-use alloy_primitives::B256;
 use alloy_rpc_types::engine::PayloadId;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
+
+use crate::service::BuildNewPayload;
 
 /// A type that can build a payload.
 ///
@@ -110,8 +111,7 @@ pub trait PayloadJobGenerator {
     /// returned directly.
     fn new_payload_job(
         &self,
-        parent: B256,
-        attr: <Self::Job as PayloadJob>::PayloadAttributes,
+        input: BuildNewPayload<<Self::Job as PayloadJob>::PayloadAttributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError>;
 

@@ -852,7 +852,6 @@ impl ExecutionCache {
                 }
 
                 self.0.account_cache.remove(addr);
-                self.0.account_stats.decrement_size();
                 continue;
             }
 
@@ -1233,6 +1232,33 @@ mod tests {
         // Verify only addr1 was removed
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
+    }
+
+    #[test]
+    fn test_insert_state_destroyed_uncached_account_keeps_size_zero() {
+        let caches = ExecutionCache::new(1000);
+        assert_eq!(caches.0.account_stats.size(), 0);
+
+        let addr = Address::random();
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    None, // No original info
+                    None, // Destroyed
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert_eq!(caches.0.account_stats.size(), 0);
+        assert!(caches.0.account_cache.get(&addr).is_none());
     }
 
     #[test]
