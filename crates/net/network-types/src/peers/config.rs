@@ -317,14 +317,23 @@ impl PeersConfig {
         tracing::info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
 
         // Try the new format first, fall back to legacy Vec<NodeRecord>
-        let peers: Vec<PersistedPeerInfo> = serde_json::from_str(&raw)
-            .or_else(|_| {
-                let nodes: HashSet<NodeRecord> = serde_json::from_str(&raw)?;
-                Ok::<_, serde_json::Error>(
-                    nodes.into_iter().map(PersistedPeerInfo::from_node_record).collect(),
-                )
-            })
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let peers: Vec<PersistedPeerInfo> = match serde_json::from_str(&raw).or_else(|_| {
+            let nodes: HashSet<NodeRecord> = serde_json::from_str(&raw)?;
+            Ok::<_, serde_json::Error>(
+                nodes.into_iter().map(PersistedPeerInfo::from_node_record).collect(),
+            )
+        }) {
+            Ok(peers) => peers,
+            Err(err) => {
+                tracing::warn!(
+                    target: "net::peers",
+                    file = %file_path.as_ref().display(),
+                    %err,
+                    "Failed to parse persisted peers file, starting without persisted peers"
+                );
+                return Ok(self);
+            }
+        };
 
         tracing::info!(target: "net::peers", count = peers.len(), "Loaded persisted peers");
         self.persisted_peers = peers;
