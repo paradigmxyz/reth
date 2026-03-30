@@ -472,10 +472,6 @@ where
         self.incoming_tx.clone()
     }
 
-    fn update_backpressure_buffer_len_metric(&self) {
-        self.metrics.engine.backpressure_buffer_len.set(self.incoming.len() as f64);
-    }
-
     /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
     /// persistence is falling behind execution.
     const fn persistence_gap(&self) -> u64 {
@@ -537,8 +533,13 @@ where
             }
 
             let event = if self.should_backpressure() {
-                self.wait_for_persistence_event()
+                self.metrics.engine.backpressure_active.set(1.0);
+                let stall_start = Instant::now();
+                let event = self.wait_for_persistence_event();
+                self.metrics.engine.backpressure_stall_duration.record(stall_start.elapsed());
+                event
             } else {
+                self.metrics.engine.backpressure_active.set(0.0);
                 self.wait_for_event()
             };
 
@@ -622,10 +623,7 @@ where
                     // Put the persistence rx back - we didn't consume it
                     self.persistence_state.rx = Some((persistence_rx, start_time, action));
                     match msg {
-                        Ok(m) => {
-                            self.update_backpressure_buffer_len_metric();
-                            LoopEvent::EngineMessage(m)
-                        }
+                        Ok(m) => LoopEvent::EngineMessage(m),
                         Err(_) => LoopEvent::Disconnected,
                     }
                 },
@@ -633,10 +631,7 @@ where
         } else {
             // No persistence in progress - just wait on incoming
             match self.incoming.recv() {
-                Ok(m) => {
-                    self.update_backpressure_buffer_len_metric();
-                    LoopEvent::EngineMessage(m)
-                }
+                Ok(m) => LoopEvent::EngineMessage(m),
                 Err(_) => LoopEvent::Disconnected,
             }
         }
@@ -672,7 +667,6 @@ where
         // if we still have blocks to execute, send them as a followup request
         if !blocks.is_empty() {
             let _ = self.incoming_tx.send(FromEngine::DownloadedBlocks(blocks));
-            self.metrics.engine.backpressure_buffer_len.set(self.incoming_tx.len() as f64);
         }
 
         Ok(None)

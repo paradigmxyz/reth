@@ -171,8 +171,10 @@ pub struct EngineMetrics {
     pub(crate) executed_new_block_cache_miss: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
-    /// Current number of messages queued in the tree input channel.
-    pub(crate) backpressure_buffer_len: Gauge,
+    /// Whether the engine loop is currently stalled on persistence backpressure.
+    pub(crate) backpressure_active: Gauge,
+    /// Time spent blocked waiting on persistence because backpressure was active.
+    pub(crate) backpressure_stall_duration: Histogram,
     /// Tracks the how often we failed to deliver a newPayload response.
     ///
     /// This effectively tracks how often the message sender dropped the channel and indicates a CL
