@@ -1,20 +1,10 @@
-//! Big-block EVM wrapper and executor.
+//! Big-block executor.
 //!
-//! Provides [`BbEvm`], [`BbEvmFactory`], [`BbBlockExecutor`], and
-//! [`BbBlockExecutorFactory`] which handle segment boundaries within
-//! big-block payloads.
+//! Provides [`BbBlockExecutor`] and [`BbBlockExecutorFactory`] which handle
+//! segment boundaries within big-block payloads.
 //!
-//! # Architecture
-//!
-//! Boundary handling lives at the **executor** level because the [`EvmFactory`]
-//! GAT requires the EVM to impl [`Evm`] for all `DB: Database`, while
-//! boundary operations need `DB: StateDB`. The executor layer
-//! ([`BlockExecutorFactory::create_executor`]) provides `DB: StateDB`.
-//!
-//! - [`BbEvm`] is a thin delegating wrapper around [`EthEvm`], carrying the plan but performing no
-//!   boundary logic.
-//! - [`BbBlockExecutor`] wraps [`EthBlockExecutor`] and intercepts `execute_transaction` to apply
-//!   segment-boundary changes.
+//! [`BbBlockExecutor`] wraps [`EthBlockExecutor`] and intercepts
+//! `execute_transaction` to apply segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
 use alloy_eips::eip7685::Requests;
@@ -25,16 +15,15 @@ use alloy_evm::{
     },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
     precompiles::PrecompilesMap,
-    Database, EthEvm, EthEvmFactory, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    Database, EthEvm, EthEvmFactory, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::B256;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm_ethereum::RethReceiptBuilder;
 use revm::{
     context::{BlockEnv, TxEnv},
-    context_interface::result::{EVMError, HaltReason, ResultAndState},
+    context_interface::result::{EVMError, HaltReason},
     handler::PrecompileProvider,
-    inspector::NoOpInspector,
     interpreter::InterpreterResult,
     primitives::hardfork::SpecId,
     Inspector,
@@ -86,145 +75,6 @@ impl std::fmt::Debug for BbEvmPlan {
 }
 
 // ---------------------------------------------------------------------------
-// BbEvm — thin delegating EVM wrapper
-// ---------------------------------------------------------------------------
-
-/// An EVM wrapper that carries a [`BbEvmPlan`] for big-block execution.
-///
-/// All [`Evm`] methods delegate directly to the inner [`EthEvm`].
-/// Boundary handling is performed by [`BbBlockExecutor`] at the executor layer.
-#[allow(missing_debug_implementations)]
-pub struct BbEvm<DB: Database, I, P = PrecompilesMap> {
-    inner: EthEvm<DB, I, P>,
-    plan: Option<BbEvmPlan>,
-}
-
-impl<DB: Database, I, P> BbEvm<DB, I, P> {
-    /// Returns a reference to the plan, if any.
-    pub(crate) const fn plan(&self) -> Option<&BbEvmPlan> {
-        self.plan.as_ref()
-    }
-
-    /// Takes the plan out of this EVM, leaving `None` in its place.
-    pub(crate) const fn take_plan(&mut self) -> Option<BbEvmPlan> {
-        self.plan.take()
-    }
-
-    /// Provides a mutable reference to the inner EVM context.
-    pub(crate) const fn ctx_mut(&mut self) -> &mut EthEvmContext<DB> {
-        self.inner.ctx_mut()
-    }
-}
-
-impl<DB, I, P> Evm for BbEvm<DB, I, P>
-where
-    DB: Database,
-    I: Inspector<EthEvmContext<DB>>,
-    P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
-{
-    type DB = DB;
-    type Tx = TxEnv;
-    type Error = EVMError<DB::Error>;
-    type HaltReason = HaltReason;
-    type Spec = SpecId;
-    type BlockEnv = BlockEnv;
-    type Precompiles = P;
-    type Inspector = I;
-
-    fn block(&self) -> &BlockEnv {
-        self.inner.block()
-    }
-
-    fn chain_id(&self) -> u64 {
-        self.inner.chain_id()
-    }
-
-    fn transact_raw(
-        &mut self,
-        tx: Self::Tx,
-    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.inner.transact_raw(tx)
-    }
-
-    fn transact_system_call(
-        &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.inner.transact_system_call(caller, contract, data)
-    }
-
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec, Self::BlockEnv>) {
-        self.inner.finish()
-    }
-
-    fn set_inspector_enabled(&mut self, enabled: bool) {
-        self.inner.set_inspector_enabled(enabled);
-    }
-
-    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-        self.inner.components()
-    }
-
-    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
-        self.inner.components_mut()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// BbEvmFactory
-// ---------------------------------------------------------------------------
-
-/// Factory producing [`BbEvm`] instances.
-#[derive(Debug, Clone)]
-pub struct BbEvmFactory {
-    inner: EthEvmFactory,
-    /// Staged plan to inject into the next created `BbEvm`.
-    pub(crate) staged_plan: Arc<Mutex<Option<BbEvmPlan>>>,
-}
-
-impl BbEvmFactory {
-    pub fn new(inner: EthEvmFactory) -> Self {
-        Self { inner, staged_plan: Arc::new(Mutex::new(None)) }
-    }
-
-    pub(crate) fn stage_plan(&self, plan: BbEvmPlan) {
-        *self.staged_plan.lock().unwrap() = Some(plan);
-    }
-
-    fn take_plan(&self) -> Option<BbEvmPlan> {
-        self.staged_plan.lock().unwrap().take()
-    }
-}
-
-impl EvmFactory for BbEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> = BbEvm<DB, I, PrecompilesMap>;
-    type Context<DB: Database> = EthEvmContext<DB>;
-    type Tx = TxEnv;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = HaltReason;
-    type Spec = SpecId;
-    type BlockEnv = BlockEnv;
-    type Precompiles = PrecompilesMap;
-
-    fn create_evm<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        let inner = self.inner.create_evm(db, evm_env);
-        BbEvm { inner, plan: self.take_plan() }
-    }
-
-    fn create_evm_with_inspector<DB: Database, I: Inspector<EthEvmContext<DB>>>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<DB, I> {
-        let inner = self.inner.create_evm_with_inspector(db, evm_env, inspector);
-        BbEvm { inner, plan: self.take_plan() }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // BbBlockExecutor — handles segment boundaries
 // ---------------------------------------------------------------------------
 
@@ -244,7 +94,7 @@ where
     DB: Database,
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
-    inner: Option<EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder>>,
+    inner: Option<EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder>>,
     plan: Option<BbEvmPlan>,
     /// Requests accumulated from segments that have been finished at
     /// boundaries. Merged into the final result in `finish()`.
@@ -267,7 +117,7 @@ where
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    BbEvm<DB, I, P>: Evm<
+    EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
         HaltReason = HaltReason,
@@ -278,12 +128,12 @@ where
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     pub(crate) fn new(
-        mut evm: BbEvm<DB, I, P>,
+        evm: EthEvm<DB, I, P>,
         ctx: EthBlockExecutionCtx<'a>,
         spec: Spec,
         receipt_builder: RethReceiptBuilder,
+        plan: Option<BbEvmPlan>,
     ) -> Self {
-        let plan = evm.take_plan();
         let inner = EthBlockExecutor::new(evm, ctx, spec, receipt_builder);
         Self {
             inner: Some(inner),
@@ -305,13 +155,13 @@ where
         }))
     }
 
-    const fn inner(&self) -> &EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
+    const fn inner(&self) -> &EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
     const fn inner_mut(
         &mut self,
-    ) -> &mut EthBlockExecutor<'a, BbEvm<DB, I, P>, Spec, RethReceiptBuilder> {
+    ) -> &mut EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
     }
 
@@ -431,7 +281,7 @@ where
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
     Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
-    BbEvm<DB, I, P>: Evm<
+    EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
         HaltReason = HaltReason,
@@ -443,7 +293,7 @@ where
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type Evm = BbEvm<DB, I, P>;
+    type Evm = EthEvm<DB, I, P>;
     type Result = EthTxResult<HaltReason, alloy_consensus::TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -569,25 +419,27 @@ where
 // BbBlockExecutorFactory
 // ---------------------------------------------------------------------------
 
-/// Block executor factory that uses [`BbEvmFactory`] to produce [`BbEvm`]
-/// instances and [`BbBlockExecutor`] for boundary-aware execution.
+/// Block executor factory that produces [`BbBlockExecutor`] for
+/// boundary-aware big-block execution.
 #[derive(Debug, Clone)]
 pub struct BbBlockExecutorFactory<Spec> {
     receipt_builder: RethReceiptBuilder,
     spec: Spec,
-    evm_factory: BbEvmFactory,
+    evm_factory: EthEvmFactory,
+    /// Staged plan consumed by the next [`BbBlockExecutor`].
+    pub(crate) staged_plan: Arc<Mutex<Option<BbEvmPlan>>>,
 }
 
 impl<Spec> BbBlockExecutorFactory<Spec> {
-    pub const fn new(
+    pub fn new(
         receipt_builder: RethReceiptBuilder,
         spec: Spec,
-        evm_factory: BbEvmFactory,
+        evm_factory: EthEvmFactory,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+        Self { receipt_builder, spec, evm_factory, staged_plan: Arc::new(Mutex::new(None)) }
     }
 
-    pub const fn evm_factory(&self) -> &BbEvmFactory {
+    pub const fn evm_factory(&self) -> &EthEvmFactory {
         &self.evm_factory
     }
 
@@ -598,6 +450,14 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
     pub const fn receipt_builder(&self) -> &RethReceiptBuilder {
         &self.receipt_builder
     }
+
+    pub(crate) fn stage_plan(&self, plan: BbEvmPlan) {
+        *self.staged_plan.lock().unwrap() = Some(plan);
+    }
+
+    fn take_plan(&self) -> Option<BbEvmPlan> {
+        self.staged_plan.lock().unwrap().take()
+    }
 }
 
 impl<Spec> BlockExecutorFactory for BbBlockExecutorFactory<Spec>
@@ -605,7 +465,7 @@ where
     Spec: alloy_evm::eth::spec::EthExecutorSpec + 'static,
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
-    type EvmFactory = BbEvmFactory;
+    type EvmFactory = EthEvmFactory;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
@@ -616,13 +476,14 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: BbEvm<DB, I, PrecompilesMap>,
+        evm: EthEvm<DB, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: StateDB + 'a,
         I: Inspector<EthEvmContext<DB>> + 'a,
     {
-        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder)
+        let plan = self.take_plan();
+        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, plan)
     }
 }

@@ -8,7 +8,7 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 
 use crate::{
-    evm::{BbBlockExecutorFactory, BbEvmFactory, BbEvmPlan},
+    evm::{BbBlockExecutorFactory, BbEvmPlan},
     BigBlockMap,
 };
 use alloy_consensus::Header;
@@ -54,17 +54,17 @@ pub(crate) struct BigBlockSegment {
 /// EVM configuration for big-block execution.
 ///
 /// Wraps [`EthEvmConfig`] and a shared [`BigBlockMap`]. When a big-block
-/// payload is received, the plan is staged on the [`BbEvmFactory`] and
-/// consumed during EVM creation. Block hashes for inter-segment BLOCKHASH
-/// resolution are seeded into the `State` database via the overridden
-/// [`ConfigureEvm::evm_with_env`].
+/// payload is received, the plan is staged on the [`BbBlockExecutorFactory`]
+/// and consumed when the executor is created. Block hashes for inter-segment
+/// BLOCKHASH resolution are seeded into the `State` database via the
+/// overridden [`ConfigureEvm::create_executor`].
 #[derive(Debug, Clone)]
 pub struct BbEvmConfig<C = ChainSpec> {
     /// The inner Ethereum EVM configuration (used for env computation).
     pub inner: EthEvmConfig<C>,
     /// Shared map of pending big-block metadata.
     pub pending: BigBlockMap,
-    /// Block executor factory with the big-block EVM factory.
+    /// Block executor factory for big-block execution.
     executor_factory: BbBlockExecutorFactory<Arc<C>>,
     /// Block assembler.
     block_assembler: EthBlockAssembler<C>,
@@ -77,9 +77,11 @@ impl<C> BbEvmConfig<C> {
         C: Clone,
     {
         let chain_spec = inner.chain_spec().clone();
-        let evm_factory = BbEvmFactory::new(EthEvmFactory::default());
-        let executor_factory =
-            BbBlockExecutorFactory::new(RethReceiptBuilder::default(), chain_spec, evm_factory);
+        let executor_factory = BbBlockExecutorFactory::new(
+            RethReceiptBuilder::default(),
+            chain_spec,
+            EthEvmFactory::default(),
+        );
         let block_assembler = inner.block_assembler.clone();
 
         Self { inner, pending, executor_factory, block_assembler }
@@ -152,16 +154,21 @@ where
         // Seed block hashes from the plan into State::block_hashes before
         // the executor is created. We have access to State<DB> here because
         // create_executor explicitly takes &mut State<DB> as the DB type.
-        if let Some(plan) = evm.plan() {
-            let hashes: Vec<_> = plan.block_hashes_to_seed.clone();
-            for (number, hash) in hashes {
-                evm.db_mut().block_hashes.insert(number, hash);
-                trace!(
-                    target: "engine::bb::evm",
-                    number,
-                    ?hash,
-                    "Seeded block hash into State"
-                );
+        //
+        // The plan is staged on the factory and will be consumed by
+        // create_executor below, so we peek at it here without taking it.
+        {
+            let staged = self.executor_factory.staged_plan.lock().unwrap();
+            if let Some(plan) = staged.as_ref() {
+                for &(number, hash) in &plan.block_hashes_to_seed {
+                    evm.db_mut().block_hashes.insert(number, hash);
+                    trace!(
+                        target: "engine::bb::evm",
+                        number,
+                        ?hash,
+                        "Seeded block hash into State"
+                    );
+                }
             }
         }
 
@@ -282,6 +289,6 @@ where
             plan.block_hashes_to_seed.drain(..excess);
         }
 
-        self.executor_factory.evm_factory().stage_plan(plan);
+        self.executor_factory.stage_plan(plan);
     }
 }
