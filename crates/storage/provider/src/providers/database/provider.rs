@@ -595,7 +595,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             return Ok(())
         };
         let last_block_number = blocks.last().expect("checked above").recovered_block().number();
-        self.update_history_indices(first_number..=last_block_number)
+
+        let mut history_transitions = HistoryTransitions::default();
+        for block in blocks {
+            for (block_idx, block_reverts) in
+                block.execution_outcome().state.reverts.iter().enumerate()
+            {
+                let block_number = block.recovered_block().number() + block_idx as u64;
+                if !history_transitions
+                    .extend_from_block_reverts(block_number, block_reverts)
+                    .is_empty()
+                {
+                    // The benchmark harness writes state before calling this helper, so the old
+                    // changeset reread path remains the only correct option for storage wipes.
+                    return self.update_history_indices(first_number..=last_block_number)
+                }
+            }
+        }
+
+        self.write_history_indices_from_transitions(history_transitions)
     }
 
     fn extend_wiped_storage_history_transitions(
