@@ -225,7 +225,7 @@ impl Discv5 {
             bootstrap_lookup_interval,
             bootstrap_lookup_countdown,
             metrics.clone(),
-            discv5.clone(),
+            Arc::downgrade(&discv5),
         );
 
         Ok((
@@ -573,17 +573,25 @@ pub fn spawn_populate_kbuckets_bg(
     bootstrap_lookup_interval: u64,
     bootstrap_lookup_countdown: u64,
     metrics: Discv5Metrics,
-    discv5: Arc<discv5::Discv5>,
+    discv5: std::sync::Weak<discv5::Discv5>,
 ) {
-    let local_node_id = discv5.local_enr().node_id();
     let lookup_interval = Duration::from_secs(lookup_interval);
     let metrics = metrics.discovered_peers;
     let mut kbucket_index = MAX_KBUCKET_INDEX;
     let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
     task::spawn(async move {
+        let Some(discv5_handle) = discv5.upgrade() else {
+            return;
+        };
+        let local_node_id = discv5_handle.local_enr().node_id();
+        drop(discv5_handle);
+
         // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
         // log2distance from local node
         for i in (0..bootstrap_lookup_countdown).rev() {
+            let Some(discv5_handle) = discv5.upgrade() else {
+                return;
+            };
             let target = discv5::enr::NodeId::random();
 
             trace!(target: "net::discv5",
@@ -593,13 +601,16 @@ pub fn spawn_populate_kbuckets_bg(
                 "starting bootstrap boost lookup query"
             );
 
-            lookup(target, &discv5, &metrics).await;
+            lookup(target, &discv5_handle, &metrics).await;
 
             tokio::time::sleep(pulse_lookup_interval).await;
         }
 
         // initiate regular lookups to populate kbuckets
         loop {
+            let Some(discv5_handle) = discv5.upgrade() else {
+                return;
+            };
             // make sure node is connected to each subtree in the network by target
             // selection (ref kademlia)
             let target = get_lookup_target(kbucket_index, local_node_id);
@@ -610,7 +621,7 @@ pub fn spawn_populate_kbuckets_bg(
                 "starting periodic lookup query"
             );
 
-            lookup(target, &discv5, &metrics).await;
+            lookup(target, &discv5_handle, &metrics).await;
 
             if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
                 // try to populate bucket one step closer
@@ -734,6 +745,40 @@ mod test {
             .build();
 
         Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")
+    }
+
+    async fn start_discovery_node_with_key(
+        secret_key: &SecretKey,
+        udp_port_discv5: u16,
+    ) -> Result<(Discv5, mpsc::Receiver<discv5::Event>), Error> {
+        let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
+        let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
+
+        let discv5_listen_config = ListenConfig::from(discv5_addr);
+        let discv5_config = Config::builder(rlpx_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        Discv5::start(secret_key, discv5_config).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn discv5_releases_port_on_drop() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let port = 30366;
+
+        let (node, updates) = start_discovery_node_with_key(&secret_key, port)
+            .await
+            .expect("should start discv5");
+        drop(updates);
+        drop(node);
+
+        tokio::task::yield_now().await;
+
+        let restarted = start_discovery_node_with_key(&secret_key, port).await;
+        assert!(restarted.is_ok(), "discv5 failed to rebind dropped port: {restarted:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
