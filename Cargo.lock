@@ -7583,9 +7583,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bb"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-hardforks 0.4.7",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "async-trait",
+ "clap",
+ "crossbeam-channel",
+ "derive_more",
+ "eyre",
+ "jsonrpsee",
+ "metrics",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-cli-util",
+ "reth-consensus",
+ "reth-engine-primitives",
+ "reth-engine-tree",
+ "reth-errors",
+ "reth-ethereum-cli",
+ "reth-ethereum-consensus",
+ "reth-ethereum-forks",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-api",
+ "reth-rpc-engine-api",
+ "reth-storage-errors",
+ "revm",
+ "revm-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-bench"
 version = "1.11.3"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -7607,9 +7656,13 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reqwest 0.13.2",
+ "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-engine-primitives",
+ "reth-ethereum-cli",
+ "reth-ethereum-primitives",
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",

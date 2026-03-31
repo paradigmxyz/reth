@@ -9,7 +9,8 @@ mod context;
 mod generate_big_block;
 pub(crate) mod helpers;
 pub use generate_big_block::{
-    RawTransaction, RpcTransactionSource, TransactionCollector, TransactionSource,
+    compute_payload_block_hash, BigBlockPayload, RawTransaction, RpcTransactionSource,
+    TransactionCollector, TransactionSource,
 };
 pub(crate) mod metrics_scraper;
 mod new_payload_fcu;
@@ -50,16 +51,16 @@ pub enum Subcommands {
     /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex)`
     SendPayload(send_payload::Command),
 
-    /// Generate a large block by packing transactions from existing blocks.
+    /// Generate a large block by merging consecutive blocks from an RPC.
     ///
-    /// This command fetches transactions from real blocks and packs them into a single
-    /// block using the `testing_buildBlockV1` RPC endpoint.
+    /// Fetches N consecutive blocks, takes block 0 as the base payload, concatenates
+    /// transactions from blocks 1..N-1, and saves the result to disk as a JSON file
+    /// containing the merged execution data and environment switches at block boundaries.
     ///
     /// Example:
     ///
-    /// `reth-bench generate-big-block --rpc-url http://localhost:8545 --engine-rpc-url
-    /// http://localhost:8551 --jwt-secret ~/.local/share/reth/mainnet/jwt.hex --target-gas
-    /// 30000000`
+    /// `reth-bench generate-big-block --rpc-url http://localhost:8545 --from-block 20000000
+    /// --count 10 --output-dir ./payloads`
     GenerateBigBlock(generate_big_block::Command),
 
     /// Replay pre-generated payloads from a directory.
