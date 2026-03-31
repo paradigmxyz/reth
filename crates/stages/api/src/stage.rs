@@ -324,12 +324,10 @@ impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
 #[cfg(test)]
 mod tests {
     use reth_chainspec::MAINNET;
-    use reth_db::test_utils::{
-        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
-    };
+    use reth_db::test_utils::{create_test_rw_db_with_datadir, tempdir_path};
     use reth_db_api::{models::StoredBlockBodyIndices, tables, transaction::DbTxMut};
     use reth_provider::{
-        providers::RocksDBProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
+        providers::RocksDBBuilder, test_utils::MockNodeTypesWithDB, ProviderFactory,
         StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileSegment,
     };
     use reth_stages_types::StageCheckpoint;
@@ -340,14 +338,21 @@ mod tests {
     #[test]
     fn test_exec_input_next_block_range_with_transaction_threshold() {
         let mut rng = generators::rng();
+
+        // Use a single temp directory for all data dirs so TempDatabase cleans up everything
+        let datadir_path = tempdir_path();
+        let static_files_path = datadir_path.join("static_files");
+        let rocksdb_path = datadir_path.join("rocksdb");
+        std::fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
         let provider_factory = ProviderFactory::<MockNodeTypesWithDB>::new(
-            create_test_rw_db(),
+            create_test_rw_db_with_datadir(&datadir_path),
             MAINNET.clone(),
-            StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
+            StaticFileProviderBuilder::read_write(&static_files_path)
                 .with_blocks_per_file(1)
                 .build()
-                .unwrap(),
-            RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
+                .expect("static file provider"),
+            RocksDBBuilder::new(&rocksdb_path).build().unwrap(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();

@@ -20,9 +20,7 @@ use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
-    test_utils::{
-        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
-    },
+    test_utils::{create_test_rw_db_with_datadir, tempdir_path, TempDatabase},
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
@@ -52,7 +50,7 @@ use reth_node_ethereum::{
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
+    providers::{BlockchainProvider, RocksDBBuilder, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::Runtime;
@@ -244,14 +242,17 @@ pub async fn test_exex_context_with_chain_spec(
     let evm_config = MockEvmConfig::default();
     let consensus = Arc::new(TestConsensus::default());
 
-    let (static_dir, _) = create_test_static_files_dir();
-    let (rocksdb_dir, _) = create_test_rocksdb_dir();
-    let db = create_test_rw_db();
+    // Use a single temp directory for all data dirs so TempDatabase cleans up everything
+    let datadir_path = tempdir_path();
+    let static_files_path = datadir_path.join("static_files");
+    let rocksdb_path = datadir_path.join("rocksdb");
+    std::fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
-        db,
+        create_test_rw_db_with_datadir(&datadir_path),
         chain_spec.clone(),
-        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
+        StaticFileProvider::read_write(&static_files_path).expect("static file provider"),
+        RocksDBBuilder::new(&rocksdb_path).with_default_tables().build().unwrap(),
         reth_tasks::Runtime::test(),
     )?;
 
