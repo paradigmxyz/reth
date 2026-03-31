@@ -20,6 +20,14 @@ use std::{path::PathBuf, sync::OnceLock, time::Duration};
 /// Global static transaction pool defaults
 static TXPOOL_DEFAULTS: OnceLock<DefaultTxPoolValues> = OnceLock::new();
 
+fn parse_non_zero_usize(value: &str) -> Result<usize, String> {
+    let parsed = value.parse::<usize>().map_err(|err| err.to_string())?;
+    if parsed == 0 {
+        return Err("value must be at least 1".to_string())
+    }
+    Ok(parsed)
+}
+
 /// Default values for transaction pool that can be customized
 ///
 /// Global defaults can be set via [`DefaultTxPoolValues::try_init`].
@@ -409,7 +417,11 @@ pub struct TxPoolArgs {
     pub disable_transactions_backup: bool,
 
     /// Max batch size for transaction pool insertions
-    #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
+    #[arg(
+        long = "txpool.max-batch-size",
+        default_value_t = DefaultTxPoolValues::get_global().max_batch_size,
+        value_parser = parse_non_zero_usize
+    )]
     pub max_batch_size: usize,
 }
 
@@ -545,7 +557,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 
     /// Returns max batch size for transaction batch insertion.
     fn max_batch_size(&self) -> usize {
-        self.max_batch_size
+        self.max_batch_size.max(1)
     }
 }
 
@@ -587,6 +599,19 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_parse_zero_max_batch_size_is_invalid() {
+        let result =
+            CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.max-batch-size", "0"]);
+        assert!(result.is_err(), "Expected an error for zero max batch size");
+    }
+
+    #[test]
+    fn txpool_max_batch_size_config_is_defensively_non_zero() {
+        let args = TxPoolArgs { max_batch_size: 0, ..Default::default() };
+        assert_eq!(RethTransactionPoolConfig::max_batch_size(&args), 1);
     }
 
     #[test]

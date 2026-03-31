@@ -61,6 +61,8 @@ where
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
 
+        let max_batch_size = max_batch_size.max(1);
+
         let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
 
         (processor, request_tx)
@@ -242,6 +244,35 @@ mod tests {
             .await
             .expect("Timeout waiting for transaction result")
         {
+            assert!(result.is_ok());
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_zero_max_batch_size_is_clamped_and_completes() {
+        let pool = testing_pool();
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 0);
+        assert_eq!(processor.max_batch_size, 1);
+
+        // Spawn the processor
+        let handle = tokio::spawn(processor);
+
+        let mut responses = Vec::new();
+        for i in 0..10 {
+            let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx);
+            request_tx.send(request).expect("Could not send batch tx");
+            responses.push(response_rx);
+        }
+
+        for response_rx in responses {
+            let result = timeout(Duration::from_millis(10), response_rx)
+                .await
+                .expect("Timeout waiting for response")
+                .expect("Response channel was closed unexpectedly");
             assert!(result.is_ok());
         }
 
