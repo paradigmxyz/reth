@@ -45,6 +45,10 @@ pub struct EthBeaconConsensus<ChainSpec> {
     max_extra_data_size: usize,
     /// When true, skips the gas limit change validation between parent and child blocks.
     skip_gas_limit_ramp_check: bool,
+    /// When true, skips the blob gas used check in header validation.
+    skip_blob_gas_used_check: bool,
+    /// When true, skips the requests hash check in post-execution validation.
+    skip_requests_hash_check: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
@@ -54,6 +58,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             chain_spec,
             max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE,
             skip_gas_limit_ramp_check: false,
+            skip_blob_gas_used_check: false,
+            skip_requests_hash_check: false,
         }
     }
 
@@ -74,6 +80,18 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
+    /// Disables the blob gas used check in header validation.
+    pub const fn with_skip_blob_gas_used_check(mut self, skip: bool) -> Self {
+        self.skip_blob_gas_used_check = skip;
+        self
+    }
+
+    /// Disables the requests hash check in post-execution validation.
+    pub const fn with_skip_requests_hash_check(mut self, skip: bool) -> Self {
+        self.skip_requests_hash_check = skip;
+        self
+    }
+
     /// Returns the chain spec associated with this consensus engine.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
@@ -91,13 +109,21 @@ where
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(
+        let res = validate_block_post_execution(
             block,
             &self.chain_spec,
             &result.receipts,
             &result.requests,
             receipt_root_bloom,
-        )
+        );
+
+        if self.skip_requests_hash_check &&
+            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
+        {
+            return Ok(());
+        }
+
+        res
     }
 }
 
@@ -183,12 +209,14 @@ where
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_4844_header_standalone(
-                header,
-                self.chain_spec
-                    .blob_params_at_timestamp(header.timestamp())
-                    .unwrap_or_else(BlobParams::cancun),
-            )?;
+            if !self.skip_blob_gas_used_check {
+                validate_4844_header_standalone(
+                    header,
+                    self.chain_spec
+                        .blob_params_at_timestamp(header.timestamp())
+                        .unwrap_or_else(BlobParams::cancun),
+                )?;
+            }
         } else if header.blob_gas_used().is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas().is_some() {

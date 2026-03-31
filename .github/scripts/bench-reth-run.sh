@@ -132,12 +132,6 @@ if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-i
   SYNC_STATE_IDLE=true
 fi
 
-# Big blocks mode requires the testing API, skip-invalid-transactions, and
-# skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
-if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size max --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
-fi
-
 # Append per-label extra node args (baseline or feature)
 EXTRA_NODE_ARGS=""
 case "$LABEL" in
@@ -266,9 +260,18 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
+  BB_BENCH_ARGS=(--reth-new-payload --wait-for-persistence)
+  if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+    BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+  fi
+  # Limit number of payloads if blocks count is specified
+  if [ "${BENCH_BLOCKS:-0}" -gt 0 ] 2>/dev/null; then
+    BB_BENCH_ARGS+=(--count "$BENCH_BLOCKS")
+  fi
+
   echo "Running big blocks benchmark (replay-payloads)..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
-    "${EXTRA_BENCH_ARGS[@]}" \
+    "${BB_BENCH_ARGS[@]}" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
