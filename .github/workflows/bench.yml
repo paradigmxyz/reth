@@ -725,7 +725,7 @@ jobs:
         run: |
           set -euo pipefail
           MC="mc --config-dir /home/ubuntu/.mc"
-          MANIFEST="minio/reth-snapshots/brian-test-big-blocks.json"
+          MANIFEST="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.json"
           HASH_FILE="$HOME/.reth-bench-big-blocks-hash"
           echo "Fetching big-blocks manifest from $MANIFEST..."
           BB_MANIFEST=$($MC cat "$MANIFEST" 2>/dev/null) || {
@@ -887,7 +887,7 @@ jobs:
             exit 0
           fi
           MC="mc --config-dir /home/ubuntu/.mc"
-          MANIFEST="minio/reth-snapshots/brian-test-big-blocks.json"
+          MANIFEST="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.json"
           rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
 
           # Download and parse manifest
