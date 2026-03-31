@@ -37,6 +37,17 @@ impl SharedPreservedSparseTrie {
     /// before starting payload processing.
     ///
     /// Returns the time spent waiting for the lock.
+    pub(super) fn try_wait_for_availability(&self) -> Option<std::time::Duration> {
+        self.0.try_lock().map(|_guard| std::time::Duration::ZERO)
+    }
+
+    /// Waits until the sparse trie lock becomes available.
+    ///
+    /// This acquires and immediately releases the lock, ensuring that any
+    /// ongoing operations complete before returning. Useful for synchronization
+    /// before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
     pub(super) fn wait_for_availability(&self) -> std::time::Duration {
         let start = Instant::now();
         let _guard = self.0.lock();

@@ -107,6 +107,16 @@ impl PayloadExecutionCache {
     /// This is useful for synchronization before starting payload processing.
     ///
     /// Returns the time spent waiting for the lock.
+    pub fn try_wait_for_availability(&self) -> Option<Duration> {
+        self.inner.try_write().map(|_guard| Duration::ZERO)
+    }
+
+    /// Waits until the execution cache becomes available for use.
+    ///
+    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
+    /// This is useful for synchronization before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
     pub fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
         // Acquire write lock to wait for any current holders to finish
