@@ -90,6 +90,13 @@ impl std::fmt::Debug for BbEvmPlan {
 // BbBlockExecutor — handles segment boundaries
 // ---------------------------------------------------------------------------
 
+/// Function pointer that seeds block hashes into the DB's block hash cache.
+///
+/// Injected from `ConfigureEvm::create_executor` where the concrete `State<DB>`
+/// type is known, allowing `BbBlockExecutor` to reseed the ring buffer at
+/// segment boundaries without requiring additional trait bounds on `DB`.
+pub(crate) type BlockHashSeeder<DB> = fn(&mut DB, &[(u64, B256)]);
+
 /// Block executor that wraps [`EthBlockExecutor`] and handles segment-boundary
 /// changes for big-block execution.
 ///
@@ -101,14 +108,6 @@ impl std::fmt::Debug for BbEvmPlan {
 /// Gas counters reset at each boundary so that each segment's real gas limit
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
-
-/// Function pointer that seeds block hashes into the DB's block hash cache.
-///
-/// Injected from `ConfigureEvm::create_executor` where the concrete `State<DB>`
-/// type is known, allowing `BbBlockExecutor` to reseed the ring buffer at
-/// segment boundaries without requiring additional trait bounds on `DB`.
-pub(crate) type BlockHashSeeder<DB> = fn(&mut DB, &[(u64, B256)]);
-
 pub(crate) struct BbBlockExecutor<'a, DB, I, P, Spec>
 where
     DB: Database,
