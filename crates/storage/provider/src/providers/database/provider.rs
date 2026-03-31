@@ -3832,7 +3832,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             self.static_file_provider.commit()?;
         } else {
-            // Normal path: finalize() will call sync_all() if not already synced
+            // Normal path: finalize() first syncs all dirty static file writers, then publishes
+            // their configs and indices.
             let mut timings = metrics::CommitTimings::default();
 
             let start = Instant::now();

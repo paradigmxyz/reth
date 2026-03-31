@@ -656,8 +656,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Writes to a static file segment using the provided closure.
     ///
-    /// The closure receives a mutable reference to the segment writer. After the closure completes,
-    /// `sync_all()` is called to flush writes to disk.
+    /// The closure receives a mutable reference to the segment writer. Durability is deferred to
+    /// the batch finalization pass so that segment writes can be synced together.
     #[instrument(level = "debug", target = "providers::static_file", skip_all, fields(?segment))]
     fn write_segment<F>(
         &self,
@@ -669,14 +669,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()>,
     {
         let mut w = self.get_writer(first_block_number, segment)?;
-        f(&mut w)?;
-        w.sync_all()
+        f(&mut w)
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
     ///
-    /// This spawns tasks on the storage thread pool for each segment type and each task calls
-    /// `sync_all()` on its writer when done.
+    /// This spawns tasks on the storage thread pool for each segment type. The tasks only append
+    /// data; durability is handled by the shared finalization step at commit time.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
     pub fn write_blocks_data(
         &self,

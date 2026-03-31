@@ -163,8 +163,9 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
 
     /// Finalizes all writers by committing their configuration to disk and updating indices.
     ///
-    /// Must be called after `sync_all` was called on individual writers.
-    /// Returns an error if any writer has prune queued.
+    /// This keeps all segment write locks held while it first syncs every dirty writer and then
+    /// finalizes them. That preserves the changeset sidecar-before-header ordering across the
+    /// whole batch and prevents new writes from slipping in between the two phases.
     #[instrument(
         name = "StaticFileWriters::finalize",
         level = "debug",
@@ -174,16 +175,25 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn finalize(&self) -> ProviderResult<()> {
         debug!(target: "providers::static_file", "Finalizing all static file segments into disk");
 
-        for writer_lock in [
-            &self.headers,
-            &self.transactions,
-            &self.receipts,
-            &self.transaction_senders,
-            &self.account_change_sets,
-            &self.storage_change_sets,
-        ] {
-            let mut writer = writer_lock.write();
-            if let Some(writer) = writer.as_mut() {
+        let mut writers = [
+            self.headers.write(),
+            self.transactions.write(),
+            self.receipts.write(),
+            self.transaction_senders.write(),
+            self.account_change_sets.write(),
+            self.storage_change_sets.write(),
+        ];
+
+        for writer in &mut writers {
+            let Some(writer) = writer.as_mut() else { continue };
+            if writer.is_dirty() {
+                writer.sync_all()?;
+            }
+        }
+
+        for writer in &mut writers {
+            let Some(writer) = writer.as_mut() else { continue };
+            if writer.is_dirty() {
                 writer.finalize()?;
             }
         }
@@ -365,6 +375,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns `true` if the writer will prune on commit.
     pub const fn will_prune_on_commit(&self) -> bool {
         self.prune_on_commit.is_some()
+    }
+
+    /// Returns `true` if the inner writer has uncommitted changes.
+    const fn is_dirty(&self) -> bool {
+        self.writer.is_dirty()
     }
 
     /// Heals the changeset offset sidecar after `NippyJar` healing.
