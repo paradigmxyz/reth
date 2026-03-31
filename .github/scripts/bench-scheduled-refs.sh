@@ -42,7 +42,7 @@ if [ "$MODE" = "hourly" ]; then
 
   # --- Step 1: Resolve feature ref from git ---
   echo "::group::Resolving hourly refs from git"
-  git fetch origin main --quiet
+  git fetch origin main --depth=2 --quiet
   FEATURE_REF=$(git rev-parse origin/main)
   echo "Feature (HEAD): $FEATURE_REF"
   echo "::endgroup::"
