@@ -122,7 +122,7 @@ test-utils = [
     "reth-tasks/test-utils",
 ]
 trie-debug = [
-	"reth-engine-tree/trie-debug",
-	"reth-engine-primitives/trie-debug",
-	"reth-node-core/trie-debug"
+    "reth-engine-tree/trie-debug",
+    "reth-engine-primitives/trie-debug",
+    "reth-node-core/trie-debug",
 ]
