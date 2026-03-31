@@ -249,7 +249,6 @@ jobs:
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
-      BENCH_RETH_NEW_PAYLOAD: "true"
       BENCH_WAIT_TIME: ""
       BENCH_BASELINE_ARGS: ""
       BENCH_FEATURE_ARGS: ""

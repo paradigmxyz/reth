@@ -15,7 +15,7 @@ use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -148,10 +148,10 @@ impl Future for PendingPayloadId {
 pub struct NewPayloadTimings {
     /// Server-side execution latency.
     pub latency: Duration,
-    /// Time spent waiting for persistence to complete.
-    ///
-    /// `None` when wasn't asked to wait for persistence.
-    pub persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence, including both time this message spent queued
+    /// due to persistence backpressure and, when `wait_for_persistence` was requested,
+    /// the explicit wait for in-flight persistence to complete.
+    pub persistence_wait: Duration,
     /// Time spent waiting for the execution cache lock.
     ///
     /// `None` when wasn't asked to wait for execution cache.
@@ -212,6 +212,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         wait_for_caches: bool,
         /// The sender for returning payload status result and timing breakdown.
         tx: oneshot::Sender<Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>>,
+        /// When this message was enqueued, used to measure backpressure wait time.
+        enqueued_at: Instant,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -308,6 +310,7 @@ where
             wait_for_persistence,
             wait_for_caches,
             tx,
+            enqueued_at: Instant::now(),
         });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
