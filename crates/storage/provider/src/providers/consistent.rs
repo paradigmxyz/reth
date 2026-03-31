@@ -1462,27 +1462,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
         Ok(changesets)
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        let mut count = 0;
-        if let Some(head_block) = &self.head_block {
-            for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .iter()
-                    .flatten()
-                    .map(|(_, revert)| revert.storage.len())
-                    .sum::<usize>();
-            }
-        }
-
-        count += self.storage_provider.storage_changeset_count()?;
-
-        Ok(count)
-    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
@@ -1630,21 +1609,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         changesets.sort_by_key(|(block_num, _)| *block_num);
 
         Ok(changesets)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        // Count changesets from in-memory state
-        let mut count = 0;
-        if let Some(head_block) = &self.head_block {
-            for state in head_block.chain() {
-                count += state.block_ref().execution_output.state.reverts.len();
-            }
-        }
-
-        // Add changesets from storage provider
-        count += self.storage_provider.account_changeset_count()?;
-
-        Ok(count)
     }
 }
 

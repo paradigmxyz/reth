@@ -647,6 +647,45 @@ where
         Ok(true)
     }
 
+    /// Update or remove a trie account for stateless validation.
+    ///
+    /// Unlike [`Self::update_account`], this method:
+    /// - Accepts `Option<Account>` — `None` removes the account leaf.
+    /// - Falls back to [`EMPTY_ROOT_HASH`] for unrevealed accounts instead of returning
+    ///   [`SparseTrieErrorKind::Blind`], since stateless validation operates with a sparse witness
+    ///   where not all accounts are revealed.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+    pub fn update_account_stateless(
+        &mut self,
+        address: B256,
+        account: Option<Account>,
+        provider_factory: impl TrieNodeProviderFactory,
+    ) -> SparseStateTrieResult<()> {
+        let nibbles = Nibbles::unpack(address);
+
+        let Some(account) = account else {
+            trace!(target: "trie::sparse", ?address, "Removing account");
+            return self.remove_account_leaf(&nibbles, provider_factory);
+        };
+
+        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
+            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
+            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+        } else if let Some(value) = self.get_account_value(&address) {
+            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
+            TrieAccount::decode(&mut &value[..])?.storage_root
+        } else {
+            EMPTY_ROOT_HASH
+        };
+
+        trace!(target: "trie::sparse", ?address, "Updating account");
+        self.account_rlp_buf.clear();
+        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+
+        Ok(())
+    }
+
     /// Update the storage root of a revealed account.
     ///
     /// If the account doesn't exist in the trie, the function is a no-op.

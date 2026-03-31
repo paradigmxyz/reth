@@ -162,6 +162,30 @@ pub struct NewPayloadTimings {
     pub sparse_trie_wait: Option<Duration>,
 }
 
+/// Additional data for big block payloads that merge multiple real blocks.
+///
+/// This is used by the `reth_newPayload` endpoint to pass environment switches
+/// and prior block hashes needed for correct multi-segment execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BigBlockData<ExecutionData> {
+    /// Environment switches at block boundaries.
+    /// Each entry is `(cumulative_tx_count, execution_data_of_next_block)`.
+    ///
+    /// The first entry at index 0 represents the **original unmutated** base block's
+    /// `ExecutionData`, which must be used to derive the initial EVM environment.
+    pub env_switches: Vec<(usize, ExecutionData)>,
+    /// Block number → real block hash for blocks covered by previous big blocks in a sequence.
+    /// When replaying chained big blocks, the BLOCKHASH opcode needs real hashes for blocks
+    /// that were merged into earlier big blocks (and thus not individually persisted).
+    pub prior_block_hashes: Vec<(u64, alloy_primitives::B256)>,
+}
+
+impl<T> Default for BigBlockData<T> {
+    fn default() -> Self {
+        Self { env_switches: Vec::new(), prior_block_hashes: Vec::new() }
+    }
+}
+
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]

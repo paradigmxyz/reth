@@ -6,7 +6,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
-use reth_node_builder::NodeTypesWithDB;
+use reth_node_api::HeaderTy;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
@@ -58,7 +58,7 @@ where
 }
 
 /// Imports all the tables that can be copied over a range.
-fn import_tables_with_range<N: NodeTypesWithDB>(
+fn import_tables_with_range<N: ProviderNodeTypes>(
     output_db: &DatabaseEnv,
     db_tool: &DbTool<N>,
     from: u64,
@@ -74,7 +74,7 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
         )
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::Headers, _>(
+        tx.import_table_with_range::<tables::Headers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,

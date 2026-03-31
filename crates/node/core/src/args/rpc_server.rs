@@ -648,14 +648,6 @@ pub struct RpcServerArgs {
     #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
 
-    /// Skip the 1/1024 gas limit change restriction between parent and child blocks.
-    ///
-    /// When enabled, consensus will not enforce the gas limit bound divisor check,
-    /// allowing blocks to jump to an arbitrary gas limit without ramping up over
-    /// thousands of empty blocks.
-    #[arg(long = "testing.skip-gas-limit-ramp-check", default_value_t = false, hide = true)]
-    pub testing_skip_gas_limit_ramp_check: bool,
-
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
     /// When set, `testing_buildBlockV1` will use this value instead of inheriting
@@ -902,7 +894,6 @@ impl Default for RpcServerArgs {
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
             testing_skip_invalid_transactions: true,
-            testing_skip_gas_limit_ramp_check: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         }
@@ -1081,7 +1072,6 @@ mod tests {
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
             testing_skip_invalid_transactions: true,
-            testing_skip_gas_limit_ramp_check: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         };
