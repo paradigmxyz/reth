@@ -50,6 +50,10 @@ pub struct SparseStateTrie<
     hot_slots_lfu: BucketedLfu<HotSlotKey>,
     /// Global LFU tracker for hot account entries.
     hot_accounts_lfu: BucketedLfu<B256>,
+    /// Scratch buffer reused to group retained slots by address across prune cycles.
+    retained_slot_paths: B256Map<Vec<Nibbles>>,
+    /// Scratch buffer reused to unpack retained account paths across prune cycles.
+    retained_account_paths: Vec<Nibbles>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -69,6 +73,8 @@ where
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
+            retained_slot_paths: Default::default(),
+            retained_account_paths: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -873,24 +879,24 @@ where
     pub fn prune(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
         self.hot_slots_lfu.decay_and_evict(max_hot_slots);
         self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        let retained = self.hot_slots_lfu.retained_slots_by_address();
+        self.hot_slots_lfu.retained_slots_by_address_into(&mut self.retained_slot_paths);
+        self.retained_account_paths.clear();
+        self.retained_account_paths
+            .extend(self.hot_accounts_lfu.keys().map(|key| Nibbles::unpack(*key)));
 
-        let retained_account_paths: Vec<Nibbles> =
-            self.hot_accounts_lfu.keys().map(|k| Nibbles::unpack(*k)).collect();
-
-        let retained_accounts = retained_account_paths.len();
-        let retained_storage_tries = retained.len();
+        let retained_accounts = self.retained_account_paths.len();
+        let retained_storage_tries = self.retained_slot_paths.len();
         let total_storage_tries_before = self.storage.tries.len();
+
+        let state = &mut self.state;
+        let storage = &mut self.storage;
+        let retained_account_paths = &self.retained_account_paths;
+        let retained_slot_paths = &self.retained_slot_paths;
 
         // Prune account and storage tries in parallel using the same LFU-selected set.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || {
-                self.state
-                    .as_revealed_mut()
-                    .map(|trie| trie.prune(&retained_account_paths))
-                    .unwrap_or(0)
-            },
-            || self.storage.prune_by_retained_slots(retained),
+            || state.as_revealed_mut().map(|trie| trie.prune(&retained_account_paths)).unwrap_or(0),
+            || storage.prune_by_retained_slots(retained_slot_paths),
         );
 
         debug!(
@@ -929,6 +935,8 @@ struct StorageTries<S = ParallelSparseTrie> {
     cleared_tries: Vec<RevealableSparseTrie<S>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
+    /// Scratch buffer reused to collect evicted trie addresses after the parallel prune pass.
+    evicted_addresses: Vec<B256>,
 }
 
 #[cfg(feature = "std")]
@@ -937,7 +945,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
-    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<Vec<Nibbles>>) -> usize {
+    fn prune_by_retained_slots(&mut self, retained_slots: &B256Map<Vec<Nibbles>>) -> usize {
         // Parallel pass: prune retained tries and clear evicted ones in place.
         {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
@@ -953,20 +961,21 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         }
 
         // Cheap sequential drain: move already-cleared tries into the reuse pool.
-        let addresses_to_evict: Vec<B256> = self
-            .tries
-            .keys()
-            .filter(|address| !retained_slots.contains_key(*address))
-            .copied()
-            .collect();
+        let mut evicted_addresses = core::mem::take(&mut self.evicted_addresses);
+        evicted_addresses.clear();
+        evicted_addresses.extend(
+            self.tries.keys().filter(|address| !retained_slots.contains_key(*address)).copied(),
+        );
 
-        let evicted = addresses_to_evict.len();
+        let evicted = evicted_addresses.len();
         self.cleared_tries.reserve(evicted);
-        for address in &addresses_to_evict {
+        for address in &evicted_addresses {
             if let Some(trie) = self.tries.remove(address) {
                 self.cleared_tries.push(trie);
             }
         }
+
+        self.evicted_addresses = evicted_addresses;
 
         evicted
     }
@@ -1037,20 +1046,21 @@ struct HotSlotKey {
 /// Slot-specific helpers for the `BucketedLfu<HotSlotKey>`.
 #[cfg(feature = "std")]
 impl BucketedLfu<HotSlotKey> {
-    /// Returns retained slots grouped by address.
-    fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {
-        let mut grouped =
-            B256Map::<Vec<Nibbles>>::with_capacity_and_hasher(self.len(), Default::default());
+    /// Writes retained slots grouped by address into a caller-owned scratch map.
+    fn retained_slots_by_address_into(&self, grouped: &mut B256Map<Vec<Nibbles>>) {
+        grouped.reserve(self.len().saturating_sub(grouped.len()));
+
+        for slots in grouped.values_mut() {
+            slots.clear();
+        }
+
+        // LFU entries are unique `(address, slot)` pairs, and trie-level prune sorts the retained
+        // leaves it receives, so we only need to rebuild the grouping here.
         for key in self.keys() {
             grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
         }
 
-        for slots in grouped.values_mut() {
-            slots.sort_unstable();
-            slots.dedup();
-        }
-
-        grouped
+        grouped.retain(|_, slots| !slots.is_empty());
     }
 }
 
@@ -1240,6 +1250,35 @@ mod tests {
             sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
             vec![HotSlotKey { address: account, slot }]
         );
+    }
+
+    #[test]
+    fn prune_reuses_hotset_scratch_without_stale_entries() {
+        let account_a = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let account_b = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let slot_a = b256!("0x3000000000000000000000000000000000000000000000000000000000000000");
+        let slot_b = b256!("0x4000000000000000000000000000000000000000000000000000000000000000");
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+
+        sparse.set_hot_cache_capacities(2, 2);
+        sparse.record_account_touch(account_a);
+        sparse.record_account_touch(account_b);
+        sparse.record_slot_touch(account_a, slot_a);
+        sparse.record_slot_touch(account_b, slot_b);
+
+        sparse.prune(2, 2);
+        assert_eq!(sparse.retained_slot_paths.len(), 2);
+        assert_eq!(sparse.retained_account_paths.len(), 2);
+
+        sparse.prune(1, 1);
+
+        assert_eq!(sparse.retained_slot_paths.len(), 1);
+        assert_eq!(
+            sparse.retained_slot_paths.get(&account_a),
+            Some(&vec![Nibbles::unpack(slot_a)])
+        );
+        assert!(!sparse.retained_slot_paths.contains_key(&account_b));
+        assert_eq!(sparse.retained_account_paths, vec![Nibbles::unpack(account_a)]);
     }
 
     #[test]
