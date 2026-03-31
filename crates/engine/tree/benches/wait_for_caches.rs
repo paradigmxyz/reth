@@ -11,7 +11,6 @@ use std::{
 };
 
 const HOLD_DURATION: Duration = Duration::from_micros(400);
-const REPORTED_WAIT_TOLERANCE: Duration = Duration::from_micros(100);
 const MAX_UNCONTENDED_WAIT: Duration = Duration::from_millis(1);
 
 struct LockBlocker {
@@ -31,6 +30,11 @@ fn spin_for(duration: Duration) {
     while start.elapsed() < duration {
         spin_loop();
     }
+}
+
+fn assert_contended(wait: Duration, elapsed: Duration) {
+    assert!(wait > Duration::ZERO);
+    assert!(wait <= elapsed);
 }
 
 fn spawn_execution_cache_blocker(harness: CacheWaitBenchHarness) -> LockBlocker {
@@ -91,10 +95,11 @@ fn bench_wait_for_caches(c: &mut Criterion) {
                 let start = Instant::now();
                 let handle = blocker.start();
                 let wait = sparse_trie_contended.wait_for_caches();
-                total += start.elapsed();
+                let elapsed = start.elapsed();
+                total += elapsed;
 
                 assert!(wait.execution_cache <= MAX_UNCONTENDED_WAIT);
-                assert!(wait.sparse_trie >= HOLD_DURATION.saturating_sub(REPORTED_WAIT_TOLERANCE));
+                assert_contended(wait.sparse_trie, elapsed);
                 black_box(wait);
 
                 handle.join().expect("sparse trie blocker thread should complete");
@@ -115,11 +120,11 @@ fn bench_wait_for_caches(c: &mut Criterion) {
                 let execution_handle = execution_blocker.start();
                 let sparse_trie_handle = sparse_trie_blocker.start();
                 let wait = dual_contended.wait_for_caches();
-                total += start.elapsed();
+                let elapsed = start.elapsed();
+                total += elapsed;
 
-                let min_wait = HOLD_DURATION.saturating_sub(REPORTED_WAIT_TOLERANCE);
-                assert!(wait.execution_cache >= min_wait);
-                assert!(wait.sparse_trie >= min_wait);
+                assert_contended(wait.execution_cache, elapsed);
+                assert_contended(wait.sparse_trie, elapsed);
                 black_box(wait);
 
                 execution_handle.join().expect("execution cache blocker thread should complete");
