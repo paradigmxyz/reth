@@ -161,43 +161,88 @@ where
     }
 }
 
+/// Minimal harness for benchmarking cache-wait coordination without constructing a full payload
+/// processor.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct CacheWaitBenchHarness {
+    executor: Runtime,
+    execution_cache: PayloadExecutionCache,
+    sparse_state_trie: SharedPreservedSparseTrie,
+}
+
+impl CacheWaitBenchHarness {
+    /// Creates a new benchmark harness backed by the provided runtime.
+    pub fn new(executor: Runtime) -> Self {
+        Self {
+            executor,
+            execution_cache: Default::default(),
+            sparse_state_trie: Default::default(),
+        }
+    }
+
+    /// Holds the execution-cache write lock for the duration of `blocked`.
+    pub fn with_execution_cache_blocked<R>(&self, blocked: impl FnOnce() -> R) -> R {
+        let mut result = None;
+        self.execution_cache.update_with_guard(|_| result = Some(blocked()));
+        result.expect("execution cache blocker closure should return a value")
+    }
+
+    /// Holds the preserved sparse-trie lock for the duration of `blocked`.
+    pub fn with_sparse_trie_blocked<R>(&self, blocked: impl FnOnce() -> R) -> R {
+        let _guard = self.sparse_state_trie.lock();
+        blocked()
+    }
+}
+
+impl WaitForCaches for CacheWaitBenchHarness {
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        wait_for_caches_with(&self.executor, &self.execution_cache, &self.sparse_state_trie)
+    }
+}
+
+fn wait_for_caches_with(
+    executor: &Runtime,
+    execution_cache: &PayloadExecutionCache,
+    sparse_trie: &SharedPreservedSparseTrie,
+) -> CacheWaitDurations {
+    let execution_cache = execution_cache.clone();
+    let sparse_trie = sparse_trie.clone();
+
+    let (execution_tx, execution_rx) = mpsc::channel();
+    let (sparse_trie_tx, sparse_trie_rx) = mpsc::channel();
+
+    executor.spawn_blocking_named("wait-exec-cache", move || {
+        let _ = execution_tx.send(execution_cache.wait_for_availability());
+    });
+    executor.spawn_blocking_named("wait-sparse-tri", move || {
+        let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
+    });
+
+    let execution_cache_duration =
+        execution_rx.recv().expect("execution cache wait task failed to send result");
+    let sparse_trie_duration =
+        sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+
+    debug!(
+        target: "engine::tree::payload_processor",
+        ?execution_cache_duration,
+        ?sparse_trie_duration,
+        "Execution cache and sparse trie locks acquired"
+    );
+    CacheWaitDurations {
+        execution_cache: execution_cache_duration,
+        sparse_trie: sparse_trie_duration,
+    }
+}
+
 impl<Evm> WaitForCaches for PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
         debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
-
-        // Wait for both caches in parallel using std threads
-        let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
-
-        // Use channels and spawn_blocking instead of std::thread::spawn
-        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
-
-        self.executor.spawn_blocking_named("wait-exec-cache", move || {
-            let _ = execution_tx.send(execution_cache.wait_for_availability());
-        });
-        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-        });
-
-        let execution_cache_duration =
-            execution_rx.recv().expect("execution cache wait task failed to send result");
-        let sparse_trie_duration =
-            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
-
-        debug!(
-            target: "engine::tree::payload_processor",
-            ?execution_cache_duration,
-            ?sparse_trie_duration,
-            "Execution cache and sparse trie locks acquired"
-        );
-        CacheWaitDurations {
-            execution_cache: execution_cache_duration,
-            sparse_trie: sparse_trie_duration,
-        }
+        wait_for_caches_with(&self.executor, &self.execution_cache, &self.sparse_state_trie)
     }
 }
 
