@@ -21,7 +21,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
     TrieInputSorted,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -671,6 +671,16 @@ impl<N: NodePrimitives> BlockState<N> {
     /// the state.
     pub fn executed_block_receipts_ref(&self) -> &[N::Receipt] {
         self.receipts()
+    }
+
+    /// Returns receipts in the given range for the executed block.
+    ///
+    /// This avoids cloning all block receipts when only a sub-range is needed.
+    pub fn executed_block_receipts_in_range(
+        &self,
+        range: RangeInclusive<usize>,
+    ) -> Vec<N::Receipt> {
+        self.executed_block_receipts_ref()[range].to_vec()
     }
 
     /// Returns an iterator over __parent__ `BlockStates`.

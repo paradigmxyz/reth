@@ -1098,9 +1098,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
-            |index_range, block_state| {
-                Ok(block_state.executed_block_receipts().drain(index_range).collect())
-            },
+            |index_range, block_state| Ok(block_state.executed_block_receipts_in_range(index_range)),
         )
     }
 
