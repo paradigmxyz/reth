@@ -215,12 +215,20 @@ pub trait CacheAvailabilityWait: Clone + Send + 'static {
 }
 
 impl CacheAvailabilityWait for PayloadExecutionCache {
+    fn try_wait_for_availability(&self) -> Option<Duration> {
+        PayloadExecutionCache::try_wait_for_availability(self)
+    }
+
     fn wait_for_availability(&self) -> Duration {
         PayloadExecutionCache::wait_for_availability(self)
     }
 }
 
 impl CacheAvailabilityWait for SharedPreservedSparseTrie {
+    fn try_wait_for_availability(&self) -> Option<Duration> {
+        SharedPreservedSparseTrie::try_wait_for_availability(self)
+    }
+
     fn wait_for_availability(&self) -> Duration {
         SharedPreservedSparseTrie::wait_for_availability(self)
     }
@@ -250,34 +258,44 @@ where
     ExecutionCacheWait: CacheAvailabilityWait,
     SparseTrieWait: CacheAvailabilityWait,
 {
-    let execution_cache = execution_cache.clone();
-    let sparse_trie = sparse_trie.clone();
+    let waits = match (
+        execution_cache.try_wait_for_availability(),
+        sparse_trie.try_wait_for_availability(),
+    ) {
+        (Some(execution_cache), Some(sparse_trie)) => {
+            CacheWaitDurations { execution_cache, sparse_trie }
+        }
+        (None, Some(sparse_trie)) => CacheWaitDurations {
+            execution_cache: execution_cache.wait_for_availability(),
+            sparse_trie,
+        },
+        (Some(execution_cache), None) => {
+            CacheWaitDurations { execution_cache, sparse_trie: sparse_trie.wait_for_availability() }
+        }
+        (None, None) => {
+            // Keep dual contention parallel without paying the extra worker/task overhead when
+            // only one cache is actually busy.
+            let execution_cache = execution_cache.clone();
+            let (execution_tx, execution_rx) = channel();
+            executor.spawn_blocking_named("wait-exec-cache", move || {
+                let _ = execution_tx.send(execution_cache.wait_for_availability());
+            });
 
-    let (execution_tx, execution_rx) = mpsc::channel();
-    let (sparse_trie_tx, sparse_trie_rx) = mpsc::channel();
+            let sparse_trie = sparse_trie.wait_for_availability();
+            let execution_cache =
+                execution_rx.recv().expect("execution cache wait task failed to send result");
 
-    executor.spawn_blocking_named("wait-exec-cache", move || {
-        let _ = execution_tx.send(execution_cache.wait_for_availability());
-    });
-    executor.spawn_blocking_named("wait-sparse-tri", move || {
-        let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-    });
-
-    let execution_cache_duration =
-        execution_rx.recv().expect("execution cache wait task failed to send result");
-    let sparse_trie_duration =
-        sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+            CacheWaitDurations { execution_cache, sparse_trie }
+        }
+    };
 
     debug!(
         target: "engine::tree::payload_processor",
-        ?execution_cache_duration,
-        ?sparse_trie_duration,
+        execution_cache_duration = ?waits.execution_cache,
+        sparse_trie_duration = ?waits.sparse_trie,
         "Execution cache and sparse trie locks acquired"
     );
-    CacheWaitDurations {
-        execution_cache: execution_cache_duration,
-        sparse_trie: sparse_trie_duration,
-    }
+    waits
 }
 
 impl<Evm> WaitForCaches for PayloadProcessor<Evm>

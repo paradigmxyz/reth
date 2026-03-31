@@ -12,7 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const HOLD_DURATION: Duration = Duration::from_micros(10);
+// Keep the synthetic contention short so this benchmark measures the wrapper overhead around the
+// reported wait duration, which matches the near-zero waits observed in production traces.
+const HOLD_DURATION: Duration = Duration::from_micros(1);
 
 #[derive(Clone, Debug, Default)]
 struct MockAvailability {
