@@ -41,6 +41,7 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
+    time::Duration,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
@@ -201,43 +202,71 @@ impl WaitForCaches for CacheWaitBenchHarness {
     }
 }
 
-fn wait_for_caches_with(
+/// Benchmark hook for exercising the cache-wait wrapper with synthetic waiters.
+#[doc(hidden)]
+pub trait CacheAvailabilityWait: Clone + Send + 'static {
+    /// Returns the uncontended wait duration if availability can be established inline.
+    fn try_wait_for_availability(&self) -> Option<Duration> {
+        None
+    }
+
+    /// Blocks until the cache becomes available and returns the reported wait duration.
+    fn wait_for_availability(&self) -> Duration;
+}
+
+impl CacheAvailabilityWait for PayloadExecutionCache {
+    fn wait_for_availability(&self) -> Duration {
+        PayloadExecutionCache::wait_for_availability(self)
+    }
+}
+
+impl CacheAvailabilityWait for SharedPreservedSparseTrie {
+    fn wait_for_availability(&self) -> Duration {
+        SharedPreservedSparseTrie::wait_for_availability(self)
+    }
+}
+
+/// Executes the cache-wait wrapper with custom waiters so the benchmark can isolate wrapper
+/// overhead from the production cache implementations.
+#[doc(hidden)]
+pub fn wait_for_caches_bench<ExecutionCacheWait, SparseTrieWait>(
     executor: &Runtime,
-    execution_cache: &PayloadExecutionCache,
-    sparse_trie: &SharedPreservedSparseTrie,
-) -> CacheWaitDurations {
-    let execution_cache_duration = execution_cache.try_wait_for_availability();
-    let sparse_trie_duration = sparse_trie.try_wait_for_availability();
+    execution_cache: &ExecutionCacheWait,
+    sparse_trie: &SparseTrieWait,
+) -> CacheWaitDurations
+where
+    ExecutionCacheWait: CacheAvailabilityWait,
+    SparseTrieWait: CacheAvailabilityWait,
+{
+    wait_for_caches_with(executor, execution_cache, sparse_trie)
+}
 
-    let execution_rx = execution_cache_duration.is_none().then(|| {
-        let execution_cache = execution_cache.clone();
-        let (execution_tx, execution_rx) = mpsc::channel();
-        executor.spawn_blocking_named("wait-exec-cache", move || {
-            let _ = execution_tx.send(execution_cache.wait_for_availability());
-        });
-        execution_rx
+fn wait_for_caches_with<ExecutionCacheWait, SparseTrieWait>(
+    executor: &Runtime,
+    execution_cache: &ExecutionCacheWait,
+    sparse_trie: &SparseTrieWait,
+) -> CacheWaitDurations
+where
+    ExecutionCacheWait: CacheAvailabilityWait,
+    SparseTrieWait: CacheAvailabilityWait,
+{
+    let execution_cache = execution_cache.clone();
+    let sparse_trie = sparse_trie.clone();
+
+    let (execution_tx, execution_rx) = mpsc::channel();
+    let (sparse_trie_tx, sparse_trie_rx) = mpsc::channel();
+
+    executor.spawn_blocking_named("wait-exec-cache", move || {
+        let _ = execution_tx.send(execution_cache.wait_for_availability());
     });
-    let sparse_trie_rx = sparse_trie_duration.is_none().then(|| {
-        let sparse_trie = sparse_trie.clone();
-        let (sparse_trie_tx, sparse_trie_rx) = mpsc::channel();
-        executor.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-        });
-        sparse_trie_rx
+    executor.spawn_blocking_named("wait-sparse-tri", move || {
+        let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
     });
 
-    let execution_cache_duration = execution_cache_duration.unwrap_or_else(|| {
-        execution_rx
-            .expect("execution cache wait receiver should exist when the fast path misses")
-            .recv()
-            .expect("execution cache wait task failed to send result")
-    });
-    let sparse_trie_duration = sparse_trie_duration.unwrap_or_else(|| {
-        sparse_trie_rx
-            .expect("sparse trie wait receiver should exist when the fast path misses")
-            .recv()
-            .expect("sparse trie wait task failed to send result")
-    });
+    let execution_cache_duration =
+        execution_rx.recv().expect("execution cache wait task failed to send result");
+    let sparse_trie_duration =
+        sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
 
     debug!(
         target: "engine::tree::payload_processor",
