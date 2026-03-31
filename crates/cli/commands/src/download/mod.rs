@@ -84,6 +84,10 @@ pub struct DownloadDefaults {
     ///
     /// Falls back to [`default_base_url`](Self::default_base_url) when `None`.
     pub default_chain_aware_base_url: Option<Cow<'static, str>>,
+    /// URL for the snapshot discovery API that lists available snapshots.
+    ///
+    /// Defaults to `https://snapshots.reth.rs/api/snapshots`.
+    pub snapshot_api_url: Cow<'static, str>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
 }
@@ -108,6 +112,7 @@ impl DownloadDefaults {
             ],
             default_base_url: Cow::Borrowed(RETH_SNAPSHOTS_BASE_URL),
             default_chain_aware_base_url: None,
+            snapshot_api_url: Cow::Borrowed(RETH_SNAPSHOTS_API_URL),
             long_help: None,
         }
     }
@@ -121,10 +126,11 @@ impl DownloadDefaults {
             return custom_help.clone();
         }
 
-        let mut help = String::from(
+        let mut help = format!(
             "Specify a snapshot URL or let the command propose a default one.\n\n\
-             Browse available snapshots at https://snapshots.reth.rs\n\
+             Browse available snapshots at {}\n\
              or use --list-snapshots to see them from the CLI.\n\nAvailable snapshot sources:\n",
+            self.snapshot_api_url.trim_end_matches("/api/snapshots"),
         );
 
         for source in &self.available_snapshots {
@@ -169,6 +175,12 @@ impl DownloadDefaults {
         self
     }
 
+    /// Set the snapshot discovery API URL.
+    pub fn with_snapshot_api_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
+        self.snapshot_api_url = url.into();
+        self
+    }
+
     /// Builder: Set custom long help text, overriding the generated help
     pub fn with_long_help(mut self, help: impl Into<String>) -> Self {
         self.long_help = Some(help.into());
@@ -191,7 +203,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Custom URL to download a single snapshot archive (legacy mode).
     ///
     /// When provided, downloads and extracts a single archive without component selection.
-    /// Browse available snapshots at <https://snapshots.reth.rs> or use --list-snapshots.
+    /// Browse available snapshots with --list-snapshots.
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
 
@@ -261,7 +273,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
     download_concurrency: usize,
 
-    /// List available snapshots from snapshots.reth.rs and exit.
+    /// List available snapshots and exit.
     ///
     /// Queries the snapshots API and prints all available snapshots for the selected chain,
     /// including block number, size, and manifest URL.
@@ -1653,10 +1665,11 @@ fn file_blake3_hex(path: &Path) -> Result<String> {
 
 /// Discovers the latest snapshot manifest URL for the given chain from the snapshots API.
 ///
-/// Queries `snapshots.reth.rs/api/snapshots` and returns the manifest URL for the most
+/// Queries the configured snapshot API and returns the manifest URL for the most
 /// recent modular snapshot matching the requested chain.
 async fn discover_manifest_url(chain_id: u64) -> Result<String> {
-    let api_url = RETH_SNAPSHOTS_API_URL;
+    let defaults = DownloadDefaults::get_global();
+    let api_url = &*defaults.snapshot_api_url;
 
     info!(target: "reth::cli", %api_url, %chain_id, "Discovering latest snapshot manifest");
 
@@ -1669,8 +1682,9 @@ async fn discover_manifest_url(chain_id: u64) -> Result<String> {
                  {chain_id} at {api_url}\n\n\
                  You can provide a manifest URL directly with --manifest-url, or\n\
                  use a direct snapshot URL with -u from:\n\
-                 \t- https://snapshots.reth.rs\n\n\
-                 Use --list to see all available snapshots."
+                 \t- {}\n\n\
+                 Use --list to see all available snapshots.",
+                api_url.trim_end_matches("/api/snapshots"),
             )
         })?;
 
@@ -1701,7 +1715,7 @@ where
     }
 }
 
-/// An entry from the `snapshots.reth.rs/api/snapshots` listing.
+/// An entry from the snapshot discovery API listing.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SnapshotApiEntry {
@@ -1726,7 +1740,7 @@ impl SnapshotApiEntry {
 
 /// Fetches the full snapshot listing from the snapshots API, filtered by chain ID.
 async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<SnapshotApiEntry>> {
-    let api_url = RETH_SNAPSHOTS_API_URL;
+    let api_url = &*DownloadDefaults::get_global().snapshot_api_url;
 
     let entries: Vec<SnapshotApiEntry> = Client::new()
         .get(api_url)
@@ -1744,7 +1758,11 @@ async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<SnapshotApiEntr
 fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64) {
     let modular: Vec<_> = entries.iter().filter(|e| e.is_modular()).collect();
 
-    println!("Available snapshots for chain {chain_id} (https://snapshots.reth.rs):\n");
+    let api_url = &*DownloadDefaults::get_global().snapshot_api_url;
+    println!(
+        "Available snapshots for chain {chain_id} ({}):\n",
+        api_url.trim_end_matches("/api/snapshots"),
+    );
     println!("{:<12}  {:>10}  {:<10}  {:>10}  MANIFEST URL", "DATE", "BLOCK", "PROFILE", "SIZE");
     println!("{}", "-".repeat(100));
 
@@ -1783,14 +1801,18 @@ async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
                     .await
                     .and_then(|r| r.error_for_status())
                     .wrap_err_with(|| {
+                        let sources = DownloadDefaults::get_global()
+                            .available_snapshots
+                            .iter()
+                            .map(|s| format!("\t- {s}"))
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         format!(
                             "Failed to fetch snapshot manifest from {source}\n\n\
                              The manifest endpoint may not be available for this snapshot source.\n\
                              You can use a direct snapshot URL instead:\n\n\
                              \treth download -u <snapshot-url>\n\n\
-                             Available snapshot sources:\n\
-                             \t- https://snapshots.reth.rs\n\
-                             \t- https://publicnode.com/snapshots"
+                             Available snapshot sources:\n{sources}"
                         )
                     })?;
                 Ok(response.json().await?)
