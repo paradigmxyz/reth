@@ -260,7 +260,7 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
-  BB_BENCH_ARGS=(--reth-new-payload)
+  BB_BENCH_ARGS=(--reth-new-payload --wait-for-persistence)
   if [ -n "${BENCH_WAIT_TIME:-}" ]; then
     BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
   fi
