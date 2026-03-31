@@ -67,7 +67,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
@@ -518,10 +518,29 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
+        self.save_blocks_inner(blocks, None, save_mode)
+    }
+
+    /// Writes executed blocks and state to storage using a pre-merged trie bundle when available.
+    pub fn save_blocks_with_trie_bundle(
+        &self,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        trie_bundle: Option<SortedTrieData>,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
+        self.save_blocks_inner(blocks, trie_bundle, save_mode)
+    }
+
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
+    fn save_blocks_inner(
+        &self,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        trie_bundle: Option<SortedTrieData>,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -569,6 +588,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Write to all backends in parallel.
         let runtime = &self.runtime;
+        let trie_bundle = trie_bundle.as_ref();
         // Propagate tracing context into rayon-spawned threads so that static file
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
@@ -667,21 +687,34 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
+                if let Some(trie_bundle) = trie_bundle {
+                    if !trie_bundle.hashed_state.is_empty() {
+                        self.write_hashed_state(trie_bundle.hashed_state.as_ref())?;
+                    }
+                } else {
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let merged_hashed_state = HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                if let Some(trie_bundle) = trie_bundle {
+                    if !trie_bundle.trie_updates.is_empty() {
+                        self.write_trie_updates_sorted(trie_bundle.trie_updates.as_ref())?;
+                    }
+                } else {
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
                 }
                 timings.write_trie_updates += start.elapsed();
             }

@@ -3,7 +3,7 @@ use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, TrieInputSorted,
+    HashedPostState, HashedPostStateSorted, SortedTrieData, TrieInputSorted,
 };
 use std::{
     fmt,
@@ -135,6 +135,17 @@ impl DeferredTrieData {
     /// [`Self::wait_cloned`] will return without any computation.
     pub fn ready(bundle: ComputedTrieData) -> Self {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
+    }
+
+    /// Returns cached trie data only if the deferred task has already completed.
+    ///
+    /// This never blocks and never triggers synchronous fallback computation.
+    pub fn try_ready_cloned(&self) -> Option<ComputedTrieData> {
+        let state = self.state.try_lock()?;
+        match &*state {
+            DeferredState::Ready(bundle) => Some(bundle.clone()),
+            DeferredState::Pending(_) => None,
+        }
     }
 
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
@@ -393,6 +404,17 @@ impl ComputedTrieData {
     pub fn trie_input(&self) -> Option<&Arc<TrieInputSorted>> {
         self.anchored_trie_input.as_ref().map(|anchored| &anchored.trie_input)
     }
+
+    /// Returns the cumulative persistence bundle when it still matches the expected anchor.
+    pub fn persistence_bundle(&self, expected_anchor: B256) -> Option<SortedTrieData> {
+        let anchored = self.anchored_trie_input.as_ref()?;
+        (anchored.anchor_hash == expected_anchor).then(|| {
+            SortedTrieData::new(
+                Arc::clone(&anchored.trie_input.state),
+                Arc::clone(&anchored.trie_input.nodes),
+            )
+        })
+    }
 }
 
 #[cfg(test)]
@@ -426,6 +448,15 @@ mod tests {
             anchor,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn try_ready_cloned_only_returns_cached_data() {
+        let pending = empty_pending();
+        assert!(pending.try_ready_cloned().is_none());
+
+        let ready = DeferredTrieData::ready(empty_bundle());
+        assert!(ready.try_ready_cloned().is_some());
     }
 
     /// Verifies that a ready handle returns immediately without computation.

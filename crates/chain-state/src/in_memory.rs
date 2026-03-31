@@ -852,6 +852,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.trie_data.wait_cloned()
     }
 
+    /// Returns cached trie data only if deferred computation has already completed.
+    #[inline]
+    pub fn try_ready_trie_data(&self) -> Option<ComputedTrieData> {
+        self.trie_data.try_ready_cloned()
+    }
+
     /// Returns a clone of the deferred trie data handle.
     ///
     /// A handle is a lightweight reference that can be passed to descendants without
@@ -890,6 +896,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn anchor_hash(&self) -> Option<B256> {
         self.trie_data().anchor_hash()
+    }
+
+    /// Returns the cumulative persistence bundle if the cached overlay already matches the
+    /// expected persisted parent for a flush batch.
+    #[inline]
+    pub fn try_persistence_bundle(&self, expected_anchor: B256) -> Option<SortedTrieData> {
+        self.try_ready_trie_data()?.persistence_bundle(expected_anchor)
     }
 
     /// Returns a [`BlockNumber`] of the block.

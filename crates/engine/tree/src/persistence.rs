@@ -1,4 +1,5 @@
 use crate::metrics::PersistenceMetrics;
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -12,6 +13,7 @@ use reth_provider::{
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, SortedTrieData};
 use std::{
     sync::{
         mpsc::{Receiver, SendError, Sender},
@@ -102,8 +104,8 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                PersistenceAction::SaveBlocks { blocks, trie_bundle, sender } => {
+                    let result = self.on_save_blocks(blocks, trie_bundle)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -148,6 +150,7 @@ where
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
+        trie_bundle: Option<SortedTrieData>,
     ) -> Result<PersistenceResult, PersistenceError> {
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
@@ -162,7 +165,7 @@ where
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+            provider_rw.save_blocks_with_trie_bundle(blocks, trie_bundle, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized.min(last.number))?;
@@ -216,6 +219,31 @@ pub enum PersistenceError {
     ProviderError(#[from] ProviderError),
 }
 
+fn prepare_persistence_trie_bundle<N: NodePrimitives>(
+    blocks: &[ExecutedBlock<N>],
+) -> Option<SortedTrieData> {
+    let (first, last) = blocks.first().zip(blocks.last())?;
+    let expected_anchor = first.recovered_block().parent_hash();
+
+    if let Some(bundle) = last.try_persistence_bundle(expected_anchor) {
+        return Some(bundle)
+    }
+
+    let trie_data = blocks
+        .iter()
+        .rev()
+        .map(ExecutedBlock::try_ready_trie_data)
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_else(|| blocks.iter().rev().map(ExecutedBlock::trie_data).collect());
+
+    Some(SortedTrieData::new(
+        HashedPostStateSorted::merge_batch(
+            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+        ),
+        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
+    ))
+}
+
 /// A signal to the persistence service that part of the tree state can be persisted.
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
@@ -224,7 +252,15 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    SaveBlocks {
+        /// The blocks to persist, in increasing block number order.
+        blocks: Vec<ExecutedBlock<N>>,
+        /// Pre-merged trie data for this batch, prepared before the persistence thread enters the
+        /// blocking flush path.
+        trie_bundle: Option<SortedTrieData>,
+        /// Channel used to report the persistence result.
+        sender: CrossbeamSender<PersistenceResult>,
+    },
 
     /// Removes block data above the given block number from the database.
     ///
@@ -311,7 +347,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         blocks: Vec<ExecutedBlock<T>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+        let trie_bundle = prepare_persistence_trie_bundle(&blocks);
+        self.send_action(PersistenceAction::SaveBlocks { blocks, trie_bundle, sender: tx })
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -375,10 +412,11 @@ impl Drop for ServiceGuard {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_chain_state::{test_utils::TestBlockBuilder, ComputedTrieData};
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune::Pruner;
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -406,6 +444,39 @@ mod tests {
 
         let result = rx.recv().unwrap();
         assert!(result.last_block.is_none());
+    }
+
+    #[test]
+    fn test_prepare_persistence_trie_bundle_reuses_ready_overlay() {
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let anchor = B256::random();
+
+        let first = test_block_builder.get_executed_block_with_number(1, anchor);
+        let second =
+            test_block_builder.get_executed_block_with_number(2, first.recovered_block().hash());
+
+        let cumulative_state = Arc::new(HashedPostStateSorted::default());
+        let cumulative_updates = Arc::new(TrieUpdatesSorted::default());
+        let cumulative_input = Arc::new(TrieInputSorted::new(
+            Arc::clone(&cumulative_updates),
+            Arc::clone(&cumulative_state),
+            Default::default(),
+        ));
+
+        let second = reth_chain_state::ExecutedBlock::new(
+            Arc::clone(&second.recovered_block),
+            Arc::clone(&second.execution_output),
+            ComputedTrieData::with_trie_input(
+                Arc::default(),
+                Arc::default(),
+                anchor,
+                cumulative_input,
+            ),
+        );
+
+        let bundle = prepare_persistence_trie_bundle(&[first, second]).unwrap();
+        assert!(Arc::ptr_eq(&bundle.hashed_state, &cumulative_state));
+        assert!(Arc::ptr_eq(&bundle.trie_updates, &cumulative_updates));
     }
 
     #[test]
