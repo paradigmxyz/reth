@@ -72,6 +72,8 @@ humantime.workspace = true
 csv.workspace = true
 
 [dev-dependencies]
+alloy-network.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 [features]
 default = ["jemalloc"]

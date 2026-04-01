@@ -9,7 +9,6 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    payload_converter::PayloadConverter,
     valid_payload::{block_to_new_payload, call_new_payload_with_reth},
 };
 use alloy_provider::{ext::DebugApi, Provider};
@@ -44,11 +43,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark new-payload-only` command
-    pub async fn execute<C: PayloadConverter>(
-        self,
-        _ctx: CliContext,
-        converter: &C,
-    ) -> eyre::Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         let BenchContext {
             benchmark_mode,
             block_provider,
@@ -129,7 +124,6 @@ impl Command {
             debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
             let (version, params) = block_to_new_payload(
-                converter,
                 block,
                 rlp,
                 use_reth_namespace,

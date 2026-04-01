@@ -4,7 +4,7 @@ mod invalidation;
 use invalidation::InvalidationConfig;
 
 use super::helpers::{load_jwt_secret, read_input};
-use crate::payload_converter::PayloadConverter;
+use alloy_consensus::TxEnvelope;
 use alloy_primitives::{Address, B256};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
@@ -215,23 +215,28 @@ impl Command {
     }
 
     /// Execute the command
-    pub async fn execute<C: PayloadConverter>(self, _ctx: CliContext, converter: &C) -> Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> Result<()> {
         let block_json = read_input(self.path.as_deref())?;
         let jwt_secret = load_jwt_secret(self.jwt_secret.as_deref())?;
 
-        let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?;
-
-        let (mut execution_payload, sidecar) = converter.block_to_payload(block)?;
+        let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
+            .into_inner()
+            .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+            .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+            })?
+            .into_consensus();
 
         let config = self.build_invalidation_config();
 
-        let cancun = sidecar.cancun();
         let parent_beacon_block_root =
-            self.parent_beacon_block_root.or_else(|| cancun.map(|c| c.parent_beacon_block_root));
-        let blob_versioned_hashes = cancun.map(|c| c.versioned_hashes.clone()).unwrap_or_default();
-        let use_v4 = sidecar.prague().is_some();
-        let requests_hash =
-            self.requests_hash.or_else(|| sidecar.prague().map(|p| p.requests.requests_hash()));
+            self.parent_beacon_block_root.or(block.header.parent_beacon_block_root);
+        let blob_versioned_hashes =
+            block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+        let use_v4 = block.header.requests_hash.is_some();
+        let requests_hash = self.requests_hash.or(block.header.requests_hash);
+
+        let mut execution_payload = ExecutionPayload::from_block_slow(&block).0;
 
         let changes = match &mut execution_payload {
             ExecutionPayload::V1(p) => config.apply_to_payload_v1(p),

@@ -10,7 +10,6 @@ use crate::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
     },
-    payload_converter::PayloadConverter,
     valid_payload::{
         block_to_new_payload, call_forkchoice_updated_with_reth, call_new_payload_with_reth,
     },
@@ -82,11 +81,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
-    pub async fn execute<C: PayloadConverter>(
-        self,
-        _ctx: CliContext,
-        converter: &C,
-    ) -> eyre::Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
             info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
@@ -204,7 +199,6 @@ impl Command {
             };
 
             let (version, params) = block_to_new_payload(
-                converter,
                 block,
                 rlp,
                 use_reth_namespace,
