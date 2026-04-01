@@ -1,4 +1,6 @@
 use super::*;
+use alloy_trie::{nodes::BranchNodeRef, TrieMask};
+use reth_trie_common::{BranchNodeV2, RlpNode};
 
 /// Empty slice is a no-op.
 ///
@@ -384,4 +386,47 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
         expected_harness.original_root(),
         "root should match 3-key reference after insert + stale reveal"
     );
+}
+
+/// Boundary reveal should not assume an upper parent branch exists.
+///
+/// When root is an extension that crosses the upper/lower boundary, a boundary node path can be
+/// reachable even if there is no explicit upper branch at `path[..UPPER_TRIE_MAX_DEPTH - 1]`.
+/// Revealing such a node should not panic.
+pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Root reveals as extension [0x1, 0x2] with a branch below it at path 0x12.
+    // Use two children so the branch shape is canonical.
+    let child_hash_0 = RlpNode::word_rlp(&B256::repeat_byte(0xAA));
+    let child_hash_1 = RlpNode::word_rlp(&B256::repeat_byte(0xBB));
+    let state_mask = TrieMask::new(0b0011);
+    let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(
+        &[child_hash_0.clone(), child_hash_1.clone()],
+        state_mask,
+    )));
+    let root = TrieNodeV2::Branch(BranchNodeV2::new(
+        Nibbles::from_nibbles([0x1, 0x2]),
+        vec![child_hash_0, child_hash_1],
+        state_mask,
+        Some(branch_rlp),
+    ));
+
+    let mut trie = (new_trie)();
+    trie.set_root(root, None, false).expect("set_root should succeed");
+
+    // Before the fix this panicked at `hashes_from_upper` when trying to unwrap
+    // `upper_subtrie.nodes.get_mut([0x1])`.
+    //
+    // In this shape, 0x12 is the lower branch root path and 0x120/0x121 are its children.
+    // The missing entry is the upper parent at [0x1], which the old code incorrectly unwrapped.
+    let boundary_path = Nibbles::from_nibbles([0x1, 0x2]);
+    let leaf =
+        TrieNodeV2::Leaf(reth_trie_common::LeafNode::new(Nibbles::from_nibbles([0x3]), vec![0x01]));
+    trie.reveal_nodes(&mut [reth_trie_common::ProofTrieNodeV2 {
+        path: boundary_path,
+        node: leaf,
+        masks: None,
+    }])
+    .expect("boundary reveal should not panic");
 }

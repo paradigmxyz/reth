@@ -22,9 +22,18 @@ set -euo pipefail
 
 MC="mc"
 BUCKET="minio/reth-snapshots"
-MANIFEST_PATH="reth-1-minimal-stable/manifest.json"
-DATADIR="$SCHELK_MOUNT/datadir"
-HASH_FILE="$HOME/.reth-bench-snapshot-hash"
+# Allow overriding the snapshot name (e.g. for big-blocks mode where the
+# big-blocks manifest specifies which base snapshot to use).
+SNAPSHOT_NAME="${BENCH_SNAPSHOT_NAME:-reth-1-minimal-stable}"
+MANIFEST_PATH="${SNAPSHOT_NAME}/manifest.json"
+DATADIR_NAME="datadir"
+HASH_MODE_SUFFIX=""
+if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+  DATADIR_NAME="datadir-big-blocks"
+  HASH_MODE_SUFFIX="-big-blocks"
+fi
+DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
+HASH_FILE="$HOME/.reth-bench-snapshot-hash${HASH_MODE_SUFFIX}"
 
 # Fetch manifest and compute content hash for reliable freshness check
 MANIFEST_CONTENT=$($MC cat "${BUCKET}/${MANIFEST_PATH}" 2>/dev/null) || {
@@ -60,7 +69,7 @@ if [ -z "$MINIO_ENDPOINT" ]; then
   echo "::error::Failed to resolve MinIO endpoint from mc alias 'minio'"
   exit 1
 fi
-BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/reth-1-minimal-stable"
+BASE_URL="${MINIO_ENDPOINT}/reth-snapshots/${SNAPSHOT_NAME}"
 
 # Rewrite manifest's base_url with the runner-reachable endpoint
 MANIFEST_TMP=$(mktemp --suffix=.json)

@@ -75,10 +75,15 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Returns the storage settings for new database initialization.
     ///
-    /// Always returns [`StorageSettings::v2()`] — v2 is the default for all new
-    /// databases. Existing databases use the settings persisted in their metadata.
+    /// Determined by the `--storage.v2` flag (defaults to `true`).
+    /// Existing databases retain whatever settings are persisted in their
+    /// metadata (checked during genesis init).
     pub fn storage_settings(&self) -> StorageSettings {
-        StorageSettings::v2()
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::v1()
+        }
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of

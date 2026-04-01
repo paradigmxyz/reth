@@ -253,27 +253,31 @@ impl SparseTrie for ParallelSparseTrie {
 
         let reachable_subtries = self.reachable_subtries();
 
-        // For boundary nodes that are blinded in upper subtrie, unset the blinded bit and remember
-        // the hash to pass into `reveal_node`.
+        // Best-effort for boundary nodes: if the parent upper node exists as a branch and the
+        // boundary child is still blinded, unset that blinded bit and carry the hash into
+        // `reveal_node`. If the parent path is absent/non-branch (for example upper extension
+        // crossing the boundary), skip without failing.
         let hashes_from_upper = nodes
             .iter()
             .filter_map(|node| {
-                if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
-                    reachable_subtries.get(path_subtrie_index_unchecked(&node.path)) &&
-                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
-                        .upper_subtrie
-                        .nodes
-                        .get_mut(&node.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1))
-                        .unwrap()
+                if node.path.len() != UPPER_TRIE_MAX_DEPTH ||
+                    !reachable_subtries.get(path_subtrie_index_unchecked(&node.path))
                 {
-                    let nibble = node.path.last().unwrap();
-                    blinded_mask.is_bit_set(nibble).then(|| {
-                        blinded_mask.unset_bit(nibble);
-                        (node.path, blinded_hashes[nibble as usize])
-                    })
-                } else {
-                    None
+                    return None;
                 }
+
+                let parent_path = node.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1);
+                let Some(SparseNode::Branch { blinded_mask, blinded_hashes, .. }) =
+                    self.upper_subtrie.nodes.get_mut(&parent_path)
+                else {
+                    return None;
+                };
+
+                let nibble = node.path.last().unwrap();
+                blinded_mask.is_bit_set(nibble).then(|| {
+                    blinded_mask.unset_bit(nibble);
+                    (node.path, blinded_hashes[nibble as usize])
+                })
             })
             .collect::<HashMap<_, _>>();
 
@@ -1525,14 +1529,24 @@ impl ParallelSparseTrie {
         }) {
             let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0]);
 
-            // Skip unrevealed/blinded subtries - nothing to prune
-            let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
-                continue;
+            // Skip unrevealed/blinded subtries - nothing to prune.
+            let should_clear = {
+                let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
+                    continue;
+                };
+
+                // Retain only nodes/values not descended from any pruned root.
+                subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
+                subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
+
+                // If prune removed the node at `subtrie.path`, the subtrie can no longer be
+                // represented as revealed and must be blinded.
+                !subtrie.nodes.contains_key(&subtrie.path)
             };
 
-            // Retain only nodes/values not descended from any pruned root.
-            subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
-            subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
+            if should_clear {
+                self.lower_subtries[subtrie_idx].clear();
+            }
         }
 
         // Branch node masks pruning

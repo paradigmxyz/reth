@@ -74,8 +74,7 @@ where
         executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                    let Ok(recovered) =
-                        RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                    let Ok(recovered) = RecoveredBlock::try_recover_sealed(*block)
                 {
                     bad_block_store.insert(recovered);
                 }
@@ -675,18 +674,14 @@ where
                     .provider()
                     .convert_block_number(number_or_tag)
                     .to_rpc_result()?
-                    .ok_or_else(|| {
-                    internal_rpc_err("Pending block not supported".to_string())
-                })?;
+                    .ok_or(EthApiError::HeaderNotFound(block_id))?;
                 self.provider().header_by_number(number).to_rpc_result()?
             }
-        };
+        }
+        .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let mut res = Vec::new();
-        if let Some(header) = header {
-            header.encode(&mut res);
-        }
-
+        header.encode(&mut res);
         Ok(res.into())
     }
 
@@ -728,7 +723,7 @@ where
             .provider()
             .receipts_by_block_id(block_id)
             .to_rpc_result()?
-            .unwrap_or_default()
+            .ok_or(EthApiError::HeaderNotFound(block_id))?
             .into_iter()
             .map(|receipt| ReceiptWithBloom::from(receipt).encoded_2718().into())
             .collect())

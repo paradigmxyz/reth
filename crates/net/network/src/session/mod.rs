@@ -42,14 +42,15 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot},
+    sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
-use crate::session::active::RANGE_UPDATE_INTERVAL;
+use crate::session::active::{BroadcastItemCounter, RANGE_UPDATE_INTERVAL};
 pub use conn::EthRlpxConnection;
+use handle::SessionCommandSender;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
@@ -372,23 +373,17 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
-    /// Sends a message to the peer's session
+    /// Sends a message to the peer's session.
+    ///
+    /// Broadcast messages use size-based backpressure: the total number of in-flight broadcast
+    /// items (across the command channel, overflow channel, and session outgoing queue) is tracked
+    /// by a shared atomic counter. If the bounded command channel is full but the broadcast limit
+    /// hasn't been reached, the message overflows to a dedicated unbounded channel.
     pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
-        if let Some(session) = self.active_sessions.get(peer_id) {
-            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
-                |e| {
-                    if let TrySendError::Full(SessionCommand::Message(msg)) = e {
-                        debug!(
-                            target: "net::session",
-                            ?peer_id,
-                            msg_kind = msg.message_kind(),
-                            items = msg.message_item_count(),
-                            "session command buffer full, dropping message"
-                        );
-                        self.metrics.total_outgoing_peer_messages_dropped.increment(1);
-                    }
-                },
-            );
+        if let Some(session) = self.active_sessions.get(peer_id) &&
+            !session.commands.send_message(msg)
+        {
+            self.metrics.total_outgoing_peer_messages_dropped.increment(1);
         }
     }
 
@@ -527,7 +522,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     })
                 }
 
-                let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
+                let (commands_tx, commands_rx) = mpsc::channel(self.session_command_buffer);
+                let (unbounded_tx, unbounded_rx) = mpsc::unbounded_channel();
 
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
@@ -551,6 +547,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     interval
                 });
 
+                // Shared counter of in-flight broadcast items. The session task must decrement
+                // this when it pops messages from the outgoing queue, and the
+                // `SessionCommandSender` increments it before enqueuing. This invariant ensures
+                // the `SessionManager` always has an accurate view of total buffered broadcast
+                // pressure for a peer.
+                let broadcast_items = BroadcastItemCounter::new();
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -558,6 +561,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     remote_capabilities: Arc::clone(&capabilities),
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
+                    unbounded_rx,
+                    unbounded_broadcast_msgs: self.metrics.total_unbounded_broadcast_msgs.clone(),
                     to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
@@ -565,6 +570,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     conn,
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
+                        broadcast_items.clone(),
                     ),
                     received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
@@ -590,7 +596,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     version,
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
-                    commands_to_session,
+                    commands: SessionCommandSender::new(commands_tx, unbounded_tx, broadcast_items),
                     client_version: Arc::clone(&client_version),
                     remote_addr,
                     local_addr,

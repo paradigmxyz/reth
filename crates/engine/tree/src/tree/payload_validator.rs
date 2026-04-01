@@ -1,14 +1,51 @@
 //! Types and traits for validating blocks and payloads.
+//!
+//! # Validation pipeline
+//!
+//! When the engine processes a new payload (`engine_newPayload`), validation happens in phases:
+//!
+//! ## Phase 1 – Payload conversion
+//! [`PayloadValidator::convert_payload_to_block`] decodes the execution payload (RLP, hashing)
+//! into a [`SealedBlock`]. This runs on a background thread concurrently with state setup.
+//!
+//! ## Phase 2 – Pre-execution consensus
+//! - [`HeaderValidator::validate_header`] — standalone header checks (hash, gas, base fee,
+//!   fork-specific fields)
+//! - [`Consensus::validate_block_pre_execution`] — body vs header (tx root, ommer hash, withdrawals
+//!   root)
+//! - [`HeaderValidator::validate_header_against_parent`] — sequential checks (block number,
+//!   timestamp, gas limit, base fee vs parent)
+//!
+//! ## Phase 3 – Execution
+//! Block transactions are executed via the EVM. Receipt roots are computed incrementally.
+//!
+//! ## Phase 4 – Post-execution consensus
+//! - [`FullConsensus::validate_block_post_execution`] — gas used, receipt root, logs bloom,
+//!   requests hash
+//! - [`PayloadValidator::validate_block_post_execution_with_hashed_state`] — network-specific
+//!   (no-op on L1, used by OP Stack)
+//!
+//! ## Payload attributes validation (`engine_forkchoiceUpdated`)
+//! When the CL provides payload attributes to start building a block:
+//! - [`PayloadValidator::validate_payload_attributes_against_header`] — ensures timestamp ordering
+//!
+//! If validation passes, a payload build job is started. If it fails,
+//! `INVALID_PAYLOAD_ATTRIBUTES` is returned without rolling back the forkchoice update.
+//!
+//! [`HeaderValidator::validate_header`]: reth_consensus::HeaderValidator::validate_header
+//! [`Consensus::validate_block_pre_execution`]: reth_consensus::Consensus::validate_block_pre_execution
+//! [`HeaderValidator::validate_header_against_parent`]: reth_consensus::HeaderValidator::validate_header_against_parent
+//! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
+//! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
 use crate::tree::{
-    cached_state::{CacheStats, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderStats},
+    multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    sparse_trie::StateRootComputeOutcome,
-    CacheWaitDurations, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
+    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
@@ -31,6 +68,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
+use reth_execution_cache::{CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -1903,6 +1941,17 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Returns [`SavedCache`] for the given block hash.
+    fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
+
+    /// Spawns a sparse trie pipeline and returns a handle for the payload builder.
+    fn sparse_trie_handle_for(
+        &self,
+        parent_hash: B256,
+        parent_state_root: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> Option<StateRootHandle>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1965,6 +2014,31 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
+        Some(self.payload_processor.cache_for(block_hash))
+    }
+
+    fn sparse_trie_handle_for(
+        &self,
+        parent_hash: B256,
+        parent_state_root: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> Option<StateRootHandle> {
+        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
+        let overlay_factory =
+            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+                .with_block_hash(Some(anchor_hash))
+                .with_lazy_overlay(lazy_overlay);
+
+        Some(self.payload_processor.spawn_state_root(
+            overlay_factory,
+            parent_state_root,
+            // Full proof workers — tx count unknown at FCU time (block built incrementally)
+            false,
+            &self.config,
+        ))
     }
 }
 

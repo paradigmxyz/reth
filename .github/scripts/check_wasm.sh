@@ -22,6 +22,7 @@ exclude_crates=(
   reth-downloaders
   reth-e2e-test-utils
   reth-engine-service
+  reth-execution-cache
   reth-engine-tree
   reth-engine-util
   reth-eth-wire
@@ -55,6 +56,7 @@ exclude_crates=(
   reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
+  reth-bb # binary-only, uses tokio features unsupported on wasm
   reth-storage-rpc-provider
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx

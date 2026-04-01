@@ -112,7 +112,7 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2 <V2>
+      --storage.v2 [<V2>]
           Enable V2 (hot/cold) storage layout for new databases.
 
           When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
@@ -186,7 +186,7 @@ Storage:
           [default: 8]
 
       --list
-          List available snapshots from snapshots.reth.rs and exit.
+          List available snapshots and exit.
 
           Queries the snapshots API and prints all available snapshots for the selected chain, including block number, size, and manifest URL.
 

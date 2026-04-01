@@ -48,6 +48,7 @@ impl SlotPreimages {
         builder.write_map();
         builder.set_flags(EnvironmentFlags {
             no_sub_dir: false,
+            no_rdahead: true,
             mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
             ..Default::default()
         });
