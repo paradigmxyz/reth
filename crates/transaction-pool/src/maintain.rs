@@ -713,45 +713,88 @@ where
         return Ok(())
     }
 
-    let pool_transactions: Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)> =
-        if let Ok(tx_backups) = serde_json::from_slice::<Vec<TxBackup>>(&data) {
-            tx_backups
-                .into_iter()
-                .filter_map(|backup| {
-                    let tx_signed =
-                        <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
-                            backup.rlp.as_ref(),
-                        )
-                        .ok()?;
-                    let recovered = tx_signed.try_into_recovered().ok()?;
-                    let pool_tx =
-                        <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
+    let tx_backups: Vec<TxBackup> = if let Ok(tx_backups) = serde_json::from_slice(&data) {
+        tx_backups
+    } else {
+        let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
+            alloy_rlp::Decodable::decode(&mut data.as_slice())?;
 
-                    Some((backup.origin, pool_tx))
-                })
-                .collect()
-        } else {
-            let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
-                alloy_rlp::Decodable::decode(&mut data.as_slice())?;
+        txs_signed
+            .into_iter()
+            .map(|tx| TxBackup { rlp: tx.encoded_2718().into(), origin: TransactionOrigin::Local })
+            .collect()
+    };
 
-            txs_signed
-                .into_iter()
-                .filter_map(|tx| tx.try_into_recovered().ok())
-                .filter_map(|tx| {
-                    <P::Transaction as PoolTransaction>::try_from_consensus(tx)
-                        .ok()
-                        .map(|pool_tx| (TransactionOrigin::Local, pool_tx))
-                })
-                .collect()
+    let total = tx_backups.len();
+    let mut successful = 0usize;
+    let mut decode_failures = 0usize;
+    let mut recover_failures = 0usize;
+    let mut convert_failures = 0usize;
+    let mut insert_failures = 0usize;
+    let mut failed_backups = Vec::new();
+
+    for backup in tx_backups {
+        let TxBackup { rlp, origin } = backup;
+
+        let tx_signed =
+            match <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(rlp.as_ref()) {
+                Ok(tx_signed) => tx_signed,
+                Err(_) => {
+                    decode_failures += 1;
+                    failed_backups.push(TxBackup { rlp, origin });
+                    continue
+                }
+            };
+
+        let recovered = match tx_signed.try_into_recovered() {
+            Ok(recovered) => recovered,
+            Err(_) => {
+                recover_failures += 1;
+                failed_backups.push(TxBackup { rlp, origin });
+                continue
+            }
         };
 
-    let inserted = futures_util::future::join_all(
-        pool_transactions.into_iter().map(|(origin, tx)| pool.add_transaction(origin, tx)),
-    )
-    .await;
+        let pool_tx = match <P::Transaction as PoolTransaction>::try_from_consensus(recovered) {
+            Ok(pool_tx) => pool_tx,
+            Err(_) => {
+                convert_failures += 1;
+                failed_backups.push(TxBackup { rlp, origin });
+                continue
+            }
+        };
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
-    reth_fs_util::remove_file(file_path)?;
+        match pool.add_transaction(origin, pool_tx).await {
+            Ok(_) => successful += 1,
+            Err(err) => {
+                debug!(target: "txpool", %err, "Failed to reinsert local transaction");
+                insert_failures += 1;
+                failed_backups.push(TxBackup { rlp, origin });
+            }
+        }
+    }
+
+    let failed = failed_backups.len();
+    if failed == 0 {
+        info!(target: "txpool", txs_file =?file_path, num_txs=%successful, "Successfully reinserted local transactions from file");
+        reth_fs_util::remove_file(file_path)?;
+    } else {
+        let failed_backups_data = serde_json::to_string(&failed_backups)?;
+        reth_fs_util::write(file_path, failed_backups_data)?;
+        info!(
+            target: "txpool",
+            txs_file =?file_path,
+            successful=%successful,
+            failed=%failed,
+            decode_failures=%decode_failures,
+            recover_failures=%recover_failures,
+            convert_failures=%convert_failures,
+            insert_failures=%insert_failures,
+            total=%total,
+            "Reinserted local transactions from file with failures retained"
+        );
+    }
+
     Ok(())
 }
 
@@ -890,7 +933,7 @@ mod tests {
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .build(blob_store.clone());
+            .build::<EthPooledTransaction, _>(blob_store.clone());
 
         let txpool = Pool::new(
             validator,
@@ -918,6 +961,84 @@ mod tests {
 
         let txs: Vec<TxBackup> = serde_json::from_slice::<Vec<TxBackup>>(&data).unwrap();
         assert_eq!(txs.len(), 1);
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_load_and_reinsert_transactions_retains_failed_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
+        let tx_bytes = hex!(
+            "02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507"
+        );
+        let provider = MockEthProvider::default().with_genesis_block();
+        let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
+        provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+            .build::<EthPooledTransaction, _>(blob_store.clone());
+
+        let txpool = Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store.clone(),
+            Default::default(),
+        );
+
+        let backups = vec![
+            TxBackup { rlp: tx_bytes.to_vec().into(), origin: TransactionOrigin::Local },
+            TxBackup {
+                rlp: Bytes::from_static(b"not-a-valid-2718"),
+                origin: TransactionOrigin::Local,
+            },
+        ];
+        fs::write(&transactions_path, serde_json::to_string(&backups).unwrap()).unwrap();
+
+        load_and_reinsert_transactions(txpool.clone(), &transactions_path).await.unwrap();
+
+        let local_txs = txpool.get_local_transactions();
+        assert_eq!(local_txs.len(), 1);
+        assert!(transactions_path.exists());
+
+        let data = fs::read(&transactions_path).unwrap();
+        let retained: Vec<TxBackup> = serde_json::from_slice(&data).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].rlp, Bytes::from_static(b"not-a-valid-2718"));
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_load_and_reinsert_transactions_deletes_backup_on_full_success() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
+        let tx_bytes = hex!(
+            "02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507"
+        );
+        let provider = MockEthProvider::default().with_genesis_block();
+        let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
+        provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+            .build::<EthPooledTransaction, _>(blob_store.clone());
+
+        let txpool = Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store.clone(),
+            Default::default(),
+        );
+
+        let backups =
+            vec![TxBackup { rlp: tx_bytes.to_vec().into(), origin: TransactionOrigin::Local }];
+        fs::write(&transactions_path, serde_json::to_string(&backups).unwrap()).unwrap();
+
+        load_and_reinsert_transactions(txpool.clone(), &transactions_path).await.unwrap();
+
+        let local_txs = txpool.get_local_transactions();
+        assert_eq!(local_txs.len(), 1);
+        assert!(!transactions_path.exists());
 
         temp_dir.close().unwrap();
     }
