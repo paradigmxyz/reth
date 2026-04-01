@@ -3,7 +3,7 @@
 mod invalidation;
 use invalidation::InvalidationConfig;
 
-use super::helpers::{load_jwt_secret, read_input};
+use super::helpers::{load_jwt_secret, read_input, warn_v4_requests_hash_only};
 use alloy_primitives::{Address, B256};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
@@ -41,6 +41,10 @@ pub struct Command {
     jwt_secret: Option<String>,
 
     /// The newPayload version to use (3 or 4).
+    ///
+    /// For Prague/Osaka (`engine_newPayloadV4`), this command can only send `requests_hash`
+    /// derived from the input block, so the target node must allow
+    /// `--engine.accept-execution-requests-hash`.
     #[arg(long, default_value_t = 3, help_heading = "Input Options")]
     new_payload_version: u8,
 
@@ -232,6 +236,9 @@ impl Command {
         let blob_versioned_hashes =
             block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
         let use_v4 = block.header.requests_hash.is_some();
+        if use_v4 {
+            warn_v4_requests_hash_only();
+        }
         let requests_hash = self.requests_hash.or(block.header.requests_hash);
 
         let mut execution_payload = ExecutionPayload::from_block_slow(&block).0;
@@ -278,6 +285,12 @@ impl Command {
                 println!("  - Block hash recalculation: SKIPPED");
             } else {
                 println!("  - Block hash recalculation: PERFORMED");
+            }
+            if use_v4 {
+                println!(
+                    "  - V4 request encoding: requests_hash only (requires \
+                     --engine.accept-execution-requests-hash on the target node)"
+                );
             }
             println!("\nResulting payload JSON:");
             let json = serde_json::to_string_pretty(&execution_payload)?;
