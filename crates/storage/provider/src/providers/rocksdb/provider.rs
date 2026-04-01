@@ -1434,17 +1434,22 @@ impl<'db> RocksReadSnapshot<'db> {
     }
 
     /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// `visible_tip` is the highest block considered visible from the companion MDBX snapshot.
+    /// History entries above it are ignored even if they already exist in `RocksDB`.
     pub fn account_history_info(
         &self,
         address: Address,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
     ) -> ProviderResult<HistoryInfo> {
         let key = ShardedKey::new(address, block_number);
         self.history_info::<tables::AccountsHistory>(
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
+            visible_tip,
             |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
             |prev_bytes| {
                 <ShardedKey<Address> as Decode>::decode(prev_bytes)
@@ -1455,18 +1460,23 @@ impl<'db> RocksReadSnapshot<'db> {
     }
 
     /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// `visible_tip` is the highest block considered visible from the companion MDBX snapshot.
+    /// History entries above it are ignored even if they already exist in `RocksDB`.
     pub fn storage_history_info(
         &self,
         address: Address,
         storage_key: B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
     ) -> ProviderResult<HistoryInfo> {
         let key = StorageShardedKey::new(address, storage_key, block_number);
         self.history_info::<tables::StoragesHistory>(
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
+            visible_tip,
             |key_bytes| {
                 let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
                 Ok(k.address == address && k.sharded_key.key == storage_key)
@@ -1480,11 +1490,24 @@ impl<'db> RocksReadSnapshot<'db> {
     }
 
     /// Generic history lookup using the snapshot's raw iterator.
+    ///
+    /// The result is derived from the history that is visible through `visible_tip`, not from the
+    /// full contents of `RocksDB`. This lets a reader combine an older MDBX snapshot with a newer
+    /// Rocks snapshot without routing through history entries that MDBX cannot see yet.
+    ///
+    /// In particular:
+    /// - a matching history entry at or after `block_number` and at or below `visible_tip` returns
+    ///   `HistoryInfo::InChangeset`
+    /// - no later matching history entry at or below `visible_tip`, but some matching history entry
+    ///   for the key at or below `visible_tip`, returns `HistoryInfo::InPlainState`
+    /// - if every matching history entry is above `visible_tip`, the lookup falls back to
+    ///   `NotYetWritten` or `MaybeInPlainState`
     fn history_info<T>(
         &self,
         encoded_key: &[u8],
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
         key_matches: impl FnOnce(&[u8]) -> Result<bool, reth_db_api::DatabaseError>,
         prev_key_matches: impl Fn(&[u8]) -> bool,
     ) -> ProviderResult<HistoryInfo>
@@ -1526,27 +1549,65 @@ impl<'db> RocksReadSnapshot<'db> {
             return fallback();
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
+
+        // Only the prefix up to `visible_tip` should influence routing for this reader. Any
+        // later Rocks history entries are not yet visible in the companion MDBX snapshot.
+        let visible_count = chunk.rank(visible_tip);
         let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
-        let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
-            iter.prev();
-            iter.status().map_err(|e| {
-                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
-            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
-            !has_prev
-        } else {
-            false
+        let mut has_previous_visible = || -> ProviderResult<bool> {
+            loop {
+                iter.prev();
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+
+                if !iter.valid() {
+                    return Ok(false)
+                }
+
+                let Some(prev_key_bytes) = iter.key() else { return Ok(false) };
+                if !prev_key_matches(prev_key_bytes) {
+                    return Ok(false)
+                }
+
+                let Some(prev_value_bytes) = iter.value() else { return Ok(false) };
+                // The current shard can be entirely stale (all blocks above `visible_tip`). Walk
+                // backward across same-key shards until we either find a matching entry at or
+                // below `visible_tip` or prove there are none for this key.
+                if BlockNumberList::decompress(prev_value_bytes)?.rank(visible_tip) > 0 {
+                    return Ok(true)
+                }
+            }
         };
 
-        Ok(HistoryInfo::from_lookup(
-            found_block,
-            is_before_first_write,
-            lowest_available_block_number,
-        ))
+        // If there is a later matching entry that is still at or below `visible_tip`, we can
+        // reuse the normal `HistoryInfo::from_lookup` logic against that capped prefix.
+        if rank < visible_count {
+            let Some(found_block) = found_block else { return fallback() };
+
+            let is_before_first_write =
+                needs_prev_shard_check(rank, Some(found_block), block_number) &&
+                    !has_previous_visible()?;
+
+            return Ok(HistoryInfo::from_lookup(
+                Some(found_block),
+                is_before_first_write,
+                lowest_available_block_number,
+            ))
+        }
+
+        // No later matching entry remains at or below `visible_tip`. If the key has any matching
+        // entry at or below `visible_tip`, the lookup should fall through to plain state;
+        // otherwise keep the existing not-written / maybe-pruned fallback.
+        if visible_count > 0 || has_previous_visible()? {
+            return Ok(HistoryInfo::InPlainState)
+        }
+
+        fallback()
     }
 }
 
@@ -2999,7 +3060,8 @@ mod tests {
         // This simulates a pruned state where data before block 100 is not available.
         // Since we're before the first write AND pruning boundary is set, we need to
         // check the changeset at the first write block.
-        let result = provider.snapshot().account_history_info(address, 50, Some(100)).unwrap();
+        let result =
+            provider.snapshot().account_history_info(address, 50, Some(100), u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(100));
     }
 
@@ -3026,14 +3088,82 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = ro_provider.snapshot().account_history_info(address, 200, None).unwrap();
+        let result =
+            ro_provider.snapshot().account_history_info(address, 200, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(200));
 
-        let result = ro_provider.snapshot().account_history_info(address, 50, None).unwrap();
+        let result =
+            ro_provider.snapshot().account_history_info(address, 50, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::NotYetWritten);
 
-        let result = ro_provider.snapshot().account_history_info(address, 400, None).unwrap();
+        let result =
+            ro_provider.snapshot().account_history_info(address, 400, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InPlainState);
+    }
+
+    #[test]
+    fn test_account_history_info_ignores_blocks_above_visible_tip() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        provider
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, 110),
+                &IntegerList::new([100, 110]).unwrap(),
+            )
+            .unwrap();
+        provider
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([200, 210]).unwrap(),
+            )
+            .unwrap();
+
+        let result = provider.snapshot().account_history_info(address, 150, None, 150).unwrap();
+        assert_eq!(result, HistoryInfo::InPlainState);
+    }
+
+    #[test]
+    fn test_account_history_info_mixed_shard_respects_visible_tip() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        provider
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([100, 200, 300]).unwrap(),
+            )
+            .unwrap();
+
+        let result = provider.snapshot().account_history_info(address, 150, None, 200).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        let result = provider.snapshot().account_history_info(address, 250, None, 200).unwrap();
+        assert_eq!(result, HistoryInfo::InPlainState);
+    }
+
+    #[test]
+    fn test_account_history_info_only_stale_entries_use_fallback() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        provider
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([200, 210]).unwrap(),
+            )
+            .unwrap();
+
+        let result = provider.snapshot().account_history_info(address, 150, None, 150).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        let result =
+            provider.snapshot().account_history_info(address, 150, Some(100), 150).unwrap();
+        assert_eq!(result, HistoryInfo::MaybeInPlainState);
     }
 
     #[test]

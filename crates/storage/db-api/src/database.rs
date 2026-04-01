@@ -1,6 +1,5 @@
 use crate::{
     table::TableImporter,
-    tables::{self, RawKey, RawTable, RawValue},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -117,14 +116,10 @@ impl<DB: Database> Database for &DB {
     }
 }
 
-/// Object-safe adapter for reader-txn tracking and unwind fencing.
+/// Object-safe adapter for reader-txn tracking during unwind.
 pub trait ReaderTxnTracker: Send + Sync {
     /// Waits until all readers older than the latest committed txnid have drained.
     fn wait_for_pre_commit_readers(&self);
-
-    /// Forces a real commit boundary and waits until readers older than that new txnid have
-    /// drained.
-    fn wait_for_pre_fence_readers(&self) -> Result<(), DatabaseError>;
 }
 
 impl<DB: Database> ReaderTxnTracker for DB {
@@ -135,19 +130,5 @@ impl<DB: Database> ReaderTxnTracker for DB {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
-    }
-
-    fn wait_for_pre_fence_readers(&self) -> Result<(), DatabaseError> {
-        let last_txnid = Database::last_txnid(self).unwrap_or_default();
-        let tx = self.tx_mut()?;
-        tx.put::<RawTable<tables::Metadata>>(
-            RawKey::<String>::from_vec(vec![0, 1]),
-            RawValue::from_vec(last_txnid.to_be_bytes().into()),
-        )?;
-        tx.commit()?;
-
-        self.wait_for_pre_commit_readers();
-
-        Ok(())
     }
 }

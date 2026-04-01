@@ -264,12 +264,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
     /// truncating static files from checkpoints on the next startup.
     ///
-    /// For `storage_v2`, this waits after the MDBX commit and again after the `RocksDB` commit so
-    /// readers holding older MDBX-visible views, including readers opened before the `RocksDB`
-    /// commit, cannot overlap the later cross-store steps.
+    /// For `storage_v2`, this waits after the MDBX commit so readers holding older MDBX-visible
+    /// views cannot overlap the `RocksDB` unwind.
     ///
-    /// Example: a reader that still sees pre-unwind `RocksDB` history must not survive long enough
-    /// to route a lookup into changesets (SF) that the unwind is about to make unreachable.
+    /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
+    /// so no additional post-`RocksDB` wait is needed before static-file commit.
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
@@ -283,10 +282,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
-            }
-
-            if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-                reader_txn_tracker.wait_for_pre_fence_readers()?;
             }
         }
 
@@ -3967,22 +3962,6 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
-    }
-
-    #[test]
-    fn unwind_fence_commit_advances_txnid() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let provider_rw = factory.unwind_provider_rw().unwrap();
-        provider_rw.write_metadata("unwind-fence-txnid-test", vec![1]).unwrap();
-        provider_rw.commit().unwrap();
-
-        let before_fence = Database::last_txnid(factory.db_ref()).unwrap();
-        ReaderTxnTracker::wait_for_pre_fence_readers(factory.db_ref()).unwrap();
-        let fence_txnid = Database::last_txnid(factory.db_ref()).unwrap();
-
-        assert!(fence_txnid > before_fence, "sentinel fence should advance the MDBX txnid");
     }
 
     #[test]
