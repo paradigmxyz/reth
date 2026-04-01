@@ -24,9 +24,10 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tracing::*;
 
 #[derive(Debug)]
@@ -41,6 +42,8 @@ type EngineReorgResponse = Result<
 >;
 
 type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send + Sync>>;
+type PendingReorgTask<T> =
+    JoinHandle<RethResult<(<T as PayloadTypes>::ExecutionData, ForkchoiceState)>>;
 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
@@ -50,11 +53,11 @@ pub struct EngineReorg<S, T: PayloadTypes, Provider, Evm, Validator> {
     #[pin]
     stream: S,
     /// Database provider.
-    provider: Provider,
+    provider: Arc<Provider>,
     /// Evm configuration.
-    evm_config: Evm,
+    evm_config: Arc<Evm>,
     /// Payload validator.
-    payload_validator: Validator,
+    payload_validator: Arc<Validator>,
     /// The frequency of reorgs.
     frequency: usize,
     /// The depth of reorgs.
@@ -68,6 +71,8 @@ pub struct EngineReorg<S, T: PayloadTypes, Provider, Evm, Validator> {
     last_forkchoice_state: Option<ForkchoiceState>,
     /// Pending engine responses to reorg messages.
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
+    /// In-flight reorg head construction task.
+    pending_reorg_task: Option<PendingReorgTask<T>>,
 }
 
 impl<S, T: PayloadTypes, Provider, Evm, Validator> EngineReorg<S, T, Provider, Evm, Validator> {
@@ -82,15 +87,16 @@ impl<S, T: PayloadTypes, Provider, Evm, Validator> EngineReorg<S, T, Provider, E
     ) -> Self {
         Self {
             stream,
-            provider,
-            evm_config,
-            payload_validator,
+            provider: Arc::new(provider),
+            evm_config: Arc::new(evm_config),
+            payload_validator: Arc::new(payload_validator),
             frequency,
             depth,
             state: EngineReorgState::Forward,
             forkchoice_states_forwarded: 0,
             last_forkchoice_state: None,
             reorg_responses: FuturesUnordered::new(),
+            pending_reorg_task: None,
         }
     }
 }
@@ -101,9 +107,13 @@ where
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
-        + ChainSpecProvider,
-    Evm: ConfigureEvm,
-    Validator: EngineValidator<T, Evm::Primitives>,
+        + ChainSpecProvider
+        + Send
+        + Sync
+        + 'static,
+    Evm: ConfigureEvm + Send + Sync + 'static,
+    Validator: EngineValidator<T, Evm::Primitives> + Send + Sync + 'static,
+    T::ExecutionData: Send + 'static,
 {
     type Item = S::Item;
 
@@ -111,6 +121,49 @@ where
         let mut this = self.project();
 
         loop {
+            if let Some(pending_reorg_task) = this.pending_reorg_task.as_mut() {
+                match Pin::new(pending_reorg_task).poll(cx) {
+                    Poll::Ready(join_result) => {
+                        this.pending_reorg_task.take();
+                        match join_result {
+                            Ok(Ok((reorg_payload, reorg_forkchoice_state))) => {
+                                let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
+                                let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
+                                this.reorg_responses.extend([
+                                    Box::pin(reorg_payload_rx.map_ok(Either::Left))
+                                        as ReorgResponseFut,
+                                    Box::pin(reorg_fcu_rx.map_ok(Either::Right))
+                                        as ReorgResponseFut,
+                                ]);
+
+                                let queue = VecDeque::from([
+                                    // Reorg payload
+                                    BeaconEngineMessage::NewPayload {
+                                        payload: reorg_payload,
+                                        tx: reorg_payload_tx,
+                                    },
+                                    // Reorg forkchoice state
+                                    BeaconEngineMessage::ForkchoiceUpdated {
+                                        state: reorg_forkchoice_state,
+                                        payload_attrs: None,
+                                        tx: reorg_fcu_tx,
+                                    },
+                                ]);
+                                *this.state = EngineReorgState::Reorg { queue };
+                                continue
+                            }
+                            Ok(Err(error)) => {
+                                error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
+                            }
+                            Err(error) => {
+                                error!(target: "engine::stream::reorg", %error, "Reorg head task failed");
+                            }
+                        }
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+
             if let Poll::Ready(Some(response)) = this.reorg_responses.poll_next_unpin(cx) {
                 match response {
                     Ok(Either::Left(Ok(payload_status))) => {
@@ -145,67 +198,45 @@ where
                 (
                     Some(BeaconEngineMessage::NewPayload { payload, tx }),
                     Some(last_forkchoice_state),
-                ) if this.forkchoice_states_forwarded > this.frequency &&
-                        // Only enter reorg state if new payload attaches to current head.
-                        last_forkchoice_state.head_block_hash == payload.parent_hash() =>
+                ) if should_start_reorg(
+                    *this.forkchoice_states_forwarded,
+                    *this.frequency,
+                    last_forkchoice_state.head_block_hash,
+                    payload.parent_hash(),
+                ) =>
                 {
                     // Enter the reorg state.
-                    // The current payload will be immediately forwarded by being in front of the
-                    // queue. Then we attempt to reorg the current head by generating a payload that
+                    // The current payload is immediately forwarded. Then we attempt to reorg the
+                    // current head by generating a payload that
                     // attaches to the head's parent and is based on the non-conflicting
                     // transactions (txs from block `n + 1` that are valid at block `n` according to
                     // consensus checks) from the current payload as well as the corresponding
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
-                    // TODO: This is an expensive blocking operation, ideally it's spawned as a task
-                    // so that the stream could yield the control back.
-                    let reorg_block = match create_reorg_head(
-                        this.provider,
-                        this.evm_config,
-                        this.payload_validator,
-                        *this.depth,
-                        payload.clone(),
-                    ) {
-                        Ok(result) => result,
-                        Err(error) => {
-                            error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
-                            // Forward the payload and attempt to create reorg on top of
-                            // the next one
-                            return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
-                                payload,
-                                tx,
-                            }))
-                        }
-                    };
-                    let reorg_forkchoice_state = ForkchoiceState {
-                        finalized_block_hash: last_forkchoice_state.finalized_block_hash,
-                        safe_block_hash: last_forkchoice_state.safe_block_hash,
-                        head_block_hash: reorg_block.hash(),
-                    };
+                    let provider = Arc::clone(this.provider);
+                    let evm_config = Arc::clone(this.evm_config);
+                    let payload_validator = Arc::clone(this.payload_validator);
+                    let depth = *this.depth;
+                    let next_payload = payload.clone();
+                    let last_forkchoice_state = *last_forkchoice_state;
+                    let task = tokio::task::spawn_blocking(move || {
+                        let reorg_block = create_reorg_head(
+                            provider.as_ref(),
+                            evm_config.as_ref(),
+                            payload_validator.as_ref(),
+                            depth,
+                            next_payload,
+                        )?;
+                        let reorg_forkchoice_state = ForkchoiceState {
+                            finalized_block_hash: last_forkchoice_state.finalized_block_hash,
+                            safe_block_hash: last_forkchoice_state.safe_block_hash,
+                            head_block_hash: reorg_block.hash(),
+                        };
 
-                    let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
-                    let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
-                    this.reorg_responses.extend([
-                        Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
-                        Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
-                    ]);
+                        Ok((T::block_to_payload(reorg_block), reorg_forkchoice_state))
+                    });
 
-                    let queue = VecDeque::from([
-                        // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx },
-                        // Reorg payload
-                        BeaconEngineMessage::NewPayload {
-                            payload: T::block_to_payload(reorg_block),
-                            tx: reorg_payload_tx,
-                        },
-                        // Reorg forkchoice state
-                        BeaconEngineMessage::ForkchoiceUpdated {
-                            state: reorg_forkchoice_state,
-                            payload_attrs: None,
-                            tx: reorg_fcu_tx,
-                        },
-                    ]);
-                    *this.state = EngineReorgState::Reorg { queue };
-                    continue
+                    *this.pending_reorg_task = Some(task);
+                    return Poll::Ready(Some(BeaconEngineMessage::NewPayload { payload, tx }))
                 }
                 (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
@@ -305,4 +336,36 @@ where
     let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider, None)?;
 
     Ok(block.into_sealed_block())
+}
+
+#[inline]
+fn should_start_reorg<Hash: Eq>(
+    forkchoice_states_forwarded: usize,
+    frequency: usize,
+    last_head_hash: Hash,
+    payload_parent_hash: Hash,
+) -> bool {
+    forkchoice_states_forwarded > frequency && last_head_hash == payload_parent_hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_not_start_reorg_when_frequency_not_exceeded() {
+        let hash = [1u8; 32];
+        assert!(!should_start_reorg(3, 3, hash, hash));
+    }
+
+    #[test]
+    fn should_not_start_reorg_when_parent_does_not_match_head() {
+        assert!(!should_start_reorg(4, 3, [1u8; 32], [2u8; 32]));
+    }
+
+    #[test]
+    fn should_start_reorg_when_frequency_exceeded_and_parent_matches() {
+        let hash = [7u8; 32];
+        assert!(should_start_reorg(4, 3, hash, hash));
+    }
 }
