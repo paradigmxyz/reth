@@ -123,43 +123,39 @@ impl<DB: Database> Database for &DB {
 
 /// Object-safe adapter for reader-txn tracking and unwind fencing.
 pub trait ReaderTxnTracker: Send + Sync {
-    /// Returns the txnid of the oldest active reader snapshot.
-    ///
-    /// This is not a unique per-reader id; it is the committed txnid the reader is pinned to.
-    fn oldest_reader_txnid(&self) -> Option<u64>;
+    /// Waits until all readers older than the latest committed txnid have drained.
+    fn wait_for_pre_commit_readers(&self);
 
-    /// Returns the latest committed MDBX txnid.
-    fn last_txnid(&self) -> Option<u64>;
-
-    /// Forces a real commit so the latest txnid advances, then returns it.
-    fn commit_fence(&self) -> Result<Option<u64>, DatabaseError>;
-
-    /// Waits until all readers pinned to a committed txnid older than `cutoff_txnid` have drained,
-    /// polling every 10ms.
-    fn wait_for_readers_before_txnid(&self, cutoff_txnid: u64) {
-        while self.oldest_reader_txnid().is_some_and(|oldest| oldest < cutoff_txnid) {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-    }
+    /// Forces a real commit boundary and waits until readers older than that new txnid have
+    /// drained.
+    fn wait_for_pre_fence_readers(&self) -> Result<(), DatabaseError>;
 }
 
 impl<DB: Database> ReaderTxnTracker for DB {
-    fn oldest_reader_txnid(&self) -> Option<u64> {
-        Database::oldest_reader_txnid(self)
+    fn wait_for_pre_commit_readers(&self) {
+        if let Some(committed_txnid) = Database::last_txnid(self) {
+            while Database::oldest_reader_txnid(self).is_some_and(|oldest| oldest < committed_txnid)
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
     }
 
-    fn last_txnid(&self) -> Option<u64> {
-        Database::last_txnid(self)
-    }
-
-    fn commit_fence(&self) -> Result<Option<u64>, DatabaseError> {
-        let last_txnid = self.last_txnid().unwrap_or_default();
+    fn wait_for_pre_fence_readers(&self) -> Result<(), DatabaseError> {
+        let last_txnid = Database::last_txnid(self).unwrap_or_default();
         let tx = self.tx_mut()?;
         tx.put::<RawTable<tables::Metadata>>(
             RawKey::<String>::from_vec(vec![0, 1]),
             RawValue::from_vec(last_txnid.to_be_bytes().into()),
         )?;
         tx.commit()?;
-        Ok(self.last_txnid())
+
+        if let Some(fence_txnid) = Database::last_txnid(self) {
+            while Database::oldest_reader_txnid(self).is_some_and(|oldest| oldest < fence_txnid) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        Ok(())
     }
 }

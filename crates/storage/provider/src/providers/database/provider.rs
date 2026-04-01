@@ -275,11 +275,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let reader_txn_tracker = self.reader_txn_tracker.clone();
         self.tx.commit()?;
 
-        if storage_v2 &&
-            let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() &&
-            let Some(committed_txn_id) = reader_txn_tracker.last_txnid()
-        {
-            reader_txn_tracker.wait_for_readers_before_txnid(committed_txn_id);
+        if storage_v2 && let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+            reader_txn_tracker.wait_for_pre_commit_readers();
         }
 
         let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
@@ -287,11 +284,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             self.rocksdb_provider.commit_batch(batch)?;
         }
 
-        if storage_v2 &&
-            let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() &&
-            let Some(fence_txnid) = reader_txn_tracker.commit_fence()?
-        {
-            reader_txn_tracker.wait_for_readers_before_txnid(fence_txnid);
+        if storage_v2 && let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+            reader_txn_tracker.wait_for_pre_fence_readers()?;
         }
 
         self.static_file_provider.commit()?;
@@ -3983,7 +3977,8 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let before_fence = Database::last_txnid(factory.db_ref()).unwrap();
-        let fence_txnid = ReaderTxnTracker::commit_fence(factory.db_ref()).unwrap().unwrap();
+        ReaderTxnTracker::wait_for_pre_fence_readers(factory.db_ref()).unwrap();
+        let fence_txnid = Database::last_txnid(factory.db_ref()).unwrap();
 
         assert!(fence_txnid > before_fence, "sentinel fence should advance the MDBX txnid");
     }
