@@ -135,7 +135,7 @@ impl Command {
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms slot interval", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
         }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");

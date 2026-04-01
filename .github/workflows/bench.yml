@@ -37,7 +37,7 @@ on:
         default: ""
         type: string
       wait_time:
-        description: "Slot interval between block submissions (e.g. 500ms, 1s)"
+        description: "Minimum interval between block submissions (e.g. 500ms, 1s)"
         required: false
         default: ""
         type: string
