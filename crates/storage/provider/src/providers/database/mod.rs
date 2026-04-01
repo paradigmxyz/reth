@@ -289,6 +289,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
     /// Uses unwind commit order (MDBX first, then `RocksDB`, then static files) to allow
     /// recovery by truncating static files on restart if interrupted.
+    ///
+    /// Unwind commits may wait for pre-existing readers to drain before finishing later
+    /// cross-store steps. Drop any long-lived read providers before committing this provider.
     #[track_caller]
     pub fn unwind_provider_rw(
         &self,
