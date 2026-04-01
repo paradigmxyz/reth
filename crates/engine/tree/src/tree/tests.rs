@@ -691,6 +691,74 @@ async fn test_holesky_payload() {
     assert!(resp.is_syncing());
 }
 
+#[test]
+fn test_backpressure_waits_for_persistence_before_reading_incoming() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_persistence_backpressure_threshold(1);
+
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+    assert!(test_harness.tree.should_backpressure());
+
+    let (tx, mut rx) = oneshot::channel();
+    test_harness
+        .to_tree_tx
+        .send(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: ForkchoiceState {
+                    head_block_hash: B256::random(),
+                    safe_block_hash: B256::random(),
+                    finalized_block_hash: B256::random(),
+                },
+                payload_attrs: None,
+                tx,
+            }
+            .into(),
+        ))
+        .unwrap();
+    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+    assert_eq!(test_harness.tree.incoming.len(), 2);
+
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        persist_tx
+            .send(PersistenceResult {
+                last_block: Some(persisted),
+                commit_duration: Some(Duration::ZERO),
+            })
+            .unwrap();
+    });
+
+    let event = test_harness.tree.wait_for_persistence_event();
+    assert!(matches!(event, super::LoopEvent::PersistenceComplete { .. }));
+    assert_eq!(test_harness.tree.incoming.len(), 2);
+
+    let super::LoopEvent::PersistenceComplete { result, start_time } = event else {
+        unreachable!()
+    };
+    test_harness.tree.on_persistence_complete(result, start_time).unwrap();
+
+    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
+        panic!("expected queued engine message")
+    };
+    let _ = test_harness.tree.on_engine_message(message).unwrap();
+    let msg = rx.try_recv();
+    assert!(msg.is_ok());
+    assert_eq!(test_harness.tree.incoming.len(), 1);
+
+    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
+        panic!("expected queued engine message")
+    };
+    let _ = test_harness.tree.on_engine_message(message).unwrap();
+    assert_eq!(test_harness.tree.incoming.len(), 0);
+}
+
 #[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();
