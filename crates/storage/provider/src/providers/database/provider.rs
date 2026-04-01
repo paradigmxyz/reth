@@ -275,17 +275,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let reader_txn_tracker = self.reader_txn_tracker.clone();
         self.tx.commit()?;
 
-        if storage_v2 && let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
-        }
+        if storage_v2 {
+            if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+                reader_txn_tracker.wait_for_pre_commit_readers();
+            }
 
-        let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-        for batch in batches {
-            self.rocksdb_provider.commit_batch(batch)?;
-        }
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
+            }
 
-        if storage_v2 && let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_fence_readers()?;
+            if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+                reader_txn_tracker.wait_for_pre_fence_readers()?;
+            }
         }
 
         self.static_file_provider.commit()?;
