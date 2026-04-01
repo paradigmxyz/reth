@@ -326,13 +326,22 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments {
+            cached_reads,
+            execution_cache,
+            trie_handle,
+            config,
+            cancel,
+            best_payload,
+        } = args;
         let PayloadConfig { parent_header, attributes, payload_id } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
         self.inner.try_build(BuildArguments {
             cached_reads,
+            execution_cache,
+            trie_handle,
             config: PayloadConfig { parent_header, attributes: attributes.inner, payload_id },
             cancel,
             best_payload,

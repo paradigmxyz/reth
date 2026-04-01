@@ -1558,14 +1558,6 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::StorageChangeSets>()?)
-        }
-    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1619,16 +1611,6 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .walk_range(to_range(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
-        }
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        // check if account changesets are in static files, otherwise just count the changeset
-        // entries in the DB
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
         }
     }
 }

@@ -23,7 +23,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -472,12 +472,79 @@ where
         self.incoming_tx.clone()
     }
 
+    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
+    /// persistence is falling behind execution.
+    const fn persistence_gap(&self) -> u64 {
+        self.state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    }
+
+    /// Returns `true` when the main loop should stop draining the tree input channel.
+    ///
+    /// This is the case when persistence is already running and the gap between the canonical tip
+    /// and the last persisted block has reached the configured threshold.
+    const fn should_backpressure(&self) -> bool {
+        self.persistence_state.in_progress() &&
+            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+    }
+
     /// Run the engine API handler.
     ///
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
-            match self.wait_for_event() {
+            // Each iteration has three phases:
+            //
+            // 1. Non-blocking poll for persistence completion. If the background flush already
+            //    landed, absorb the result now so the gap calculation below is fresh.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
+            //    the backpressure threshold we only block on the persistence receiver, leaving new
+            //    engine requests sitting in the unbounded upstream channel.
+            // 3. Handle the event (engine message or persistence completion) and kick off a new
+            //    persistence cycle if the threshold is met again.
+            //
+            // The net effect: when the persistence gap exceeds the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a
+            // soft form of backpressure: it delays replies and, more importantly, prevents
+            // executing further blocks that would pile up in the persistence queue - where each
+            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
+            // engine channel.
+            //
+            // Standard Ethereum CLs won't truly back off - the engine API has no
+            // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
+            // this cannot prevent the incoming channel from growing under sustained load.
+            // But it shifts the bottleneck to the lighter-weight incoming queue rather than
+            // the costlier persistence pipeline. Other clients that respect reply latency
+            // can treat the delayed responses as a signal to chill out.
+            match self.try_poll_persistence() {
+                Ok(true) => {
+                    if let Err(err) = self.advance_persistence() {
+                        error!(target: "engine::tree", %err, "Advancing persistence failed");
+                        return
+                    }
+                    continue;
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    error!(target: "engine::tree", %err, "Polling persistence failed");
+                    return
+                }
+            }
+
+            let event = if self.should_backpressure() {
+                self.metrics.engine.backpressure_active.set(1.0);
+                let stall_start = Instant::now();
+                let event = self.wait_for_persistence_event();
+                self.metrics.engine.backpressure_stall_duration.record(stall_start.elapsed());
+                event
+            } else {
+                self.metrics.engine.backpressure_active.set(0.0);
+                self.wait_for_event()
+            };
+
+            match event {
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
@@ -509,6 +576,24 @@ where
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
             }
+        }
+    }
+
+    /// Blocks until the in-flight persistence task completes, used when we are under
+    /// backpressure.
+    ///
+    /// Unlike `wait_for_event`, this deliberately does not read from the tree input channel. Any
+    /// requests sent to the tree remain queued upstream until persistence catches up.
+    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
+        let maybe_persistence = self.persistence_state.rx.take();
+
+        if let Some((persistence_rx, start_time, _action)) = maybe_persistence {
+            match persistence_rx.recv() {
+                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                Err(_) => LoopEvent::Disconnected,
+            }
+        } else {
+            self.wait_for_event()
         }
     }
 
@@ -1341,8 +1426,7 @@ where
     /// Tries to poll for a completed persistence task (non-blocking).
     ///
     /// Returns `true` if a persistence task was completed, `false` otherwise.
-    #[cfg(test)]
-    pub fn try_poll_persistence(&mut self) -> Result<bool, AdvancePersistenceError> {
+    fn try_poll_persistence(&mut self) -> Result<bool, AdvancePersistenceError> {
         let Some((rx, start_time, action)) = self.persistence_state.rx.take() else {
             return Ok(false);
         };
@@ -3079,12 +3163,12 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: T::PayloadAttributes,
+        attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         if let Err(err) =
-            self.payload_validator.validate_payload_attributes_against_header(&attrs, head)
+            self.payload_validator.validate_payload_attributes_against_header(&attributes, head)
         {
             warn!(target: "engine::tree", %err, ?head, "Invalid payload attributes");
             return OnForkChoiceUpdated::invalid_payload_attributes()
@@ -3095,10 +3179,30 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
+        let cache = if self.config.share_execution_cache_with_payload_builder() {
+            self.payload_validator.cache_for(state.head_block_hash)
+        } else {
+            None
+        };
+
+        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
+            self.payload_validator.sparse_trie_handle_for(
+                state.head_block_hash,
+                head.state_root(),
+                &self.state,
+            )
+        } else {
+            None
+        };
+
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
-        let pending_payload_id =
-            self.payload_builder.send_new_payload(state.head_block_hash, attrs);
+        let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
+            parent_hash: state.head_block_hash,
+            attributes,
+            cache,
+            trie_handle,
+        });
 
         // Client software MUST respond to this method call in the following way:
         // {

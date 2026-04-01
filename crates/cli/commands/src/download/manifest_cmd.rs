@@ -3,9 +3,10 @@ use clap::Parser;
 use eyre::{Result, WrapErr};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, tables, Database};
 use reth_db_api::transaction::DbTx;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_stages_types::StageId;
 use reth_static_file_types::DEFAULT_BLOCKS_PER_STATIC_FILE;
-use std::{path::PathBuf, time::Instant};
+use std::path::PathBuf;
 use tracing::{info, warn};
 
 /// Generate modular chunk archives and a snapshot manifest from a source datadir.

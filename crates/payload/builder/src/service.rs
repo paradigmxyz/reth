@@ -12,11 +12,12 @@ use alloy_primitives::{BlockTimestamp, B256};
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
+use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
-    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -123,14 +124,12 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Returns a receiver that will receive the payload id.
     pub fn send_new_payload(
         &self,
-        parent: B256,
-        attr: T::PayloadAttributes,
+        input: BuildNewPayload<T::PayloadAttributes>,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        let job_span = debug_span!(parent: Span::current(), "payload_job");
-        let _ = self
-            .to_service
-            .send(PayloadServiceCommand::BuildNewPayload(parent, attr, job_span, tx));
+        let span = debug_span!(parent: Span::current(), "payload_job");
+        let _ =
+            self.to_service.send(PayloadServiceCommand::BuildNewPayload(input.into(), span, tx));
         rx
     }
 
@@ -157,6 +156,17 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
             Ok(fut) => Some(fut.await),
             Err(e) => Some(Err(e.into())),
         }
+    }
+
+    /// Same as [`Self::resolve_kind`] but returns the underlying future.
+    pub async fn resolve_kind_fut(
+        &self,
+        id: PayloadId,
+        kind: PayloadKind,
+    ) -> Result<Option<PayloadFuture<T::BuiltPayload>>, PayloadBuilderError> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx))?;
+        rx.await.map_err(Into::into)
     }
 
     /// Sends a message to the service to subscribe to payload events.
@@ -425,17 +435,19 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(parent, attr, job_span, tx) => {
-                        let id = attr.payload_id(&parent);
+                    PayloadServiceCommand::BuildNewPayload(input, job_span, tx) => {
+                        let id = input.payload_id();
                         let mut res = Ok(id);
+                        let parent = input.parent_hash;
 
                         if this.contains_payload(id) {
                             debug!(target: "payload_builder", %id, %parent, "Payload job already in progress, ignoring.");
                         } else {
                             let start = Instant::now();
+                            let attributes = input.attributes.clone();
                             let job_result = {
                                 let _entered = job_span.enter();
-                                this.generator.new_payload_job(parent, attr.clone(), id)
+                                this.generator.new_payload_job(*input, id)
                             };
 
                             match job_result {
@@ -445,7 +457,7 @@ where
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id, job_span));
-                                    this.payload_events.send(Events::Attributes(attr)).ok();
+                                    this.payload_events.send(Events::Attributes(attributes)).ok();
 
                                     // Clear stale cached payload for this id so
                                     // resolve() never returns an outdated result
@@ -496,14 +508,14 @@ where
 }
 
 /// Message type for the [`PayloadBuilderService`].
+#[derive(derive_more::Debug)]
 pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Start building a new payload.
     ///
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
     BuildNewPayload(
-        B256,
-        T::PayloadAttributes,
+        Box<BuildNewPayload<T::PayloadAttributes>>,
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
@@ -515,29 +527,30 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     Resolve(
         PayloadId,
         /* kind: */ PayloadKind,
-        oneshot::Sender<Option<PayloadFuture<T::BuiltPayload>>>,
+        #[debug(skip)] oneshot::Sender<Option<PayloadFuture<T::BuiltPayload>>>,
     ),
     /// Payload service events
     Subscribe(oneshot::Sender<broadcast::Receiver<Events<T>>>),
 }
 
-impl<T> fmt::Debug for PayloadServiceCommand<T>
-where
-    T: PayloadTypes,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BuildNewPayload(f0, f1, _, f2) => {
-                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).field(&f2).finish()
-            }
-            Self::BestPayload(f0, f1) => {
-                f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
-            }
-            Self::PayloadTimestamp(f0, f1) => {
-                f.debug_tuple("PayloadTimestamp").field(&f0).field(&f1).finish()
-            }
-            Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),
-            Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
-        }
+/// A request to build a new payload.
+#[derive(Debug)]
+pub struct BuildNewPayload<T> {
+    /// The attributes for the new payload
+    pub attributes: T,
+    /// The parent hash of the new payload
+    pub parent_hash: B256,
+    /// Optional execution cache to use for the payload.
+    ///
+    /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
+    pub cache: Option<SavedCache>,
+    /// Optional handle to a background sparse trie task.
+    pub trie_handle: Option<StateRootHandle>,
+}
+
+impl<T: PayloadAttributes> BuildNewPayload<T> {
+    /// Returns the payload id for the new payload.
+    pub fn payload_id(&self) -> PayloadId {
+        self.attributes.payload_id(&self.parent_hash)
     }
 }

@@ -12,7 +12,7 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    payload_processor::{bal, multiproof::MultiProofMessage},
+    payload_processor::{bal, multiproof::StateRootMessage},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
@@ -69,7 +69,7 @@ where
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+    to_multi_proof: Option<CrossbeamSender<StateRootMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
@@ -87,7 +87,7 @@ where
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<StateRootMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -121,7 +121,7 @@ where
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
@@ -181,7 +181,7 @@ where
                     !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
-                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                    let _ = to_multi_proof.send(StateRootMessage::PrefetchProofs(targets));
                 }
             });
 
@@ -201,7 +201,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
-        to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
+        to_multi_proof: Option<&CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -248,7 +248,7 @@ where
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = to_multi_proof {
-                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                    let _ = to_multi_proof.send(StateRootMessage::PrefetchProofs(targets));
                 }
             }
 
@@ -402,8 +402,8 @@ where
                     storages = hashed_state.storages.len(),
                     "Converted BAL to hashed post state"
                 );
-                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
-                let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
+                let _ = to_multi_proof.send(StateRootMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(StateRootMessage::FinishedStateUpdates);
             }
             Err(err) => {
                 warn!(

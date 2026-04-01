@@ -925,6 +925,13 @@ Engine:
 
           [default: 2]
 
+      --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
+          Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+
+          This value must be greater than `--engine.persistence-threshold`.
+
+          [default: 16]
+
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 
@@ -1019,6 +1026,22 @@ Engine:
           Set to 0s to disable.
 
           [default: 1s]
+
+      --engine.share-execution-cache-with-payload-builder
+          Whether to share execution cache with the payload builder.
+
+          When enabled, each payload job will get an instance of cross-block execution cache from the engine.
+
+          Note: this should only be enabled if node would not be requested to process any payloads in parallel with payload building.
+
+      --engine.share-sparse-trie-with-payload-builder
+          Whether to share the sparse trie with the payload builder.
+
+          Replaces the payload builder's blocking `state_root_with_updates()` call with the sparse trie, computing the state root concurrently with transaction execution.
+
+          The engine and payload builder contend for the same trie — if a builder task is still running when `newPayload` arrives, the engine will block until the trie is stored back.
+
+          The builder also anchors the trie at the built block's state root, so if the next `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
 
 ERA:
       --era.enable

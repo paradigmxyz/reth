@@ -12,10 +12,15 @@ on:
   workflow_dispatch:
     inputs:
       blocks:
-        description: "Number of blocks to benchmark (or 'big' for big blocks mode)"
+        description: "Number of blocks to benchmark"
         required: false
         default: "500"
         type: string
+      big_blocks:
+        description: "Use big blocks mode (pre-generated merged payloads with reth-bb)"
+        required: false
+        default: "false"
+        type: boolean
       warmup:
         description: "Number of warmup blocks"
         required: false
@@ -152,7 +157,7 @@ jobs:
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
               var noSlack = '${{ github.event.inputs.no_slack }}' !== 'false' ? 'true' : 'false';
               cores = '${{ github.event.inputs.cores }}' || '0';
-              bigBlocks = blocks === 'big' ? 'true' : 'false';
+              bigBlocks = '${{ github.event.inputs.big_blocks }}' === 'true' ? 'true' : 'false';
               var rethNewPayload = '${{ github.event.inputs.reth_newPayload }}' !== 'false' ? 'true' : 'false';
               var abba = '${{ github.event.inputs.abba }}' !== 'false' ? 'true' : 'false';
               var otlp = '${{ github.event.inputs.otlp }}' !== 'false' ? 'true' : 'false';
@@ -178,14 +183,13 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['warmup', 'cores']);
-              const intOrKeywordArgs = new Map([['blocks', new Set(['big'])]]);
+              const intArgs = new Set(['warmup', 'cores', 'blocks']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'no-slack']);
+              const boolArgs = new Set(['samply', 'no-slack', 'big-blocks']);
               const boolDefaultTrue = new Set(['reth_newPayload', 'abba', 'otlp']);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false', 'no-slack': 'false', 'big-blocks': 'false', cores: '0', reth_newPayload: 'true', abba: 'true', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -230,15 +234,6 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
-                } else if (intOrKeywordArgs.has(key)) {
-                  const keywords = intOrKeywordArgs.get(key);
-                  if (keywords.has(value)) {
-                    defaults[key] = value;
-                  } else if (/^\d+$/.test(value)) {
-                    defaults[key] = value;
-                  } else {
-                    invalid.push(`\`${key}=${value}\` (must be a positive integer or one of: ${[...keywords].join(', ')})`);
-                  }
                 } else if (refArgs.has(key)) {
                   if (!value) {
                     invalid.push(`\`${key}=\` (must be a git ref)`);
@@ -255,7 +250,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N|big] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [big-blocks] [warmup=N] [baseline=REF] [feature=REF] [samply] [no-slack] [cores=N] [reth_newPayload=true|false] [abba=true|false] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -272,7 +267,7 @@ jobs:
               samply = defaults.samply;
               var noSlack = defaults['no-slack'];
               cores = defaults.cores;
-              bigBlocks = blocks === 'big' ? 'true' : 'false';
+              bigBlocks = defaults['big-blocks'];
               var rethNewPayload = defaults.reth_newPayload;
               var abba = defaults.abba;
               var otlp = defaults.otlp;
@@ -508,6 +503,7 @@ jobs:
       BENCH_OTLP: ${{ needs.reth-bench-ack.outputs.otlp }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
       BENCH_NO_SLACK: ${{ needs.reth-bench-ack.outputs.no-slack }}
+      BENCH_NODE_BIN: ${{ needs.reth-bench-ack.outputs.big-blocks == 'true' && 'reth-bb' || 'reth' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.reth-bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
@@ -825,7 +821,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
-          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/reth
+          BENCH_RETH_BINARY: ${{ github.workspace }}/../reth-feature/target/profiling/${{ needs.reth-bench-ack.outputs.big-blocks == 'true' && 'reth-bb' || 'reth' }}
         run: .github/scripts/bench-reth-snapshot.sh
 
       # System tuning for reproducible benchmarks
@@ -891,11 +887,23 @@ jobs:
             exit 0
           fi
           MC="mc --config-dir /home/ubuntu/.mc"
-          BUCKET="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.tar.zst"
+          MANIFEST="minio/reth-snapshots/reth-1-minimal-stable-big-blocks.json"
           rm -rf "$BIG_BLOCKS_DIR"; mkdir -p "$BIG_BLOCKS_DIR"
-          echo "Downloading big blocks from $BUCKET..."
-          $MC cat "$BUCKET" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
+
+          # Download and parse manifest
+          echo "Downloading manifest from $MANIFEST..."
+          $MC cat "$MANIFEST" > "$BIG_BLOCKS_DIR/manifest.json"
+          UPLOAD_PATH=$(jq -r '.upload_path' "$BIG_BLOCKS_DIR/manifest.json")
+          COUNT=$(jq -r '.count' "$BIG_BLOCKS_DIR/manifest.json")
+          TARGET_GAS=$(jq -r '.target_gas' "$BIG_BLOCKS_DIR/manifest.json")
+          echo "Manifest: count=$COUNT, target_gas=$TARGET_GAS, archive=$UPLOAD_PATH"
+
+          # Download and extract archive
+          ARCHIVE="minio/$UPLOAD_PATH"
+          echo "Downloading big blocks from $ARCHIVE..."
+          $MC cat "$ARCHIVE" | pzstd -d -p 6 | tar -xf - -C "$BIG_BLOCKS_DIR"
           echo "Big blocks downloaded to $BIG_BLOCKS_DIR"
+
           # Verify expected directory structure
           if [ ! -d "$BIG_BLOCKS_DIR/payloads" ]; then
             echo "::error::Big blocks archive missing expected payloads/ directory"
@@ -946,7 +954,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
@@ -957,7 +965,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
         if: env.BENCH_ABBA != 'false'
@@ -969,7 +977,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+          taskset -c 0 .github/scripts/bench-reth-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
         if: env.BENCH_ABBA != 'false'
@@ -983,7 +991,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
+          taskset -c 0 .github/scripts/bench-reth-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
 
       - name: Stop metrics proxy & generate Grafana URL
         id: metrics

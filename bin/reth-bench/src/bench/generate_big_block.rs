@@ -1,27 +1,30 @@
-//! Command for generating large blocks by packing transactions from real blocks.
+//! Command for generating large blocks by merging transactions from consecutive real blocks.
 //!
-//! This command fetches transactions from existing blocks and packs them into a single
-//! large block using the `testing_buildBlockV1` RPC endpoint.
+//! This command fetches consecutive blocks from an RPC until a target gas usage is reached,
+//! takes block 0 as the "base" payload, concatenates transactions from subsequent blocks,
+//! and saves the result to disk as a [`BigBlockPayload`] JSON file containing the merged
+//! [`ExecutionData`] and environment switches at each block boundary.
 
-use crate::{
-    authenticated_transport::AuthenticatedTransportConnect, bench::helpers::parse_gas_limit,
-};
-use alloy_eips::{BlockNumberOrTag, Typed2718};
-use alloy_primitives::{Bytes, B256};
-use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
+use alloy_consensus::TxReceipt;
+use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams, Typed2718};
+use alloy_primitives::{Bloom, Bytes, B256};
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ForkchoiceState, JwtSecret,
-    PayloadAttributes,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
+    PraguePayloadFields,
 };
-use alloy_transport::layers::RetryBackoffLayer;
 use clap::Parser;
 use eyre::Context;
-use reqwest::Url;
+use reth_chainspec::EthChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_engine_primitives::BigBlockData;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use reth_ethereum_primitives::Receipt;
+use reth_primitives_traits::proofs;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
-use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 /// A single transaction with its gas used and raw encoded bytes.
@@ -64,7 +67,7 @@ impl RpcTransactionSource {
     /// Create from an RPC URL with retry backoff.
     pub fn from_url(rpc_url: &str) -> eyre::Result<Self> {
         let client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
             .http(rpc_url.parse()?);
         let provider = RootProvider::<AnyNetwork>::new(client);
         Ok(Self { provider })
@@ -152,7 +155,7 @@ impl<S: TransactionSource> TransactionCollector<S> {
         while total_gas < gas_target {
             let Some((block_txs, _)) = self.source.fetch_block_transactions(current_block).await?
             else {
-                warn!(target: "reth-bench", block = current_block, "Block not found, stopping");
+                tracing::warn!(target: "reth-bench", block = current_block, "Block not found, stopping");
                 break;
             };
 
@@ -193,81 +196,6 @@ impl<S: TransactionSource> TransactionCollector<S> {
     }
 }
 
-/// `reth bench generate-big-block` command
-///
-/// Generates a large block by fetching transactions from existing blocks and packing them
-/// into a single block using the `testing_buildBlockV1` RPC endpoint.
-#[derive(Debug, Parser)]
-pub struct Command {
-    /// The RPC URL to use for fetching blocks (can be an external archive node).
-    #[arg(long, value_name = "RPC_URL")]
-    rpc_url: String,
-
-    /// The engine RPC URL (with JWT authentication).
-    #[arg(long, value_name = "ENGINE_RPC_URL", default_value = "http://localhost:8551")]
-    engine_rpc_url: String,
-
-    /// The RPC URL for `testing_buildBlockV1` calls (same node as engine, regular RPC port).
-    #[arg(long, value_name = "TESTING_RPC_URL", default_value = "http://localhost:8545")]
-    testing_rpc_url: String,
-
-    /// Path to the JWT secret file for engine API authentication.
-    #[arg(long, value_name = "JWT_SECRET")]
-    jwt_secret: std::path::PathBuf,
-
-    /// Target gas to pack into the block.
-    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 1G = 1
-    /// billion).
-    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000", value_parser = parse_gas_limit)]
-    target_gas: u64,
-
-    /// Block number to start fetching transactions from (required).
-    ///
-    /// This must be the last canonical block BEFORE any gas limit ramping was performed.
-    /// The command collects transactions from historical blocks starting at this number
-    /// to pack into large blocks.
-    ///
-    /// How to determine this value:
-    /// - If starting from a fresh node (no gas limit ramp yet): use the current chain tip
-    /// - If gas limit ramping has already been performed: use the block number that was the chain
-    ///   tip BEFORE ramping began (you must track this yourself)
-    ///
-    /// Using a block after ramping started will cause transaction collection to fail
-    /// because those blocks contain synthetic transactions that cannot be replayed.
-    #[arg(long, value_name = "FROM_BLOCK")]
-    from_block: u64,
-
-    /// Execute the payload (call newPayload + forkchoiceUpdated).
-    /// If false, only builds the payload and prints it.
-    #[arg(long, default_value = "false")]
-    execute: bool,
-
-    /// Number of payloads to generate. Each payload uses the previous as parent.
-    /// When count == 1, the payload is only generated and saved, not executed.
-    /// When count > 1, each payload is executed before building the next.
-    #[arg(long, default_value = "1")]
-    count: u64,
-
-    /// Number of transaction batches to prefetch in background when count > 1.
-    /// Higher values reduce latency but use more memory.
-    #[arg(long, default_value = "4")]
-    prefetch_buffer: usize,
-
-    /// Output directory for generated payloads. Each payload is saved as `payload_block_N.json`.
-    #[arg(long, value_name = "OUTPUT_DIR")]
-    output_dir: std::path::PathBuf,
-}
-
-/// A built payload ready for execution.
-struct BuiltPayload {
-    block_number: u64,
-    envelope: ExecutionPayloadEnvelopeV4,
-    block_hash: B256,
-    timestamp: u64,
-    /// The actual gas used in the built block.
-    gas_used: u64,
-}
-
 /// Result of collecting transactions from blocks.
 #[derive(Debug)]
 pub struct CollectionResult {
@@ -279,106 +207,75 @@ pub struct CollectionResult {
     pub next_block: u64,
 }
 
-/// Constants for retry logic.
-const MAX_BUILD_RETRIES: u32 = 5;
-/// Maximum retries for fetching a transaction batch.
-const MAX_FETCH_RETRIES: u32 = 5;
-/// Tolerance: if `gas_used` is within 1M of target, don't retry.
-const MIN_TARGET_SLACK: u64 = 1_000_000;
-/// Maximum gas to request in retries (10x target as safety cap).
-const MAX_ADDITIONAL_GAS_MULTIPLIER: u64 = 10;
+/// A merged big block payload with environment switches at block boundaries.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BigBlockPayload {
+    /// The primary execution data with all concatenated transactions.
+    pub execution_data: ExecutionData,
+    /// Big block data containing environment switches and prior block hashes.
+    #[serde(default)]
+    pub big_block_data: BigBlockData<ExecutionData>,
+}
 
-/// Fetches a batch of transactions with retry logic.
+/// `reth bench generate-big-block` command
 ///
-/// Returns `None` if all retries are exhausted.
-async fn fetch_batch_with_retry<S: TransactionSource>(
-    collector: &TransactionCollector<S>,
-    block: u64,
-) -> Option<CollectionResult> {
-    for attempt in 1..=MAX_FETCH_RETRIES {
-        match collector.collect(block).await {
-            Ok(result) => return Some(result),
-            Err(e) => {
-                if attempt == MAX_FETCH_RETRIES {
-                    warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions after max retries");
-                    return None;
-                }
-                warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions, retrying...");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        }
-    }
-    None
-}
+/// Generates a large block by fetching consecutive blocks from an RPC, merging their
+/// transactions into a single payload, and saving the result to disk.
+#[derive(Debug, Parser)]
+pub struct Command {
+    /// The RPC URL to use for fetching blocks.
+    #[arg(long, value_name = "RPC_URL")]
+    rpc_url: String,
 
-/// Outcome of a build attempt check.
-enum RetryOutcome {
-    /// Payload is close enough to target gas.
-    Success,
-    /// Max retries reached, accept what we have.
-    MaxRetries,
-    /// Need more transactions with the specified gas amount.
-    NeedMore(u64),
-}
+    /// The chain name or path to a chain spec JSON file.
+    #[arg(long, value_name = "CHAIN", default_value = "mainnet")]
+    chain: String,
 
-/// Buffer for receiving transaction batches from the fetcher.
-///
-/// This abstracts over the channel to allow the main loop to request
-/// batches on demand, including for retries.
-struct TxBuffer {
-    receiver: mpsc::Receiver<CollectionResult>,
-}
+    /// Block number to start from.
+    #[arg(long, value_name = "FROM_BLOCK")]
+    from_block: u64,
 
-impl TxBuffer {
-    const fn new(receiver: mpsc::Receiver<CollectionResult>) -> Self {
-        Self { receiver }
-    }
+    /// Target gas usage per big block. Consecutive real blocks are merged until
+    /// this gas target is reached (or exceeded by the last included block).
+    /// Accepts optional suffixes: K (thousand), M (million), G (billion).
+    #[arg(long, value_name = "TARGET_GAS", value_parser = super::helpers::parse_gas_limit)]
+    target_gas: u64,
 
-    /// Take the next available batch from the fetcher.
-    async fn take_batch(&mut self) -> Option<CollectionResult> {
-        self.receiver.recv().await
-    }
+    /// Number of sequential big blocks to generate.
+    ///
+    /// Each big block merges real blocks until `--target-gas` is reached.
+    /// Sequential big blocks are chained: block N+1's `parent_hash` is set to
+    /// block N's computed hash.
+    #[arg(long, value_name = "NUM_BIG_BLOCKS", default_value = "1")]
+    num_big_blocks: u64,
+
+    /// Output directory for generated payloads.
+    #[arg(long, value_name = "OUTPUT_DIR")]
+    output_dir: std::path::PathBuf,
 }
 
 impl Command {
-    /// Execute the `generate-big-block` command
+    /// Execute the `generate-big-block` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth-bench", target_gas = self.target_gas, count = self.count, "Generating big block(s)");
+        if self.target_gas == 0 {
+            return Err(eyre::eyre!("--target-gas must be greater than 0"));
+        }
+        if self.num_big_blocks == 0 {
+            return Err(eyre::eyre!("--num-big-blocks must be at least 1"));
+        }
 
-        // Set up authenticated engine provider
-        let jwt =
-            std::fs::read_to_string(&self.jwt_secret).wrap_err("Failed to read JWT secret file")?;
-        let jwt = JwtSecret::from_hex(jwt.trim())?;
-        let auth_url = Url::parse(&self.engine_rpc_url)?;
-
-        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
-        let auth_transport = AuthenticatedTransportConnect::new(auth_url.clone(), jwt);
-        let auth_client = ClientBuilder::default().connect_with(auth_transport).await?;
-        let auth_provider = RootProvider::<AnyNetwork>::new(auth_client);
-
-        // Set up testing RPC provider (for testing_buildBlockV1)
-        info!(target: "reth-bench", "Connecting to Testing RPC at {}", self.testing_rpc_url);
-        let testing_client = ClientBuilder::default()
-            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
-            .http(self.testing_rpc_url.parse()?);
-        let testing_provider = RootProvider::<AnyNetwork>::new(testing_client);
-
-        // Get the parent block (latest canonical block)
-        info!(target: "reth-bench", endpoint = "engine", method = "eth_getBlockByNumber", block = "latest", "RPC call");
-        let parent_block = auth_provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .ok_or_else(|| eyre::eyre!("Failed to fetch latest block"))?;
-
-        let parent_hash = parent_block.header.hash;
-        let parent_number = parent_block.header.number;
-        let parent_timestamp = parent_block.header.timestamp;
+        // Resolve chain spec for blob params lookup
+        let chain_spec = EthereumChainSpecParser::parse(&self.chain)
+            .wrap_err_with(|| format!("Failed to parse chain spec: {}", self.chain))?;
 
         info!(
             target: "reth-bench",
-            parent_hash = %parent_hash,
-            parent_number = parent_number,
-            "Using initial parent block"
+            from_block = self.from_block,
+            target_gas = self.target_gas,
+            num_big_blocks = self.num_big_blocks,
+            chain = %chain_spec.chain(),
+            output_dir = %self.output_dir.display(),
+            "Generating big block payloads"
         );
 
         // Create output directory
@@ -386,466 +283,358 @@ impl Command {
             format!("Failed to create output directory: {:?}", self.output_dir)
         })?;
 
-        let start_block = self.from_block;
+        // Set up RPC provider
+        let client = ClientBuilder::default()
+            .layer(alloy_transport::layers::RetryBackoffLayer::new(10, 800, u64::MAX))
+            .http(self.rpc_url.parse()?);
+        let provider = RootProvider::<AnyNetwork>::new(client);
 
-        // Use pipelined execution when generating multiple payloads
-        if self.count > 1 {
-            self.execute_pipelined(
-                &auth_provider,
-                &testing_provider,
-                start_block,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-        } else {
-            // Single payload - collect transactions and build with retry
-            let tx_source = RpcTransactionSource::from_url(&self.rpc_url)?;
-            let collector = TransactionCollector::new(tx_source, self.target_gas);
-            let result = collector.collect(start_block).await?;
+        let mut prev_big_block_hash: Option<B256> = None;
+        let mut accumulated_block_hashes: Vec<(u64, B256)> = Vec::new();
 
-            if result.transactions.is_empty() {
-                return Err(eyre::eyre!("No transactions collected"));
-            }
-
-            self.execute_sequential_with_retry(
-                &auth_provider,
-                &testing_provider,
-                &collector,
-                result,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
+        // Track previous big block's merged header fields for deriving basefee and
+        // excess_blob_gas on subsequent big blocks.
+        struct PrevBigBlockHeader {
+            gas_used: u64,
+            gas_limit: u64,
+            base_fee_per_gas: u64,
+            blob_gas_used: u64,
+            excess_blob_gas: u64,
         }
+        let mut prev_big_block_header: Option<PrevBigBlockHeader> = None;
 
-        info!(target: "reth-bench", count = self.count, output_dir = %self.output_dir.display(), "All payloads generated");
-        Ok(())
-    }
+        // Track the next block to fetch across big blocks so they don't overlap.
+        let mut next_block = self.from_block;
 
-    /// Sequential execution path with retry logic for underfilled payloads.
-    async fn execute_sequential_with_retry<S: TransactionSource>(
-        &self,
-        auth_provider: &RootProvider<AnyNetwork>,
-        testing_provider: &RootProvider<AnyNetwork>,
-        collector: &TransactionCollector<S>,
-        initial_result: CollectionResult,
-        mut parent_hash: B256,
-        mut parent_timestamp: u64,
-    ) -> eyre::Result<()> {
-        let mut current_result = initial_result;
+        for big_block_idx in 0..self.num_big_blocks {
+            let range_start = next_block;
 
-        for i in 0..self.count {
-            let built = self
-                .build_with_retry(
-                    testing_provider,
-                    collector,
-                    &mut current_result,
-                    i,
-                    parent_hash,
-                    parent_timestamp,
-                )
-                .await?;
+            // Fetch consecutive blocks until the gas target is reached.
+            let mut blocks = Vec::new();
+            let mut block_receipts: Vec<Vec<Receipt>> = Vec::new();
+            let mut accumulated_block_gas: u64 = 0;
 
-            self.save_payload(&built)?;
+            let mut reached_chain_tip = false;
+            while accumulated_block_gas < self.target_gas {
+                let block_number = next_block;
+                info!(target: "reth-bench", block_number, big_block = big_block_idx, "Fetching block");
 
-            if self.execute || self.count > 1 {
-                info!(target: "reth-bench", payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
-                self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-                info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
-            }
-
-            parent_hash = built.block_hash;
-            parent_timestamp = built.timestamp;
-        }
-        Ok(())
-    }
-
-    /// Build a payload with retry logic when `gas_used` is below target.
-    ///
-    /// Uses the ratio of `gas_used/gas_sent` to estimate how many more transactions
-    /// are needed to hit the target gas.
-    async fn build_with_retry<S: TransactionSource>(
-        &self,
-        testing_provider: &RootProvider<AnyNetwork>,
-        collector: &TransactionCollector<S>,
-        result: &mut CollectionResult,
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        for attempt in 1..=MAX_BUILD_RETRIES {
-            let tx_bytes: Vec<Bytes> = result.transactions.iter().map(|t| t.raw.clone()).collect();
-            let gas_sent = result.gas_sent;
-
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                attempt,
-                tx_count = tx_bytes.len(),
-                gas_sent,
-                parent_hash = %parent_hash,
-                "Building payload via testing_buildBlockV1"
-            );
-
-            let built = Self::build_payload_static(
-                testing_provider,
-                &tx_bytes,
-                index,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-
-            match self.check_retry_outcome(&built, index, attempt, gas_sent) {
-                RetryOutcome::Success | RetryOutcome::MaxRetries => return Ok(built),
-                RetryOutcome::NeedMore(additional_gas) => {
-                    let additional =
-                        collector.collect_gas(result.next_block, additional_gas).await?;
-                    result.transactions.extend(additional.transactions);
-                    result.gas_sent = result.gas_sent.saturating_add(additional.gas_sent);
-                    result.next_block = additional.next_block;
-                }
-            }
-        }
-
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
-        Err(eyre::eyre!("build_with_retry exhausted retries without result"))
-    }
-
-    /// Pipelined execution - fetches transactions in background, builds with retry.
-    ///
-    /// The fetcher continuously produces transaction batches. The main loop consumes them,
-    /// builds payloads with retry logic (requesting more transactions if underfilled),
-    /// and executes each payload before moving to the next.
-    async fn execute_pipelined(
-        &self,
-        auth_provider: &RootProvider<AnyNetwork>,
-        testing_provider: &RootProvider<AnyNetwork>,
-        start_block: u64,
-        initial_parent_hash: B256,
-        initial_parent_timestamp: u64,
-    ) -> eyre::Result<()> {
-        // Create channel for transaction batches - fetcher sends CollectionResult
-        let (tx_sender, tx_receiver) = mpsc::channel::<CollectionResult>(self.prefetch_buffer);
-
-        // Spawn background task to continuously fetch transaction batches
-        let rpc_url = self.rpc_url.clone();
-        let target_gas = self.target_gas;
-
-        let fetcher_handle = tokio::spawn(async move {
-            let tx_source = match RpcTransactionSource::from_url(&rpc_url) {
-                Ok(source) => source,
-                Err(e) => {
-                    warn!(target: "reth-bench", error = %e, "Failed to create transaction source");
-                    return None;
-                }
-            };
-
-            let collector = TransactionCollector::new(tx_source, target_gas);
-            let mut current_block = start_block;
-
-            while let Some(batch) = fetch_batch_with_retry(&collector, current_block).await {
-                if batch.transactions.is_empty() {
-                    info!(target: "reth-bench", block = current_block, "Reached chain tip, stopping fetcher");
-                    break;
-                }
-
-                info!(
-                    target: "reth-bench",
-                    tx_count = batch.transactions.len(),
-                    gas_sent = batch.gas_sent,
-                    blocks = format!("{}..{}", current_block, batch.next_block),
-                    "Fetched transaction batch"
+                let fetch_result = tokio::try_join!(
+                    provider.get_block_by_number(block_number.into()).full(),
+                    provider.get_block_receipts(block_number.into()),
                 );
-                current_block = batch.next_block;
 
-                if tx_sender.send(batch).await.is_err() {
-                    break;
-                }
-            }
+                let (rpc_block, receipts) = match fetch_result {
+                    Ok((Some(block), Some(receipts))) => (block, receipts),
+                    Ok((None, _) | (_, None)) => {
+                        warn!(
+                            target: "reth-bench",
+                            block_number,
+                            "Block not found — reached chain tip"
+                        );
+                        reached_chain_tip = true;
+                        break;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
 
-            Some(current_block)
-        });
-
-        // Transaction buffer: holds transactions from batches + any extras from retries
-        let mut tx_buffer = TxBuffer::new(tx_receiver);
-
-        let mut parent_hash = initial_parent_hash;
-        let mut parent_timestamp = initial_parent_timestamp;
-
-        for i in 0..self.count {
-            // Get initial batch of transactions for this payload
-            let Some(mut result) = tx_buffer.take_batch().await else {
-                info!(
-                    target: "reth-bench",
-                    payloads_built = i,
-                    payloads_requested = self.count,
-                    "Transaction source exhausted, stopping"
-                );
-                break;
-            };
-
-            if result.transactions.is_empty() {
-                info!(
-                    target: "reth-bench",
-                    payloads_built = i,
-                    payloads_requested = self.count,
-                    "No more transactions available, stopping"
-                );
-                break;
-            }
-
-            // Build with retry - may need to request more transactions
-            let built = self
-                .build_with_retry_buffered(
-                    testing_provider,
-                    &mut tx_buffer,
-                    &mut result,
-                    i,
-                    parent_hash,
-                    parent_timestamp,
-                )
-                .await?;
-
-            self.save_payload(&built)?;
-
-            let current_block_hash = built.block_hash;
-            let current_timestamp = built.timestamp;
-
-            // Execute payload
-            info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
-            self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-            info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
-
-            parent_hash = current_block_hash;
-            parent_timestamp = current_timestamp;
-        }
-
-        // Clean up the fetcher task
-        drop(tx_buffer);
-        let _ = fetcher_handle.await;
-
-        Ok(())
-    }
-
-    /// Build a payload with retry logic, using the buffered transaction source.
-    async fn build_with_retry_buffered(
-        &self,
-        testing_provider: &RootProvider<AnyNetwork>,
-        tx_buffer: &mut TxBuffer,
-        result: &mut CollectionResult,
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        for attempt in 1..=MAX_BUILD_RETRIES {
-            let tx_bytes: Vec<Bytes> = result.transactions.iter().map(|t| t.raw.clone()).collect();
-            let gas_sent = result.gas_sent;
-
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                attempt,
-                tx_count = tx_bytes.len(),
-                gas_sent,
-                parent_hash = %parent_hash,
-                "Building payload via testing_buildBlockV1"
-            );
-
-            let built = Self::build_payload_static(
-                testing_provider,
-                &tx_bytes,
-                index,
-                parent_hash,
-                parent_timestamp,
-            )
-            .await?;
-
-            match self.check_retry_outcome(&built, index, attempt, gas_sent) {
-                RetryOutcome::Success | RetryOutcome::MaxRetries => return Ok(built),
-                RetryOutcome::NeedMore(additional_gas) => {
-                    let mut collected_gas = 0u64;
-                    while collected_gas < additional_gas {
-                        if let Some(batch) = tx_buffer.take_batch().await {
-                            collected_gas += batch.gas_sent;
-                            result.transactions.extend(batch.transactions);
-                            result.gas_sent = result.gas_sent.saturating_add(batch.gas_sent);
-                            result.next_block = batch.next_block;
-                        } else {
-                            warn!(target: "reth-bench", "Transaction fetcher exhausted, proceeding with available transactions");
-                            break;
+                // Convert RPC receipts to consensus receipts
+                let consensus_receipts: Vec<Receipt> = receipts
+                    .iter()
+                    .map(|r| {
+                        let inner = &r.inner.inner.inner;
+                        let tx_type = r.inner.inner.r#type.try_into().unwrap_or_default();
+                        Receipt {
+                            tx_type,
+                            success: inner.receipt.status.coerce_status(),
+                            cumulative_gas_used: inner.receipt.cumulative_gas_used,
+                            logs: inner
+                                .receipt
+                                .logs
+                                .iter()
+                                .map(|log| alloy_primitives::Log {
+                                    address: log.inner.address,
+                                    data: log.inner.data.clone(),
+                                })
+                                .collect(),
                         }
+                    })
+                    .collect();
+
+                // Convert to consensus block
+                let block = rpc_block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| {
+                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    })?
+                    .into_consensus();
+
+                // Convert to ExecutionData
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let execution_data = ExecutionData { payload, sidecar };
+
+                let block_gas = execution_data.payload.as_v1().gas_used;
+                info!(
+                    target: "reth-bench",
+                    block_number,
+                    gas_used = block_gas,
+                    tx_count = execution_data.payload.transactions().len(),
+                    receipts = consensus_receipts.len(),
+                    "Fetched block"
+                );
+
+                accumulated_block_gas += block_gas;
+                blocks.push(execution_data);
+                block_receipts.push(consensus_receipts);
+                next_block += 1;
+            }
+
+            // If we hit the chain tip without fetching any blocks, stop generating.
+            if blocks.is_empty() {
+                warn!(
+                    target: "reth-bench",
+                    big_block = big_block_idx,
+                    requested = self.num_big_blocks,
+                    "No blocks available, stopping generation early"
+                );
+                break;
+            }
+
+            // Block 0 is the base
+            let mut base = blocks.remove(0);
+            let base_receipts = block_receipts.remove(0);
+            let mut env_switches = Vec::new();
+
+            // Accumulate all receipts with corrected cumulative_gas_used.
+            // Each block's receipts have cumulative gas relative to that block;
+            // we add the prior blocks' total gas to make them globally correct.
+            let mut all_receipts: Vec<Receipt> = Vec::new();
+            let mut cumulative_gas_offset: u64 = 0;
+            {
+                // Base block receipts (block 0) — no offset needed
+                let base_block_gas = base.payload.as_v1().gas_used;
+                all_receipts.extend(base_receipts.into_iter().map(|mut r| {
+                    r.cumulative_gas_used += cumulative_gas_offset;
+                    r
+                }));
+                cumulative_gas_offset += base_block_gas;
+            }
+
+            if !blocks.is_empty() {
+                // Store the original unmutated base block as env_switch at index 0.
+                // This preserves the real gas_limit, basefee, etc. for segment 0's
+                // EVM environment, which would otherwise be lost when we mutate the
+                // base payload header below.
+                env_switches.push((0, base.clone()));
+
+                let mut cumulative_tx_count = base.payload.transactions().len();
+
+                // Collect state from the last block for header fields
+                let last = blocks.last().unwrap();
+                let last_v1 = last.payload.as_v1();
+                let final_state_root = last_v1.state_root;
+
+                let mut total_gas_used = base.payload.as_v1().gas_used;
+                let mut total_gas_limit = base.payload.as_v1().gas_limit;
+
+                // Concatenate transactions from subsequent blocks and build env_switches
+                for (block_data, receipts) in blocks.into_iter().zip(block_receipts) {
+                    let block_v1 = block_data.payload.as_v1();
+                    let block_gas = block_v1.gas_used;
+                    total_gas_used += block_gas;
+                    total_gas_limit += block_v1.gas_limit;
+
+                    // Accumulate receipts with corrected cumulative_gas_used
+                    all_receipts.extend(receipts.into_iter().map(|mut r| {
+                        r.cumulative_gas_used += cumulative_gas_offset;
+                        r
+                    }));
+                    cumulative_gas_offset += block_gas;
+
+                    // Record environment switch at this block boundary
+                    env_switches.push((cumulative_tx_count, block_data.clone()));
+
+                    // Append this block's transactions to the base payload
+                    let txs = block_data.payload.transactions().clone();
+                    cumulative_tx_count += txs.len();
+                    base.payload.transactions_mut().extend(txs);
+                }
+
+                // Compute merged receipts_root and logs_bloom from all accumulated
+                // receipts (with globally-correct cumulative_gas_used).
+                let receipts_with_bloom: Vec<_> =
+                    all_receipts.iter().map(|r| r.with_bloom_ref()).collect();
+                let merged_receipts_root = proofs::calculate_receipt_root(&receipts_with_bloom);
+                let merged_logs_bloom =
+                    receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r.bloom_ref());
+
+                // Mutate the base payload header
+                let base_v1 = base.payload.as_v1_mut();
+                base_v1.state_root = final_state_root;
+                base_v1.gas_used = total_gas_used;
+                base_v1.gas_limit = total_gas_limit;
+                base_v1.receipts_root = merged_receipts_root;
+                base_v1.logs_bloom = merged_logs_bloom;
+            }
+
+            // Chain sequential big blocks: set parent_hash, block_number, basefee,
+            // and excess_blob_gas for sequential continuity. The engine validates
+            // each big block against its parent, so these fields must be
+            // derivable from the previous big block's merged header.
+            if let Some(prev_hash) = prev_big_block_hash {
+                base.payload.as_v1_mut().parent_hash = prev_hash;
+                // First big block keeps its original block number (from_block).
+                // Subsequent big blocks increment from there.
+                base.payload.as_v1_mut().block_number = self.from_block + big_block_idx;
+            }
+            if let Some(prev) = &prev_big_block_header {
+                // Derive basefee from the previous big block's merged header using
+                // the standard EIP-1559 formula so validate_against_parent_eip1559_base_fee passes.
+                let next_base_fee = alloy_eips::calc_next_block_base_fee(
+                    prev.gas_used,
+                    prev.gas_limit,
+                    prev.base_fee_per_gas,
+                    BaseFeeParams::ethereum(),
+                );
+                base.payload.as_v1_mut().base_fee_per_gas =
+                    alloy_primitives::U256::from(next_base_fee);
+
+                // Derive excess_blob_gas from the previous big block's merged header
+                // so validate_against_parent_4844 passes.
+                let timestamp = base.payload.as_v1().timestamp;
+                let blob_params = chain_spec
+                    .blob_params_at_timestamp(timestamp)
+                    .unwrap_or_else(BlobParams::cancun);
+                let next_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
+                    prev.excess_blob_gas,
+                    prev.blob_gas_used,
+                    prev.base_fee_per_gas,
+                );
+                if let Some(v3) = base.payload.as_v3_mut() {
+                    v3.excess_blob_gas = next_excess_blob_gas;
+                }
+            }
+
+            // Merge blob data from all constituent blocks: sum blob_gas_used
+            // and concatenate versioned hashes so the sidecar matches the blob
+            // transactions in the merged payload body.
+            {
+                let mut all_versioned_hashes: Vec<B256> =
+                    base.sidecar.cancun().map(|c| c.versioned_hashes.clone()).unwrap_or_default();
+                let mut total_blob_gas =
+                    base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0);
+                // Skip env_switch[0] (base block clone) to avoid double-counting
+                for (_, switch_data) in env_switches.iter().skip(1) {
+                    if let Some(cancun) = switch_data.sidecar.cancun() {
+                        all_versioned_hashes.extend_from_slice(&cancun.versioned_hashes);
+                    }
+                    if let Some(v3) = switch_data.payload.as_v3() {
+                        total_blob_gas += v3.blob_gas_used;
                     }
                 }
+                if let Some(v3) = base.payload.as_v3_mut() {
+                    v3.blob_gas_used = total_blob_gas;
+                }
+                let cancun = base.sidecar.cancun().map(|c| CancunPayloadFields {
+                    versioned_hashes: all_versioned_hashes,
+                    parent_beacon_block_root: c.parent_beacon_block_root,
+                });
+                // For merged blocks, set an empty requests hash in the Prague sidecar.
+                // The correct requests_hash cannot be computed from RPC data alone
+                // (raw execution layer requests are not exposed via eth_getBlockByNumber).
+                // Use --testing.skip-requests-hash-check when validating big block payloads.
+                let prague = base
+                    .sidecar
+                    .prague()
+                    .map(|_| PraguePayloadFields::new(alloy_eips::eip7685::Requests::default()));
+                base.sidecar = match (cancun, prague) {
+                    (Some(c), Some(p)) => ExecutionPayloadSidecar::v4(c, p),
+                    (Some(c), None) => ExecutionPayloadSidecar::v3(c),
+                    _ => ExecutionPayloadSidecar::none(),
+                };
+            }
+
+            // Compute the real block hash from the mutated payload
+            let block_hash = compute_payload_block_hash(&base)?;
+            base.payload.as_v1_mut().block_hash = block_hash;
+            prev_big_block_hash = Some(block_hash);
+
+            // Record this big block's merged header fields so the next big block
+            // can derive its basefee and excess_blob_gas correctly.
+            {
+                let v1 = base.payload.as_v1();
+                prev_big_block_header = Some(PrevBigBlockHeader {
+                    gas_used: v1.gas_used,
+                    gas_limit: v1.gas_limit,
+                    base_fee_per_gas: v1.base_fee_per_gas.to::<u64>(),
+                    blob_gas_used: base.payload.as_v3().map(|v3| v3.blob_gas_used).unwrap_or(0),
+                    excess_blob_gas: base.payload.as_v3().map(|v3| v3.excess_blob_gas).unwrap_or(0),
+                });
+            }
+
+            let big_block = BigBlockPayload {
+                execution_data: base,
+                big_block_data: BigBlockData {
+                    env_switches,
+                    prior_block_hashes: accumulated_block_hashes.clone(),
+                },
+            };
+
+            // Accumulate real block hashes from this big block's env_switches for
+            // subsequent big blocks' BLOCKHASH lookups. Cap at 256 entries since the
+            // BLOCKHASH opcode only looks back 256 blocks.
+            for (_, switch_data) in &big_block.big_block_data.env_switches {
+                let block_number = switch_data.payload.as_v1().block_number;
+                let block_hash = switch_data.payload.as_v1().block_hash;
+                accumulated_block_hashes.push((block_number, block_hash));
+            }
+            if accumulated_block_hashes.len() > 256 {
+                let excess = accumulated_block_hashes.len() - 256;
+                accumulated_block_hashes.drain(..excess);
+            }
+
+            // Save to disk
+            let range_end = next_block - 1;
+            let filename = format!("big_block_{range_start}_to_{range_end}.json");
+            let filepath = self.output_dir.join(&filename);
+            let json = serde_json::to_string_pretty(&big_block)?;
+            std::fs::write(&filepath, &json)
+                .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
+
+            info!(
+                target: "reth-bench",
+                path = %filepath.display(),
+                block_hash = %block_hash,
+                total_txs = big_block.execution_data.payload.transactions().len(),
+                total_gas_used = big_block.execution_data.payload.as_v1().gas_used,
+                env_switches = big_block.big_block_data.env_switches.len(),
+                prior_block_hashes = big_block.big_block_data.prior_block_hashes.len(),
+                "Big block payload saved"
+            );
+
+            if reached_chain_tip {
+                warn!(
+                    target: "reth-bench",
+                    generated = big_block_idx + 1,
+                    requested = self.num_big_blocks,
+                    "Reached chain tip, stopping generation early"
+                );
+                break;
             }
         }
 
-        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
-        Err(eyre::eyre!("build_with_retry_buffered exhausted retries without result"))
-    }
-
-    /// Determines the outcome of a build attempt.
-    fn check_retry_outcome(
-        &self,
-        built: &BuiltPayload,
-        index: u64,
-        attempt: u32,
-        gas_sent: u64,
-    ) -> RetryOutcome {
-        let gas_used = built.gas_used;
-
-        if gas_used + MIN_TARGET_SLACK >= self.target_gas {
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                attempts = attempt,
-                "Payload built successfully"
-            );
-            return RetryOutcome::Success;
-        }
-
-        if attempt == MAX_BUILD_RETRIES {
-            warn!(
-                target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                gas_sent,
-                "Underfilled after max retries, accepting payload"
-            );
-            return RetryOutcome::MaxRetries;
-        }
-
-        if gas_used == 0 {
-            warn!(
-                target: "reth-bench",
-                payload = index + 1,
-                "Zero gas used in payload, requesting fixed chunk of additional transactions"
-            );
-            return RetryOutcome::NeedMore(self.target_gas);
-        }
-
-        let gas_sent_needed_total =
-            (self.target_gas as u128 * gas_sent as u128).div_ceil(gas_used as u128) as u64;
-        let additional = gas_sent_needed_total.saturating_sub(gas_sent);
-        let additional = additional.min(self.target_gas * MAX_ADDITIONAL_GAS_MULTIPLIER);
-
-        if additional == 0 {
-            info!(
-                target: "reth-bench",
-                payload = index + 1,
-                gas_used,
-                target_gas = self.target_gas,
-                "No additional transactions needed based on ratio"
-            );
-            return RetryOutcome::Success;
-        }
-
-        let ratio = gas_used as f64 / gas_sent as f64;
-        info!(
-            target: "reth-bench",
-            payload = index + 1,
-            gas_used,
-            gas_sent,
-            ratio = format!("{:.4}", ratio),
-            additional_gas = additional,
-            "Underfilled, collecting more transactions for retry"
-        );
-        RetryOutcome::NeedMore(additional)
-    }
-
-    /// Build a single payload via `testing_buildBlockV1`.
-    async fn build_payload_static(
-        testing_provider: &RootProvider<AnyNetwork>,
-        transactions: &[Bytes],
-        index: u64,
-        parent_hash: B256,
-        parent_timestamp: u64,
-    ) -> eyre::Result<BuiltPayload> {
-        let request = TestingBuildBlockRequestV1 {
-            parent_block_hash: parent_hash,
-            payload_attributes: PayloadAttributes {
-                timestamp: parent_timestamp + 12,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            },
-            transactions: transactions.to_vec(),
-            extra_data: None,
-        };
-
-        let total_tx_bytes: usize = transactions.iter().map(|tx| tx.len()).sum();
-        info!(
-            target: "reth-bench",
-            payload = index + 1,
-            tx_count = transactions.len(),
-            total_tx_bytes = total_tx_bytes,
-            parent_hash = %parent_hash,
-            "Sending to testing_buildBlockV1"
-        );
-        let envelope: ExecutionPayloadEnvelopeV5 =
-            testing_provider.client().request("testing_buildBlockV1", [request]).await?;
-
-        let v4_envelope = envelope.try_into_v4()?;
-
-        let inner = &v4_envelope.envelope_inner.execution_payload.payload_inner.payload_inner;
-        let block_hash = inner.block_hash;
-        let block_number = inner.block_number;
-        let timestamp = inner.timestamp;
-        let gas_used = inner.gas_used;
-
-        Ok(BuiltPayload { block_number, envelope: v4_envelope, block_hash, timestamp, gas_used })
-    }
-
-    /// Save a payload to disk.
-    fn save_payload(&self, payload: &BuiltPayload) -> eyre::Result<()> {
-        let filename = format!("payload_block_{}.json", payload.block_number);
-        let filepath = self.output_dir.join(&filename);
-        let json = serde_json::to_string_pretty(&payload.envelope)?;
-        std::fs::write(&filepath, &json)
-            .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-        info!(target: "reth-bench", block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
         Ok(())
     }
+}
 
-    async fn execute_payload_v4(
-        &self,
-        provider: &RootProvider<AnyNetwork>,
-        envelope: ExecutionPayloadEnvelopeV4,
-        parent_hash: B256,
-    ) -> eyre::Result<()> {
-        let block_hash =
-            envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
-
-        let status = provider
-            .new_payload_v4(
-                envelope.envelope_inner.execution_payload,
-                vec![],
-                B256::ZERO,
-                envelope.execution_requests.to_vec(),
-            )
-            .await?;
-
-        if !status.is_valid() {
-            return Err(eyre::eyre!("Payload rejected: {:?}", status));
-        }
-
-        let fcu_state = ForkchoiceState {
-            head_block_hash: block_hash,
-            safe_block_hash: parent_hash,
-            finalized_block_hash: parent_hash,
-        };
-
-        let fcu_result = provider.fork_choice_updated_v3(fcu_state, None).await?;
-
-        if !fcu_result.is_valid() {
-            return Err(eyre::eyre!("FCU rejected: {:?}", fcu_result));
-        }
-
-        Ok(())
-    }
+/// Computes the block hash for an [`ExecutionData`] by converting it to a raw block
+/// and hashing the header.
+pub fn compute_payload_block_hash(data: &ExecutionData) -> eyre::Result<B256> {
+    let block = data
+        .payload
+        .clone()
+        .into_block_with_sidecar_raw(&data.sidecar)
+        .wrap_err("failed to convert payload to block for hash computation")?;
+    Ok(block.header.hash_slow())
 }
