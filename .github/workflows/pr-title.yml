@@ -1,7 +1,7 @@
 name: Pull Request
 
 on:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - reopened
@@ -17,6 +17,7 @@ jobs:
     name: Validate PR title is Conventional Commit
     runs-on: ubuntu-latest
     permissions:
+      issues: write
       pull-requests: write
     steps:
       - name: Check title
