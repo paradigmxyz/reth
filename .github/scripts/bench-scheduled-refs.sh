@@ -23,10 +23,10 @@
 #   nightly-created — ISO timestamp of the nightly build (nightly only)
 #
 # Reads:
-#   .nightly-state/last-feature-ref  (nightly, from GH Actions cache)
-#   .hourly-state/last-feature-ref   (hourly, from GH Actions cache)
+#   state/nightly-last-feature-ref  (nightly, from decofe/reth-bench-charts repo)
+#   state/hourly-last-feature-ref   (hourly, from decofe/reth-bench-charts repo)
 #
-# Requires: gh (GitHub CLI), jq, date, git (hourly mode)
+# Requires: gh (GitHub CLI), jq, date, git (hourly mode), curl, DEREK_TOKEN env
 set -euo pipefail
 
 FORCE="${1:-false}"
@@ -42,7 +42,7 @@ if [ "$MODE" = "hourly" ]; then
 
   # --- Step 1: Resolve feature ref from git ---
   echo "::group::Resolving hourly refs from git"
-  git fetch origin main --quiet
+  git fetch origin main --depth=2 --quiet
   FEATURE_REF=$(git rev-parse origin/main)
   echo "Feature (HEAD): $FEATURE_REF"
   echo "::endgroup::"
@@ -69,15 +69,15 @@ if [ "$MODE" = "hourly" ]; then
   fi
   echo "::endgroup::"
 
-  # --- Step 3: Read last successful feature ref from cache ---
-  echo "::group::Reading cached state"
+  # --- Step 3: Read last successful feature ref from charts repo ---
+  echo "::group::Reading persisted state"
   LAST_FEATURE_REF=""
-  STATE_FILE=".hourly-state/last-feature-ref"
-  if [ -f "$STATE_FILE" ]; then
-    LAST_FEATURE_REF=$(tr -d '[:space:]' < "$STATE_FILE")
+  STATE_URL="https://raw.githubusercontent.com/decofe/reth-bench-charts/state/state/hourly-last-feature-ref"
+  if RAW=$(curl -sfL -H "Authorization: token ${DEREK_TOKEN}" "$STATE_URL"); then
+    LAST_FEATURE_REF=$(echo "$RAW" | tr -d '[:space:]')
     echo "Previous feature ref: $LAST_FEATURE_REF"
   else
-    echo "No cached state found (first run)"
+    echo "No persisted state found (first run)"
   fi
   echo "::endgroup::"
 
@@ -173,15 +173,15 @@ else
 fi
 echo "::endgroup::"
 
-# --- Step 3: Read last successful feature ref from cache ---
-echo "::group::Reading cached state"
+# --- Step 3: Read last successful feature ref from charts repo ---
+echo "::group::Reading persisted state"
 LAST_FEATURE_REF=""
-STATE_FILE=".nightly-state/last-feature-ref"
-if [ -f "$STATE_FILE" ]; then
-  LAST_FEATURE_REF=$(tr -d '[:space:]' < "$STATE_FILE")
+STATE_URL="https://raw.githubusercontent.com/decofe/reth-bench-charts/state/state/nightly-last-feature-ref"
+if RAW=$(curl -sfL -H "Authorization: token ${DEREK_TOKEN}" "$STATE_URL"); then
+  LAST_FEATURE_REF=$(echo "$RAW" | tr -d '[:space:]')
   echo "Previous feature ref: $LAST_FEATURE_REF"
 else
-  echo "No cached state found (first run)"
+  echo "No persisted state found (first run)"
 fi
 echo "::endgroup::"
 

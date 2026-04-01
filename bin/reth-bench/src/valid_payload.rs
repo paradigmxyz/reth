@@ -290,7 +290,7 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
 struct RethPayloadStatus {
     latency_us: u64,
     #[serde(default)]
-    persistence_wait_us: Option<u64>,
+    persistence_wait_us: u64,
     #[serde(default)]
     execution_cache_wait_us: u64,
     #[serde(default)]
@@ -302,8 +302,8 @@ struct RethPayloadStatus {
 pub(crate) struct NewPayloadTimingBreakdown {
     /// Server-side execution latency.
     pub(crate) latency: Duration,
-    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
-    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence (backpressure + explicit wait).
+    pub(crate) persistence_wait: Duration,
     /// Time spent waiting for execution cache lock.
     pub(crate) execution_cache_wait: Duration,
     /// Time spent waiting for sparse trie lock.
@@ -351,7 +351,7 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
 
     Ok(Some(NewPayloadTimingBreakdown {
         latency: Duration::from_micros(resp.latency_us),
-        persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+        persistence_wait: Duration::from_micros(resp.persistence_wait_us),
         execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
         sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
     }))

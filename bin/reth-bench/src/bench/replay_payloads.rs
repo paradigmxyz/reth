@@ -135,7 +135,7 @@ impl Command {
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
         }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
@@ -274,7 +274,10 @@ impl Command {
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
-                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
                 execution_cache_wait: server_timings
                     .as_ref()
                     .map(|t| t.execution_cache_wait)
@@ -318,7 +321,10 @@ impl Command {
             }
 
             if let Some(wait_time) = self.wait_time {
-                tokio::time::sleep(wait_time).await;
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
             }
 
             let gas_row =

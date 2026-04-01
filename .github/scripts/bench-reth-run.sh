@@ -7,12 +7,12 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
-#               BENCH_RETH_NEW_PAYLOAD (true/false, default true)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
+#               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
 set -euo pipefail
 
 LABEL="$1"
@@ -149,11 +149,13 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
 fi
 
 # OTLP traces and logs export
-if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
-fi
-if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
+  if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+  fi
+  if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+  fi
 fi
 
 # Tracy profiling: add --log.tracy flags and set environment
@@ -240,10 +242,7 @@ fi
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 
 # Build optional flags
-EXTRA_BENCH_ARGS=()
-if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
-  EXTRA_BENCH_ARGS+=(--reth-new-payload --wait-for-persistence)
-fi
+EXTRA_BENCH_ARGS=(--reth-new-payload)
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
@@ -252,7 +251,7 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
 
-  BB_BENCH_ARGS=(--reth-new-payload --wait-for-persistence)
+  BB_BENCH_ARGS=(--reth-new-payload)
   if [ -n "${BENCH_WAIT_TIME:-}" ]; then
     BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
   fi

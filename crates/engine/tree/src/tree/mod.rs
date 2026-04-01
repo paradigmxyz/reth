@@ -1643,6 +1643,7 @@ where
                                 wait_for_persistence,
                                 wait_for_caches,
                                 tx,
+                                enqueued_at,
                             } => {
                                 debug!(
                                     target: "engine::tree",
@@ -1651,7 +1652,9 @@ where
                                     "Processing reth_newPayload"
                                 );
 
-                                let persistence_wait = if wait_for_persistence {
+                                let backpressure_wait = enqueued_at.elapsed();
+
+                                let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
                                         let (persistence_tx, persistence_rx) =
@@ -1674,12 +1677,12 @@ where
                                             .recv()
                                             .expect("persistence result channel closed");
                                         let _ = self.on_persistence_complete(result, start_time);
-                                        Some(wait_duration)
+                                        wait_duration
                                     } else {
-                                        Some(Duration::ZERO)
+                                        Duration::ZERO
                                     }
                                 } else {
-                                    None
+                                    Duration::ZERO
                                 };
 
                                 let cache_wait = wait_for_caches
@@ -1702,7 +1705,7 @@ where
 
                                 let timings = NewPayloadTimings {
                                     latency,
-                                    persistence_wait,
+                                    persistence_wait: backpressure_wait + explicit_persistence_wait,
                                     execution_cache_wait: cache_wait
                                         .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
