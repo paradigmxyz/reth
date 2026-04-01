@@ -51,6 +51,11 @@ pub struct EngineNodeLauncher {
     /// Temporary configuration for engine tree.
     /// After engine is stabilized, this should be configured through node builder.
     pub engine_tree_config: TreeConfig,
+
+    /// Optional external `ChangesetCache` to share with the engine.
+    /// When provided, the engine will use this cache instead of creating its own,
+    /// allowing external components to share the same trie changeset cache.
+    pub changeset_cache: Option<ChangesetCache>,
 }
 
 impl EngineNodeLauncher {
@@ -60,7 +65,17 @@ impl EngineNodeLauncher {
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
+        Self {
+            ctx: LaunchContext::new(task_executor, data_dir),
+            engine_tree_config,
+            changeset_cache: None,
+        }
+    }
+
+    /// Sets an external [`ChangesetCache`] to share with the engine.
+    pub fn with_changeset_cache(mut self, cache: ChangesetCache) -> Self {
+        self.changeset_cache = Some(cache);
+        self
     }
 
     async fn launch_node<T, CB, AO>(
@@ -78,7 +93,7 @@ impl EngineNodeLauncher {
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
-        let Self { ctx, engine_tree_config } = self;
+        let Self { ctx, engine_tree_config, changeset_cache } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
@@ -88,8 +103,9 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create changeset cache that will be shared across the engine
-        let changeset_cache = ChangesetCache::new();
+        // Use external changeset cache if provided, otherwise create a new
+        // changeset cache that will be shared across the engine.
+        let changeset_cache = changeset_cache.unwrap_or_default();
 
         // setup the launch context
         let ctx = ctx
