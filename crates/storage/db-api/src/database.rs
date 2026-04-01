@@ -28,6 +28,9 @@ pub trait Database: Send + Sync + Debug {
 
     /// Returns the transaction ID of the oldest active reader, if available.
     ///
+    /// This is the committed txnid of the snapshot the reader is pinned to, not a unique per-reader
+    /// identifier, so multiple readers can report the same txnid.
+    ///
     /// Used to check whether stale readers from a previous write transaction have completed.
     /// Returns `None` if no readers are active or the backend does not support this query.
     fn oldest_reader_txnid(&self) -> Option<u64> {
@@ -120,7 +123,9 @@ impl<DB: Database> Database for &DB {
 
 /// Object-safe adapter for reader-txn tracking and unwind fencing.
 pub trait ReaderTxnTracker: Send + Sync {
-    /// Returns the txnid of the oldest active MDBX reader.
+    /// Returns the txnid of the oldest active reader snapshot.
+    ///
+    /// This is not a unique per-reader id; it is the committed txnid the reader is pinned to.
     fn oldest_reader_txnid(&self) -> Option<u64>;
 
     /// Returns the latest committed MDBX txnid.
@@ -129,7 +134,7 @@ pub trait ReaderTxnTracker: Send + Sync {
     /// Forces a real commit so the latest txnid advances, then returns it.
     fn commit_fence(&self) -> Result<Option<u64>, DatabaseError>;
 
-    /// Waits until all MDBX readers older than `cutoff_txnid` have drained,
+    /// Waits until all readers pinned to a committed txnid older than `cutoff_txnid` have drained,
     /// polling every 10ms.
     fn wait_for_readers_before_txnid(&self, cutoff_txnid: u64) {
         while self.oldest_reader_txnid().is_some_and(|oldest| oldest < cutoff_txnid) {
