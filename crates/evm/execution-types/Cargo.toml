@@ -22,8 +22,6 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
-
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
@@ -36,6 +34,7 @@ alloy-primitives = { workspace = true, features = ["rand", "arbitrary"] }
 arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
+alloy-rlp.workspace = true
 
 [features]
 default = ["std"]
@@ -69,5 +68,4 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
     "alloy-evm/std",
-    "alloy-rlp/std",
 ]
