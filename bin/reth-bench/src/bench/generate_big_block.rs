@@ -5,7 +5,7 @@
 //! and saves the result to disk as a [`BigBlockPayload`] JSON file containing the merged
 //! [`ExecutionData`] and environment switches at each block boundary.
 
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{TxEnvelope, TxReceipt};
 use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams, Typed2718};
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -365,8 +365,8 @@ impl Command {
                 let block = rpc_block
                     .into_inner()
                     .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| {
-                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+                        tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
                     })?
                     .into_consensus();
 
