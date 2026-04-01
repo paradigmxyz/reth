@@ -424,6 +424,12 @@ impl Info {
         self.0.mi_numreaders as usize
     }
 
+    /// Transaction ID of the oldest active reader.
+    #[inline]
+    pub const fn latter_reader_txnid(&self) -> u64 {
+        self.0.mi_latter_reader_txnid
+    }
+
     /// Return the internal page ops metrics
     #[inline]
     pub const fn page_ops(&self) -> PageOps {

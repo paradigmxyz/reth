@@ -1,5 +1,6 @@
 use crate::{
     table::TableImporter,
+    tables::{self, RawKey, RawTable, RawValue},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -24,6 +25,19 @@ pub trait Database: Send + Sync + Debug {
 
     /// Returns the path to the database directory.
     fn path(&self) -> PathBuf;
+
+    /// Returns the transaction ID of the oldest active reader, if available.
+    ///
+    /// Used to check whether stale readers from a previous write transaction have completed.
+    /// Returns `None` if no readers are active or the backend does not support this query.
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        None
+    }
+
+    /// Returns the ID of the most recently committed transaction, if available.
+    fn last_txnid(&self) -> Option<u64> {
+        None
+    }
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
@@ -69,6 +83,14 @@ impl<DB: Database> Database for Arc<DB> {
     fn path(&self) -> PathBuf {
         <DB as Database>::path(self)
     }
+
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        <DB as Database>::oldest_reader_txnid(self)
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        <DB as Database>::last_txnid(self)
+    }
 }
 
 impl<DB: Database> Database for &DB {
@@ -85,5 +107,54 @@ impl<DB: Database> Database for &DB {
 
     fn path(&self) -> PathBuf {
         <DB as Database>::path(self)
+    }
+
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        <DB as Database>::oldest_reader_txnid(self)
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        <DB as Database>::last_txnid(self)
+    }
+}
+
+/// Object-safe adapter for reader-txn tracking and unwind fencing.
+pub trait ReaderTxnTracker: Send + Sync {
+    /// Returns the txnid of the oldest active MDBX reader.
+    fn oldest_reader_txnid(&self) -> Option<u64>;
+
+    /// Returns the latest committed MDBX txnid.
+    fn last_txnid(&self) -> Option<u64>;
+
+    /// Forces a real commit so the latest txnid advances, then returns it.
+    fn commit_fence(&self) -> Result<Option<u64>, DatabaseError>;
+
+    /// Waits until all MDBX readers older than `cutoff_txnid` have drained,
+    /// polling every 10ms.
+    fn wait_for_readers_before_txnid(&self, cutoff_txnid: u64) {
+        while self.oldest_reader_txnid().is_some_and(|oldest| oldest < cutoff_txnid) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+impl<DB: Database> ReaderTxnTracker for DB {
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        Database::oldest_reader_txnid(self)
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        Database::last_txnid(self)
+    }
+
+    fn commit_fence(&self) -> Result<Option<u64>, DatabaseError> {
+        let last_txnid = self.last_txnid().unwrap_or_default();
+        let tx = self.tx_mut()?;
+        tx.put::<RawTable<tables::Metadata>>(
+            RawKey::<String>::from_vec(vec![0, 1]),
+            RawValue::from_vec(last_txnid.to_be_bytes().into()),
+        )?;
+        tx.commit()?;
+        Ok(self.last_txnid())
     }
 }

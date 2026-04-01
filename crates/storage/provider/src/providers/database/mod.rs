@@ -281,6 +281,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.runtime.clone(),
                 self.db.path(),
             )
+            .with_reader_txn_tracker(self.db.clone())
             .with_minimum_pruning_distance(self.minimum_pruning_distance),
         ))
     }
@@ -304,6 +305,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.runtime.clone(),
             self.db.path(),
         )
+        .with_reader_txn_tracker(self.db.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
