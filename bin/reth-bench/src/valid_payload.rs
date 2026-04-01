@@ -437,13 +437,11 @@ pub(crate) async fn call_forkchoice_updated_with_reth<
 mod tests {
     use super::*;
     use alloy_eips::eip7685::RequestsOrHash;
-    use alloy_network::{AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction};
-    use alloy_primitives::{Address, Bloom, B256, B64, U256};
+    use alloy_primitives::{Address, Bloom, B256, U256};
     use alloy_rpc_types_engine::{
         CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
         PraguePayloadFields,
     };
-    use alloy_rpc_types_eth::{Block, BlockTransactions};
 
     #[test]
     fn payload_to_new_payload_v3_uses_standard_ethereum_params() {
@@ -498,41 +496,47 @@ mod tests {
 
     #[test]
     fn ethereum_block_to_payload_rejects_unsupported_transaction_types() {
-        let tx: AnyRpcTransaction = serde_json::from_value(serde_json::json!({
-            "blockHash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
-            "blockNumber": "0x1",
-            "depositReceiptVersion": "0x1",
-            "from": "0x36bde71c97b33cc4729cf772ae268934f7ab70b2",
-            "gas": "0x5208",
-            "gasPrice": "0x1",
-            "hash": "0x0bf1845c5d7a82ec92365d5027f7310793d53004f3c86aa80965c67bf7e7dc80",
-            "input": "0x",
-            "mint": "0x0",
-            "nonce": "0x0",
-            "r": "0x0",
-            "s": "0x0",
-            "sourceHash": "0x074adb22f2e6ed9bdd31c52eefc1f050e5db56eb85056450bccd79a6649520b3",
-            "to": "0x4200000000000000000000000000000000000007",
-            "transactionIndex": "0x0",
-            "type": "0x7e",
-            "v": "0x0",
-            "value": "0x0"
+        let block = serde_json::from_value::<AnyRpcBlock>(serde_json::json!({
+            "hash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
+            "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+            "miner": "0x0000000000000000000000000000000000000000",
+            "stateRoot": "0x5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
+            "transactionsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "logsBloom": format!("0x{}", "00".repeat(256)),
+            "difficulty": "0x0",
+            "number": "0x1",
+            "gasLimit": "0x1c9c380",
+            "gasUsed": "0x0",
+            "timestamp": "0x1",
+            "extraData": "0x",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "0x0000000000000000",
+            "baseFeePerGas": "0x1",
+            "transactions": [{
+                "blockHash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
+                "blockNumber": "0x1",
+                "depositReceiptVersion": "0x1",
+                "from": "0x36bde71c97b33cc4729cf772ae268934f7ab70b2",
+                "gas": "0x5208",
+                "gasPrice": "0x1",
+                "hash": "0x0bf1845c5d7a82ec92365d5027f7310793d53004f3c86aa80965c67bf7e7dc80",
+                "input": "0x",
+                "mint": "0x0",
+                "nonce": "0x0",
+                "r": "0x0",
+                "s": "0x0",
+                "sourceHash": "0x074adb22f2e6ed9bdd31c52eefc1f050e5db56eb85056450bccd79a6649520b3",
+                "to": "0x4200000000000000000000000000000000000007",
+                "transactionIndex": "0x0",
+                "type": "0x7e",
+                "v": "0x0",
+                "value": "0x0"
+            }],
+            "uncles": []
         }))
-        .expect("transaction deserializes");
-        let block = AnyRpcBlock::new(
-            Block::new(
-                AnyRpcHeader::from_sealed(
-                    AnyHeader {
-                        nonce: Some(B64::ZERO),
-                        mix_hash: Some(B256::ZERO),
-                        ..Default::default()
-                    }
-                    .seal(B256::ZERO),
-                ),
-                BlockTransactions::Full(vec![tx]),
-            )
-            .into(),
-        );
+        .expect("block deserializes");
 
         let err = ethereum_block_to_payload(block).expect_err("unsupported tx fails");
         assert!(err.to_string().contains("unsupported tx type"));
