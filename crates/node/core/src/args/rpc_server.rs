@@ -28,6 +28,14 @@ use super::types::MaxOr;
 /// Global static RPC server defaults
 static RPC_SERVER_DEFAULTS: OnceLock<DefaultRpcServerArgs> = OnceLock::new();
 
+fn parse_non_zero_usize(value: &str) -> Result<usize, String> {
+    let parsed = value.parse::<usize>().map_err(|err| err.to_string())?;
+    if parsed == 0 {
+        return Err("value must be at least 1".to_string())
+    }
+    Ok(parsed)
+}
+
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 
@@ -533,7 +541,13 @@ pub struct RpcServerArgs {
     /// Tracing requests are generally CPU bound.
     /// Choosing a value that is higher than the available CPU cores can have a negative impact on
     /// the performance of the node and affect the node's ability to maintain sync.
-    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests)]
+    #[arg(
+        long = "rpc.max-tracing-requests",
+        alias = "rpc-max-tracing-requests",
+        value_name = "COUNT",
+        value_parser = parse_non_zero_usize,
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests
+    )]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of concurrent blocking IO requests.
@@ -1007,6 +1021,16 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
+    }
+
+    #[test]
+    fn test_rpc_max_tracing_requests_reject_zero() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--rpc.max-tracing-requests",
+            "0",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -377,13 +377,11 @@ where
             .into())
         }
 
+        let max_tracing_requests = self.inner.eth_config.max_tracing_requests.max(1);
         let mut all_traces = Vec::new();
-        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end = std::cmp::min(
-                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
-                end,
-            );
+        let mut block_traces = Vec::with_capacity(max_tracing_requests);
+        for chunk_start in (start..=end).step_by(max_tracing_requests) {
+            let chunk_end = std::cmp::min(chunk_start + max_tracing_requests as u64 - 1, end);
 
             // fetch all blocks in that chunk
             let blocks = self

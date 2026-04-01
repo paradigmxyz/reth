@@ -543,9 +543,12 @@ where
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
     {
-        let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
+        let mut eth_config = config.eth;
+        eth_config.max_tracing_requests = eth_config.max_tracing_requests.max(1);
 
-        let eth = EthHandlers::bootstrap(config.eth.clone(), executor.clone(), eth_api);
+        let blocking_pool_guard = BlockingTaskGuard::new(eth_config.max_tracing_requests);
+
+        let eth = EthHandlers::bootstrap(eth_config.clone(), executor.clone(), eth_api);
 
         Self {
             provider,
@@ -556,7 +559,7 @@ where
             consensus,
             modules: Default::default(),
             blocking_pool_guard,
-            eth_config: config.eth,
+            eth_config,
             evm_config,
             engine_events,
         }
