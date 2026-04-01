@@ -82,8 +82,11 @@ impl DiskFileBlobStore {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
-                    result[hash_idx] = Some(match_result);
-                    missing_count -= 1;
+                    let slot = &mut result[hash_idx];
+                    if slot.is_none() {
+                        missing_count -= 1;
+                    }
+                    *slot = Some(match_result);
                 }
             }
 
@@ -175,6 +178,10 @@ impl BlobStore for DiskFileBlobStore {
                 Ok(_) => {
                     stat.delete_succeed += 1;
                     subsize += filesize;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already deleted by a concurrent cleanup task
+                    stat.delete_succeed += 1;
                 }
                 Err(e) => {
                     stat.delete_failed += 1;
@@ -928,5 +935,31 @@ mod tests {
 
         let v3 = store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap();
         assert_eq!(v3, vec![Some(expected)]);
+    }
+
+    #[test]
+    fn disk_double_cleanup_no_failure() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(5);
+        let all_hashes: Vec<_> = blobs.iter().map(|(tx, _)| *tx).collect();
+        store.insert_all(blobs).unwrap();
+        store.clear_cache();
+
+        // Schedule blobs for deletion
+        store.delete_all(all_hashes.clone()).unwrap();
+
+        // First cleanup: files exist, all should succeed
+        let stat1 = store.cleanup();
+        assert_eq!(stat1.delete_succeed, 5);
+        assert_eq!(stat1.delete_failed, 0);
+
+        // Manually re-enqueue the same hashes to simulate a concurrent cleanup race
+        store.inner.txs_to_delete.write().extend(all_hashes);
+
+        // Second cleanup: files already deleted, should still report success (NotFound)
+        let stat2 = store.cleanup();
+        assert_eq!(stat2.delete_succeed, 5);
+        assert_eq!(stat2.delete_failed, 0);
     }
 }

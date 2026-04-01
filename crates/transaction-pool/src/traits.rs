@@ -175,9 +175,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
-        self.add_transactions_with_origins(transactions.into_iter().map(move |tx| (origin, tx)))
-    }
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Adds the given _unvalidated_ transactions into the pool.
     ///
@@ -188,7 +186,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: RPC
     fn add_transactions_with_origins(
         &self,
-        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Submit a consensus transaction directly to the pool
@@ -786,20 +784,17 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone_into_consensus())
+        self.pending.iter().map(|tx| tx.to_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone_into_consensus())
+        self.queued.iter().map(|tx| tx.to_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
     pub fn all(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending
-            .iter()
-            .chain(self.queued.iter())
-            .map(|tx| tx.transaction.clone_into_consensus())
+        self.pending.iter().chain(self.queued.iter()).map(|tx| tx.to_consensus())
     }
 }
 
@@ -824,6 +819,37 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 /// Represents transactions that were propagated over the network.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
+
+impl PropagatedTransactions {
+    /// Records a propagation of a transaction to a peer.
+    pub fn record(&mut self, hash: TxHash, kind: PropagateKind) {
+        self.0.entry(hash).or_default().push(kind);
+    }
+
+    /// Returns the number of distinct transactions that were propagated.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if no transactions were propagated.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns the propagation info for a specific transaction.
+    pub fn get(&self, hash: &TxHash) -> Option<&[PropagateKind]> {
+        self.0.get(hash).map(Vec::as_slice)
+    }
+}
+
+impl IntoIterator for PropagatedTransactions {
+    type Item = (TxHash, Vec<PropagateKind>);
+    type IntoIter = std::collections::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
 
 /// Represents how a transaction was propagated over the network.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -1259,6 +1285,9 @@ pub trait PoolTransaction:
         self.clone().into_consensus()
     }
 
+    /// Returns a reference to the consensus transaction with the recovered sender.
+    fn consensus_ref(&self) -> Recovered<&Self::Consensus>;
+
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
 
@@ -1447,6 +1476,10 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
+    }
+
+    fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
+        Recovered::new_unchecked(&*self.transaction, self.transaction.signer())
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {

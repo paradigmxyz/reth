@@ -33,7 +33,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthEvmConfig, EthereumNode,
     },
-    tasks::TaskManager,
+    tasks::Runtime,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -74,13 +74,14 @@ impl EvmFactory for MyEvmFactory {
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let new_cache = self.precompile_cache.clone();
+        let spec = input.cfg_env.spec;
 
         let evm = Context::mainnet()
             .with_db(db)
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::new(spec).precompiles));
 
         let mut evm = EthEvm::new(evm, false);
 
@@ -187,7 +188,7 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
+    let runtime = Runtime::test();
 
     // create a custom chain spec
     let spec = ChainSpec::builder()
@@ -203,7 +204,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor

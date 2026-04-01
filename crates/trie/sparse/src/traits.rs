@@ -9,8 +9,10 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
 
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::TrieDebugRecorder;
 use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
@@ -59,7 +61,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
     fn set_root(
         &mut self,
-        root: TrieNode,
+        root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()>;
@@ -69,7 +71,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// See [`Self::set_root`] for more details.
     fn with_root(
         mut self,
-        root: TrieNode,
+        root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
@@ -111,10 +113,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn reveal_node(
         &mut self,
         path: Nibbles,
-        node: TrieNode,
+        node: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(&mut [ProofTrieNode { path, node, masks }])
+        self.reveal_nodes(&mut [ProofTrieNodeV2 { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -135,8 +137,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Note
     ///
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
-    /// each node with [`TrieNode::EmptyRoot`] to avoid cloning.
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
+    /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -278,14 +280,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
-}
 
-/// Extension trait for sparse tries that support pruning.
-///
-/// This trait provides the `prune` method for sparse trie implementations that support
-/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
-/// memory usage when caching tries across payload validations.
-pub trait SparseTrieExt: SparseTrie {
     /// Returns a cheap O(1) size hint for the trie representing the count of revealed
     /// (non-Hash) nodes.
     ///
@@ -293,25 +288,36 @@ pub trait SparseTrieExt: SparseTrie {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    /// Returns a heuristic for the in-memory size of this trie in bytes.
     ///
-    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
-    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    /// This is an approximation that accounts for the trie's nodes, values,
+    /// and auxiliary data structures.
+    fn memory_size(&self) -> usize;
+
+    /// Prunes all subtrees that do not contain retained leaves.
+    ///
+    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
+    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
+    /// hash stubs when hashes are available.
     ///
     /// # Preconditions
     ///
-    /// Must be called after `root()` to ensure all nodes have computed hashes.
-    /// Calling on a trie without computed hashes will result in no pruning.
-    ///
-    /// # Behavior
-    ///
-    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
-    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    /// Must be called only after `root()` has computed hashes for the current trie state.
+    /// Calling `prune` on a dirty trie is a hard error and may panic.
     ///
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, max_depth: usize) -> usize;
+    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize;
+
+    /// Takes the debug recorder out of this trie, replacing it with an empty one.
+    ///
+    /// Returns the recorder containing all recorded mutations since the last reset.
+    /// The default implementation returns an empty recorder.
+    #[cfg(feature = "trie-debug")]
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+        TrieDebugRecorder::default()
+    }
 
     /// Applies leaf updates to the sparse trie.
     ///
@@ -335,6 +341,13 @@ pub trait SparseTrieExt: SparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
+
+    /// Commits the updated nodes to internal trie state.
+    fn commit_updates(
+        &mut self,
+        updated: &HashMap<Nibbles, BranchNodeCompact>,
+        removed: &HashSet<Nibbles>,
+    );
 }
 
 /// Tracks modifications to the sparse trie structure.
@@ -393,3 +406,158 @@ pub enum LeafLookup {
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
 }
+
+#[cfg(feature = "std")]
+mod configurable_sparse_trie {
+    use super::*;
+    use crate::{arena::ArenaParallelSparseTrie, parallel::ParallelSparseTrie};
+
+    /// An enum wrapping two different [`SparseTrie`] implementations, forwarding all calls to the
+    /// underlying trie.
+    #[derive(Debug, Clone)]
+    pub enum ConfigurableSparseTrie {
+        /// The arena-based parallel sparse trie implementation.
+        Arena(ArenaParallelSparseTrie),
+        /// The hash-map-based parallel sparse trie implementation.
+        HashMap(ParallelSparseTrie),
+    }
+
+    impl Default for ConfigurableSparseTrie {
+        fn default() -> Self {
+            Self::Arena(ArenaParallelSparseTrie::default())
+        }
+    }
+
+    macro_rules! delegate {
+        ($self:ident, $method:ident $(, $arg:expr)*) => {
+            match $self {
+                Self::Arena(inner) => inner.$method($($arg),*),
+                Self::HashMap(inner) => inner.$method($($arg),*),
+            }
+        };
+    }
+
+    impl SparseTrie for ConfigurableSparseTrie {
+        fn set_root(
+            &mut self,
+            root: TrieNodeV2,
+            masks: Option<BranchNodeMasks>,
+            retain_updates: bool,
+        ) -> SparseTrieResult<()> {
+            delegate!(self, set_root, root, masks, retain_updates)
+        }
+
+        fn set_updates(&mut self, retain_updates: bool) {
+            delegate!(self, set_updates, retain_updates)
+        }
+
+        fn reserve_nodes(&mut self, additional: usize) {
+            delegate!(self, reserve_nodes, additional)
+        }
+
+        fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
+            delegate!(self, reveal_nodes, nodes)
+        }
+
+        fn update_leaf<P: TrieNodeProvider>(
+            &mut self,
+            full_path: Nibbles,
+            value: Vec<u8>,
+            provider: P,
+        ) -> SparseTrieResult<()> {
+            delegate!(self, update_leaf, full_path, value, provider)
+        }
+
+        fn remove_leaf<P: TrieNodeProvider>(
+            &mut self,
+            full_path: &Nibbles,
+            provider: P,
+        ) -> SparseTrieResult<()> {
+            delegate!(self, remove_leaf, full_path, provider)
+        }
+
+        fn root(&mut self) -> B256 {
+            delegate!(self, root)
+        }
+
+        fn is_root_cached(&self) -> bool {
+            delegate!(self, is_root_cached)
+        }
+
+        fn update_subtrie_hashes(&mut self) {
+            delegate!(self, update_subtrie_hashes)
+        }
+
+        fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
+            delegate!(self, get_leaf_value, full_path)
+        }
+
+        fn find_leaf(
+            &self,
+            full_path: &Nibbles,
+            expected_value: Option<&Vec<u8>>,
+        ) -> Result<LeafLookup, LeafLookupError> {
+            delegate!(self, find_leaf, full_path, expected_value)
+        }
+
+        fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+            delegate!(self, updates_ref)
+        }
+
+        fn take_updates(&mut self) -> SparseTrieUpdates {
+            delegate!(self, take_updates)
+        }
+
+        fn wipe(&mut self) {
+            delegate!(self, wipe)
+        }
+
+        fn clear(&mut self) {
+            delegate!(self, clear)
+        }
+
+        fn shrink_nodes_to(&mut self, size: usize) {
+            delegate!(self, shrink_nodes_to, size)
+        }
+
+        fn shrink_values_to(&mut self, size: usize) {
+            delegate!(self, shrink_values_to, size)
+        }
+
+        fn size_hint(&self) -> usize {
+            delegate!(self, size_hint)
+        }
+
+        fn memory_size(&self) -> usize {
+            delegate!(self, memory_size)
+        }
+
+        fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+            delegate!(self, prune, retained_leaves)
+        }
+
+        #[cfg(feature = "trie-debug")]
+        fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+            delegate!(self, take_debug_recorder)
+        }
+
+        fn update_leaves(
+            &mut self,
+            updates: &mut B256Map<LeafUpdate>,
+            proof_required_fn: impl FnMut(B256, u8),
+        ) -> SparseTrieResult<()> {
+            delegate!(self, update_leaves, updates, proof_required_fn)
+        }
+
+        fn commit_updates(
+            &mut self,
+            updated: &HashMap<Nibbles, BranchNodeCompact>,
+            removed: &HashSet<Nibbles>,
+        ) {
+            delegate!(self, commit_updates, updated, removed)
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+pub use configurable_sparse_trie::ConfigurableSparseTrie;

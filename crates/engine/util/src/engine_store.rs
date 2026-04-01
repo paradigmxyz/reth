@@ -62,12 +62,7 @@ impl EngineMessageStore {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
-            BeaconEngineMessage::ForkchoiceUpdated {
-                state,
-                payload_attrs,
-                tx: _tx,
-                version: _version,
-            } => {
+            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(
                     self.path.join(filename),
@@ -77,7 +72,8 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, .. } |
+            BeaconEngineMessage::RethNewPayload { payload, .. } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
@@ -107,7 +103,7 @@ impl EngineMessageStore {
                 tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
             }
         }
-        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
+        Ok(filenames_by_ts.into_values().flatten())
     }
 }
 

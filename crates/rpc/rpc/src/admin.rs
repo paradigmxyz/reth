@@ -76,7 +76,7 @@ where
 
         for peer in peers {
             infos.push(PeerInfo {
-                id: keccak256(peer.remote_id.as_slice()).to_string(),
+                id: alloy_primitives::hex::encode(keccak256(peer.remote_id.as_slice())),
                 name: peer.client_version.to_string(),
                 enode: peer.enode,
                 enr: peer.enr,

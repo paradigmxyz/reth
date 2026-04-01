@@ -35,6 +35,7 @@ mod error;
 mod flags;
 mod transaction;
 mod txn_manager;
+mod txn_pool;
 
 #[cfg(test)]
 mod test_utils {

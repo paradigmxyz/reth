@@ -425,17 +425,9 @@ impl TotalDifficulty {
 
     /// Convert to an [`Entry`]
     pub fn to_entry(&self) -> Entry {
-        let mut data = [0u8; 32];
-
-        let be_bytes = self.value.to_be_bytes_vec();
-
-        if be_bytes.len() <= 32 {
-            data[32 - be_bytes.len()..].copy_from_slice(&be_bytes);
-        } else {
-            data.copy_from_slice(&be_bytes[be_bytes.len() - 32..]);
-        }
-
-        Entry::new(TOTAL_DIFFICULTY, data.to_vec())
+        // era1 spec: `total-difficulty = { type: 0x0600, data: SSZ uint256 }` (little-endian)
+        let data = self.value.to_le_bytes::<32>().to_vec();
+        Entry::new(TOTAL_DIFFICULTY, data)
     }
 
     /// Create from an [`Entry`]
@@ -454,8 +446,8 @@ impl TotalDifficulty {
             )));
         }
 
-        // Convert 32-byte array to U256
-        let value = U256::from_be_slice(&entry.data);
+        // era1 spec: `total-difficulty = { type: 0x0600, data: SSZ uint256 }` (little-endian)
+        let value = U256::from_le_slice(&entry.data);
 
         Ok(Self { value })
     }
@@ -606,6 +598,19 @@ mod tests {
         let recovered = TotalDifficulty::from_entry(&entry).unwrap();
 
         assert_eq!(recovered.value, value);
+    }
+
+    #[test]
+    fn test_total_difficulty_ssz_le_encoding() {
+        // Verify that total-difficulty is encoded as SSZ uint256 (little-endian).
+        // See https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md
+        let value = U256::from(1u64);
+        let td = TotalDifficulty::new(value);
+        let entry = td.to_entry();
+
+        // Little-endian: least significant byte first [1, 0, 0, ..., 0]
+        assert_eq!(entry.data[0], 1, "First byte must be 1 (little-endian)");
+        assert_eq!(entry.data[31], 0, "Last byte must be 0 (little-endian)");
     }
 
     #[test]

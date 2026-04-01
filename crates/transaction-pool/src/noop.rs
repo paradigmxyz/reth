@@ -84,9 +84,23 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
+    async fn add_transactions(
+        &self,
+        _origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        transactions
+            .into_iter()
+            .map(|transaction| {
+                let hash = *transaction.hash();
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+            })
+            .collect()
+    }
+
     async fn add_transactions_with_origins(
         &self,
-        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         transactions
             .into_iter()

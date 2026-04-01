@@ -669,7 +669,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_block_count{$instance_label=\"$instance\", quantile=\"$quantile\"})",
+          "expr": "avg(reth_storage_providers_database_save_blocks_batch_size{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Blocks per save_blocks call",
           "range": true,
           "refId": "A"
@@ -1309,7 +1309,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_block_count_last{$instance_label=\"$instance\"})",
+          "expr": "avg(reth_storage_providers_database_save_blocks_batch_size_last{$instance_label=\"$instance\"})",
           "legendFormat": "Blocks per save_blocks call",
           "range": true,
           "refId": "A"

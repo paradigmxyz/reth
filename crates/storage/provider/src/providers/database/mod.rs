@@ -24,12 +24,12 @@ use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
-use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
 use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -40,7 +40,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 mod provider;
 pub use provider::{
@@ -78,6 +78,10 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
+    /// Minimum distance from tip required before pruning can occur.
+    minimum_pruning_distance: u64,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -100,6 +104,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
@@ -115,6 +120,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             ChangesetCache::new(),
+            runtime.clone(),
+            db.path(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -128,6 +135,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
+            runtime,
+            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
         })
     }
 
@@ -142,8 +151,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -158,6 +168,15 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the changeset cache for an existing [`ProviderFactory`].
     pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
         self.changeset_cache = changeset_cache;
+        self
+    }
+
+    /// Sets the minimum pruning distance for an existing [`ProviderFactory`].
+    ///
+    /// This controls the minimum distance from tip required before pruning can occur.
+    /// The default is [`MINIMUM_UNWIND_SAFE_DISTANCE`].
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.minimum_pruning_distance = distance;
         self
     }
 
@@ -188,12 +207,10 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
         self.rocksdb_provider.clone()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }
@@ -208,12 +225,14 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
             init_db(path, args).map_err(RethError::msg)?,
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )
         .map_err(RethError::Provider)
     }
@@ -237,7 +256,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
-        ))
+            self.runtime.clone(),
+            self.db.path(),
+        )
+        .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -246,16 +268,21 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
-            self.db.tx_mut()?,
-            self.chain_spec.clone(),
-            self.static_file_provider.clone(),
-            self.prune_modes.clone(),
-            self.storage.clone(),
-            self.storage_settings.clone(),
-            self.rocksdb_provider.clone(),
-            self.changeset_cache.clone(),
-        )))
+        Ok(DatabaseProviderRW(
+            DatabaseProvider::new_rw(
+                self.db.tx_mut()?,
+                self.chain_spec.clone(),
+                self.static_file_provider.clone(),
+                self.prune_modes.clone(),
+                self.storage.clone(),
+                self.storage_settings.clone(),
+                self.rocksdb_provider.clone(),
+                self.changeset_cache.clone(),
+                self.runtime.clone(),
+                self.db.path(),
+            )
+            .with_minimum_pruning_distance(self.minimum_pruning_distance),
+        ))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
@@ -274,7 +301,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
-        ))
+            self.runtime.clone(),
+            self.db.path(),
+        )
+        .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
     /// State provider for latest block
@@ -336,7 +366,12 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// consistency. I.e. this MAY result in writes to the static files.
     #[instrument(err, skip(self))]
     pub fn check_consistency(&self) -> ProviderResult<(Option<u64>, Option<u64>)> {
-        let provider_ro = self.database_provider_ro()?;
+        let provider_ro = self
+            .database_provider_ro()?
+            // Healing can run long-lived read transactions (e.g., iterating changesets
+            // over millions of blocks). Disable the default timeout so MDBX doesn't
+            // kill the transaction mid-heal, which causes a crash loop on startup.
+            .disable_long_read_transaction_safety();
 
         // Step 1: heal file-level inconsistencies (no pruning)
         self.static_file_provider().check_file_consistency(&provider_ro)?;
@@ -352,7 +387,58 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             },
         );
 
+        // Step 4: Heal finalized/safe block numbers that may be ahead of the
+        // highest header on nodes coming from <=1.10.2.
+        //
+        // Unwinds already set it to the target block.
+        if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
+            self.heal_chain_state_block_numbers(&provider_ro)?;
+        }
+
         Ok((rocksdb_unwind, static_file_unwind))
+    }
+
+    /// If the stored finalized or safe block number is ahead of the highest
+    /// header, resets it to the highest header.
+    fn heal_chain_state_block_numbers(
+        &self,
+        provider_ro: &DatabaseProvider<<N::DB as Database>::TX, N>,
+    ) -> ProviderResult<()> {
+        let highest_header = self.last_block_number()?;
+
+        let finalized = provider_ro.last_finalized_block_number()?;
+        let safe = provider_ro.last_safe_block_number()?;
+
+        if finalized.is_none_or(|f| f <= highest_header) && safe.is_none_or(|s| s <= highest_header)
+        {
+            return Ok(());
+        }
+
+        let provider_rw = self.provider_rw()?;
+
+        if let Some(finalized) = finalized.filter(|&f| f > highest_header) {
+            info!(
+                target: "providers::db",
+                finalized,
+                highest_header,
+                "Healing finalized block number",
+            );
+            provider_rw.save_finalized_block_number(highest_header)?;
+        }
+
+        if let Some(safe) = safe.filter(|&s| s > highest_header) {
+            info!(
+                target: "providers::db",
+                safe,
+                highest_header,
+                "Healing safe block number",
+            );
+            provider_rw.save_safe_block_number(highest_header)?;
+        }
+
+        provider_rw.commit()?;
+
+        Ok(())
     }
 }
 
@@ -732,6 +818,8 @@ where
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
+            minimum_pruning_distance,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -742,6 +830,8 @@ where
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
+            .field("runtime", &runtime)
+            .field("minimum_pruning_distance", &minimum_pruning_distance)
             .finish()
     }
 }
@@ -757,6 +847,8 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
+            runtime: self.runtime.clone(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
         }
     }
 }
@@ -822,6 +914,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            reth_tasks::Runtime::test(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

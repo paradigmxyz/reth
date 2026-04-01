@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_codecs::Compact;
 use reth_db_api::table::Value;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
@@ -19,7 +19,6 @@ use reth_tokio_util::{EventSender, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},
     sync::Arc,
-    time::Instant,
 };
 use tracing::{debug, trace};
 

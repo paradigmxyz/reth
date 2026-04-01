@@ -16,16 +16,37 @@ use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
 };
+use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
+use std::collections::HashMap;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
     fn max_proof_window(&self) -> u64;
+
+    /// Validates that the given block is within the configured proof window.
+    ///
+    /// Returns an error if the distance between the chain tip and the requested block exceeds
+    /// [`Self::max_proof_window`].
+    fn ensure_within_proof_window(&self, block_id: BlockId) -> Result<(), Self::Error>
+    where
+        Self: EthApiSpec,
+    {
+        let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+        let block_number = self
+            .provider()
+            .block_number_for_id(block_id)
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        if chain_info.best_number.saturating_sub(block_number) > self.max_proof_window() {
+            return Err(EthApiError::ExceedsMaxProofWindow.into())
+        }
+        Ok(())
+    }
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
@@ -54,7 +75,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)
                 .await?
@@ -71,7 +92,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)
                     .await?
@@ -81,6 +102,47 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .to_be_bytes(),
             ))
         })
+    }
+
+    /// Returns values from multiple storage positions across multiple addresses.
+    ///
+    /// Enforces a cap on total slot count (sum of all slot arrays) and returns an error if
+    /// exceeded.
+    fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<HashMap<Address, Vec<B256>>, Self::Error>> + Send {
+        async move {
+            let total_slots: usize = requests.values().map(|slots| slots.len()).sum();
+            if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "total slot count {total_slots} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                    ),
+                )));
+            }
+
+            self.spawn_blocking_io_fut(async move |this| {
+                let state = this.state_at_block_id_or_latest(block_id).await?;
+
+                let mut result = HashMap::with_capacity(requests.len());
+                for (address, slots) in requests {
+                    let mut values = Vec::with_capacity(slots.len());
+                    for slot in &slots {
+                        let value = state
+                            .storage(address, slot.as_b256())
+                            .map_err(Self::Error::from_eth_err)?
+                            .unwrap_or_default();
+                        values.push(B256::new(value.to_be_bytes()));
+                    }
+                    result.insert(address, values);
+                }
+
+                Ok(result)
+            })
+            .await
+        }
     }
 
     /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
@@ -103,21 +165,10 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
 
-            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
             let block_id = block_id.unwrap_or_default();
+            self.ensure_within_proof_window(block_id)?;
 
-            // Check whether the distance to the block exceeds the maximum configured window.
-            let block_number = self
-                .provider()
-                .block_number_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block_id))?;
-            let max_window = self.max_proof_window();
-            if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
-            }
-
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
@@ -134,36 +185,32 @@ pub trait EthState: LoadState + SpawnBlocking {
         &self,
         address: Address,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
-            let state = this.state_at_block_id(block_id).await?;
-            let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
-            let Some(account) = account else { return Ok(None) };
+    ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send
+    where
+        Self: EthApiSpec,
+    {
+        async move {
+            self.ensure_within_proof_window(block_id)?;
 
-            // Check whether the distance to the block exceeds the maximum configured proof window.
-            let chain_info = this.provider().chain_info().map_err(Self::Error::from_eth_err)?;
-            let block_number = this
-                .provider()
-                .block_number_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block_id))?;
-            let max_window = this.max_proof_window();
-            if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
-            }
+            self.spawn_blocking_io_fut(async move |this| {
+                let state = this.state_at_block_id(block_id).await?;
+                let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
+                let Some(account) = account else { return Ok(None) };
 
-            let balance = account.balance;
-            let nonce = account.nonce;
-            let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
+                let balance = account.balance;
+                let nonce = account.nonce;
+                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
 
-            // Provide a default `HashedStorage` value in order to
-            // get the storage root hash of the current state.
-            let storage_root = state
-                .storage_root(address, Default::default())
-                .map_err(Self::Error::from_eth_err)?;
+                // Provide a default `HashedStorage` value in order to
+                // get the storage root hash of the current state.
+                let storage_root = state
+                    .storage_root(address, Default::default())
+                    .map_err(Self::Error::from_eth_err)?;
 
-            Ok(Some(Account { balance, nonce, code_hash, storage_root }))
-        })
+                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+            })
+            .await
+        }
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
@@ -172,7 +219,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(block_id).await?;
             let account = state
                 .basic_account(&address)
@@ -346,7 +393,7 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .state_at_block_id_or_latest(block_id)
@@ -392,7 +439,7 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)
                 .await?

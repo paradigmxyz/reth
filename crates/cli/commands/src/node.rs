@@ -10,8 +10,8 @@ use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
-        NetworkArgs, PayloadBuilderArgs, PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs,
-        StorageArgs, TxPoolArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, StorageArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -103,10 +103,6 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten)]
     pub pruning: PruningArgs,
 
-    /// All `RocksDB` table routing arguments
-    #[command(flatten)]
-    pub rocksdb: RocksDbArgs,
-
     /// Engine cli arguments
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
@@ -119,8 +115,8 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "Static Files")]
     pub static_files: StaticFilesArgs,
 
-    /// Storage mode configuration (v2 vs v1/legacy)
-    #[command(flatten)]
+    /// All storage related arguments with --storage prefix
+    #[command(flatten, next_help_heading = "Storage")]
     pub storage: StorageArgs,
 
     /// Additional cli arguments
@@ -129,12 +125,12 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
 }
 
 impl<C: ChainSpecParser> NodeCommand<C> {
-    /// Parsers only the default CLI arguments
+    /// Parses only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
     }
 
-    /// Parsers only the default [`NodeCommand`] arguments from the given iterator
+    /// Parses only the default [`NodeCommand`] arguments from the given iterator
     pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
     where
         I: IntoIterator<Item = T>,
@@ -175,7 +171,6 @@ where
             db,
             dev,
             pruning,
-            rocksdb,
             engine,
             era,
             static_files,
@@ -183,8 +178,7 @@ where
             ext,
         } = self;
 
-        // Validate RocksDB arguments
-        rocksdb.validate()?;
+        engine.validate()?;
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -201,7 +195,6 @@ where
             db,
             dev,
             pruning,
-            rocksdb,
             engine,
             era,
             static_files,

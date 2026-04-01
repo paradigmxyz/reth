@@ -59,7 +59,6 @@ plain_hasher.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-criterion.workspace = true
 bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -86,6 +85,7 @@ std = [
     "serde_json/std",
     "revm-database/std",
     "revm-state/std",
+    "reth-codecs?/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
@@ -105,7 +105,6 @@ serde = [
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
-    "reth-primitives-traits/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
     "dep:serde_with",
     "alloy-genesis/serde-bincode-compat",
@@ -132,12 +131,3 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
 ]
 rayon = ["dep:rayon"]
-
-[[bench]]
-name = "prefix_set"
-harness = false
-
-[[bench]]
-name = "hashed_state"
-harness = false
-required-features = ["rayon"]

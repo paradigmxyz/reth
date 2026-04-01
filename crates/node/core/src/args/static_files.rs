@@ -9,9 +9,6 @@ use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
 pub const MINIMAL_BLOCKS_PER_FILE: u64 = 10000;
 
 /// Parameters for static files configuration
-///
-/// When `--storage.v2` is used, the defaults for the storage flags change to enable static file
-/// storage. Individual flags can still override those defaults when explicitly set.
 #[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "Static Files")]
 pub struct StaticFilesArgs {
@@ -38,53 +35,6 @@ pub struct StaticFilesArgs {
     /// Number of blocks per file for the storage changesets segment.
     #[arg(long = "static-files.blocks-per-file.storage-change-sets")]
     pub blocks_per_file_storage_change_sets: Option<u64>,
-
-    /// Store receipts in static files instead of the database.
-    ///
-    /// When enabled, receipts will be written to static files on disk instead of the database.
-    ///
-    /// Note: This setting can only be configured at genesis initialization. Once
-    /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    ///
-    /// Defaults to the base storage mode (v1: false, v2: true).
-    #[arg(long = "static-files.receipts", action = clap::ArgAction::Set)]
-    pub receipts: Option<bool>,
-
-    /// Store transaction senders in static files instead of the database.
-    ///
-    /// When enabled, transaction senders will be written to static files on disk instead of the
-    /// database.
-    ///
-    /// Note: This setting can only be configured at genesis initialization. Once
-    /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    ///
-    /// Defaults to the base storage mode (v1: false, v2: true).
-    #[arg(long = "static-files.transaction-senders", action = clap::ArgAction::Set)]
-    pub transaction_senders: Option<bool>,
-
-    /// Store account changesets in static files.
-    ///
-    /// When enabled, account changesets will be written to static files on disk instead of the
-    /// database.
-    ///
-    /// Note: This setting can only be configured at genesis initialization. Once
-    /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    ///
-    /// Defaults to the base storage mode (v1: false, v2: true).
-    #[arg(long = "static-files.account-change-sets", action = clap::ArgAction::Set)]
-    pub account_changesets: Option<bool>,
-
-    /// Store storage changesets in static files.
-    ///
-    /// When enabled, storage changesets will be written to static files on disk instead of the
-    /// database.
-    ///
-    /// Note: This setting can only be configured at genesis initialization. Once
-    /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    ///
-    /// Defaults to the base storage mode (v1: false, v2: true).
-    #[arg(long = "static-files.storage-change-sets", action = clap::ArgAction::Set)]
-    pub storage_changesets: Option<bool>,
 }
 
 impl StaticFilesArgs {

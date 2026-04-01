@@ -1,6 +1,6 @@
 [profile.default]
 retries = { backoff = "exponential", count = 2, delay = "2s", jitter = true }
-slow-timeout = { period = "30s", terminate-after = 4 }
+slow-timeout = { period = "30s", terminate-after = 2 }
 
 [[profile.default.overrides]]
 filter = "test(general_state_tests)"

@@ -12,6 +12,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// Utility functions for initializing the database.
+pub mod init;
+
 /// Various provider traits.
 mod traits;
 pub use traits::*;
@@ -27,9 +30,6 @@ pub use providers::{
 
 pub mod changeset_walker;
 pub mod changesets_utils;
-
-mod storage_threadpool;
-use storage_threadpool::STORAGE_POOL;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.

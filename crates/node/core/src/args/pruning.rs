@@ -196,6 +196,11 @@ pub struct PruningArgs {
     /// pruned.
     #[arg(long = "prune.bodies.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
     pub bodies_before: Option<BlockNumber>,
+
+    /// Minimum pruning distance from the tip. This controls the safety margin for reorgs and
+    /// manual unwinds.
+    #[arg(long = "prune.minimum-distance", value_name = "BLOCKS")]
+    pub minimum_distance: Option<u64>,
 }
 
 impl PruningArgs {
@@ -220,7 +225,11 @@ impl PruningArgs {
                     .block_number()
                     .map(PruneMode::Before);
             }
-            config = PruneConfig { block_interval: config.block_interval, segments }
+            config = PruneConfig {
+                block_interval: config.block_interval,
+                segments,
+                minimum_pruning_distance: config.minimum_pruning_distance,
+            }
         }
 
         // If --minimal is set, use minimal storage mode with aggressive pruning.
@@ -228,12 +237,16 @@ impl PruningArgs {
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: DefaultPruningValues::get_global().minimal_prune_modes.clone(),
+                minimum_pruning_distance: config.minimum_pruning_distance,
             }
         }
 
         // Override with any explicitly set prune.* flags.
         if let Some(block_interval) = self.block_interval {
             config.block_interval = block_interval as usize;
+        }
+        if let Some(distance) = self.minimum_distance {
+            config.minimum_pruning_distance = distance;
         }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);
@@ -354,7 +367,7 @@ pub(crate) fn parse_receipts_log_filter(
 ) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
     let mut config = BTreeMap::new();
     // Split out each of the filters.
-    let filters = value.split(',');
+    let filters = value.split(',').map(str::trim);
     for filter in filters {
         let parts: Vec<&str> = filter.split(':').collect();
         if parts.len() < 2 {
@@ -448,6 +461,23 @@ mod tests {
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
         assert_eq!(config.0.get(&addr3), Some(&PruneMode::Before(5000000)));
+    }
+
+    #[test]
+    fn test_parse_receipts_log_filter_with_spaces() {
+        // Verify that spaces after commas are handled correctly
+        let filters = "0x0000000000000000000000000000000000000001:full, 0x0000000000000000000000000000000000000002:distance:1000";
+
+        let result = parse_receipts_log_filter(filters);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.0.len(), 2);
+
+        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
+        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
+
+        assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
+        assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
     }
 
     #[test]

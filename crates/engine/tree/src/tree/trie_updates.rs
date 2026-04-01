@@ -101,11 +101,13 @@ impl StorageTrieUpdatesDiff {
 
 /// Compares the trie updates from state root task, regular state root calculation and database,
 /// and logs the differences if there's any.
+///
+/// Returns `true` if there are differences.
 pub(crate) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
     regular: TrieUpdates,
-) -> Result<(), DatabaseError> {
+) -> Result<bool, DatabaseError> {
     let mut task = adjust_trie_updates(task);
     let mut regular = adjust_trie_updates(regular);
 
@@ -179,9 +181,10 @@ pub(crate) fn compare_trie_updates(
     }
 
     // log differences
+    let has_differences = diff.has_differences();
     diff.log_differences();
 
-    Ok(())
+    Ok(has_differences)
 }
 
 fn compare_storage_trie_updates<C: TrieCursor>(

@@ -64,10 +64,8 @@ where
     let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
         for (key, indices) in cache.drain() {
             let last = *indices.last().expect("qed");
-            collector.insert(
-                sharded_key_factory(key, last),
-                BlockNumberList::new_pre_sorted(indices.into_iter()),
-            )?;
+            collector
+                .insert(sharded_key_factory(key, last), BlockNumberList::new_pre_sorted(indices))?;
         }
         Ok::<(), StageError>(())
     };
@@ -129,35 +127,26 @@ where
 
     let mut insert_fn = |address: Address, indices: Vec<u64>| {
         let last = indices.last().expect("indices is non-empty");
-        collector.insert(
-            ShardedKey::new(address, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
-        )?;
+        collector
+            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
         Ok(())
     };
 
     // Convert range bounds to concrete range
     let range = to_range(range);
+    let start_block = range.start;
 
     // Use the new walker for lazy iteration over static file changesets
     let static_file_provider = provider.static_file_provider();
-
-    // Get total count for progress reporting
-    let total_changesets = static_file_provider.account_changeset_count()?;
-    let interval = (total_changesets / 1000).max(1);
 
     let walker = static_file_provider.walk_account_changeset_range(range);
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
 
-    for (idx, changeset_result) in walker.enumerate() {
+    for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
         cache.entry(address).or_default().push(block_number);
-
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
-        }
 
         if block_number != current_block_number {
             current_block_number = block_number;
@@ -165,6 +154,12 @@ where
         }
 
         if flush_counter > DEFAULT_CACHE_THRESHOLD {
+            info!(
+                target: "sync::stages::index_history",
+                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
+                current_block = current_block_number,
+                "Collecting indices"
+            );
             collect_indices(cache.drain(), &mut insert_fn)?;
             flush_counter = 0;
         }
@@ -190,29 +185,23 @@ where
         let last = indices.last().expect("qed");
         collector.insert(
             StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
+            BlockNumberList::new_pre_sorted(indices),
         )?;
         Ok::<(), StageError>(())
     };
 
     let range = to_range(range);
+    let start_block = range.start;
     let static_file_provider = provider.static_file_provider();
-
-    let total_changesets = static_file_provider.storage_changeset_count()?;
-    let interval = (total_changesets / 1000).max(1);
 
     let walker = static_file_provider.walk_storage_changeset_range(range);
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
 
-    for (idx, changeset_result) in walker.enumerate() {
+    for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
         cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
-
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
-        }
 
         if block_number != current_block_number {
             current_block_number = block_number;
@@ -220,6 +209,12 @@ where
         }
 
         if flush_counter > DEFAULT_CACHE_THRESHOLD {
+            info!(
+                target: "sync::stages::index_history",
+                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
+                current_block = current_block_number,
+                "Collecting indices"
+            );
             collect_indices(cache.drain(), &mut insert_fn)?;
             flush_counter = 0;
         }

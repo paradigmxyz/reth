@@ -2,9 +2,6 @@
 set -uo pipefail
 
 crates_to_check=(
-    reth-codecs-derive
-    reth-primitives
-    reth-primitives-traits
     reth-network-peers
     reth-trie-common
     reth-trie-sparse
@@ -27,7 +24,6 @@ crates_to_check=(
     reth-ethereum-forks
     reth-ethereum-primitives
     reth-ethereum-consensus
-    reth-stateless
 )
 
 any_failed=0

@@ -1,7 +1,7 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
-    peers::InboundConnectionError,
+    peers::{InboundConnectionError, PeersManager},
     protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
@@ -98,6 +98,16 @@ impl<N: NetworkPrimitives> Swarm<N> {
     pub(crate) const fn sessions_mut(&mut self) -> &mut SessionManager<N> {
         &mut self.sessions
     }
+
+    /// Access to the [`PeersManager`].
+    pub(crate) const fn peers(&self) -> &PeersManager {
+        self.state.peers()
+    }
+
+    /// Mutable access to the [`PeersManager`].
+    pub(crate) const fn peers_mut(&mut self) -> &mut PeersManager {
+        self.state.peers_mut()
+    }
 }
 
 impl<N: NetworkPrimitives> Swarm<N> {
@@ -190,9 +200,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
                     return None
                 }
                 // ensure we can handle an incoming connection from this address
-                if let Err(err) =
-                    self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
-                {
+                if let Err(err) = self.peers_mut().on_incoming_pending_session(remote_addr.ip()) {
                     match err {
                         InboundConnectionError::IpBanned => {
                             trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
@@ -246,21 +254,31 @@ impl<N: NetworkPrimitives> Swarm<N> {
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
-                // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
-                // Insert peer only if no fork id or a valid fork id
-                if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
+
+                // When `enforce_enr_fork_id` is enabled, peers discovered without a confirmed
+                // fork ID (via EIP-868 ENR) are deferred — they'll only be added once a
+                // `DiscoveredEnrForkId` event arrives with a validated fork ID.
+                //
+                // When disabled (default), peers without a fork ID are admitted immediately.
+                // Peers that *do* carry a fork ID are always validated against ours.
+                let enforce = self.peers().enforce_enr_fork_id();
+                let allow = match fork_id {
+                    Some(f) => self.sessions.is_valid_fork_id(f),
+                    None => !enforce,
+                };
+                if allow {
+                    self.peers_mut().add_peer(peer_id, addr, fork_id);
                 }
             }
-            StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
+            StateAction::DiscoveredEnrForkId { peer_id, addr, fork_id } => {
                 if self.sessions.is_valid_fork_id(fork_id) {
-                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                    self.peers_mut().add_peer(peer_id, addr, Some(fork_id));
                 } else {
                     trace!(target: "net", ?peer_id, remote_fork_id=?fork_id, our_fork_id=?self.sessions.fork_id(), "fork id mismatch, removing peer");
-                    self.state_mut().peers_mut().remove_peer(peer_id);
+                    self.peers_mut().remove_peer(peer_id);
                 }
             }
         }
@@ -269,18 +287,18 @@ impl<N: NetworkPrimitives> Swarm<N> {
 
     /// Set network connection state to `ShuttingDown`
     pub(crate) const fn on_shutdown_requested(&mut self) {
-        self.state_mut().peers_mut().on_shutdown();
+        self.peers_mut().on_shutdown();
     }
 
     /// Checks if the node's network connection state is '`ShuttingDown`'
     #[inline]
     pub(crate) const fn is_shutting_down(&self) -> bool {
-        self.state().peers().connection_state().is_shutting_down()
+        self.peers().connection_state().is_shutting_down()
     }
 
     /// Set network connection state to `Hibernate` or `Active`
     pub(crate) const fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
-        self.state_mut().peers_mut().on_network_state_change(network_state);
+        self.peers_mut().on_network_state_change(network_state);
     }
 }
 

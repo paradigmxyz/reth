@@ -37,7 +37,7 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -63,7 +63,7 @@ where
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
         evm_config: E,
         config: ValidationApiConfig,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         payload_validator: Arc<
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
@@ -511,12 +511,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -529,12 +529,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -547,12 +547,12 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v5(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
-        }));
+        });
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
@@ -578,7 +578,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
 }

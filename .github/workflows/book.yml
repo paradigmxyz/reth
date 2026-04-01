@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: depot-ubuntu-latest-8
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - name: Checkout

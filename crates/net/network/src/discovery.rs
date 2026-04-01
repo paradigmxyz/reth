@@ -240,7 +240,7 @@ impl Discovery {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
-                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node, fork_id))
             }
             DiscoveryUpdate::Removed(peer_id) => {
                 self.discovered_nodes.remove(&peer_id);
@@ -297,6 +297,20 @@ impl Discovery {
             if self.queued_events.is_empty() {
                 return Poll::Pending
             }
+        }
+    }
+}
+
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.terminate();
+        }
+        if let Some(handle) = self._discv4_service.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self._dns_disc_service.take() {
+            handle.abort();
         }
     }
 }

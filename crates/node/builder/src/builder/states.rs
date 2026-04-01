@@ -16,6 +16,7 @@ use crate::{
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
+use reth_provider::providers::RocksDBProvider;
 use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
 
@@ -25,6 +26,8 @@ pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
     config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
+    /// An optional [`RocksDBProvider`] to use instead of creating one during launch.
+    rocksdb_provider: Option<RocksDBProvider>,
 }
 
 impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
@@ -32,8 +35,9 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
         database: T::DB,
+        rocksdb_provider: Option<RocksDBProvider>,
     ) -> Self {
-        Self { config, adapter: NodeTypesAdapter::new(database) }
+        Self { config, adapter: NodeTypesAdapter::new(database), rocksdb_provider }
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
@@ -41,11 +45,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     where
         CB: NodeComponentsBuilder<T>,
     {
-        let Self { config, adapter } = self;
+        let Self { config, adapter, rocksdb_provider } = self;
 
         NodeBuilderWithComponents {
             config,
             adapter,
+            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
         }
@@ -150,6 +155,8 @@ pub struct NodeBuilderWithComponents<
     pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// Adapter for the underlying node types and database
     pub adapter: NodeTypesAdapter<T>,
+    /// An optional [`RocksDBProvider`] to use instead of creating one during launch.
+    pub rocksdb_provider: Option<RocksDBProvider>,
     /// container for type specific components
     pub components_builder: CB,
     /// Additional node extensions.
@@ -167,11 +174,12 @@ where
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
-        let Self { config, adapter, components_builder, .. } = self;
+        let Self { config, adapter, rocksdb_provider, components_builder, .. } = self;
 
         NodeBuilderWithComponents {
             config,
             adapter,
+            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
         }
@@ -324,7 +332,7 @@ mod test {
     use reth_node_ethereum::EthereumNode;
     use reth_payload_builder::PayloadBuilderHandle;
     use reth_provider::noop::NoopProvider;
-    use reth_tasks::TaskManager;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[test]
@@ -343,12 +351,7 @@ mod test {
             payload_builder_handle: PayloadBuilderHandle::<EthEngineTypes>::noop(),
         };
 
-        let task_executor = {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            let handle = runtime.handle().clone();
-            let manager = TaskManager::new(handle);
-            manager.executor()
-        };
+        let task_executor = Runtime::test();
 
         let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
 

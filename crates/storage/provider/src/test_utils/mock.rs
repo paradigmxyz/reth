@@ -22,7 +22,7 @@ use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
-    models::{AccountBeforeTx, StoredBlockBodyIndices},
+    models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
@@ -35,7 +35,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -903,6 +903,16 @@ where
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
+    for MockEthProvider<T, ChainSpec>
+{
+    fn cached_storage_settings(&self) -> StorageSettings {
+        StorageSettings::default()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
+}
+
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
@@ -999,10 +1009,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
-    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
@@ -1029,10 +1035,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
-    }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
     }
 }
 

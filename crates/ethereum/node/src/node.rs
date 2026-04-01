@@ -9,9 +9,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
-};
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
@@ -81,11 +79,8 @@ impl EthereumNode {
                 Primitives = EthPrimitives,
             >,
         >,
-        <Node::Types as NodeTypes>::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
+        <Node::Types as NodeTypes>::Payload:
+            PayloadTypes<BuiltPayload = EthBuiltPayload, PayloadAttributes = EthPayloadAttributes>,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -107,26 +102,16 @@ impl EthereumNode {
     /// use reth_chainspec::MAINNET;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .open_read_only(MAINNET.clone(), "datadir")
-    ///     .unwrap();
+    /// fn demo(runtime: reth_tasks::Runtime) {
+    ///     let factory = EthereumNode::provider_factory_builder()
+    ///         .open_read_only(MAINNET.clone(), "datadir", runtime)
+    ///         .unwrap();
+    /// }
     /// ```
     ///
-    /// # Open a Providerfactory manually with all required components
-    ///
-    /// ```no_run
-    /// use reth_chainspec::ChainSpecBuilder;
-    /// use reth_db::open_db_read_only;
-    /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
-    ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(open_db_read_only("db", Default::default()).unwrap())
-    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///     .build_provider_factory();
-    /// ```
+    /// See also [`ProviderFactory::new`](reth_provider::ProviderFactory::new) for constructing
+    /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
+    /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
         ProviderFactoryBuilder::default()
     }
@@ -295,7 +280,7 @@ where
             Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
-            Box::new(ctx.node.task_executor().clone()),
+            ctx.node.task_executor().clone(),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
         );
 
@@ -303,6 +288,7 @@ where
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
+        let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -323,6 +309,9 @@ where
                 );
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();
+                }
+                if let Some(gas_limit) = testing_gas_limit_override {
+                    testing_api = testing_api.with_gas_limit_override(gas_limit);
                 }
                 container
                     .modules
@@ -513,7 +502,7 @@ where
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
             let kzg_settings = validator.validator().kzg_settings().clone();
-            ctx.task_executor().spawn_blocking(async move {
+            ctx.task_executor().spawn_blocking_task(async move {
                 let _ = kzg_settings.get();
                 debug!(target: "reth::cli", "Initialized KZG settings");
             });

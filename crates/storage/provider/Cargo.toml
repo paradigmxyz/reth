@@ -24,7 +24,7 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
@@ -36,6 +36,7 @@ reth-fs-util.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
@@ -63,9 +64,7 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 # parallel utils
 rayon.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-# rocksdb: jemalloc is recommended production workload
-rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
+rocksdb.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -87,8 +86,7 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
-rocksdb = ["reth-storage-api/rocksdb", "dep:rocksdb"]
-edge = ["rocksdb"]
+jemalloc = ["rocksdb/jemalloc"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -105,4 +103,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-tasks/test-utils",
 ]

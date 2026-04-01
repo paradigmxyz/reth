@@ -48,7 +48,7 @@ where
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypes>:
     PayloadBuilder<
-    Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+    Attributes = <N::Payload as PayloadTypes>::PayloadAttributes,
     BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
 >
 {
@@ -56,7 +56,7 @@ pub trait PayloadBuilderFor<N: NodeTypes>:
 
 impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
-        Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+        Attributes = <N::Payload as PayloadTypes>::PayloadAttributes,
         BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
     >
 {
@@ -98,7 +98,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns an executor handle to spawn tasks.
     ///
     /// This can be used to spawn critical, blocking tasks or register tasks that should be
-    /// terminated gracefully. See also [`TaskSpawner`](reth_tasks::TaskSpawner).
+    /// terminated gracefully.
     fn task_executor(&self) -> &TaskExecutor;
 }
 
