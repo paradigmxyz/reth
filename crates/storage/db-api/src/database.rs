@@ -33,14 +33,10 @@ pub trait Database: Send + Sync + Debug {
     ///
     /// Used to check whether stale readers from a previous write transaction have completed.
     /// Returns `None` if no readers are active or the backend does not support this query.
-    fn oldest_reader_txnid(&self) -> Option<u64> {
-        None
-    }
+    fn oldest_reader_txnid(&self) -> Option<u64>;
 
     /// Returns the ID of the most recently committed transaction, if available.
-    fn last_txnid(&self) -> Option<u64> {
-        None
-    }
+    fn last_txnid(&self) -> Option<u64>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
