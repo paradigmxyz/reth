@@ -98,9 +98,11 @@ where
         L::KeyToInsert<'a>: Hash + PartialEq<K>,
         V: InMemorySize,
     {
+        let existing_size = self.cache.peek(&key).map(InMemorySize::size);
         let size = value.size();
 
-        if self.cache.limiter().is_over_the_limit(self.cache.len() + 1) &&
+        if existing_size.is_none() &&
+            self.cache.limiter().is_over_the_limit(self.cache.len() + 1) &&
             let Some((_, evicted)) = self.cache.pop_oldest()
         {
             // update tracked memory with the evicted value
@@ -108,9 +110,15 @@ where
         }
 
         if self.cache.insert(key, value) {
+            if let Some(existing_size) = existing_size {
+                self.memory_usage = self.memory_usage.saturating_sub(existing_size);
+            }
             self.memory_usage = self.memory_usage.saturating_add(size);
             true
         } else {
+            if let Some(existing_size) = existing_size {
+                self.memory_usage = self.memory_usage.saturating_sub(existing_size);
+            }
             false
         }
     }
@@ -141,5 +149,49 @@ where
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
             memory_usage: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct TestValue(usize);
+
+    impl InMemorySize for TestValue {
+        fn size(&self) -> usize {
+            self.0
+        }
+    }
+
+    #[test]
+    fn replacing_existing_entry_at_capacity_does_not_evict_oldest() {
+        let mut cache = MultiConsumerLruCache::<u8, TestValue, ByLength, ()>::new(2, "test");
+
+        assert!(cache.insert(1, TestValue(10)));
+        assert!(cache.insert(2, TestValue(20)));
+        assert_eq!(cache.memory_usage, 30);
+
+        assert!(cache.insert(2, TestValue(30)));
+
+        assert_eq!(cache.cache.len(), 2);
+        assert_eq!(cache.get(&1), Some(&mut TestValue(10)));
+        assert_eq!(cache.get(&2), Some(&mut TestValue(30)));
+        assert_eq!(cache.memory_usage, 40);
+    }
+
+    #[test]
+    fn replacing_existing_entry_updates_memory_usage() {
+        let mut cache = MultiConsumerLruCache::<u8, TestValue, ByLength, ()>::new(2, "test");
+
+        assert!(cache.insert(1, TestValue(20)));
+        assert_eq!(cache.memory_usage, 20);
+
+        assert!(cache.insert(1, TestValue(5)));
+
+        assert_eq!(cache.cache.len(), 1);
+        assert_eq!(cache.get(&1), Some(&mut TestValue(5)));
+        assert_eq!(cache.memory_usage, 5);
     }
 }
