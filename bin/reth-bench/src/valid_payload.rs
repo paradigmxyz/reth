@@ -191,7 +191,14 @@ pub(crate) fn block_to_new_payload(
         ));
     }
 
-    let (payload, sidecar) = ethereum_block_to_payload(block)?;
+    let block = block
+        .into_inner()
+        .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
+        })?
+        .into_consensus();
+    let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
     let (version, params, execution_data) = payload_to_new_payload(payload, sidecar, None)?;
 
     if reth_new_payload {
@@ -206,20 +213,6 @@ pub(crate) fn block_to_new_payload(
     } else {
         Ok((Some(version), params))
     }
-}
-
-fn ethereum_block_to_payload(
-    block: AnyRpcBlock,
-) -> eyre::Result<(ExecutionPayload, ExecutionPayloadSidecar)> {
-    let block = block
-        .into_inner()
-        .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
-            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
-        })?
-        .into_consensus();
-
-    Ok(ExecutionPayload::from_block_slow(&block))
 }
 
 /// Converts an execution payload and sidecar into versioned engine API params and an
