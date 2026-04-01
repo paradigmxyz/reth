@@ -252,7 +252,24 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
 
-  # Start tracy-capture so profile only covers the benchmark
+  BB_BENCH_ARGS=(--reth-new-payload --wait-for-persistence)
+  if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+    BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+  fi
+
+  # Warmup
+  WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    echo "Running big blocks warmup (${WARMUP} payloads)..."
+    $BENCH_NICE "$RETH_BENCH" replay-payloads \
+      "${BB_BENCH_ARGS[@]}" \
+      --count "$WARMUP" \
+      --payload-dir "$BIG_BLOCKS_DIR/payloads" \
+      --engine-rpc-url http://127.0.0.1:8551 \
+      --jwt-secret "$DATADIR/jwt.hex" 2>&1 | sed -u "s/^/[bench] /"
+  fi
+
+  # Start tracy-capture after warmup so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then
     echo "Starting tracy-capture..."
     tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
@@ -260,18 +277,19 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
-  BB_BENCH_ARGS=(--reth-new-payload --wait-for-persistence)
-  if [ -n "${BENCH_WAIT_TIME:-}" ]; then
-    BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+  # Benchmark — skip warmup payloads so they aren't measured
+  BB_SKIP=0
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    BB_SKIP="$WARMUP"
   fi
-  # Limit number of payloads if blocks count is specified
   if [ "${BENCH_BLOCKS:-0}" -gt 0 ] 2>/dev/null; then
     BB_BENCH_ARGS+=(--count "$BENCH_BLOCKS")
   fi
 
-  echo "Running big blocks benchmark (replay-payloads)..."
+  echo "Running big blocks benchmark (replay-payloads, skip=${BB_SKIP})..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
     "${BB_BENCH_ARGS[@]}" \
+    --skip "$BB_SKIP" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
