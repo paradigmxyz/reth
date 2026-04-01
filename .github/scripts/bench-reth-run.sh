@@ -13,6 +13,7 @@
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
+#               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
 set -euo pipefail
 
 LABEL="$1"
@@ -149,11 +150,13 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
 fi
 
 # OTLP traces and logs export
-if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
-fi
-if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
+  if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+  fi
+  if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+  fi
 fi
 
 # Tracy profiling: add --log.tracy flags and set environment
