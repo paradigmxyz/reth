@@ -248,12 +248,12 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self
     }
 
-    /// Attaches MDBX reader tracking so unwind commits can wait on active readers.
-    pub(crate) fn with_reader_txn_tracker<DB>(mut self, db: DB) -> Self
+    /// Attaches reader tracking so unwind commits can wait on active readers.
+    pub(crate) fn with_reader_txn_tracker<T>(mut self, reader_txn_tracker: T) -> Self
     where
-        DB: Database + 'static,
+        T: ReaderTxnTracker + 'static,
     {
-        self.reader_txn_tracker = Some(Arc::new(db));
+        self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
 }
