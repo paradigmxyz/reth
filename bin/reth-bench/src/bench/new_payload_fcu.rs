@@ -84,7 +84,7 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms slot interval", duration.as_millis());
         }
 
         let BenchContext {
@@ -268,7 +268,10 @@ impl Command {
             }
 
             if let Some(wait_time) = self.wait_time {
-                tokio::time::sleep(wait_time).await;
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
             }
 
             let gas_row =
