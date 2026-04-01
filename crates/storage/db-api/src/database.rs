@@ -150,11 +150,7 @@ impl<DB: Database> ReaderTxnTracker for DB {
         )?;
         tx.commit()?;
 
-        if let Some(fence_txnid) = Database::last_txnid(self) {
-            while Database::oldest_reader_txnid(self).is_some_and(|oldest| oldest < fence_txnid) {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
+        self.wait_for_pre_commit_readers();
 
         Ok(())
     }
