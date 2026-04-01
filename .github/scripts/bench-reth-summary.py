@@ -426,6 +426,10 @@ def generate_markdown(
 ) -> str:
     """Generate a markdown comment body."""
     lines = ["## Benchmark Results", ""]
+    wait_time = summary.get("wait_time")
+    if wait_time:
+        lines.append(f"**Wait time:** `{wait_time}`")
+        lines.append("")
     if behind_baseline > 0:
         s = "s" if behind_baseline > 1 else ""
         diff_link = f"https://github.com/{repo}/compare/{baseline_ref[:12]}...{baseline_name}"
@@ -472,6 +476,7 @@ def main():
     parser.add_argument("--feature-ref", "--branch-sha", "--feature-sha", default=None, help="Feature commit SHA")
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
     parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
+    parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
@@ -553,6 +558,7 @@ def main():
     summary = {
         "blocks": paired_stats["blocks"],
         "big_blocks": args.big_blocks,
+        "wait_time": args.wait_time,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,
