@@ -1,0 +1,4 @@
+ignore = ["*.md", "docs/**", ".github/**", "LICENSE*", "*.txt", "*.yml", "*.yaml", "rustfmt.toml", "clippy.toml", "typos.toml", "deny.toml"]
+
+[test]
+cargo = "cargo nextest run -p {package} --no-fail-fast --no-tests=warn"
