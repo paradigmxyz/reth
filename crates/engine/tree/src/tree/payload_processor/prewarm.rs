@@ -281,26 +281,30 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
-            execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+            // Perform expensive operations outside the lock:
+            // 1. Split the saved cache to get underlying components
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+
+            // 2. Insert state into cache (expensive: iterates all accounts and storage)
+            // ExecutionCache is Arc-based, so mutations are visible to the shared cache
+            let insert_ok = new_cache.cache().insert_state(&execution_outcome.state).is_ok();
+
+            // 3. Update metrics outside the lock
+            new_cache.update_metrics();
+
+            // 4. Wait for block validation result outside the lock (can block for a long time)
+            let block_valid = valid_block_rx.recv().is_ok();
+
+            // Only acquire lock for the final quick assignment
+            execution_cache.update_with_guard(|cached| {
+                if !insert_ok {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics();
-
-                if valid_block_rx.recv().is_ok() {
+                } else if block_valid {
                     // Replace the shared cache with the new one; the previous cache (if any) is
                     // dropped.
                     *cached = Some(new_cache);
