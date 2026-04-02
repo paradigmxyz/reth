@@ -312,7 +312,7 @@ where
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
             for start_block in range.step_by(incremental_threshold as usize) {
-                let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
+                let chunk_to = incremental_chunk_end(start_block, incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
                 debug!(
                     target: "sync::stages::merkle::exec",
@@ -429,6 +429,20 @@ where
             checkpoint: StageCheckpoint::new(input.unwind_to)
                 .with_entities_stage_checkpoint(entities_checkpoint),
         })
+    }
+}
+
+#[inline]
+const fn incremental_chunk_end(
+    start_block: BlockNumber,
+    incremental_threshold: u64,
+    to_block: BlockNumber,
+) -> BlockNumber {
+    let chunk_to = start_block.saturating_add(incremental_threshold.saturating_sub(1));
+    if chunk_to > to_block {
+        to_block
+    } else {
+        chunk_to
     }
 }
 
@@ -616,6 +630,20 @@ mod tests {
             expected_root,
             "State root mismatch after chunked processing"
         );
+    }
+
+    #[test]
+    fn incremental_chunks_do_not_overlap_boundaries() {
+        let range = 101..=125;
+        let threshold = 10;
+        let to_block = *range.end();
+
+        let chunks = range
+            .step_by(threshold as usize)
+            .map(|start| (start, incremental_chunk_end(start, threshold, to_block)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(chunks, vec![(101, 110), (111, 120), (121, 125)]);
     }
 
     struct MerkleTestRunner {
