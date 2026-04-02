@@ -3110,13 +3110,13 @@ mod tests {
         rw_provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
 
         // Read-only doesn't see the new data yet.
-        let result = ro_provider.snapshot().account_history_info(address2, 500, None).unwrap();
+        let result = ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::NotYetWritten);
 
         // Catch up — now it sees the new data.
         ro_provider.try_catch_up_with_primary().unwrap();
 
-        let result = ro_provider.snapshot().account_history_info(address2, 500, None).unwrap();
+        let result = ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(500));
     }
 
