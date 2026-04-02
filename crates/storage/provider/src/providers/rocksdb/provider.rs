@@ -349,8 +349,11 @@ impl RocksDBBuilder {
             let mut options = options;
             options.set_max_open_files(-1);
 
-            let secondary_path =
-                std::env::temp_dir().join(format!("reth-rocksdb-secondary-{}", std::process::id()));
+            let secondary_path = self
+                .path
+                .parent()
+                .unwrap_or(&self.path)
+                .join(format!("rocksdb-secondary-tmp-{}", std::process::id()));
             reth_fs_util::create_dir_all(&secondary_path).map_err(ProviderError::other)?;
 
             let db = DB::open_cf_descriptors_as_secondary(
@@ -365,7 +368,11 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::Secondary { db, metrics })))
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::Secondary {
+                db,
+                metrics,
+                secondary_path,
+            })))
         } else {
             // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
             // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
@@ -419,6 +426,8 @@ enum RocksDBProviderInner {
         db: DB,
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
+        /// Temporary directory for secondary LOG files, removed on drop.
+        secondary_path: PathBuf,
     },
 }
 
@@ -646,7 +655,10 @@ impl Drop for RocksDBProviderInner {
                 }
                 db.cancel_all_background_work(true);
             }
-            Self::Secondary { db, .. } => db.cancel_all_background_work(true),
+            Self::Secondary { db, secondary_path, .. } => {
+                db.cancel_all_background_work(true);
+                let _ = std::fs::remove_dir_all(secondary_path);
+            }
         }
     }
 }
@@ -4290,4 +4302,5 @@ mod tests {
         let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
     }
+
 }
