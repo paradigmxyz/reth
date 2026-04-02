@@ -1494,14 +1494,6 @@ impl<'db> RocksReadSnapshot<'db> {
     /// The result is derived from the history that is visible through `visible_tip`, not from the
     /// full contents of `RocksDB`. This lets a reader combine an older MDBX snapshot with a newer
     /// Rocks snapshot without routing through history entries that MDBX cannot see yet.
-    ///
-    /// In particular:
-    /// - a matching history entry at or after `block_number` and at or below `visible_tip` returns
-    ///   `HistoryInfo::InChangeset`
-    /// - no later matching history entry at or below `visible_tip`, but some matching history entry
-    ///   for the key at or below `visible_tip`, returns `HistoryInfo::InPlainState`
-    /// - if every matching history entry is above `visible_tip`, the lookup falls back to
-    ///   `NotYetWritten` or `MaybeInPlainState`
     fn history_info<T>(
         &self,
         encoded_key: &[u8],
@@ -1550,64 +1542,37 @@ impl<'db> RocksReadSnapshot<'db> {
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
 
-        // Only the prefix up to `visible_tip` should influence routing for this reader. Any
-        // later Rocks history entries are not yet visible in the companion MDBX snapshot.
-        let visible_count = chunk.rank(visible_tip);
         let (rank, found_block) = compute_history_rank(&chunk, block_number);
+        // Ignore later Rocks history that is ahead of the companion MDBX snapshot.
+        let found_block = found_block.filter(|block| *block <= visible_tip);
 
-        let mut has_previous_visible = || -> ProviderResult<bool> {
-            loop {
-                iter.prev();
-                iter.status().map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+        let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
+            iter.prev();
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
 
-                if !iter.valid() {
-                    return Ok(false)
-                }
-
-                let Some(prev_key_bytes) = iter.key() else { return Ok(false) };
-                if !prev_key_matches(prev_key_bytes) {
-                    return Ok(false)
-                }
-
-                let Some(prev_value_bytes) = iter.value() else { return Ok(false) };
-                // The current shard can be entirely stale (all blocks above `visible_tip`). Walk
-                // backward across same-key shards until we either find a matching entry at or
-                // below `visible_tip` or prove there are none for this key.
-                if BlockNumberList::decompress(prev_value_bytes)?.rank(visible_tip) > 0 {
-                    return Ok(true)
-                }
+            // If the current shard only contains history above `visible_tip`, there is no usable
+            // later change. Without a previous shard for the same key, fall back to the existing
+            // not-written / maybe-pruned result instead of routing into plain state.
+            if found_block.is_none() && !has_prev {
+                return fallback()
             }
+
+            !has_prev
+        } else {
+            false
         };
 
-        // If there is a later matching entry that is still at or below `visible_tip`, we can
-        // reuse the normal `HistoryInfo::from_lookup` logic against that capped prefix.
-        if rank < visible_count {
-            let Some(found_block) = found_block else { return fallback() };
-
-            let is_before_first_write =
-                needs_prev_shard_check(rank, Some(found_block), block_number) &&
-                    !has_previous_visible()?;
-
-            return Ok(HistoryInfo::from_lookup(
-                Some(found_block),
-                is_before_first_write,
-                lowest_available_block_number,
-            ))
-        }
-
-        // No later matching entry remains at or below `visible_tip`. If the key has any matching
-        // entry at or below `visible_tip`, the lookup should fall through to plain state;
-        // otherwise keep the existing not-written / maybe-pruned fallback.
-        if visible_count > 0 || has_previous_visible()? {
-            return Ok(HistoryInfo::InPlainState)
-        }
-
-        fallback()
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
     }
 }
 
@@ -3134,14 +3099,14 @@ mod tests {
         provider
             .put::<tables::AccountsHistory>(
                 ShardedKey::new(address, u64::MAX),
-                &IntegerList::new([100, 200, 300]).unwrap(),
+                &IntegerList::new([100, 150, 300]).unwrap(),
             )
             .unwrap();
 
-        let result = provider.snapshot().account_history_info(address, 150, None, 200).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
+        let result = provider.snapshot().account_history_info(address, 120, None, 200).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(150));
 
-        let result = provider.snapshot().account_history_info(address, 250, None, 200).unwrap();
+        let result = provider.snapshot().account_history_info(address, 201, None, 200).unwrap();
         assert_eq!(result, HistoryInfo::InPlainState);
     }
 
