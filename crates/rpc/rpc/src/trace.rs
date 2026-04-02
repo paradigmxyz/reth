@@ -454,14 +454,16 @@ where
                 after = None;
             }
 
-            // Return at most `count` of traces
-            if let Some(count) = count {
+            // Return at most `count` traces after `after` has been consumed.
+            if after.is_none() &&
+                let Some(count) = count
+            {
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
                     return Ok(all_traces)
                 }
-            };
+            }
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
