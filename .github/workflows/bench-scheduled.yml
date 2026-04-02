@@ -585,6 +585,26 @@ jobs:
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
+      - name: Upload to ClickHouse
+        if: success()
+        env:
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+        run: |
+          WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
+          DIFF_URL="https://github.com/${{ github.repository }}/compare/${BASELINE_REF}...${FEATURE_REF}"
+          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          JOB_URL="${BENCH_JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
+
+          python3 .github/scripts/bench-upload-clickhouse.py \
+            --summary "$BENCH_WORK_DIR/summary.json" \
+            --workflow-name "$WORKFLOW_NAME" \
+            --chain mainnet \
+            --grafana-url "${GRAFANA_URL:-}" \
+            --github-diff-url "$DIFF_URL" \
+            --job-url "$JOB_URL"
+
       - name: Generate charts
         if: success() && env.BENCH_MODE != 'hourly'
         env:
