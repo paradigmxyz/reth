@@ -349,10 +349,8 @@ impl RocksDBBuilder {
             let mut options = options;
             options.set_max_open_files(-1);
 
-            let secondary_path = std::env::temp_dir().join(format!(
-                "reth-rocksdb-secondary-{}",
-                std::process::id()
-            ));
+            let secondary_path =
+                std::env::temp_dir().join(format!("reth-rocksdb-secondary-{}", std::process::id()));
             reth_fs_util::create_dir_all(&secondary_path).map_err(ProviderError::other)?;
 
             let db = DB::open_cf_descriptors_as_secondary(
@@ -428,8 +426,7 @@ impl RocksDBProviderInner {
     /// Returns the metrics for this provider.
     const fn metrics(&self) -> Option<&RocksDBMetrics> {
         match self {
-            Self::ReadWrite { metrics, .. } |
-            Self::Secondary { metrics, .. } => metrics.as_ref(),
+            Self::ReadWrite { metrics, .. } | Self::Secondary { metrics, .. } => metrics.as_ref(),
         }
     }
 
@@ -1428,7 +1425,6 @@ enum RocksReadSnapshotInner<'db> {
     /// Snapshot from read-write `OptimisticTransactionDB`.
     ReadWrite(SnapshotWithThreadMode<'db, OptimisticTransactionDB>),
     /// Direct reads from a secondary `DB` instance (no snapshot).
-    /// Consistency is guaranteed externally by gating catch-up on MDBX txn_id.
     Secondary(&'db DB),
 }
 
@@ -3110,13 +3106,15 @@ mod tests {
         rw_provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
 
         // Read-only doesn't see the new data yet.
-        let result = ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
+        let result =
+            ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::NotYetWritten);
 
         // Catch up — now it sees the new data.
         ro_provider.try_catch_up_with_primary().unwrap();
 
-        let result = ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
+        let result =
+            ro_provider.snapshot().account_history_info(address2, 500, None, u64::MAX).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(500));
     }
 
