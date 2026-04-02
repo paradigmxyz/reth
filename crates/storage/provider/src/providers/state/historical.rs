@@ -54,20 +54,20 @@ type DbProof<'a, TX, A> = Proof<
 
 /// Result of a history lookup for an account or storage slot.
 ///
-/// Indicates where to find the historical value for a given key in the current visible history
-/// view.
+/// Indicates where to find the historical value for a given key at a specific block.
 #[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
-    /// No visible history entry proves that the key was already written at the target block.
+    /// The key is written to, but only after our block (not yet written at the target block). Or
+    /// it has never been written.
     NotYetWritten,
-    /// The first visible history entry at or after the target block is at this block number.
-    /// The value should be read from the changeset before that block.
+    /// The chunk contains an entry for a write after our block at the given block number.
+    /// The value should be looked up in the changeset at this block.
     InChangeset(u64),
-    /// No visible history entry at or after the target block exists, but the key does have some
-    /// visible history, so plain state matches the target state.
+    /// The chunk does not contain an entry for a write after our block. This can only
+    /// happen if this is the last chunk, so we need to look in the plain state.
     InPlainState,
-    /// History may be incomplete because of pruning, so plain state is the best available
-    /// fallback.
+    /// The key may have been written, but due to pruning we may not have changesets and
+    /// history, so we need to make a plain state lookup.
     MaybeInPlainState,
 }
 
@@ -77,9 +77,10 @@ impl HistoryInfo {
     /// This is a pure function shared by both MDBX and `RocksDB` backends.
     ///
     /// # Arguments
-    /// * `found_block` - The first visible history entry at or after the target block, if any
-    /// * `is_before_first_write` - True if the target block is before the first visible history
-    ///   entry for this key in the current lookup view
+    /// * `found_block` - The block number from the shard lookup
+    /// * `is_before_first_write` - True if the target block is before the first write to this key.
+    ///   This should be computed as: `rank == 0 && found_block != Some(block_number) &&
+    ///   !has_previous_shard` where `has_previous_shard` comes from a lazy `cursor.prev()` check.
     /// * `lowest_available` - Lowest block where history is available (pruning boundary)
     pub const fn from_lookup(
         found_block: Option<u64>,
@@ -88,20 +89,20 @@ impl HistoryInfo {
     ) -> Self {
         if is_before_first_write {
             if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
-                // History before the first visible entry may have been pruned, so use the first
-                // visible changeset as the best available boundary.
+                // The key may have been written, but due to pruning we may not have changesets
+                // and history, so we need to make a changeset lookup.
                 return Self::InChangeset(block_number)
             }
-            // The first visible entry is after the target block, so the key is not yet written in
-            // the current lookup view.
+            // The key is written to, but only after our block.
             return Self::NotYetWritten
         }
 
         if let Some(block_number) = found_block {
-            // A later visible entry exists, so read the value before that block from changesets.
+            // The chunk contains an entry for a write after our block, return it.
             Self::InChangeset(block_number)
         } else {
-            // No later visible entry exists, so plain state already matches the target state.
+            // The chunk does not contain an entry for a write after our block. This can only
+            // happen if this is the last chunk and so we need to look in the plain state.
             Self::InPlainState
         }
     }
