@@ -144,6 +144,14 @@ pub mod test_utils {
         fn path(&self) -> std::path::PathBuf {
             self.db().path()
         }
+
+        fn oldest_reader_txnid(&self) -> Option<u64> {
+            self.db().oldest_reader_txnid()
+        }
+
+        fn last_txnid(&self) -> Option<u64> {
+            self.db().last_txnid()
+        }
     }
 
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {

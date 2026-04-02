@@ -203,7 +203,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     }
 
     /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn get_receipts_and_maybe_block_stream<'a>(
         &'a self,
         hashes: Vec<B256>,

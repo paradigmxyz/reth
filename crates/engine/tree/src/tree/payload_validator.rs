@@ -220,7 +220,7 @@ where
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a new `TreePayloadValidator`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
         consensus: Arc<dyn FullConsensus<N>>,
@@ -1426,7 +1426,6 @@ where
     ///
     /// * `overlay_factory` - Pre-computed overlay factory for multiproof generation
     ///   (`StateRootTask`)
-    #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
