@@ -4302,5 +4302,4 @@ mod tests {
         let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
     }
-
 }
