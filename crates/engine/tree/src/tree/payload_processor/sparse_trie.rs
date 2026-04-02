@@ -777,8 +777,8 @@ where
             chunking_length,
             self.chunk_size,
             self.max_targets_for_chunking,
-            self.proof_worker_handle.available_account_workers(),
-            self.proof_worker_handle.available_storage_workers(),
+            self.proof_worker_handle.has_multiple_idle_account_workers(),
+            self.proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
                 if let Err(e) =

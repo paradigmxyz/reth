@@ -9,6 +9,7 @@ exclude = [".github/"]
 
 [workspace]
 members = [
+    "bin/reth-bb/",
     "bin/reth-bench/",
     "bin/reth/",
     "crates/storage/rpc-provider/",
@@ -410,6 +411,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
+reth-rpc-traits = { version = "0.1.0", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -448,7 +450,7 @@ alloy-sol-types = { version = "1.5.6", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.29.2", default-features = false }
+alloy-evm = { version = "0.30.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -481,11 +483,6 @@ alloy-transport = { version = "1.8.2" }
 alloy-transport-http = { version = "1.8.2", features = ["reqwest-rustls-tls"], default-features = false }
 alloy-transport-ipc = { version = "1.8.2", default-features = false }
 alloy-transport-ws = { version = "1.8.2", default-features = false }
-
-# op
-op-alloy-rpc-types = { version = "0.24.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.24.0", default-features = false }
-op-alloy-consensus = { version = "0.24.0", default-features = false }
 
 # misc
 either = { version = "1.15.0", default-features = false }
@@ -733,10 +730,6 @@ ipnet = "2.11"
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 
-# op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-# op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
-#
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }

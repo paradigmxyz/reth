@@ -7,8 +7,9 @@
 #             regressions quickly. Falls back to HEAD~1 on first run.
 #             Skips if no new commits or if a previous run is still in progress.
 #
-# State is persisted between runs via GitHub Actions cache: each successful
-# run saves the feature commit SHA so the next run knows what to compare against.
+# State is persisted between runs via the decofe/reth-bench-charts repo: each
+# successful run saves the feature commit SHA so the next run knows what to
+# compare against.
 
 on:
   schedule:
@@ -84,19 +85,11 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Detected mode: $MODE"
 
-      - name: Restore state cache
-        id: state-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .${{ steps.mode.outputs.mode == 'hourly' && 'hourly' || 'nightly' }}-state
-          key: bench-${{ steps.mode.outputs.mode }}-state-dummy
-          restore-keys: |
-            bench-${{ steps.mode.outputs.mode }}-state-
-
       - name: Resolve refs
         id: refs
         env:
           GH_TOKEN: ${{ github.token }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
@@ -249,7 +242,6 @@ jobs:
       BENCH_SAMPLY: "false"
       BENCH_CORES: "0"
       BENCH_BIG_BLOCKS: "false"
-      BENCH_RETH_NEW_PAYLOAD: "true"
       BENCH_WAIT_TIME: ""
       BENCH_BASELINE_ARGS: ""
       BENCH_FEATURE_ARGS: ""
@@ -257,8 +249,7 @@ jobs:
       BENCH_COMMENT_ID: ""
       BENCH_NO_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.no_slack == true && 'true' || 'false' }}
       BENCH_METRICS_ADDR: "127.0.0.1:9100"
-      BENCH_OTLP_TRACES_ENDPOINT: ${{ secrets.BENCH_OTLP_TRACES_ENDPOINT }}
-      BENCH_OTLP_LOGS_ENDPOINT: ${{ secrets.BENCH_OTLP_LOGS_ENDPOINT }}
+      BENCH_OTLP_DISABLED: "true"
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
     steps:
@@ -952,15 +943,27 @@ jobs:
     name: save-state
     runs-on: ubuntu-latest
     steps:
-      - name: Write state file
+      - name: Push state to charts repo
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
           MODE="${{ needs.resolve-refs.outputs.mode }}"
-          STATE_DIR=".${MODE}-state"
-          mkdir -p "$STATE_DIR"
-          echo "${{ needs.resolve-refs.outputs.feature-ref }}" > "$STATE_DIR/last-feature-ref"
+          FEATURE_REF="${{ needs.resolve-refs.outputs.feature-ref }}"
+          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
-      - name: Save state
-        uses: actions/cache/save@v4
-        with:
-          path: .${{ needs.resolve-refs.outputs.mode }}-state
-          key: bench-${{ needs.resolve-refs.outputs.mode }}-state-${{ needs.resolve-refs.outputs.feature-ref }}
+          TMP_DIR=$(mktemp -d)
+          if git clone --depth 1 --branch state "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            true
+          else
+            git init "${TMP_DIR}"
+            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+          fi
+
+          mkdir -p "${TMP_DIR}/state"
+          echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
+          git -C "${TMP_DIR}" add state/
+          git -C "${TMP_DIR}" diff --cached --quiet && echo "No state change" && exit 0
+          git -C "${TMP_DIR}" -c user.name="github-actions" -c user.email="github-actions@github.com" \
+            commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
+          git -C "${TMP_DIR}" push origin HEAD:state
+          rm -rf "${TMP_DIR}"

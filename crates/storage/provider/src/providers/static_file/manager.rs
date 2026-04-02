@@ -39,8 +39,8 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
-    find_fixed_range, ChangesetOffsetReader, HighestStaticFiles, SegmentHeader,
-    SegmentRangeInclusive, StaticFileMap, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
+    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
+    StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
@@ -2499,31 +2499,6 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         self.walk_account_changeset_range(range).collect()
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        let mut count = 0;
-
-        let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        if let Some(changeset_segments) = static_files.get(StaticFileSegment::AccountChangeSets) {
-            for (block_range, header) in changeset_segments {
-                let csoff_path = self
-                    .path
-                    .join(StaticFileSegment::AccountChangeSets.filename(block_range))
-                    .with_extension("csoff");
-                if csoff_path.exists() {
-                    let len = header.changeset_offsets_len();
-                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
-                        .map_err(ProviderError::other)?;
-                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
-                    for offset in offsets {
-                        count += offset.num_changes() as usize;
-                    }
-                }
-            }
-        }
-
-        Ok(count)
-    }
 }
 
 impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
@@ -2624,31 +2599,6 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
-    }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        let mut count = 0;
-
-        let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        if let Some(changeset_segments) = static_files.get(StaticFileSegment::StorageChangeSets) {
-            for (block_range, header) in changeset_segments {
-                let csoff_path = self
-                    .path
-                    .join(StaticFileSegment::StorageChangeSets.filename(block_range))
-                    .with_extension("csoff");
-                if csoff_path.exists() {
-                    let len = header.changeset_offsets_len();
-                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
-                        .map_err(ProviderError::other)?;
-                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
-                    for offset in offsets {
-                        count += offset.num_changes() as usize;
-                    }
-                }
-            }
-        }
-
-        Ok(count)
     }
 }
 

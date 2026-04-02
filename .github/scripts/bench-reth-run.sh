@@ -7,12 +7,12 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_BIG_BLOCKS (true/false), BENCH_WORK_DIR (for big blocks path)
-#               BENCH_RETH_NEW_PAYLOAD (true/false, default true)
 #               BENCH_WAIT_TIME (duration like 500ms, default empty)
 #               BENCH_BASELINE_ARGS (extra reth node args for baseline runs)
 #               BENCH_FEATURE_ARGS (extra reth node args for feature runs)
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
+#               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
 set -euo pipefail
 
 LABEL="$1"
@@ -132,12 +132,6 @@ if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-i
   SYNC_STATE_IDLE=true
 fi
 
-# Big blocks mode requires the testing API, skip-invalid-transactions, and
-# skip-gas-limit-ramp-check + gas-limit override to avoid the 6800-block ramp.
-if [ "$BIG_BLOCKS" = "true" ]; then
-  RETH_ARGS+=(--http.api eth,net,web3,reth,testing --rpc.max-request-size max --testing.skip-invalid-transactions --testing.skip-gas-limit-ramp-check --testing.gas-limit 1000000000)
-fi
-
 # Append per-label extra node args (baseline or feature)
 EXTRA_NODE_ARGS=""
 case "$LABEL" in
@@ -155,11 +149,13 @@ if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
 fi
 
 # OTLP traces and logs export
-if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
-fi
-if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-  RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
+  if [ -n "${BENCH_OTLP_TRACES_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench)
+  fi
+  if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+  fi
 fi
 
 # Tracy profiling: add --log.tracy flags and set environment
@@ -246,10 +242,7 @@ fi
 BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 
 # Build optional flags
-EXTRA_BENCH_ARGS=()
-if [ "${BENCH_RETH_NEW_PAYLOAD:-true}" != "false" ]; then
-  EXTRA_BENCH_ARGS+=(--reth-new-payload --wait-for-persistence)
-fi
+EXTRA_BENCH_ARGS=(--reth-new-payload)
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   EXTRA_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
 fi
@@ -258,7 +251,24 @@ if [ "$BIG_BLOCKS" = "true" ]; then
   # Big blocks mode: replay pre-generated payloads
   BIG_BLOCKS_DIR="${BENCH_BIG_BLOCKS_DIR:-${BENCH_WORK_DIR}/big-blocks}"
 
-  # Start tracy-capture so profile only covers the benchmark
+  BB_BENCH_ARGS=(--reth-new-payload)
+  if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+    BB_BENCH_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+  fi
+
+  # Warmup
+  WARMUP="${BENCH_WARMUP_BLOCKS:-50}"
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    echo "Running big blocks warmup (${WARMUP} payloads)..."
+    $BENCH_NICE "$RETH_BENCH" replay-payloads \
+      "${BB_BENCH_ARGS[@]}" \
+      --count "$WARMUP" \
+      --payload-dir "$BIG_BLOCKS_DIR/payloads" \
+      --engine-rpc-url http://127.0.0.1:8551 \
+      --jwt-secret "$DATADIR/jwt.hex" 2>&1 | sed -u "s/^/[bench] /"
+  fi
+
+  # Start tracy-capture after warmup so profile only covers the benchmark
   if [ "${BENCH_TRACY:-off}" != "off" ]; then
     echo "Starting tracy-capture..."
     tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
@@ -266,9 +276,19 @@ if [ "$BIG_BLOCKS" = "true" ]; then
     sleep 0.5  # give tracy-capture time to connect
   fi
 
-  echo "Running big blocks benchmark (replay-payloads)..."
+  # Benchmark — skip warmup payloads so they aren't measured
+  BB_SKIP=0
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    BB_SKIP="$WARMUP"
+  fi
+  if [ "${BENCH_BLOCKS:-0}" -gt 0 ] 2>/dev/null; then
+    BB_BENCH_ARGS+=(--count "$BENCH_BLOCKS")
+  fi
+
+  echo "Running big blocks benchmark (replay-payloads, skip=${BB_SKIP})..."
   $BENCH_NICE "$RETH_BENCH" replay-payloads \
-    "${EXTRA_BENCH_ARGS[@]}" \
+    "${BB_BENCH_ARGS[@]}" \
+    --skip "$BB_SKIP" \
     --payload-dir "$BIG_BLOCKS_DIR/payloads" \
     --engine-rpc-url http://127.0.0.1:8551 \
     --jwt-secret "$DATADIR/jwt.hex" \
