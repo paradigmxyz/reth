@@ -144,7 +144,11 @@ pub trait EthFees:
             let mut base_fee_per_blob_gas: Vec<u128> = Vec::with_capacity(block_count as usize + 1);
             let mut blob_gas_used_ratio: Vec<f64> = Vec::with_capacity(block_count as usize);
 
-            let mut rewards: Vec<Vec<u128>> = Vec::with_capacity(block_count as usize);
+            let mut rewards: Vec<Vec<u128>> = if reward_percentiles.is_some() {
+                Vec::with_capacity(block_count as usize)
+            } else {
+                Vec::new()
+            };
 
             // Check if the requested range is within the cache bounds
             let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
