@@ -15,7 +15,7 @@ use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -148,10 +148,10 @@ impl Future for PendingPayloadId {
 pub struct NewPayloadTimings {
     /// Server-side execution latency.
     pub latency: Duration,
-    /// Time spent waiting for persistence to complete.
-    ///
-    /// `None` when wasn't asked to wait for persistence.
-    pub persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence, including both time this message spent queued
+    /// due to persistence backpressure and, when `wait_for_persistence` was requested,
+    /// the explicit wait for in-flight persistence to complete.
+    pub persistence_wait: Duration,
     /// Time spent waiting for the execution cache lock.
     ///
     /// `None` when wasn't asked to wait for execution cache.
@@ -160,6 +160,30 @@ pub struct NewPayloadTimings {
     ///
     /// `None` when wasn't asked to wait for sparse trie cache.
     pub sparse_trie_wait: Option<Duration>,
+}
+
+/// Additional data for big block payloads that merge multiple real blocks.
+///
+/// This is used by the `reth_newPayload` endpoint to pass environment switches
+/// and prior block hashes needed for correct multi-segment execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BigBlockData<ExecutionData> {
+    /// Environment switches at block boundaries.
+    /// Each entry is `(cumulative_tx_count, execution_data_of_next_block)`.
+    ///
+    /// The first entry at index 0 represents the **original unmutated** base block's
+    /// `ExecutionData`, which must be used to derive the initial EVM environment.
+    pub env_switches: Vec<(usize, ExecutionData)>,
+    /// Block number → real block hash for blocks covered by previous big blocks in a sequence.
+    /// When replaying chained big blocks, the BLOCKHASH opcode needs real hashes for blocks
+    /// that were merged into earlier big blocks (and thus not individually persisted).
+    pub prior_block_hashes: Vec<(u64, alloy_primitives::B256)>,
+}
+
+impl<T> Default for BigBlockData<T> {
+    fn default() -> Self {
+        Self { env_switches: Vec::new(), prior_block_hashes: Vec::new() }
+    }
 }
 
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
@@ -188,6 +212,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         wait_for_caches: bool,
         /// The sender for returning payload status result and timing breakdown.
         tx: oneshot::Sender<Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>>,
+        /// When this message was enqueued, used to measure backpressure wait time.
+        enqueued_at: Instant,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -284,6 +310,7 @@ where
             wait_for_persistence,
             wait_for_caches,
             tx,
+            enqueued_at: Instant::now(),
         });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }

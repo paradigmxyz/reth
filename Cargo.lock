@@ -1024,7 +1024,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1035,7 +1035,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3434,7 +3434,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5157,7 +5157,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6127,7 +6127,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6316,62 +6316,6 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
-
-[[package]]
-name = "op-alloy-consensus"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fadcb964b0aa645d12e952d470c7585d23286d8bcf1ac41589410b6724216b68"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "derive_more",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "op-alloy-rpc-types"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be9d16ec9f7810e0623a37edc293d1c05fe9c58a5647f6973fdd93e0b4795015"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network-primitives",
- "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "derive_more",
- "op-alloy-consensus",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "op-alloy-rpc-types-engine"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c0ac5c5ddcbffadcd097d278c717d34849bcc629f6e4f8514eb000ec862def8"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-engine",
- "alloy-serde",
- "derive_more",
- "op-alloy-consensus",
- "serde",
- "sha2",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "opaque-debug"
@@ -7583,9 +7527,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bb"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-hardforks 0.4.7",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "async-trait",
+ "clap",
+ "crossbeam-channel",
+ "derive_more",
+ "eyre",
+ "jsonrpsee",
+ "metrics",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-cli-util",
+ "reth-consensus",
+ "reth-engine-primitives",
+ "reth-engine-tree",
+ "reth-errors",
+ "reth-ethereum-cli",
+ "reth-ethereum-consensus",
+ "reth-ethereum-forks",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-api",
+ "reth-rpc-engine-api",
+ "reth-storage-errors",
+ "revm",
+ "revm-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-bench"
 version = "1.11.3"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
@@ -7604,12 +7597,14 @@ dependencies = [
  "eyre",
  "futures",
  "humantime",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
  "reqwest 0.13.2",
+ "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-engine-primitives",
+ "reth-ethereum-cli",
+ "reth-ethereum-primitives",
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
@@ -9864,14 +9859,12 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-signer",
  "auto_impl",
  "dyn-clone",
  "jsonrpsee-types",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
  "reth-evm",
  "reth-primitives-traits",
+ "reth-rpc-traits",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -10053,6 +10046,21 @@ dependencies = [
  "reth-network-api",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-rpc-traits"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9230acfd70f7f27bc52da3f397e1896432ce160f9bd460d9788f1a28d61588c"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-signer",
+ "reth-primitives-traits",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10512,6 +10520,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
+ "crossbeam-utils",
  "derive_more",
  "itertools 0.14.0",
  "metrics",
@@ -10993,7 +11002,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11073,7 +11082,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11664,7 +11673,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11864,7 +11873,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13142,7 +13151,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
