@@ -122,15 +122,17 @@ def main():
     );
     """
 
-    # Build ClickHouse HTTP URL
+    # Build ClickHouse HTTP URL (credentials via headers, never in URL)
     host = ch_host.rstrip("/")
     if not host.startswith("http"):
         host = f"https://{host}:8443"
 
-    url = f"{host}/?database={ch_database}&user={ch_user}&password={ch_password}"
+    url = f"{host}/?database={ch_database}"
 
     req = urllib.request.Request(url, data=insert.encode("utf-8"), method="POST")
     req.add_header("Content-Type", "text/plain")
+    req.add_header("X-ClickHouse-User", ch_user)
+    req.add_header("X-ClickHouse-Key", ch_password)
 
     try:
         with urllib.request.urlopen(req) as resp:
