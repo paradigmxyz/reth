@@ -55,7 +55,7 @@ pub(crate) struct MultiProofTaskMetrics {
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,

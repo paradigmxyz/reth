@@ -447,7 +447,7 @@ impl Peer {
                 let self_covers = self_r.contains(range.start()) && self_r.contains(range.end());
                 let other_covers = other_r.contains(range.start()) && other_r.contains(range.end());
 
-                #[allow(clippy::match_same_arms)]
+                #[expect(clippy::match_same_arms)]
                 match (self_covers, other_covers) {
                     (true, false) => true,  // Only self covers the range
                     (false, true) => false, // Only other covers the range
@@ -531,7 +531,7 @@ struct Request<Req, Resp> {
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 #[derive(Debug)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {

@@ -1916,7 +1916,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Generic implementation for both account and storage history pruning.
     /// Mirrors MDBX `prune_shard` semantics. After pruning, the last remaining shard
     /// (if any) will have the sentinel key (`u64::MAX`).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn prune_history_shards_inner<K>(
         &mut self,
         shards: Vec<(K, BlockNumberList)>,
@@ -3905,7 +3905,7 @@ mod tests {
         let storage_key = B256::from([0x01; 32]);
 
         // Test cases that exercise invariants
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         let invariant_cases: &[(&[(u64, &[u64])], u64)] = &[
             // Account: shards where middle becomes empty
             (&[(10, &[5, 10]), (20, &[15, 20]), (u64::MAX, &[25, 30])], 20),
