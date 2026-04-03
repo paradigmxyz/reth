@@ -15,6 +15,7 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
@@ -38,9 +39,12 @@ use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
-use tracing::{info, instrument, trace};
+use tracing::{info, instrument, trace, warn};
 
 mod provider;
 pub use provider::{
@@ -57,6 +61,17 @@ mod metrics;
 
 mod chain;
 pub use chain::*;
+
+/// Sync state for read-only [`ProviderFactory`] instances.
+///
+/// The atomic allows a lock-free fast-path check. The mutex serializes only the actual
+/// catch-up I/O so concurrent readers don't block each other when the txnid hasn't changed.
+struct ReadOnlySyncState {
+    /// Last MDBX txn ID we synced RocksDB secondary / static file indexes to.
+    last_synced_txnid: AtomicU64,
+    /// Serializes the slow-path catch-up (RocksDB + static file re-init).
+    sync_lock: Mutex<()>,
+}
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -82,6 +97,11 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     runtime: reth_tasks::Runtime,
     /// Minimum distance from tip required before pruning can occur.
     minimum_pruning_distance: u64,
+    /// State for on-demand syncing of RocksDB secondary and static file indexes.
+    ///
+    /// `Some` only for read-only factories. Uses an atomic for the fast-path check (no
+    /// contention when txnid hasn't changed) and a mutex only for the slow-path sync.
+    read_only_sync: Option<Arc<ReadOnlySyncState>>,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -137,6 +157,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             changeset_cache: ChangesetCache::new(),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
+            read_only_sync: None,
         })
     }
 
@@ -178,6 +199,101 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
         self
+    }
+
+    /// Enables on-demand syncing of RocksDB secondary and static file indexes for read-only
+    /// factories. Initializes the tracker to the current MDBX txn ID.
+    ///
+    /// If `watch` is true, also watches the static files directory for `.conf` changes to
+    /// eagerly catch up in the background.
+    pub fn with_read_only_sync(mut self, watch: bool) -> Self
+    where
+        N::DB: Database,
+    {
+        let state = Arc::new(ReadOnlySyncState {
+            last_synced_txnid: AtomicU64::new(self.db.last_txnid().unwrap_or(0)),
+            sync_lock: Mutex::new(()),
+        });
+        self.read_only_sync = Some(state);
+
+        if watch {
+            self.watch_db_directory();
+        }
+        self
+    }
+
+    /// Watches the MDBX data directory for changes and eagerly syncs RocksDB secondary and
+    /// static file indexes when modifications are detected.
+    fn watch_db_directory(&self)
+    where
+        N::DB: Database,
+    {
+        let factory = self.clone();
+        let db_path = self.db.path();
+        reth_tasks::spawn_os_thread("ro-sync", move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher = RecommendedWatcher::new(
+                move |res| {
+                    let _ = tx.send(res);
+                },
+                notify::Config::default(),
+            )
+            .expect("failed to create watcher");
+
+            watcher
+                .watch(&db_path, RecursiveMode::NonRecursive)
+                .expect("failed to watch MDBX path");
+
+            while let Ok(res) = rx.recv() {
+                match res {
+                    Ok(event) => {
+                        if !matches!(
+                            event.kind,
+                            notify::EventKind::Modify(_) | notify::EventKind::Create(_)
+                        ) {
+                            continue;
+                        }
+
+                        if let Err(err) = factory.sync_providers_if_needed() {
+                            warn!(target: "reth::provider", %err, "background ro-sync failed");
+                        }
+                    }
+                    Err(err) => {
+                        warn!(target: "reth::provider", ?err, "MDBX directory watcher error");
+                    }
+                }
+            }
+        });
+    }
+
+    /// For read-only factories, checks whether the MDBX committed txn ID has advanced since the
+    /// last sync and, if so, catches up the RocksDB secondary instance and re-initializes the
+    /// static file index.
+    ///
+    /// The fast path (txnid unchanged) is lock-free. Only the actual sync I/O is serialized.
+    ///
+    /// No-op for read-write factories.
+    pub fn sync_providers_if_needed(&self) -> ProviderResult<()> {
+        let Some(sync_state) = &self.read_only_sync else { return Ok(()) };
+        let current_txnid = self.db.last_txnid().unwrap_or(0);
+
+        // Fast path: no contention when nothing changed.
+        if current_txnid == sync_state.last_synced_txnid.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        // Slow path: serialize the actual catch-up I/O.
+        let _guard = sync_state.sync_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Double-check after acquiring the lock — another thread may have already synced.
+        if current_txnid == sync_state.last_synced_txnid.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        self.rocksdb_provider.try_catch_up_with_primary()?;
+        self.static_file_provider.initialize_index()?;
+        sync_state.last_synced_txnid.store(current_txnid, Ordering::Relaxed);
+        Ok(())
     }
 
     /// Returns reference to the underlying database.
@@ -247,8 +363,17 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
+        let db_tx = self.db.tx()?;
+
+        // Sync providers after opening the database transaction to make
+        // sure that no data is pruned from rocksdb or static files.
+        //
+        // Reorg logic ensures that no data is pruned from rocksdb or static files while there is an
+        // mdbx transaction open that might rely on this data.
+        self.sync_providers_if_needed()?;
+
         Ok(DatabaseProvider::new(
-            self.db.tx()?,
+            db_tx,
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
@@ -445,6 +570,15 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
         Ok(())
     }
+
+    /// Returns a static file provider. For read-only instances, this will also invoke
+    /// [`Self::sync_providers_if_needed`] to make sure that the static file provider is up to date.
+    pub fn catched_up_static_file_provider(
+        &self,
+    ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
+        self.sync_providers_if_needed()?;
+        Ok(self.static_file_provider.clone())
+    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
@@ -498,28 +632,28 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.static_file_provider.header_by_number(num)
+        self.catched_up_static_file_provider()?.header_by_number(num)
     }
 
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        self.static_file_provider.headers_range(range)
+        self.catched_up_static_file_provider()?.headers_range(range)
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.static_file_provider.sealed_header(number)
+        self.catched_up_static_file_provider()?.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.static_file_provider.sealed_headers_range(range)
+        self.catched_up_static_file_provider()?.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
@@ -527,13 +661,13 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.static_file_provider.sealed_headers_while(range, predicate)
+        self.catched_up_static_file_provider()?.sealed_headers_while(range, predicate)
     }
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.static_file_provider.block_hash(number)
+        self.catched_up_static_file_provider()?.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -541,7 +675,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.static_file_provider.canonical_hashes_range(start, end)
+        self.catched_up_static_file_provider()?.canonical_hashes_range(start, end)
     }
 }
 
@@ -555,13 +689,13 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.static_file_provider.last_block_number()
+        self.catched_up_static_file_provider()?.last_block_number()
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
         // earliest history height tracks the lowest block number that has __not__ been expired, in
         // other words, the first/earliest available block.
-        Ok(self.static_file_provider.earliest_history_height())
+        Ok(self.catched_up_static_file_provider()?.earliest_history_height())
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -641,14 +775,14 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.transaction_by_id(id)
+        self.catched_up_static_file_provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.transaction_by_id_unhashed(id)
+        self.catched_up_static_file_provider()?.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
@@ -680,7 +814,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.static_file_provider.transactions_by_tx_range(range)
+        self.catched_up_static_file_provider()?.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
@@ -688,7 +822,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         if EitherWriterDestination::senders(self).is_static_file() {
-            self.static_file_provider.senders_by_tx_range(range)
+            self.catched_up_static_file_provider()?.senders_by_tx_range(range)
         } else {
             self.provider()?.senders_by_tx_range(range)
         }
@@ -696,7 +830,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         if EitherWriterDestination::senders(self).is_static_file() {
-            self.static_file_provider.transaction_sender(id)
+            self.catched_up_static_file_provider()?.transaction_sender(id)
         } else {
             self.provider()?.transaction_sender(id)
         }
@@ -707,7 +841,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
     type Receipt = ReceiptTy<N>;
 
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-        self.static_file_provider.get_with_static_file_or_database(
+        self.catched_up_static_file_provider()?.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
             id,
             |static_file| static_file.receipt(id),
@@ -730,7 +864,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
+        self.catched_up_static_file_provider()?.get_range_with_static_file_or_database(
             StaticFileSegment::Receipts,
             to_range(range),
             |static_file, range, _| static_file.receipts_by_tx_range(range),
@@ -825,6 +959,7 @@ where
             changeset_cache,
             runtime,
             minimum_pruning_distance,
+            read_only_sync,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -837,6 +972,10 @@ where
             .field("changeset_cache", &changeset_cache)
             .field("runtime", &runtime)
             .field("minimum_pruning_distance", &minimum_pruning_distance)
+            .field(
+                "read_only_sync",
+                &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
+            )
             .finish()
     }
 }
@@ -854,6 +993,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             changeset_cache: self.changeset_cache.clone(),
             runtime: self.runtime.clone(),
             minimum_pruning_distance: self.minimum_pruning_distance,
+            read_only_sync: self.read_only_sync.clone(),
         }
     }
 }

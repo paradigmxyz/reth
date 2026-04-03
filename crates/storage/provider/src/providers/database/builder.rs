@@ -50,7 +50,7 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// # Open an unmonitored instance
     ///
-    /// This is recommended when no changes to the static files are expected (e.g. no active node)
+    /// This is recommended when no changes to the database are expected (e.g. no active node)
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
@@ -101,17 +101,18 @@ impl<N> ProviderFactoryBuilder<N> {
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch_static_files } =
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch } =
             config.into();
         let db = open_db_read_only(db_dir, db_args)?;
-        let static_file_provider =
-            StaticFileProvider::read_only(static_files_dir, watch_static_files)?;
+        let static_file_provider = StaticFileProvider::read_only(static_files_dir)?;
         let rocksdb_provider = RocksDBProvider::builder(&rocksdb_dir)
             .with_default_tables()
             .with_read_only(true)
             .build()?;
-        ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)
-            .map_err(Into::into)
+        let factory =
+            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
+                .with_read_only_sync(watch);
+        Ok(factory)
     }
 }
 
@@ -135,8 +136,8 @@ pub struct ReadOnlyConfig {
     pub static_files_dir: PathBuf,
     /// The path to the `RocksDB` directory
     pub rocksdb_dir: PathBuf,
-    /// Whether the static files should be watched for changes.
-    pub watch_static_files: bool,
+    /// Whether to watch the MDBX directory for changes and eagerly sync providers.
+    pub watch: bool,
 }
 
 impl ReadOnlyConfig {
@@ -151,8 +152,8 @@ impl ReadOnlyConfig {
     ///    |__static_files
     /// ```
     ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
+    /// By default this watches the static files directory for changes, see also
+    /// [`ProviderFactory::with_read_only_sync`]
     pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
         let datadir = datadir.as_ref();
         Self {
@@ -160,7 +161,7 @@ impl ReadOnlyConfig {
             db_args: Default::default(),
             static_files_dir: datadir.join("static_files"),
             rocksdb_dir: datadir.join("rocksdb"),
-            watch_static_files: true,
+            watch: true,
         }
     }
 
@@ -183,9 +184,6 @@ impl ReadOnlyConfig {
     ///    - static_files
     /// ```
     ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
-    ///
     /// # Panics
     ///
     /// If the path does not exist
@@ -199,9 +197,8 @@ impl ReadOnlyConfig {
 
     /// Creates the config for the given paths.
     ///
-    ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
+    /// By default this watches the static files directory for changes, see also
+    /// [`ProviderFactory::with_read_only_sync`]
     pub fn from_dirs(
         db_dir: impl AsRef<Path>,
         static_files_dir: impl AsRef<Path>,
@@ -212,7 +209,7 @@ impl ReadOnlyConfig {
             db_args: Default::default(),
             static_files_dir: static_files_dir.as_ref().into(),
             rocksdb_dir: rocksdb_dir.as_ref().into(),
-            watch_static_files: true,
+            watch: true,
         }
     }
 
@@ -234,18 +231,12 @@ impl ReadOnlyConfig {
         self
     }
 
-    /// Whether the static file directory should be watches for changes, see also
-    /// [`StaticFileProvider::read_only`]
-    pub const fn set_watch_static_files(&mut self, watch_static_files: bool) {
-        self.watch_static_files = watch_static_files;
-    }
-
-    /// Don't watch the static files for changes.
+    /// Don't watch the static files directory for changes.
     ///
     /// This is only recommended if this is used without a running node instance that modifies
-    /// static files.
+    /// the database.
     pub const fn no_watch(mut self) -> Self {
-        self.set_watch_static_files(false);
+        self.watch = false;
         self
     }
 }
