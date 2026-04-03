@@ -44,6 +44,12 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
 
+/// Account history indices keyed by address.
+type AccountHistoryEntries = BTreeMap<Address, Vec<u64>>;
+
+/// Storage history indices keyed by (address, slot).
+type StorageHistoryEntries = BTreeMap<(Address, B256), Vec<u64>>;
+
 /// Statistics for a single `RocksDB` table (column family).
 #[derive(Debug, Clone)]
 pub struct RocksDBTableStats {
@@ -1227,6 +1233,11 @@ impl RocksDBProvider {
             ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
         let write_account_history = ctx.storage_settings.storage_v2;
         let write_storage_history = ctx.storage_settings.storage_v2;
+        let (account_history, storage_history) = if write_account_history || write_storage_history {
+            Self::collect_history_from_reverts(blocks, ctx.first_block_number)
+        } else {
+            (AccountHistoryEntries::new(), StorageHistoryEntries::new())
+        };
 
         // Propagate tracing context into rayon-spawned threads so that RocksDB
         // write spans appear as children of write_blocks_data in traces.
@@ -1242,14 +1253,14 @@ impl RocksDBProvider {
             if write_account_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_account_history = Some(self.write_account_history(blocks, &ctx));
+                    r_account_history = Some(self.write_account_history(&account_history, &ctx));
                 });
             }
 
             if write_storage_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_storage_history = Some(self.write_storage_history(blocks, &ctx));
+                    r_storage_history = Some(self.write_storage_history(&storage_history, &ctx));
                 });
             }
         });
@@ -1298,20 +1309,16 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Writes account history indices for the given blocks.
-    ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
-    fn write_account_history<N: reth_node_types::NodePrimitives>(
-        &self,
+    /// Collects account and storage history indices from block reverts in a single pass.
+    fn collect_history_from_reverts<N: reth_node_types::NodePrimitives>(
         blocks: &[ExecutedBlock<N>],
-        ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
-        let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        first_block_number: BlockNumber,
+    ) -> (AccountHistoryEntries, StorageHistoryEntries) {
+        let mut account_history: AccountHistoryEntries = BTreeMap::new();
+        let mut storage_history: StorageHistoryEntries = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
-            let block_number = ctx.first_block_number + block_idx as u64;
+            let block_number = first_block_number + block_idx as u64;
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through account reverts - these are exactly the accounts that have
@@ -1321,31 +1328,6 @@ impl RocksDBProvider {
                     account_history.entry(address).or_default().push(block_number);
                 }
             }
-        }
-
-        // Write account history using proper shard append logic
-        for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
-        }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
-    }
-
-    /// Writes storage history indices for the given blocks.
-    ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
-    fn write_storage_history<N: reth_node_types::NodePrimitives>(
-        &self,
-        blocks: &[ExecutedBlock<N>],
-        ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
-        let mut batch = self.batch();
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
-
-        for (block_idx, block) in blocks.iter().enumerate() {
-            let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.
@@ -1362,9 +1344,42 @@ impl RocksDBProvider {
             }
         }
 
+        (account_history, storage_history)
+    }
+
+    /// Writes account history indices from precomputed history entries.
+    ///
+    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    fn write_account_history(
+        &self,
+        account_history: &AccountHistoryEntries,
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+
+        // Write account history using proper shard append logic
+        for (address, indices) in account_history {
+            batch.append_account_history_shard(*address, indices.iter().copied())?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes storage history indices from precomputed history entries.
+    ///
+    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    fn write_storage_history(
+        &self,
+        storage_history: &StorageHistoryEntries,
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+
         // Write storage history using proper shard append logic
         for ((address, slot), indices) in storage_history {
-            batch.append_storage_history_shard(address, slot, indices)?;
+            batch.append_storage_history_shard(*address, *slot, indices.iter().copied())?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
