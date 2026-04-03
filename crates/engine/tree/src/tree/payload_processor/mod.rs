@@ -226,7 +226,7 @@ where
 
     /// Spawns a standalone state root computation task without full payload processing.
     ///
-    /// Returns a [`StateRootHandle`] that provides a channel to send [`SparseTrieUpdate`]s and
+    /// Returns a [`StateRootHandle`] that provides a channel to send `SparseTrieUpdates` and
     /// a receiver for the final state root result.
     pub fn spawn_state_root<F>(
         &self,
