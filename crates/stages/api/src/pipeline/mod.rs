@@ -581,10 +581,9 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         "Stage encountered a validation error: {validation_error}"
                     );
 
-                    // FIXME: When handling errors, we do not commit the database transaction. This
-                    // leads to the Merkle stage not clearing its checkpoint, and restarting from an
-                    // invalid place.
-                    // Only reset MerkleExecute checkpoint if MerkleExecute itself failed
+                    // Validation errors can leave an in-progress Merkle checkpoint behind.
+                    // Reset the persisted progress before unwinding so the next run restarts from
+                    // the previous stage checkpoint.
                     if stage_id == StageId::MerkleExecute {
                         let provider_rw = self.provider_factory.database_provider_rw()?;
                         provider_rw
@@ -669,8 +668,9 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use super::*;
-    use crate::{test_utils::TestStage, UnwindOutput};
+    use crate::{test_utils::TestStage, MerkleCheckpoint, UnwindOutput};
     use assert_matches::assert_matches;
+    use reth_codecs::Compact;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
@@ -1150,6 +1150,68 @@ mod tests {
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn merkle_execute_validation_error_clears_checkpoint_progress() {
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+
+        let prev_checkpoint = StageCheckpoint::new(10);
+        let current_checkpoint = StageCheckpoint::new(20);
+        provider_rw.save_stage_checkpoint(StageId::MerkleExecute, current_checkpoint).unwrap();
+
+        let mut progress = Vec::new();
+        MerkleCheckpoint::new(20, B256::ZERO, vec![], Default::default()).to_compact(&mut progress);
+        provider_rw
+            .save_stage_checkpoint_progress(StageId::MerkleExecute, progress.clone())
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(),
+            Some(current_checkpoint)
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint_progress(StageId::MerkleExecute).unwrap(),
+            Some(progress)
+        );
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder().build(
+            provider_factory.clone(),
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+        );
+
+        let ctrl = pipeline
+            .on_stage_error(
+                StageId::MerkleExecute,
+                Some(prev_checkpoint),
+                StageError::Block {
+                    block: Box::new(random_block_with_parent(
+                        &mut generators::rng(),
+                        current_checkpoint.block_number,
+                        Default::default(),
+                    )),
+                    error: BlockErrorKind::Validation(ConsensusError::BaseFeeMissing),
+                },
+            )
+            .unwrap();
+
+        assert_matches!(
+            ctrl,
+            Some(ControlFlow::Unwind { target, bad_block: _ }) if target == prev_checkpoint.block_number
+        );
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(),
+            Some(prev_checkpoint)
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint_progress(StageId::MerkleExecute).unwrap(),
+            Some(vec![])
         );
     }
 
