@@ -68,13 +68,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         // Validate gas limit against the configured call gas limit before any DB calls
@@ -84,7 +84,7 @@ where
         {
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+            );
         }
 
         let transactions = txs
@@ -126,7 +126,7 @@ where
                     EthBundleError::Eip4844BlobGasExceeded(blob_params.max_blob_gas_per_block())
                         .to_string(),
                 )
-                .into())
+                .into());
             }
         }
 
@@ -160,9 +160,9 @@ where
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut transactions = transactions.into_iter().peekable();
+                let mut transactions = transactions.into_iter().enumerate().peekable();
 
-                while let Some(tx) = transactions.next() {
+                while let Some((index, tx)) = transactions.next() {
                     let signer = tx.signer();
                     let tx = {
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
@@ -183,7 +183,7 @@ where
                     hasher.update(*tx.tx_hash());
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                        .map_err(|e| Eth::Error::from_evm_err_with_index(e, index))?;
 
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
