@@ -63,9 +63,6 @@ mod chain;
 pub use chain::*;
 
 /// Sync state for read-only [`ProviderFactory`] instances.
-///
-/// The atomic allows a lock-free fast-path check. The mutex serializes only the actual
-/// catch-up I/O so concurrent readers don't block each other when the txnid hasn't changed.
 struct ReadOnlySyncState {
     /// Last MDBX txn ID we synced RocksDB secondary / static file indexes to.
     last_synced_txnid: AtomicU64,
@@ -98,9 +95,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Minimum distance from tip required before pruning can occur.
     minimum_pruning_distance: u64,
     /// State for on-demand syncing of RocksDB secondary and static file indexes.
-    ///
-    /// `Some` only for read-only factories. Uses an atomic for the fast-path check (no
-    /// contention when txnid hasn't changed) and a mutex only for the slow-path sync.
+    /// 
+    /// Only set for read-only factories.
     read_only_sync: Option<Arc<ReadOnlySyncState>>,
 }
 
@@ -269,8 +265,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// For read-only factories, checks whether the MDBX committed txn ID has advanced since the
     /// last sync and, if so, catches up the RocksDB secondary instance and re-initializes the
     /// static file index.
-    ///
-    /// The fast path (txnid unchanged) is lock-free. Only the actual sync I/O is serialized.
     ///
     /// No-op for read-write factories.
     pub fn sync_providers_if_needed(&self) -> ProviderResult<()> {
@@ -573,7 +567,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
     /// Returns a static file provider. For read-only instances, this will also invoke
     /// [`Self::sync_providers_if_needed`] to make sure that the static file provider is up to date.
-    pub fn catched_up_static_file_provider(
+    pub fn caught_up_static_file_provider(
         &self,
     ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
         self.sync_providers_if_needed()?;
@@ -632,28 +626,28 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.catched_up_static_file_provider()?.header_by_number(num)
+        self.caught_up_static_file_provider()?.header_by_number(num)
     }
 
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        self.catched_up_static_file_provider()?.headers_range(range)
+        self.caught_up_static_file_provider()?.headers_range(range)
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.catched_up_static_file_provider()?.sealed_header(number)
+        self.caught_up_static_file_provider()?.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.catched_up_static_file_provider()?.sealed_headers_range(range)
+        self.caught_up_static_file_provider()?.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
@@ -661,13 +655,13 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.catched_up_static_file_provider()?.sealed_headers_while(range, predicate)
+        self.caught_up_static_file_provider()?.sealed_headers_while(range, predicate)
     }
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.catched_up_static_file_provider()?.block_hash(number)
+        self.caught_up_static_file_provider()?.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -675,7 +669,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.catched_up_static_file_provider()?.canonical_hashes_range(start, end)
+        self.caught_up_static_file_provider()?.canonical_hashes_range(start, end)
     }
 }
 
@@ -689,13 +683,13 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.catched_up_static_file_provider()?.last_block_number()
+        self.caught_up_static_file_provider()?.last_block_number()
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
         // earliest history height tracks the lowest block number that has __not__ been expired, in
         // other words, the first/earliest available block.
-        Ok(self.catched_up_static_file_provider()?.earliest_history_height())
+        Ok(self.caught_up_static_file_provider()?.earliest_history_height())
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -775,14 +769,14 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.catched_up_static_file_provider()?.transaction_by_id(id)
+        self.caught_up_static_file_provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.catched_up_static_file_provider()?.transaction_by_id_unhashed(id)
+        self.caught_up_static_file_provider()?.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
@@ -814,7 +808,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.catched_up_static_file_provider()?.transactions_by_tx_range(range)
+        self.caught_up_static_file_provider()?.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
@@ -822,7 +816,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         if EitherWriterDestination::senders(self).is_static_file() {
-            self.catched_up_static_file_provider()?.senders_by_tx_range(range)
+            self.caught_up_static_file_provider()?.senders_by_tx_range(range)
         } else {
             self.provider()?.senders_by_tx_range(range)
         }
@@ -830,7 +824,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         if EitherWriterDestination::senders(self).is_static_file() {
-            self.catched_up_static_file_provider()?.transaction_sender(id)
+            self.caught_up_static_file_provider()?.transaction_sender(id)
         } else {
             self.provider()?.transaction_sender(id)
         }
@@ -841,7 +835,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
     type Receipt = ReceiptTy<N>;
 
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-        self.catched_up_static_file_provider()?.get_with_static_file_or_database(
+        self.caught_up_static_file_provider()?.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
             id,
             |static_file| static_file.receipt(id),
@@ -864,7 +858,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
-        self.catched_up_static_file_provider()?.get_range_with_static_file_or_database(
+        self.caught_up_static_file_provider()?.get_range_with_static_file_or_database(
             StaticFileSegment::Receipts,
             to_range(range),
             |static_file, range, _| static_file.receipts_by_tx_range(range),
