@@ -206,8 +206,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     where
         N::DB: Database,
     {
+        // Initialize to 0 so the first `sync_providers_if_needed` call always
+        // triggers a RocksDB/static-file catch-up, regardless of what MDBX txnid
+        // the database was at when we opened it.
         let state = Arc::new(ReadOnlySyncState {
-            last_synced_txnid: AtomicU64::new(self.db.last_txnid().unwrap_or(0)),
+            last_synced_txnid: AtomicU64::new(0),
             sync_lock: Mutex::new(()),
         });
         self.read_only_sync = Some(state);
