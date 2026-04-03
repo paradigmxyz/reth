@@ -9652,6 +9652,8 @@ version = "1.11.3"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
  "reth-ethereum-forks",
  "reth-primitives-traits",
  "reth-storage-api",
