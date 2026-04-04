@@ -64,9 +64,9 @@ pub use chain::*;
 
 /// Sync state for read-only [`ProviderFactory`] instances.
 struct ReadOnlySyncState {
-    /// Last MDBX txn ID we synced RocksDB secondary / static file indexes to.
+    /// Last MDBX txn ID we synced `RocksDB` secondary / static file indexes to.
     last_synced_txnid: AtomicU64,
-    /// Serializes the slow-path catch-up (RocksDB + static file re-init).
+    /// Serializes the slow-path catch-up (`RocksDB` + static file re-init).
     sync_lock: Mutex<()>,
 }
 
@@ -94,8 +94,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     runtime: reth_tasks::Runtime,
     /// Minimum distance from tip required before pruning can occur.
     minimum_pruning_distance: u64,
-    /// State for on-demand syncing of RocksDB secondary and static file indexes.
-    /// 
+    /// State for on-demand syncing of `RocksDB` secondary and static file indexes.
+    ///
     /// Only set for read-only factories.
     read_only_sync: Option<Arc<ReadOnlySyncState>>,
 }
@@ -197,7 +197,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
-    /// Enables on-demand syncing of RocksDB secondary and static file indexes for read-only
+    /// Enables on-demand syncing of `RocksDB` secondary and static file indexes for read-only
     /// factories. Initializes the tracker to the current MDBX txn ID.
     ///
     /// If `watch` is true, also watches the static files directory for `.conf` changes to
@@ -221,7 +221,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
-    /// Watches the MDBX data directory for changes and eagerly syncs RocksDB secondary and
+    /// Watches the MDBX data directory for changes and eagerly syncs `RocksDB` secondary and
     /// static file indexes when modifications are detected.
     fn watch_db_directory(&self)
     where
@@ -266,7 +266,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// For read-only factories, checks whether the MDBX committed txn ID has advanced since the
-    /// last sync and, if so, catches up the RocksDB secondary instance and re-initializes the
+    /// last sync and, if so, catches up the `RocksDB` secondary instance and re-initializes the
     /// static file index.
     ///
     /// No-op for read-write factories.

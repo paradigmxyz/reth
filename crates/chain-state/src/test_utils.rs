@@ -95,7 +95,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
     /// Enables state generation: blocks will include proper `BundleState` with
     /// account/storage changes, reverts, and hashed state.
-    pub fn with_state(mut self) -> Self {
+    pub const fn with_state(mut self) -> Self {
         self.with_state = true;
         self
     }
@@ -293,7 +293,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let hashed_state = reth_trie::HashedPostState::from_bundle_state::<
             reth_trie::KeccakKeyHasher,
-        >(bundle.state.iter().map(|(a, acc)| (a, acc)))
+        >(bundle.state.iter())
         .into_sorted();
 
         let block_receipts = if receipts.is_empty() {

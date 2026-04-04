@@ -601,13 +601,12 @@ mod tests {
         // Spawn the reorg on a background thread because `commit_unwind` calls
         // `wait_for_pre_commit_readers()` which blocks until the secondary's held
         // RO tx is dropped.
-        let pf = provider_factory.clone();
         let reorg_handle = std::thread::spawn(move || {
-            let provider_rw = pf.database_provider_rw().unwrap();
+            let provider_rw = provider_factory.database_provider_rw().unwrap();
             provider_rw.remove_block_and_execution_above(1).unwrap();
             provider_rw.commit().unwrap();
 
-            let provider_rw = pf.database_provider_rw().unwrap();
+            let provider_rw = provider_factory.database_provider_rw().unwrap();
             provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full).unwrap();
             provider_rw.commit().unwrap();
         });
@@ -633,7 +632,10 @@ mod tests {
         // Consuming pre_reorg_provider here also unblocks the reorg commit.
         let state_at_1 = pre_reorg_provider.try_into_history_at_block(1).unwrap();
         let account = state_at_1.basic_account(&signer).unwrap();
-        assert!(account.is_some(), "pre-reorg RO tx must still read signer at block 1 during reorg");
+        assert!(
+            account.is_some(),
+            "pre-reorg RO tx must still read signer at block 1 during reorg"
+        );
         let account = account.unwrap();
         assert_eq!(
             account.balance, balance_after_block1,
