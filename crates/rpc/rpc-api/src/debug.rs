@@ -9,7 +9,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -140,21 +140,27 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or tag.
+    /// The first argument is the block number or tag. The optional second argument selects the
+    /// witness generation mode and defaults to `legacy`.
     #[method(name = "executionWitness")]
-    async fn debug_execution_witness(&self, block: BlockNumberOrTag)
-        -> RpcResult<ExecutionWitness>;
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+        mode: Option<ExecutionWitnessMode>,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
     /// purpose of generating an execution witness. The witness comprises of a map of all hashed
     /// trie nodes to their preimages that were required during the execution of the block,
     /// including during state root recomputation.
     ///
-    /// The first argument is the block hash.
+    /// The first argument is the block hash. The optional second argument selects the witness
+    /// generation mode and defaults to `legacy`.
     #[method(name = "executionWitnessByBlockHash")]
     async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
+        mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness>;
 
     /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.

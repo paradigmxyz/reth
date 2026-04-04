@@ -14,8 +14,9 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StateRoot, StorageMultiProof, StorageRoot, TrieInput, TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
@@ -218,11 +219,16 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         })
     }
 
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let nodes_sorted = input.nodes.into_sorted();
             let state_sorted = input.state.into_sorted();
-            Ok(TrieWitness::new(
+            let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
                     &nodes_sorted,
@@ -233,10 +239,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
                 ),
             )
             .with_prefix_sets_mut(input.prefix_sets)
-            .always_include_root_node()
-            .compute(target)?
-            .into_values()
-            .collect())
+            .with_execution_witness_mode(mode);
+            let witness =
+                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+            let mut values: Vec<_> = witness.compute(target)?.into_values().collect();
+            if mode.is_canonical() {
+                values.sort_unstable();
+            }
+            Ok(values)
         })
     }
 }

@@ -33,11 +33,10 @@ use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
@@ -498,6 +497,7 @@ where
     pub async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
+        mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
@@ -506,7 +506,7 @@ where
             .await?
             .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
-        self.debug_execution_witness_for_block(block).await
+        self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
 
     /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
@@ -516,6 +516,7 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
+        mode: Option<ExecutionWitnessMode>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
@@ -524,18 +525,17 @@ where
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
-        self.debug_execution_witness_for_block(block).await
+        self.debug_execution_witness_for_block(block, mode.unwrap_or_default()).await
     }
 
     /// Generates an execution witness, using the given recovered block.
     pub async fn debug_execution_witness_for_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        mode: ExecutionWitnessMode,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let block_number = block.header().number();
-
-        let (mut exec_witness, lowest_block_number) = self
-            .eth_api()
+        self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
@@ -543,48 +543,15 @@ where
 
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness_record.record_executed_state(statedb);
+                        witness_record.record_executed_state(statedb, mode);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
-                    witness_record;
-
-                let state = db
-                    .database
-                    .0
-                    .witness(Default::default(), hashed_state)
-                    .map_err(EthApiError::from)?;
-                Ok((
-                    ExecutionWitness { state, codes, keys, ..Default::default() },
-                    lowest_block_number,
-                ))
+                Ok(witness_record
+                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
+                    .map_err(EthApiError::from)?)
             })
-            .await?;
-
-        let smallest = match lowest_block_number {
-            Some(smallest) => smallest,
-            None => {
-                // Return only the parent header, if there were no calls to the
-                // BLOCKHASH opcode.
-                block_number.saturating_sub(1)
-            }
-        };
-
-        let range = smallest..block_number;
-        exec_witness.headers = self
-            .provider()
-            .headers_range(range)
-            .map_err(EthApiError::from)?
-            .into_iter()
-            .map(|header| {
-                let mut serialized_header = Vec::new();
-                header.encode(&mut serialized_header);
-                serialized_header.into()
-            })
-            .collect();
-
-        Ok(exec_witness)
+            .await
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
@@ -846,18 +813,20 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
+        mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into)
+        Self::debug_execution_witness(self, block, mode).await.map_err(Into::into)
     }
 
     /// Handler for `debug_executionWitnessByBlockHash`
     async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
+        mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
+        Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
     }
 
     async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
