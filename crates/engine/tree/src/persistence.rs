@@ -601,12 +601,17 @@ mod tests {
         // Spawn the reorg on a background thread because `commit_unwind` calls
         // `wait_for_pre_commit_readers()` which blocks until the secondary's held
         // RO tx is dropped.
+        //
+        // We want to keep provider factory around, otherwise it's gonna drop mdbx env before the
+        // reorg thread is on
+        #[expect(clippy::redundant_clone)]
+        let pf = provider_factory.clone();
         let reorg_handle = std::thread::spawn(move || {
-            let provider_rw = provider_factory.database_provider_rw().unwrap();
+            let provider_rw = pf.database_provider_rw().unwrap();
             provider_rw.remove_block_and_execution_above(1).unwrap();
             provider_rw.commit().unwrap();
 
-            let provider_rw = provider_factory.database_provider_rw().unwrap();
+            let provider_rw = pf.database_provider_rw().unwrap();
             provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full).unwrap();
             provider_rw.commit().unwrap();
         });

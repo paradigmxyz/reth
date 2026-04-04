@@ -246,7 +246,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with read-only access.
     ///
     /// The caller is responsible for calling [`StaticFileProvider::initialize_index`] when
-    /// underlying data changes (e.g. via [`ProviderFactory`]'s on-demand MDBX txn ID sync).
+    /// underlying data changes.
     pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
         Self::new(path, StaticFileAccess::RO)
     }
