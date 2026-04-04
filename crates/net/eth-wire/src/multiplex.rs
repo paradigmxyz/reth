@@ -651,9 +651,26 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+
+        // Drain buffered outgoing messages (FCFS) to prevent satellite starvation.
+        // Check readiness BEFORE popping to avoid losing messages on Pending.
+        loop {
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(err.into()))
+                        }
+                    } else {
+                        break
+                    }
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
+                Poll::Pending => return Poll::Pending,
+            }
         }
+
+        // conn is already Ready(Ok(())) from the last drain iteration (buffer was empty).
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err))
         }
