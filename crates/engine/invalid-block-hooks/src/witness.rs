@@ -239,6 +239,7 @@ where
                 DebugApiClient::<()>::debug_execution_witness(
                     healthy_node_client,
                     block_number.into(),
+                    None,
                 )
                 .await
             })?;
