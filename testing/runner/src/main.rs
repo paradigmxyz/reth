@@ -41,11 +41,6 @@ enum Commands {
         /// Skips engine tree. (~5s for 40k tests)
         #[arg(long)]
         fast: bool,
-
-        /// Full DB mode: engine tree with full provider factory + state root
-        /// trie verification. Most thorough but slowest.
-        #[arg(long)]
-        full_db: bool,
     },
     /// Execute engine-x test fixtures (blockchain_test_engine_x format)
     /// with cached provider factories per (fork, preHash).
@@ -57,6 +52,11 @@ enum Commands {
         /// Path to the pre_alloc directory containing shared genesis state files.
         #[arg(long)]
         pre_alloc_dir: PathBuf,
+
+        /// Use a real MDBX-backed database with trie storage and state root
+        /// verification instead of the default in-memory MockEthProvider.
+        #[arg(long)]
+        full_db: bool,
     },
 }
 
@@ -73,18 +73,16 @@ fn main() {
             };
             BlockchainTests::new(suite_path).run();
         }
-        Some(Commands::EngineTest { path, fast, full_db }) => {
+        Some(Commands::EngineTest { path, fast }) => {
             let mode = if fast {
                 EngineTestMode::Fast
-            } else if full_db {
-                EngineTestMode::FullDb
             } else {
                 EngineTestMode::EngineTree
             };
             EngineTests::new(path).with_mode(mode).run();
         }
-        Some(Commands::EngineXTest { path, pre_alloc_dir }) => {
-            EngineXTests::new(path, pre_alloc_dir).run();
+        Some(Commands::EngineXTest { path, pre_alloc_dir, full_db }) => {
+            EngineXTests::new(path, pre_alloc_dir).with_full_db(full_db).run();
         }
         None => {
             let suite_path = cli
