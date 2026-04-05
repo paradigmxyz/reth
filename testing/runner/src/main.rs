@@ -1,17 +1,81 @@
-//! Command-line interface for running tests.
+//! Command-line interface for running Ethereum execution spec tests.
 use std::path::PathBuf;
 
-use clap::Parser;
-use ef_tests::{cases::blockchain_test::BlockchainTests, Suite};
+use clap::{Parser, Subcommand};
+use ef_tests::{
+    cases::{
+        blockchain_test::BlockchainTests,
+        engine_test::{EngineTestMode, EngineTests},
+    },
+    Suite,
+};
 
-/// Command-line arguments for the test runner.
+/// Reth test runner for Ethereum execution spec test fixtures.
 #[derive(Debug, Parser)]
-pub struct TestRunnerCommand {
-    /// Path to the test suite
-    suite_path: PathBuf,
+#[command(name = "ef-test-runner")]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Path to the test suite (used when no subcommand is given).
+    suite_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Execute blockchain test fixtures (blockchain_tests format).
+    #[command(name = "blocktest")]
+    BlockTest {
+        /// Path to the test fixtures directory or file.
+        path: PathBuf,
+    },
+    /// Execute engine test fixtures (blockchain_test_engine format)
+    /// through the real Engine API tree path.
+    #[command(name = "enginetest")]
+    EngineTest {
+        /// Path to the blockchain_tests_engine fixture directory.
+        path: PathBuf,
+
+        /// Fast mode: direct EVM execution with parameter validation.
+        /// Skips engine tree. (~5s for 40k tests)
+        #[arg(long)]
+        fast: bool,
+
+        /// Full DB mode: engine tree with full provider factory + state root
+        /// trie verification. Most thorough but slowest.
+        #[arg(long)]
+        full_db: bool,
+    },
 }
 
 fn main() {
-    let cmd = TestRunnerCommand::parse();
-    BlockchainTests::new(cmd.suite_path.join("blockchain_tests")).run();
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::BlockTest { path }) => {
+            let suite_path = if path.ends_with("blockchain_tests") {
+                path
+            } else {
+                let candidate = path.join("blockchain_tests");
+                if candidate.exists() { candidate } else { path }
+            };
+            BlockchainTests::new(suite_path).run();
+        }
+        Some(Commands::EngineTest { path, fast, full_db }) => {
+            let mode = if fast {
+                EngineTestMode::Fast
+            } else if full_db {
+                EngineTestMode::FullDb
+            } else {
+                EngineTestMode::EngineTree
+            };
+            EngineTests::new(path).with_mode(mode).run();
+        }
+        None => {
+            let suite_path = cli
+                .suite_path
+                .expect("suite_path is required when no subcommand is given");
+            BlockchainTests::new(suite_path.join("blockchain_tests")).run();
+        }
+    }
 }
