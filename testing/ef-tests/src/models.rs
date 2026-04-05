@@ -508,7 +508,7 @@ pub struct EngineNewPayload {
 
 /// Deserialize a `u64` that may be encoded as either a JSON number or a JSON
 /// string (the fixture format uses strings).
-fn deserialize_string_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+pub(crate) fn deserialize_string_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -536,7 +536,7 @@ where
 
 /// Deserialize an `Option<i64>` that may be encoded as a JSON number, a JSON
 /// string, or `null` (the fixture format uses strings for error codes).
-fn deserialize_optional_string_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+pub(crate) fn deserialize_optional_string_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

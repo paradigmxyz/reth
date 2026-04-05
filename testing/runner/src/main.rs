@@ -6,6 +6,7 @@ use ef_tests::{
     cases::{
         blockchain_test::BlockchainTests,
         engine_test::{EngineTestMode, EngineTests},
+        engine_x_test::EngineXTests,
     },
     Suite,
 };
@@ -46,6 +47,17 @@ enum Commands {
         #[arg(long)]
         full_db: bool,
     },
+    /// Execute engine-x test fixtures (blockchain_test_engine_x format)
+    /// with cached provider factories per (fork, preHash).
+    #[command(name = "enginextest")]
+    EngineXTest {
+        /// Path to the test fixtures directory (e.g. .../blockchain_tests_engine_x/prague/).
+        path: PathBuf,
+
+        /// Path to the pre_alloc directory containing shared genesis state files.
+        #[arg(long)]
+        pre_alloc_dir: PathBuf,
+    },
 }
 
 fn main() {
@@ -70,6 +82,9 @@ fn main() {
                 EngineTestMode::EngineTree
             };
             EngineTests::new(path).with_mode(mode).run();
+        }
+        Some(Commands::EngineXTest { path, pre_alloc_dir }) => {
+            EngineXTests::new(path, pre_alloc_dir).run();
         }
         None => {
             let suite_path = cli
