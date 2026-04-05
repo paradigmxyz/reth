@@ -52,11 +52,6 @@ enum Commands {
         /// Path to the pre_alloc directory containing shared genesis state files.
         #[arg(long)]
         pre_alloc_dir: PathBuf,
-
-        /// Use a real MDBX-backed database with trie storage and state root
-        /// verification instead of the default in-memory MockEthProvider.
-        #[arg(long)]
-        full_db: bool,
     },
 }
 
@@ -81,8 +76,8 @@ fn main() {
             };
             EngineTests::new(path).with_mode(mode).run();
         }
-        Some(Commands::EngineXTest { path, pre_alloc_dir, full_db }) => {
-            EngineXTests::new(path, pre_alloc_dir).with_full_db(full_db).run();
+        Some(Commands::EngineXTest { path, pre_alloc_dir }) => {
+            EngineXTests::new(path, pre_alloc_dir).run();
         }
         None => {
             let suite_path = cli

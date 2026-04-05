@@ -7,11 +7,7 @@
 //! Tests sharing the same `preHash` can reuse the same engine tree, amortizing
 //! the expensive database creation. Engines are cached by `"fork:preHash"`.
 //!
-//! Two modes are available:
-//!   - **Default (in-memory):** `MockEthProvider` + `EngineApiTreeHandler` — fast
-//!     but no trie / state root verification.
-//!   - **Full-DB (`--full-db`):** `ProviderFactory` (MDBX-backed) with direct EVM
-//!     execution, real trie storage and state root verification.
+//! Uses `MockEthProvider` + `EngineApiTreeHandler` for fast in-memory execution.
 //!
 //! Access is serialized per engine via mutex to prevent concurrent test
 //! interference. After each test, an FCU resets the chain head back to genesis.
@@ -22,7 +18,6 @@ use crate::{
     Error,
 };
 use alloy_eips::eip7685::{Requests, RequestsOrHash};
-use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -33,7 +28,6 @@ use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
-use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_engine_primitives::{BeaconEngineMessage, ForkchoiceStatus, TreeConfig};
 use reth_engine_tree::{
     engine::{EngineApiKind, FromEngine},
@@ -58,19 +52,9 @@ use reth_payload_primitives::{
     PayloadOrAttributes,
 };
 use reth_primitives_traits::{Account as RethAccount, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_provider::{
-    test_utils::{
-        create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
-        MockNodeTypesWithDB,
-    },
-    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HistoryWriter, OriginalValuesKnown,
-    ProviderFactory, StateWriteConfig, StateWriter, StaticFileProviderFactory,
-    StaticFileSegment, StaticFileWriter, StorageSettingsCache,
-};
+use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
-use reth_storage_api::DBProvider;
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
-use reth_trie_db::{ChangesetCache, DatabaseStateRoot};
+use reth_trie_db::ChangesetCache;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -154,24 +138,13 @@ type MockEngineTree = EngineApiTreeHandler<
 
 /// A cached engine for a `(fork, preHash)` pair.
 ///
-/// Either in-memory (`Mock`) with engine tree, or backed by a real MDBX
-/// database (`FullDb`) with direct EVM execution and state root verification.
-enum CachedEngine {
-    /// In-memory mode: `MockEthProvider` + engine tree.
-    Mock {
-        tree: MockEngineTree,
-        /// Shared state provider -- kept alive for the engine validator's `Arc`.
-        #[allow(dead_code)]
-        state: Arc<Mutex<StateProviderTest>>,
-        genesis_hash: B256,
-    },
-    /// Full-DB mode: direct EVM execution against a real MDBX-backed
-    /// `ProviderFactory` with trie storage and state root verification.
-    FullDb {
-        factory: ProviderFactory<MockNodeTypesWithDB>,
-        chain_spec: Arc<ChainSpec>,
-        genesis_block: RecoveredBlock<Block>,
-    },
+/// In-memory `MockEthProvider` + engine tree.
+struct CachedEngine {
+    tree: MockEngineTree,
+    /// Shared state provider -- kept alive for the engine validator's `Arc`.
+    #[allow(dead_code)]
+    state: Arc<Mutex<StateProviderTest>>,
+    genesis_hash: B256,
 }
 
 // ---------------------------------------------------------------------------
@@ -185,22 +158,12 @@ pub struct EngineXTests {
     suite_path: PathBuf,
     /// Path to the pre-alloc directory (e.g. `.../blockchain_tests_engine_x/pre_alloc/`).
     pre_alloc_dir: PathBuf,
-    /// When `true`, use a real MDBX-backed `ProviderFactory` per cached engine
-    /// with trie storage and state root verification. When `false` (default),
-    /// use `MockEthProvider` for fast in-memory execution.
-    full_db: bool,
 }
 
 impl EngineXTests {
     /// Create a new engine-x test suite.
     pub fn new(suite_path: PathBuf, pre_alloc_dir: PathBuf) -> Self {
-        Self { suite_path, pre_alloc_dir, full_db: false }
-    }
-
-    /// Enable full-DB mode with real trie + state root verification.
-    pub fn with_full_db(mut self, full_db: bool) -> Self {
-        self.full_db = full_db;
-        self
+        Self { suite_path, pre_alloc_dir }
     }
 
     /// Walk the suite path and run all engine-x test fixtures.
@@ -288,11 +251,10 @@ impl EngineXTests {
         // Step 4: Run each group. Tests within a group share an engine and
         // execute sequentially; different groups run in parallel.
         let pre_allocs = pre_allocs.clone();
-        let full_db = self.full_db;
         let results: Vec<CaseResult> = groups
             .into_par_iter()
             .flat_map(|(key, items)| {
-                run_engine_group(&key, items, &pre_allocs, full_db)
+                run_engine_group(&key, items, &pre_allocs)
             })
             .collect();
 
@@ -387,7 +349,6 @@ fn run_engine_group(
     key: &str,
     items: Vec<TestItem>,
     pre_allocs: &HashMap<String, ExPreAlloc>,
-    full_db: bool,
 ) -> Vec<CaseResult> {
     // Parse the key back to fork + preHash.
     let (fork_str, pre_hash) = key.split_once(':').unwrap_or(("", key));
@@ -413,11 +374,7 @@ fn run_engine_group(
 
     // Create the engine once for the group.
     let chain_spec = items[0].def.network.to_chain_spec();
-    let engine = match if full_db {
-        create_cached_engine_full_db(chain_spec, pre_alloc)
-    } else {
-        create_cached_engine(chain_spec, pre_alloc)
-    } {
+    let engine = match create_cached_engine(chain_spec, pre_alloc) {
         Ok(e) => e,
         Err(err) => {
             let msg = format!("Failed to create engine for {key}: {err}");
@@ -436,7 +393,7 @@ fn run_engine_group(
         .map(|item| {
             let result = {
                 let mut eng = engine.lock().unwrap();
-                let r = run_single_test(&item.name, &item.def, &mut eng);
+                let r = run_single_test(&item.name, &item.def, &mut eng.tree);
                 // Reset engine to genesis after each test.
                 reset_to_genesis(&mut eng);
                 r
@@ -751,102 +708,7 @@ fn create_cached_engine(
         runtime,
     );
 
-    Ok(CachedEngine::Mock { tree, state: shared_state, genesis_hash })
-}
-
-// ---------------------------------------------------------------------------
-// Full-DB engine creation + helpers
-// ---------------------------------------------------------------------------
-
-/// Convert a `BTreeMap<Address, Account>` (test model) into a
-/// `BTreeMap<Address, GenesisAccount>` suitable for `insert_genesis_state`.
-fn pre_to_genesis_state(
-    pre: &BTreeMap<alloy_primitives::Address, Account>,
-) -> BTreeMap<alloy_primitives::Address, GenesisAccount> {
-    pre.iter()
-        .map(|(address, account)| {
-            let storage = account
-                .storage
-                .iter()
-                .filter(|(_, v)| !v.is_zero())
-                .map(|(k, v)| {
-                    (
-                        B256::from_slice(&k.to_be_bytes::<32>()),
-                        B256::from_slice(&v.to_be_bytes::<32>()),
-                    )
-                })
-                .collect();
-            let genesis_account = GenesisAccount {
-                balance: account.balance,
-                nonce: Some(account.nonce.try_into().unwrap()),
-                code: Some(account.code.clone()).filter(|c| !c.is_empty()),
-                storage: Some(storage),
-                private_key: None,
-            };
-            (*address, genesis_account)
-        })
-        .collect()
-}
-
-/// Create a cached engine backed by a real MDBX database with trie storage
-/// and state root verification. This uses direct EVM execution (no engine
-/// tree) matching the `run_engine_case_full_db` pattern from `engine_test.rs`.
-fn create_cached_engine_full_db(
-    chain_spec: Arc<ChainSpec>,
-    pre_alloc: &ExPreAlloc,
-) -> Result<CachedEngine, Error> {
-    // Create a real MDBX-backed provider factory.
-    let factory =
-        create_test_provider_factory_with_chain_spec(chain_spec.clone());
-    let provider = factory.database_provider_rw().map_err(|e| {
-        Error::Assertion(format!("Failed to create DB provider: {e}"))
-    })?;
-
-    // Genesis block.
-    let sealed_genesis_header: SealedHeader =
-        pre_alloc.genesis.clone().into();
-    let genesis_block = SealedBlock::<Block>::from_sealed_parts(
-        sealed_genesis_header.clone(),
-        Default::default(),
-    )
-    .try_recover()
-    .unwrap();
-
-    // Insert genesis block into the DB.
-    provider
-        .insert_block(&genesis_block)
-        .map_err(|e| Error::Assertion(format!("insert genesis block: {e}")))?;
-
-    // Increment block number for receipts static file.
-    provider
-        .static_file_provider()
-        .latest_writer(StaticFileSegment::Receipts)
-        .and_then(|mut writer| writer.increment_block(0))
-        .map_err(|e| Error::Assertion(format!("receipts static file: {e}")))?;
-
-    // Insert genesis state (accounts, hashes, history) into the DB.
-    let genesis_state = pre_to_genesis_state(&pre_alloc.pre);
-    insert_genesis_state(&provider, genesis_state.iter())
-        .map_err(|e| Error::Assertion(format!("insert genesis state: {e}")))?;
-    insert_genesis_hashes(&provider, genesis_state.iter())
-        .map_err(|e| {
-            Error::Assertion(format!("insert genesis hashes: {e}"))
-        })?;
-    insert_genesis_history(&provider, genesis_state.iter())
-        .map_err(|e| {
-            Error::Assertion(format!("insert genesis history: {e}"))
-        })?;
-
-    // Commit the genesis transaction.
-    provider.commit().map_err(|e| {
-        Error::Assertion(format!("commit genesis: {e}"))
-    })?;
-
-    Ok(CachedEngine::FullDb {
-        factory,
-        chain_spec,
-        genesis_block,
-    })
+    Ok(CachedEngine { tree, state: shared_state, genesis_hash })
 }
 
 // ---------------------------------------------------------------------------
@@ -944,36 +806,9 @@ fn parse_execution_data(entry: &ExNewPayload) -> Result<ExecutionData, Error> {
 // Test execution
 // ---------------------------------------------------------------------------
 
-/// Execute a single engine-x test against a cached engine, dispatching to
-/// either the engine-tree path (Mock) or direct EVM execution (FullDb).
+/// Execute a single engine-x test against a cached engine via the in-memory
+/// engine tree path.
 fn run_single_test(
-    name: &str,
-    def: &ExTestDef,
-    engine: &mut CachedEngine,
-) -> Result<(), Error> {
-    match engine {
-        CachedEngine::Mock { tree, .. } => {
-            run_single_test_mock(name, def, tree)
-        }
-        CachedEngine::FullDb {
-            factory,
-            chain_spec,
-            genesis_block,
-            ..
-        } => {
-            run_single_test_full_db(
-                name,
-                def,
-                factory,
-                chain_spec,
-                genesis_block,
-            )
-        }
-    }
-}
-
-/// In-memory engine tree path: send payloads through `on_engine_message`.
-fn run_single_test_mock(
     name: &str,
     def: &ExTestDef,
     tree: &mut MockEngineTree,
@@ -1149,263 +984,30 @@ fn run_single_test_mock(
     Ok(())
 }
 
-/// Full-DB path: direct EVM execution with state root verification.
-///
-/// Mirrors `run_engine_case_full_db` from `engine_test.rs` but operates on
-/// the cached `ProviderFactory` so that genesis state is reused across tests.
-fn run_single_test_full_db(
-    name: &str,
-    def: &ExTestDef,
-    factory: &ProviderFactory<MockNodeTypesWithDB>,
-    chain_spec: &Arc<ChainSpec>,
-    genesis_block: &RecoveredBlock<Block>,
-) -> Result<(), Error> {
-    use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
-
-    let payload_validator =
-        EthereumExecutionPayloadValidator::new(chain_spec.clone());
-    let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
-
-    let provider = factory.database_provider_rw().map_err(|e| {
-        Error::Assertion(format!("Failed to open DB provider: {e}"))
-    })?;
-
-    let mut parent = genesis_block.clone();
-
-    for (payload_idx, entry) in def.engine_new_payloads.iter().enumerate() {
-        let expects_error = entry.expects_error();
-        let block_number = (payload_idx + 1) as u64;
-
-        // -- Step 1: Parse the execution data from fixture params --
-        let execution_data = match parse_execution_data(entry) {
-            Ok(data) => data,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(err);
-            }
-        };
-
-        // -- Step 2: Engine API version-specific validation --
-        let engine_version =
-            to_engine_version(entry.new_payload_version)?;
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            ExecutionData,
-            EthPayloadAttributes,
-        >::from_execution_payload(&execution_data);
-
-        if let Some(requests) = payload_or_attrs.execution_requests() {
-            if let Err(_err) = validate_execution_requests(requests) {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     unexpected execution requests validation \
-                     error: {_err}"
-                )));
-            }
-        }
-
-        if let Err(_err) = validate_version_specific_fields(
-            chain_spec.as_ref(),
-            engine_version,
-            payload_or_attrs,
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::Assertion(format!(
-                "Test case: {name}\nPayload {payload_idx}: \
-                 unexpected version validation error: {_err}"
-            )));
-        }
-
-        // -- Step 3: Convert payload to block --
-        let sealed_block = match payload_validator
-            .ensure_well_formed_payload(execution_data)
-        {
-            Ok(block) => block,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     payload validation error: {err}"
-                )));
-            }
-        };
-        let block = match sealed_block.try_recover() {
-            Ok(b) => b,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     recovery error: {err}"
-                )));
-            }
-        };
-
-        // -- Step 4: Consensus pre-execution checks --
-        if let Err(err) = consensus.validate_header_against_parent(
-            block.sealed_header(),
-            parent.sealed_header(),
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-
-        // Insert the block into the database.
-        if let Err(err) = provider.insert_block(&block) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-        provider
-            .static_file_provider()
-            .commit()
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        // -- Step 5: Execute the block against the real DB --
-        let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
-        let executor = executor_provider.batch_executor(state_db);
-
-        let output = match executor.execute(&block) {
-            Ok(output) => output,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::block_failed(block_number, err));
-            }
-        };
-
-        // -- Step 6: Post-execution consensus checks --
-        if let Err(err) = validate_block_post_execution(
-            &block,
-            chain_spec,
-            &output.receipts,
-            &output.requests,
-            None,
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-
-        // -- Step 7: Compute and verify state root from the trie --
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-                output.state.state(),
-            );
-        let sorted = hashed_state.clone_into_sorted();
-        let (computed_state_root, _) =
-            reth_trie_db::with_adapter!(provider, |A| {
-                StateRoot::<
-                    reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                    _,
-                >::overlay_root_with_updates(
-                    provider.tx_ref(), &sorted
-                )
-            })
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        if computed_state_root != block.state_root {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(
-                block_number,
-                Error::Assertion(format!(
-                    "state root mismatch: computed {computed_state_root}, \
-                     expected {}",
-                    block.state_root
-                )),
-            ));
-        }
-
-        if expects_error {
-            return Err(Error::Assertion(format!(
-                "Test case: {name}\nPayload {payload_idx}: expected error \
-                 ({:?} / error_code {:?}) but payload was accepted",
-                entry.validation_error, entry.error_code,
-            )));
-        }
-
-        // -- Step 8: Commit state to the database --
-        provider
-            .write_state(
-                &ExecutionOutcome::single(block.number, output),
-                OriginalValuesKnown::Yes,
-                StateWriteConfig::default(),
-            )
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        provider
-            .write_hashed_state(&hashed_state.into_sorted())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        provider
-            .update_history_indices(block.number..=block.number)
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        parent = block;
-    }
-
-    // Do NOT commit: the RW transaction is rolled back on drop so the
-    // next test in this group starts from the same committed genesis state.
-    Ok(())
-}
-
 /// Reset the engine tree's chain head back to genesis so the next test
-/// starts from a clean state.
-///
-/// For Mock engines, this sends an FCU back to genesis.
-/// For FullDb engines, this is a no-op -- the DB accumulates state across
-/// tests, but each test forks from the point it finds. Since tests in a
-/// group share the same genesis, subsequent tests will build on top of
-/// any previously committed blocks, which is acceptable.
+/// starts from a clean state by sending an FCU back to genesis.
 fn reset_to_genesis(engine: &mut CachedEngine) {
-    match engine {
-        CachedEngine::Mock { tree, genesis_hash, .. } => {
-            let fcu_state = ForkchoiceState {
-                head_block_hash: *genesis_hash,
-                safe_block_hash: *genesis_hash,
-                finalized_block_hash: *genesis_hash,
-            };
+    let fcu_state = ForkchoiceState {
+        head_block_hash: engine.genesis_hash,
+        safe_block_hash: engine.genesis_hash,
+        finalized_block_hash: engine.genesis_hash,
+    };
 
-            let (fcu_tx, fcu_rx) = oneshot::channel();
-            let fcu_msg = FromEngine::Request(
-                BeaconEngineMessage::ForkchoiceUpdated {
-                    state: fcu_state,
-                    payload_attrs: None,
-                    tx: fcu_tx,
-                    version: EngineApiMessageVersion::V3,
-                }
-                .into(),
-            );
+    let (fcu_tx, fcu_rx) = oneshot::channel();
+    let fcu_msg = FromEngine::Request(
+        BeaconEngineMessage::ForkchoiceUpdated {
+            state: fcu_state,
+            payload_attrs: None,
+            tx: fcu_tx,
+            version: EngineApiMessageVersion::V3,
+        }
+        .into(),
+    );
 
-            // Best-effort reset: ignore errors (the engine may be in a
-            // broken state after a failed test, but the next test group
-            // will get a fresh engine).
-            if tree.on_engine_message(fcu_msg).is_ok() {
-                let _ = fcu_rx.blocking_recv();
-            }
-        }
-        CachedEngine::FullDb { .. } => {
-            // Full-DB mode: the DB accumulates state across tests in the
-            // same group. No reset needed -- each test's blocks are
-            // committed sequentially.
-        }
+    // Best-effort reset: ignore errors (the engine may be in a
+    // broken state after a failed test, but the next test group
+    // will get a fresh engine).
+    if engine.tree.on_engine_message(fcu_msg).is_ok() {
+        let _ = fcu_rx.blocking_recv();
     }
 }

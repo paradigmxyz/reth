@@ -12,7 +12,7 @@ use crate::{
     Case, Error,
 };
 use alloy_eips::eip7685::{Requests, RequestsOrHash};
-use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Bytes, B256};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -24,10 +24,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
 };
 use reth_chainspec::ChainSpec;
-use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
-use reth_db_common::init::{
-    insert_genesis_hashes, insert_genesis_history, insert_genesis_state,
-};
+use reth_consensus::{FullConsensus, HeaderValidator};
 use reth_engine_primitives::{
     BeaconEngineMessage, ForkchoiceStatus, TreeConfig,
 };
@@ -59,18 +56,10 @@ use reth_primitives_traits::{
     Account, ParallelBridgeBuffered, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    test_utils::{
-        create_test_provider_factory_with_chain_spec, ExtendedAccount,
-        MockEthProvider,
-    },
-    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HistoryWriter,
-    OriginalValuesKnown, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache,
+    test_utils::{ExtendedAccount, MockEthProvider},
 };
 use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
-use reth_trie_db::{ChangesetCache, DatabaseStateRoot};
+use reth_trie_db::ChangesetCache;
 use std::{
     collections::BTreeMap,
     fs,
@@ -309,8 +298,6 @@ pub enum EngineTestMode {
     /// Sends payloads through on_new_payload → PayloadStatus → FCU. (~37s for 40k tests)
     #[default]
     EngineTree = 1,
-    /// Full DB: real engine tree with full provider factory + state root trie verification.
-    FullDb = 2,
 }
 
 impl EngineTestMode {
@@ -321,7 +308,6 @@ impl EngineTestMode {
     fn get_global() -> Self {
         match ENGINE_TEST_MODE.load(Ordering::Relaxed) {
             0 => Self::Fast,
-            2 => Self::FullDb,
             _ => Self::EngineTree,
         }
     }
@@ -444,7 +430,6 @@ impl EngineTestCase {
         match EngineTestMode::get_global() {
             EngineTestMode::Fast => run_engine_case_fast(name, case),
             EngineTestMode::EngineTree => run_engine_case(name, case),
-            EngineTestMode::FullDb => run_engine_case_full_db(name, case),
         }
     }
 }
@@ -1002,261 +987,6 @@ fn run_engine_case(name: &str, case: &EngineTest) -> Result<(), Error> {
     if let Some(ref expected_post_state) = case.post_state {
         let state_guard = shared_state.lock().unwrap();
         verify_post_state(&state_guard, expected_post_state)?;
-    }
-
-    Ok(())
-}
-
-/// Full-DB mode: validates Engine API params, converts payload, executes via
-/// direct EVM against a real `ProviderFactory` (MDBX-backed), computes
-/// state root from the trie, and verifies it matches the block header.
-///
-/// This provides the most thorough validation — identical to how
-/// `blockchain_test` works, but driven by the engine test fixture format
-/// (payload + expected status).
-fn run_engine_case_full_db(name: &str, case: &EngineTest) -> Result<(), Error> {
-    let chain_spec = case.network.to_chain_spec();
-    let payload_validator =
-        EthereumExecutionPayloadValidator::new(chain_spec.clone());
-    let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-
-    // ---- Set up a real MDBX-backed provider factory ----
-    let factory =
-        create_test_provider_factory_with_chain_spec(chain_spec.clone());
-    let provider = factory.database_provider_rw().unwrap();
-
-    // Insert genesis block
-    let sealed_genesis_header: SealedHeader =
-        case.genesis_block_header.clone().into();
-    let genesis_block = SealedBlock::<Block>::from_sealed_parts(
-        sealed_genesis_header.clone(),
-        Default::default(),
-    )
-    .try_recover()
-    .unwrap();
-
-    provider
-        .insert_block(&genesis_block)
-        .map_err(|err| Error::block_failed(0, err))?;
-
-    // Increment block number for receipts static file
-    provider
-        .static_file_provider()
-        .latest_writer(StaticFileSegment::Receipts)
-        .and_then(|mut writer| writer.increment_block(0))
-        .map_err(|err| Error::block_failed(0, err))?;
-
-    // Insert genesis state into the DB (accounts, hashes, history)
-    let genesis_state = case.pre.clone().into_genesis_state();
-    insert_genesis_state(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
-    insert_genesis_hashes(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
-    insert_genesis_history(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
-
-    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
-    let mut parent = genesis_block;
-
-    for (payload_idx, entry) in case.engine_new_payloads.iter().enumerate() {
-        let expects_error =
-            entry.validation_error.is_some() || entry.error_code.is_some();
-        let block_number = (payload_idx + 1) as u64;
-
-        // -- Step 1: Parse the execution data from fixture params --
-        let execution_data = match parse_execution_data(entry) {
-            Ok(data) => data,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(err);
-            }
-        };
-
-        // -- Step 2: Engine API version-specific validation --
-        let engine_version =
-            to_engine_version(entry.new_payload_version)?;
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            ExecutionData,
-            EthPayloadAttributes,
-        >::from_execution_payload(
-            &execution_data
-        );
-
-        if let Some(requests) = payload_or_attrs.execution_requests() {
-            if let Err(_err) =
-                validate_execution_requests(requests)
-            {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     unexpected execution requests validation \
-                     error: {_err}"
-                )));
-            }
-        }
-
-        if let Err(_err) = validate_version_specific_fields(
-            chain_spec.as_ref(),
-            engine_version,
-            payload_or_attrs,
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::Assertion(format!(
-                "Test case: {name}\nPayload {payload_idx}: \
-                 unexpected version validation error: {_err}"
-            )));
-        }
-
-        // -- Step 3: Convert payload to block --
-        let sealed_block = match payload_validator
-            .ensure_well_formed_payload(execution_data)
-        {
-            Ok(block) => block,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     payload validation error: {err}"
-                )));
-            }
-        };
-        let block = match sealed_block.try_recover() {
-            Ok(b) => b,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::Assertion(format!(
-                    "Test case: {name}\nPayload {payload_idx}: \
-                     recovery error: {err}"
-                )));
-            }
-        };
-
-        // -- Step 4: Consensus pre-execution checks --
-        if let Err(err) = consensus.validate_header_against_parent(
-            block.sealed_header(),
-            parent.sealed_header(),
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-
-        // Insert the block into the database
-        if let Err(err) = provider.insert_block(&block) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-        provider
-            .static_file_provider()
-            .commit()
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        // -- Step 5: Execute the block against the real DB --
-        let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
-        let executor = executor_provider.batch_executor(state_db);
-
-        let output = match executor.execute(&block) {
-            Ok(output) => output,
-            Err(err) => {
-                if expects_error {
-                    continue;
-                }
-                return Err(Error::block_failed(block_number, err));
-            }
-        };
-
-        // -- Step 6: Post-execution consensus checks --
-        if let Err(err) = validate_block_post_execution(
-            &block,
-            &chain_spec,
-            &output.receipts,
-            &output.requests,
-            None,
-        ) {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(block_number, err));
-        }
-
-        // -- Step 7: Compute and verify state root from the trie --
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-                output.state.state(),
-            );
-        let sorted = hashed_state.clone_into_sorted();
-        let (computed_state_root, _) =
-            reth_trie_db::with_adapter!(provider, |A| {
-                StateRoot::<
-                    reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                    _,
-                >::overlay_root_with_updates(
-                    provider.tx_ref(), &sorted
-                )
-            })
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        if computed_state_root != block.state_root {
-            if expects_error {
-                continue;
-            }
-            return Err(Error::block_failed(
-                block_number,
-                Error::Assertion(format!(
-                    "state root mismatch: computed {computed_state_root}, \
-                     expected {}",
-                    block.state_root
-                )),
-            ));
-        }
-
-        if expects_error {
-            return Err(Error::Assertion(format!(
-                "Test case: {name}\nPayload {payload_idx}: expected error \
-                 ({:?} / error_code {:?}) but payload was accepted",
-                entry.validation_error, entry.error_code,
-            )));
-        }
-
-        // -- Step 8: Commit state to the database --
-        provider
-            .write_state(
-                &ExecutionOutcome::single(block.number, output),
-                OriginalValuesKnown::Yes,
-                StateWriteConfig::default(),
-            )
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        provider
-            .write_hashed_state(&hashed_state.into_sorted())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        provider
-            .update_history_indices(block.number..=block.number)
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        parent = block;
-    }
-
-    // -- Step 9: Validate final post-state against the real DB --
-    if let Some(ref expected_post_state) = case.post_state {
-        for (address, account) in expected_post_state {
-            account.assert_db(*address, provider.tx_ref())?;
-        }
     }
 
     Ok(())
