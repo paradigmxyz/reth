@@ -96,7 +96,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     minimum_pruning_distance: u64,
     /// State for on-demand syncing of `RocksDB` secondary and static file indexes.
     ///
-    /// Only set for read-only factories.
+    /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
+    /// factory writing to the database (e.g as part of a running reth node).
     read_only_sync: Option<Arc<ReadOnlySyncState>>,
 }
 
@@ -200,8 +201,8 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Enables on-demand syncing of `RocksDB` secondary and static file indexes for read-only
     /// factories. Initializes the tracker to the current MDBX txn ID.
     ///
-    /// If `watch` is true, also watches the static files directory for `.conf` changes to
-    /// eagerly catch up in the background.
+    /// Should be used for read-only factories that are running concurrently to a reth node writing
+    /// new data to the database. Would effectively be a no-op if database durectory is unchanged.
     pub fn with_read_only_sync(mut self, watch: bool) -> Self
     where
         N::DB: Database,
