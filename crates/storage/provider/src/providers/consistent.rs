@@ -1458,7 +1458,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             changesets.extend(db_changesets);
         }
 
-        changesets.sort_by_key(|(block_address, _)| block_address.block_number());
+        changesets.sort_unstable_by_key(|(block_address, _)| block_address.block_number());
 
         Ok(changesets)
     }
@@ -1606,7 +1606,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             changesets.extend(db_changesets);
         }
 
-        changesets.sort_by_key(|(block_num, _)| *block_num);
+        changesets.sort_unstable_by_key(|(block_num, _)| *block_num);
 
         Ok(changesets)
     }
