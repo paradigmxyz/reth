@@ -29,6 +29,10 @@ enum Commands {
     BlockTest {
         /// Path to the test fixtures directory or file.
         path: PathBuf,
+
+        /// Output results as a JSON array.
+        #[arg(long)]
+        json_array: bool,
     },
     /// Execute engine test fixtures (blockchain_test_engine format)
     /// through the real Engine API tree path.
@@ -41,6 +45,10 @@ enum Commands {
         /// Skips engine tree. (~5s for 40k tests)
         #[arg(long)]
         fast: bool,
+
+        /// Output results as a JSON array.
+        #[arg(long)]
+        json_array: bool,
     },
     /// Execute engine-x test fixtures (blockchain_test_engine_x format)
     /// with cached provider factories per (fork, preHash).
@@ -59,22 +67,30 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::BlockTest { path }) => {
+        Some(Commands::BlockTest { path, json_array }) => {
             let suite_path = if path.ends_with("blockchain_tests") {
                 path
             } else {
                 let candidate = path.join("blockchain_tests");
                 if candidate.exists() { candidate } else { path }
             };
-            BlockchainTests::new(suite_path).run();
+            if json_array {
+                BlockchainTests::new(suite_path).run_json();
+            } else {
+                BlockchainTests::new(suite_path).run();
+            }
         }
-        Some(Commands::EngineTest { path, fast }) => {
+        Some(Commands::EngineTest { path, fast, json_array }) => {
             let mode = if fast {
                 EngineTestMode::Fast
             } else {
                 EngineTestMode::EngineTree
             };
-            EngineTests::new(path).with_mode(mode).run();
+            if json_array {
+                EngineTests::new(path).with_mode(mode).run_json();
+            } else {
+                EngineTests::new(path).with_mode(mode).run();
+            }
         }
         Some(Commands::EngineXTest { path, pre_alloc_dir }) => {
             EngineXTests::new(path, pre_alloc_dir).run();

@@ -8,7 +8,7 @@
 use crate::{
     case::Cases,
     models::{EngineNewPayload, EngineTest, ForkSpec},
-    result::{categorize_results, print_results},
+    result::{categorize_results, print_results, CaseResult},
     Case, Error,
 };
 use alloy_eips::eip7685::{Requests, RequestsOrHash};
@@ -367,6 +367,44 @@ impl EngineTests {
                 .unwrap_or_else(|| "engine_tests".to_string());
             self.run_dir(&name, suite_path);
         }
+    }
+
+    /// Run all tests and print results as a JSON array.
+    pub fn run_json(&self) {
+        let results = self.collect_all();
+        crate::result::print_json_array(&results);
+    }
+
+    /// Collect per-test results for JSON output.
+    fn collect_all(&self) -> Vec<CaseResult> {
+        use rayon::prelude::*;
+
+        let suite_path = &self.suite_path;
+        self.mode.set_global();
+
+        // Load all files, then flatten into (path, test_name, test) triples
+        let test_items: Vec<_> = find_all_json_files(suite_path)
+            .into_iter()
+            .filter_map(|path| {
+                let case = EngineTestCase::load(&path).ok()?;
+                Some(
+                    case.tests
+                        .into_iter()
+                        .filter(|(_, t)| !EngineTestCase::excluded_fork(t.network))
+                        .map(move |(name, test)| (path.clone(), name, test))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .flatten()
+            .collect();
+
+        test_items
+            .into_par_iter()
+            .map(|(path, name, test)| {
+                let result = EngineTestCase::run_single_case(&name, &test);
+                CaseResult::new(&path, name, result)
+            })
+            .collect()
     }
 
     /// Load and run all JSON test files in the given directory (recursively).

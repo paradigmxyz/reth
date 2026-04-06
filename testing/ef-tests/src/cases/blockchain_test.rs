@@ -40,6 +40,41 @@ impl BlockchainTests {
     pub const fn new(suite_path: PathBuf) -> Self {
         Self { suite_path }
     }
+
+    /// Run all tests and print per-test results as a JSON array.
+    pub fn run_json(&self) {
+        use crate::result::CaseResult;
+        use rayon::prelude::*;
+        use walkdir::WalkDir;
+
+        let test_items: Vec<_> = WalkDir::new(&self.suite_path)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".json"))
+            .filter_map(|entry| {
+                let path = entry.into_path();
+                let case = BlockchainTestCase::load(&path).ok()?;
+                Some(
+                    case.tests
+                        .into_iter()
+                        .filter(|(_, t)| !BlockchainTestCase::excluded_fork(t.network))
+                        .map(move |(name, test)| (path.clone(), name, test))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .flatten()
+            .collect();
+
+        let results: Vec<CaseResult> = test_items
+            .into_par_iter()
+            .map(|(path, name, test)| {
+                let result = BlockchainTestCase::run_single_case(&name, &test);
+                CaseResult::new(&path, name, result)
+            })
+            .collect();
+
+        crate::result::print_json_array(&results);
+    }
 }
 
 impl Suite for BlockchainTests {
