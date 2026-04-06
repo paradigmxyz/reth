@@ -202,7 +202,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// factories. Initializes the tracker to the current MDBX txn ID.
     ///
     /// Should be used for read-only factories that are running concurrently to a reth node writing
-    /// new data to the database. Would effectively be a no-op if database durectory is unchanged.
+    /// new data to the database. Would effectively be a no-op if database directory is unchanged.
     pub fn with_read_only_sync(mut self, watch: bool) -> Self
     where
         N::DB: Database,
