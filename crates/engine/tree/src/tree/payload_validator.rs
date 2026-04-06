@@ -56,7 +56,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -624,30 +624,32 @@ where
         // nonce/balance lookups (state_provider was consumed by execute_block above).
         if let Some(il) = &il {
             let validation_start = Instant::now();
-            let il_state_provider = self.provider.history_by_block_hash(parent_hash).ok();
-            let il_validation_result =
-                il_state_provider.map(|sp| self.validate_block_inclusion_list(sp, &block, il));
-            let il_validation_result = match il_validation_result {
-                Some(result) => Some(result),
-                None => {
-                    warn!(target: "engine::tree::payload_validator", "Failed to get parent state for IL validation, skipping");
-                    None
-                }
-            };
-            match il_validation_result.unwrap_or(Ok(())) {
+            let il_state_provider =
+                self.provider.history_by_block_hash(parent_hash).map_err(|err| {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        %err,
+                        "Failed to obtain parent state for IL validation"
+                    );
+                    InsertBlockError::new(
+                        block.clone().into_sealed_block(),
+                        BlockExecutionError::Validation(BlockValidationError::InvalidInclusionList)
+                            .into(),
+                    )
+                })?;
+            match self.validate_block_inclusion_list(il_state_provider, &block, il) {
                 Ok(()) => {
-                    // Record successful validation time
                     self.metrics
                         .ef_execution
                         .record_inclusion_list_block_validation_time(validation_start.elapsed());
                 }
                 Err(err) => {
-                    // Record failed validation time
                     self.metrics
                         .ef_execution
                         .record_inclusion_list_block_validation_time(validation_start.elapsed());
 
-                    warn!("Block failed inclusionlist test.");
+                    warn!(target: "engine::tree", "Block failed inclusion list validation");
                     self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
                     return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
                 }
@@ -1900,7 +1902,7 @@ where
         S: StateProvider,
     {
         // Gather all tx hashes already in the block
-        let included: BTreeSet<_> =
+        let included: B256Set =
             block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
 
         // Compute remaining gas after block execution
@@ -1971,7 +1973,7 @@ where
 
             if account_balance >= max_cost {
                 // Transaction would still be valid - inclusion list violation
-                info!("Failed on TX: {:?}", recovered);
+                warn!(target: "engine::tree", tx_hash = ?recovered.hash(), "IL transaction not included in block but required");
 
                 // Number of unchecked transactions plus the current tx
                 let unknown_count = (il_len - idx) as u64;

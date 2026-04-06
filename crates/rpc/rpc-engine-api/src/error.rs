@@ -126,8 +126,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |
-                    VersionSpecificValidationError::IlNotSupportedBeforeV5 |
-                    VersionSpecificValidationError::NoIlPostAmsterdam,
+                    VersionSpecificValidationError::IlNotSupportedPreBogota,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {

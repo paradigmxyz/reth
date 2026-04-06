@@ -156,13 +156,14 @@ impl ForkchoiceStatus {
     /// Converts the general purpose [`PayloadStatusEnum`] into a [`ForkchoiceStatus`].
     pub(crate) const fn from_payload_status(status: &PayloadStatusEnum) -> Self {
         match status {
-            PayloadStatusEnum::Valid |
-            PayloadStatusEnum::Accepted |
-            PayloadStatusEnum::InclusionListUnsatisfied => {
-                // `Accepted` is only returned on `newPayload`. It would be a valid state here.
+            PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted => {
+                // `Accepted` is only returned on `newPayload`, not on `forkchoiceUpdated`.
                 Self::Valid
             }
-            PayloadStatusEnum::Invalid { .. } => Self::Invalid,
+            // An IL-unsatisfied block must not become the canonical head.
+            PayloadStatusEnum::InclusionListUnsatisfied | PayloadStatusEnum::Invalid { .. } => {
+                Self::Invalid
+            }
             PayloadStatusEnum::Syncing => Self::Syncing,
         }
     }

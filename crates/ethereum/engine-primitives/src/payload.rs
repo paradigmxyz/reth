@@ -465,9 +465,8 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     }
 
     if let Some(il) = &attributes.inclusion_list_transactions {
-        // NOTE
-        //
-        // perhaps we want to only update the digest a single time after flattening the IL
+        // Each IL transaction is hashed individually in sequence, which is equivalent to
+        // hashing the concatenated bytes since SHA-256 is a streaming hash.
         for tx in il {
             hasher.update(tx);
         }
@@ -510,7 +509,7 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
-            // TODO: add a dummy IL
+            // TODO(focil): add IL fixture for testing
             inclusion_list_transactions: Some(vec![]),
         };
 
@@ -549,7 +548,7 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
-            // TODO: add a dummy IL
+            // TODO(focil): add IL fixture for testing
             inclusion_list_transactions: None,
         };
 
@@ -583,7 +582,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            // TODO: add a dummy IL
+            // TODO(focil): add IL fixture for testing
             inclusion_list_transactions: None,
         };
 

@@ -227,7 +227,7 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                // TODO: add a dummy IL
+                // TODO(focil): add IL fixture for testing
                 inclusion_list_transactions: None,
             };
 
@@ -301,7 +301,7 @@ where
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
-                    // TODO: add a dummy IL
+                    // TODO(focil): add IL fixture for testing
                     inclusion_list_transactions: None,
                 };
 

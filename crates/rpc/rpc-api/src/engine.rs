@@ -77,11 +77,21 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Post Amsterdam payload handler
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
-    ///
-    /// Note: the additional parameter here represents the inclusion list of transactions
-    /// and is named `inclusion_list_transactions` to match EIP-7805 terminology.
     #[method(name = "newPayloadV5")]
     async fn new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Post Hegota (EIP-7805 / FOCIL) payload handler.
+    ///
+    /// TODO(FOCIL): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv6>
+    #[method(name = "newPayloadV6")]
+    async fn new_payload_v6(
         &self,
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
@@ -130,14 +140,15 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
-    /// Post Amsterdam forkchoice update handler.
+    /// Post Hegota (EIP-7805 / FOCIL) forkchoice update handler.
     ///
-    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
-    /// `InclusionListTransactions` field in the `payloadAttributes`.
+    /// This is the same as `forkchoiceUpdatedV4`, but expects an additional
+    /// `inclusionListTransactions` field in the `payloadAttributes`.
     ///
-    /// TODO: Update link
-    #[method(name = "forkchoiceUpdatedV4")]
-    async fn fork_choice_updated_v4(
+    /// TODO(FOCIL): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_forkchoiceupdatedv5>
+    #[method(name = "forkchoiceUpdatedV5")]
+    async fn fork_choice_updated_v5(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,

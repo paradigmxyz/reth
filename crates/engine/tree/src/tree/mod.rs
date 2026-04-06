@@ -645,10 +645,8 @@ where
             self.try_buffer_payload(payload)?
         };
 
-        // TODO Pelle
-        //
-        // pass in the IL along with the block to buffer, so that, when we catch up via sync, then
-        // we can check the IL that we got for the block.
+        // TODO(focil): pass the IL alongside buffered blocks so that when sync catches up,
+        // IL validation can be applied retroactively to blocks received during live sync.
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {

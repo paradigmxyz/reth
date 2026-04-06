@@ -392,7 +392,8 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 |
+        EngineApiMessageVersion::V7 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {

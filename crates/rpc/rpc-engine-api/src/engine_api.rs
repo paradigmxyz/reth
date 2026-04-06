@@ -11,11 +11,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
-    AmsterdamPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, HegotaPayloadFields,
     ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -271,7 +271,7 @@ where
         >::from_execution_payload(&payload);
         self.inner
             .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+            .validate_version_specific_fields(EngineApiMessageVersion::V7, payload_or_attrs)?;
 
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
@@ -287,6 +287,37 @@ where
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        Ok(res?)
+    }
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv6>
+    pub async fn new_payload_v6(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V7, payload_or_attrs)?;
+
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+    }
+
+    /// Metrics version of `new_payload_v6`
+    pub async fn new_payload_v6_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+
+        let res = Self::new_payload_v6(self, payload).await;
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v6.record(elapsed);
         Ok(res?)
     }
 
@@ -385,25 +416,26 @@ where
     /// This behaves like previous fork choice handlers but validates attributes according to the
     /// Amsterdam rules and updates blocks based on inclusion list.
     ///
-    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/.md#engine_forkchoiceupdatedv4>
-    pub async fn fork_choice_updated_v4(
+    /// TODO(FOCIL): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_forkchoiceupdatedv5>
+    pub async fn fork_choice_updated_v5(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V7, state, payload_attrs)
             .await
     }
 
-    /// Metrics version of `fork_choice_updated_v4`
-    pub async fn fork_choice_updated_v4_metered(
+    /// Metrics version of `fork_choice_updated_v5`
+    pub async fn fork_choice_updated_v5_metered(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
-        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
-        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
+        let res = Self::fork_choice_updated_v5(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v5.record(start.elapsed());
         res
     }
 
@@ -1075,8 +1107,25 @@ where
     }
 
     /// Handler for `engine_newPayloadV5`
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    /// TODO(focil): Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv5>
     async fn new_payload_v5(
+        &self,
+        _payload: ExecutionPayloadV4,
+        _versioned_hashes: Vec<B256>,
+        _parent_beacon_block_root: B256,
+        _execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
+    /// Handler for `engine_newPayloadV6`
+    /// TODO(FOCIL): Update Link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv6>
+    async fn new_payload_v6(
         &self,
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
@@ -1084,7 +1133,7 @@ where
         requests: RequestsOrHash,
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus> {
-        info!(target: "rpc::engine", il = %inclusion_list_transactions.len(), "Serving engine_newPayloadV5");
+        info!(target: "rpc::engine", il = %inclusion_list_transactions.len(), "Serving engine_newPayloadV6");
 
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
@@ -1093,14 +1142,14 @@ where
 
         let payload = ExecutionData {
             payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v5(
+            sidecar: ExecutionPayloadSidecar::v7(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests },
-                AmsterdamPayloadFields { inclusion_list_transactions },
+                HegotaPayloadFields { inclusion_list_transactions },
             ),
         };
 
-        Ok(self.new_payload_v5_metered(payload).await?)
+        Ok(self.new_payload_v6_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1139,16 +1188,16 @@ where
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV4`
+    /// Handler for `engine_forkchoiceUpdatedV5`
     ///
-    /// See also <https://github.com/jihoonsong/execution-apis/blob/ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#engine_forkchoiceupdatedv4>
-    async fn fork_choice_updated_v4(
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_forkchoiceupdatedv5>
+    async fn fork_choice_updated_v5(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
-        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5");
+        Ok(self.fork_choice_updated_v5_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1369,7 +1418,7 @@ where
             Ok(None) => {
                 return Err(EngineApiError::other(jsonrpsee_types::error::ErrorObject::owned(
                     UNKNOWN_PARENT_CODE,
-                    "Parent hash unknown, Parent Hash: ",
+                    "Unknown parent hash",
                     Some(parent_hash.to_string()),
                 ))
                 .into());

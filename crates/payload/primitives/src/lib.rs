@@ -160,21 +160,31 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    // let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+    if version.is_v6() && !is_amsterdam {
+        // From the Engine API spec (Amsterdam):
+        //
+        // For `engine_newPayloadV5` / `engine_forkchoiceUpdatedV4`:
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    payload does not fall within the time frame of the Amsterdam fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     let is_eip7805 = chain_spec.is_eip7805_active_at_timestamp(timestamp);
-    if version.is_v6() && !is_eip7805 {
+    if version.is_v7() && !is_eip7805 {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/pull/609>
         //
-        // For `engine_newPayloadV5`
+        // For `engine_newPayloadV6`:
         //
         // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
-        //    built payload does not fall within the time frame of the Amsterdam/EIP7805 fork.
+        //    payload does not fall within the time frame of the Bogota fork.
         //
-        // For `engine_forkchoiceUpdatedV4`
+        // For `engine_forkchoiceUpdatedV5`:
         //
-        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
-        //    built payload does not fall within the time frame of the Amsterdam/EIP7805 fork.
+        // 1. Client software MUST return -38005: Unsupported fork error if
+        //    payloadAttributes.timestamp does not fall within the time frame of the Bogota fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
@@ -209,7 +219,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 |
+        EngineApiMessageVersion::V7 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -313,7 +324,8 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 |
+        EngineApiMessageVersion::V7 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -337,11 +349,14 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
 }
 
 /// Validates the presence of the `il` field according to the payload timestamp.
-/// Before Amsterdam, il field must be [None];
-pub const fn validate_il_presence<T: EthereumHardforks>(
-    _chain_spec: &T,
+/// Before Hegota (EIP-7805 / Bogota), il field must be [None].
+/// On `engine_newPayloadV6` / `engine_forkchoiceUpdatedV5` (V7 internally), IL is only valid
+/// when the EIP-7805 hardfork is active at the payload timestamp.
+pub fn validate_il_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
+    timestamp: u64,
     has_il: bool,
 ) -> Result<(), EngineObjectValidationError> {
     match version {
@@ -349,13 +364,20 @@ pub const fn validate_il_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if has_il {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))
+                    .to_error(VersionSpecificValidationError::IlNotSupportedPreBogota))
             }
         }
-        EngineApiMessageVersion::V6 => {}
+        EngineApiMessageVersion::V7 => {
+            if has_il && !chain_spec.is_eip7805_active_at_timestamp(timestamp) {
+                // IL is only valid once EIP-7805 (Hegota / Bogota) is active.
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::IlNotSupportedPreBogota))
+            }
+        }
     };
 
     Ok(())
@@ -428,6 +450,7 @@ where
         chain_spec,
         version,
         payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.timestamp(),
         payload_or_attrs.il().is_some(),
     )
 }
@@ -458,6 +481,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Amsterdam hardfork.
     V6 = 6,
+    /// Version 7
+    ///
+    /// Added in the Hegota hardfork.
+    V7 = 7,
 }
 
 impl EngineApiMessageVersion {
@@ -491,6 +518,11 @@ impl EngineApiMessageVersion {
         matches!(self, Self::V6)
     }
 
+    /// Returns true if the version is V7.
+    pub const fn is_v7(&self) -> bool {
+        matches!(self, Self::V7)
+    }
+
     /// Returns the method name for the given version.
     pub const fn method_name(&self) -> &'static str {
         match self {
@@ -500,6 +532,7 @@ impl EngineApiMessageVersion {
             Self::V4 => "engine_newPayloadV4",
             Self::V5 => "engine_newPayloadV5",
             Self::V6 => "engine_newPayloadV6",
+            Self::V7 => "engine_newPayloadV7",
         }
     }
 }

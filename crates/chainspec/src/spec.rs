@@ -888,12 +888,13 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
-            (EthereumHardfork::Eip7805.boxed(), genesis.config.eip7805_time),
             (EthereumHardfork::Bpo1.boxed(), genesis.config.bpo1_time),
             (EthereumHardfork::Bpo2.boxed(), genesis.config.bpo2_time),
             (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
+            (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
+            (EthereumHardfork::Eip7805.boxed(), genesis.config.eip7805_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
