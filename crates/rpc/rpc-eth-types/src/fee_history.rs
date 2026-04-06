@@ -374,7 +374,10 @@ where
         let header = block.header();
         Self {
             header: block.header().clone(),
-            gas_used_ratio: header.gas_used() as f64 / header.gas_limit() as f64,
+            gas_used_ratio: crate::utils::checked_gas_used_ratio(
+                header.gas_used(),
+                header.gas_limit(),
+            ),
             base_fee_per_blob_gas: header
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),

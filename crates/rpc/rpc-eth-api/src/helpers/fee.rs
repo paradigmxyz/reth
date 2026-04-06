@@ -10,7 +10,8 @@ use futures::{Future, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
-    fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
+    fee_history::calculate_reward_percentiles_for_block,
+    utils::{checked_blob_gas_used_ratio, checked_gas_used_ratio},
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use reth_storage_api::{
@@ -197,7 +198,10 @@ pub trait EthFees:
                 let chain_spec = self.provider().chain_spec();
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
-                    gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
+                    gas_used_ratio.push(checked_gas_used_ratio(
+                        header.gas_used(),
+                        header.gas_limit(),
+                    ));
 
                     let blob_params = chain_spec
                         .blob_params_at_timestamp(header.timestamp())

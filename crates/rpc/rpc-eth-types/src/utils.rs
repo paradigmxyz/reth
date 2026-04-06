@@ -80,6 +80,18 @@ where
     Ok(num)
 }
 
+/// Calculates the gas used ratio for a block, accounting for the case where
+/// `gas_limit` is zero.
+///
+/// Returns `0.0` if `gas_limit` is `0`, otherwise returns the ratio `gas_used / gas_limit`.
+pub fn checked_gas_used_ratio(gas_used: u64, gas_limit: u64) -> f64 {
+    if gas_limit == 0 {
+        0.0
+    } else {
+        gas_used as f64 / gas_limit as f64
+    }
+}
+
 /// Calculates the blob gas used ratio for a block, accounting for the case where
 /// `max_blob_gas_per_block` is zero.
 ///
@@ -118,6 +130,19 @@ mod tests {
         let num: Result<_, ()> =
             binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
         assert_eq!(num, Ok(10));
+    }
+
+    #[test]
+    fn test_checked_gas_used_ratio() {
+        // gas_limit is 0 — division by zero protection
+        assert_eq!(checked_gas_used_ratio(0, 0), 0.0);
+        assert_eq!(checked_gas_used_ratio(100, 0), 0.0);
+        // gas_used is 0, gas_limit is non-zero
+        assert_eq!(checked_gas_used_ratio(0, 1_000_000), 0.0);
+        // partial usage
+        assert_eq!(checked_gas_used_ratio(500_000, 1_000_000), 0.5);
+        // full usage
+        assert_eq!(checked_gas_used_ratio(1_000_000, 1_000_000), 1.0);
     }
 
     #[test]
