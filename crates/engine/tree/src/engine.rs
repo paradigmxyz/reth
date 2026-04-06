@@ -196,7 +196,9 @@ where
 
     fn on_event(&mut self, event: FromEngine<Self::Request, Self::Block>) {
         // delegate to the tree
-        let _ = self.to_tree.send(event);
+        if let Err(err) = self.to_tree.send(event) {
+            tracing::warn!(target: "engine::handler", %err, "Failed to send event to engine tree");
+        }
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {

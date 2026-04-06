@@ -1342,7 +1342,9 @@ where
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            if let Err(err) = self.persistence.remove_blocks_above(new_tip_num, tx) {
+                warn!(target: "engine::tree", %err, ?new_tip_num, "Failed to send remove_blocks_above to persistence");
+            }
             self.persistence_state.start_remove(new_tip_num, rx);
         }
     }
@@ -1364,7 +1366,9 @@ where
 
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+        if let Err(err) = self.persistence.save_blocks(blocks_to_persist, tx) {
+            warn!(target: "engine::tree", %err, "Failed to send save_blocks to persistence");
+        }
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }
