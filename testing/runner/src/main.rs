@@ -13,7 +13,7 @@ use ef_tests::{
 
 /// Reth test runner for Ethereum execution spec test fixtures.
 #[derive(Debug, Parser)]
-#[command(name = "ef-test-runner")]
+#[command(name = "ef-test-runner", version)]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
