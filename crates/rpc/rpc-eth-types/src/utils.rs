@@ -68,8 +68,12 @@ where
     let mut num = high;
 
     while low <= high {
-        let mid = (low + high) / 2;
+        let mid = low + (high - low) / 2;
         if check(mid).await? {
+            if mid == 0 {
+                num = mid;
+                break;
+            }
             high = mid - 1;
             num = mid;
         } else {
@@ -118,6 +122,21 @@ mod tests {
         let num: Result<_, ()> =
             binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
         assert_eq!(num, Ok(10));
+
+        // low == 0: previously caused underflow on `high = mid - 1` when mid == 0
+        let num: Result<_, ()> =
+            binary_search(0, 10, |_mid| Box::pin(async move { Ok(true) })).await;
+        assert_eq!(num, Ok(0));
+
+        // low == 0 with target in the middle
+        let num: Result<_, ()> =
+            binary_search(0, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
+        assert_eq!(num, Ok(5));
+
+        // low == high == 0
+        let num: Result<_, ()> =
+            binary_search(0, 0, |_mid| Box::pin(async move { Ok(true) })).await;
+        assert_eq!(num, Ok(0));
     }
 
     #[test]
