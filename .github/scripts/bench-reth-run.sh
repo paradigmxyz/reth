@@ -76,10 +76,9 @@ cleanup() {
   fi
   # Fix ownership of reth-created files (reth runs as root)
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
-  if mountpoint -q "$SCHELK_MOUNT"; then
-    sudo umount -l "$SCHELK_MOUNT" || true
-    sudo schelk recover -y || true
-  fi
+  # Let schelk recover the mounted volume in place so dm-era can restore only
+  # the changed blocks and clean up its own state.
+  mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 }
 TAIL_PID=
 TRACY_PID=
