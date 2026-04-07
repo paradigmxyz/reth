@@ -811,10 +811,27 @@ jobs:
       # System tuning for reproducible benchmarks
       - name: System setup
         run: |
+          # Switch amd-pstate to passive mode so the kernel governor
+          # controls frequency directly (EPP is ignored in passive).
+          echo passive | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
           sudo cpupower frequency-set -g performance || true
-          # Disable turbo boost (Intel and AMD paths)
-          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
-          echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+          # Pin all cores to the nominal (base) frequency from CPPC.
+          NOMINAL_KHZ=""
+          if [ -f /sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq ]; then
+            NOMINAL_MHZ=$(cat /sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq)
+            NOMINAL_KHZ=$((NOMINAL_MHZ * 1000))
+          elif [ -f /sys/devices/system/cpu/cpu0/cpufreq/base_frequency ]; then
+            NOMINAL_KHZ=$(cat /sys/devices/system/cpu/cpu0/cpufreq/base_frequency)
+          fi
+          if [ -n "$NOMINAL_KHZ" ] && [ "$NOMINAL_KHZ" -gt 0 ] 2>/dev/null; then
+            echo "Pinning all cores to nominal frequency: $((NOMINAL_KHZ / 1000)) MHz"
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+              echo "$NOMINAL_KHZ" | sudo tee "$f" > /dev/null
+            done
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+              echo "$NOMINAL_KHZ" | sudo tee "$f" > /dev/null
+            done
+          fi
           sudo swapoff -a || true
           echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
           # Disable SMT (hyperthreading)
@@ -844,6 +861,8 @@ jobs:
           lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
           cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
           cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+          echo "scaling_min_freq: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq)"
+          echo "scaling_max_freq: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq)"
           cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || cat /sys/kernel/mm/transparent_hugepages/enabled 2>/dev/null || echo "THP: unknown"
           free -h
 
@@ -1354,4 +1373,14 @@ jobs:
       - name: Restore system settings
         if: always()
         run: |
+          # Restore frequency scaling to full range
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+            cat "$(dirname "$f")/cpuinfo_min_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+          done
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+            cat "$(dirname "$f")/cpuinfo_max_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+          done
+          # Restore amd-pstate to active (EPP) mode with powersave governor
+          echo active | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
+          sudo cpupower frequency-set -g powersave 2>/dev/null || true
           sudo systemctl start irqbalance cron atd 2>/dev/null || true
