@@ -26,7 +26,7 @@ DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 
-RETH_SCOPE="reth-bench.scope"
+RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true

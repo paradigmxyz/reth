@@ -399,6 +399,8 @@ upload_tracy() {
 # ── Step 6: Pre-flight cleanup ───────────────────────────────────────
 echo "▸ Pre-flight cleanup..."
 pkill -f bench-metrics-proxy 2>/dev/null || true
+sudo systemctl stop "${RETH_SCOPE:-reth-bench.scope}" 2>/dev/null || true
+sudo systemctl reset-failed "${RETH_SCOPE:-reth-bench.scope}" 2>/dev/null || true
 sudo pkill -9 reth 2>/dev/null || true
 sleep 1
 if mountpoint -q "$SCHELK_MOUNT" 2>/dev/null; then
