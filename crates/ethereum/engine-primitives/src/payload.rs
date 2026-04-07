@@ -12,7 +12,8 @@ use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};

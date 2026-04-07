@@ -249,6 +249,7 @@ where
     // to avoid re-executing them from the inclusion list
     let mut executed_tx_hashes = std::collections::HashSet::new();
 
+
     let withdrawals_rlp_length =
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 

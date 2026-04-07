@@ -184,7 +184,6 @@ where
         Self::PayloadAttributes(attributes)
     }
 }
-
 /// Extended functionality for Ethereum execution payloads
 impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
 where

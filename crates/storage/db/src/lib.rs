@@ -230,6 +230,27 @@ pub mod test_utils {
         let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
         Arc::new(TempDatabase::new(db, path))
     }
+
+    /// Enables MDBX legacy multi-open mode, allowing the same database to be opened
+    /// multiple times within a single process. This is needed for tests that simulate
+    /// concurrent primary + read-only secondary provider scenarios.
+    ///
+    /// Must be called before any MDBX environment is opened.
+    ///
+    /// # Safety
+    ///
+    /// This uses `MDBX_DBG_LEGACY_MULTIOPEN` which recovers POSIX file locks on close.
+    /// It may cause unexpected pauses and does not perfectly mirror multi-process behavior.
+    /// Use only in tests.
+    pub fn enable_legacy_multiopen() {
+        unsafe {
+            reth_libmdbx::ffi::mdbx_setup_debug(
+                reth_libmdbx::ffi::MDBX_LOG_DONTCHANGE,
+                reth_libmdbx::ffi::MDBX_DBG_LEGACY_MULTIOPEN as reth_libmdbx::ffi::MDBX_debug_flags,
+                None,
+            );
+        }
+    }
 }
 
 #[cfg(test)]

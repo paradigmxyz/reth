@@ -153,6 +153,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
     fn clone_with_il(&self, il: Vec<Bytes>) -> Self;
 }
 
+
 /// Basic attributes required to initiate payload construction.
 ///
 /// Defines minimal parameters needed to build a new execution payload.
@@ -201,6 +202,7 @@ impl PayloadAttributes for EthPayloadAttributes {
         self.inclusion_list_transactions.as_ref()
     }
 }
+
 
 /// Factory trait for creating payload attributes.
 ///
@@ -287,6 +289,7 @@ pub fn payload_id(
             hasher.update(tx);
         }
     }
+
 
     let out = hasher.finalize();
 

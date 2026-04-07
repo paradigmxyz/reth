@@ -77,7 +77,8 @@ trap 'rm -f -- "$MANIFEST_TMP"' EXIT
 echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
-# Prepare mount
+# Prepare mount. If a previous run left the volume mounted, let schelk recover
+# it in place so dm-era can restore only the changed blocks.
 mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
