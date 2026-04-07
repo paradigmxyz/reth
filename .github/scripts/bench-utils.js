@@ -50,6 +50,7 @@ function blocksLabel(summary) {
   }
   const cores = process.env.BENCH_CORES || '0';
   if (cores !== '0') parts.push({ key: 'Cores', value: cores });
+  if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
   return parts;
 }
 

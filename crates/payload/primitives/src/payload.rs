@@ -219,7 +219,6 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
         self.payload.as_v1().gas_used
     }
 
-    // TODO Pelle: Impl the OP payloads
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         None
     }

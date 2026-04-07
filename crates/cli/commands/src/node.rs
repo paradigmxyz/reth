@@ -178,6 +178,8 @@ where
             ext,
         } = self;
 
+        engine.validate()?;
+
         // set up node config
         let mut node_config = NodeConfig {
             datadir,

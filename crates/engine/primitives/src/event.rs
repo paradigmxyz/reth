@@ -86,13 +86,14 @@ where
     }
 }
 
-/// Information about a slow block detected after persistence.
+/// Information about a slow block detected after execution or persistence.
 #[derive(Clone, Debug)]
 pub struct SlowBlockInfo {
     /// The timing statistics for the slow block.
     pub stats: Box<ExecutionTimingStats>,
     /// The commit duration for the batch containing this block.
-    pub commit_duration: Duration,
+    /// `None` when emitted immediately after execution (before persistence).
+    pub commit_duration: Option<Duration>,
     /// The total duration (execution + `state_root` + commit).
     /// Note: `state_read` is a subset of execution and is not added separately.
     pub total_duration: Duration,

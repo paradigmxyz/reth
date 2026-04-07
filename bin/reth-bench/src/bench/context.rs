@@ -3,13 +3,12 @@
 
 use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::layers::{RateLimitRetryPolicy, RetryBackoffLayer};
 use reqwest::Url;
-use reth_node_core::args::BenchmarkArgs;
+use reth_node_core::args::{BenchmarkArgs, WaitForPersistence};
 use tracing::info;
 
 /// This is intended to be used by benchmarks that replay blocks from an RPC.
@@ -27,14 +26,12 @@ pub(crate) struct BenchContext {
     pub(crate) benchmark_mode: BenchMode,
     /// The next block to fetch.
     pub(crate) next_block: u64,
-    /// Whether the chain is an OP rollup.
-    pub(crate) is_optimism: bool,
     /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
     pub(crate) rlp_blocks: bool,
-    /// Whether to skip waiting for persistence (pass `wait_for_persistence: false`).
-    pub(crate) no_wait_for_persistence: bool,
+    /// Controls when `reth_newPayload` waits for persistence.
+    pub(crate) wait_for_persistence: WaitForPersistence,
     /// Whether to skip waiting for caches (pass `wait_for_caches: false`).
     pub(crate) no_wait_for_caches: bool,
 }
@@ -69,12 +66,6 @@ impl BenchContext {
             .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
-
-        // Check if this is an OP chain by checking code at a predeploy address.
-        let is_optimism = !block_provider
-            .get_code_at(address!("0x420000000000000000000000000000000000000F"))
-            .await?
-            .is_empty();
 
         // construct the authenticated provider
         let auth_jwt = bench_args
@@ -166,18 +157,18 @@ impl BenchContext {
 
         let next_block = first_block.header.number + 1;
         let rlp_blocks = bench_args.rlp_blocks;
+        let wait_for_persistence =
+            bench_args.wait_for_persistence.unwrap_or(WaitForPersistence::Never);
         let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
-        let no_wait_for_persistence = bench_args.no_wait_for_persistence;
         let no_wait_for_caches = bench_args.no_wait_for_caches;
         Ok(Self {
             auth_provider,
             block_provider,
             benchmark_mode,
             next_block,
-            is_optimism,
             use_reth_namespace,
             rlp_blocks,
-            no_wait_for_persistence,
+            wait_for_persistence,
             no_wait_for_caches,
         })
     }

@@ -419,7 +419,7 @@ where
                 block_traces.push(traces);
             }
 
-            #[allow(clippy::iter_with_drain)]
+            #[expect(clippy::iter_with_drain)]
             let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
             all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
                 traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
@@ -454,14 +454,16 @@ where
                 after = None;
             }
 
-            // Return at most `count` of traces
-            if let Some(count) = count {
+            // Return at most `count` traces after `after` has been consumed.
+            if after.is_none() &&
+                let Some(count) = count
+            {
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
                     return Ok(all_traces)
                 }
-            };
+            }
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an

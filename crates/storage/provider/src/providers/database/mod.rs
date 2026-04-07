@@ -281,6 +281,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.runtime.clone(),
                 self.db.path(),
             )
+            .with_reader_txn_tracker(self.db.clone())
             .with_minimum_pruning_distance(self.minimum_pruning_distance),
         ))
     }
@@ -288,6 +289,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
     /// Uses unwind commit order (MDBX first, then `RocksDB`, then static files) to allow
     /// recovery by truncating static files on restart if interrupted.
+    ///
+    /// Unwind commits may wait for pre-existing readers to drain before finishing later
+    /// cross-store steps. Drop any long-lived read providers before committing this provider.
     #[track_caller]
     pub fn unwind_provider_rw(
         &self,
@@ -304,6 +308,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.runtime.clone(),
             self.db.path(),
         )
+        .with_reader_txn_tracker(self.db.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 

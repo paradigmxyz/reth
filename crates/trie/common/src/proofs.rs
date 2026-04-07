@@ -79,7 +79,14 @@ impl MultiProofTargets {
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         for (hashed_address, hashed_slots) in other.iter() {
-            self.entry(*hashed_address).or_default().extend(hashed_slots);
+            match self.entry(*hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(hashed_slots.clone());
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(hashed_slots);
+                }
+            }
         }
     }
 

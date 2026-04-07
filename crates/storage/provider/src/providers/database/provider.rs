@@ -37,7 +37,7 @@ use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    database::Database,
+    database::{Database, ReaderTxnTracker},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
@@ -212,6 +212,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+    /// Database handle used to inspect active MDBX readers during unwind commits.
+    reader_txn_tracker: Option<Arc<dyn ReaderTxnTracker>>,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -229,6 +231,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .field("reader_txn_tracker", &"<reader txn tracker>")
             .finish()
     }
 }
@@ -244,9 +247,48 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.minimum_pruning_distance = distance;
         self
     }
+
+    /// Attaches reader tracking so unwind commits can wait on active readers.
+    pub(crate) fn with_reader_txn_tracker<T>(mut self, reader_txn_tracker: T) -> Self
+    where
+        T: ReaderTxnTracker + 'static,
+    {
+        self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
+        self
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
+    ///
+    /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
+    /// truncating static files from checkpoints on the next startup.
+    ///
+    /// For `storage_v2`, this waits after the MDBX commit so readers holding older MDBX-visible
+    /// views cannot overlap the `RocksDB` unwind.
+    ///
+    /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
+    /// so no additional post-`RocksDB` wait is needed before static-file commit.
+    fn commit_unwind(self) -> ProviderResult<()> {
+        let storage_v2 = self.cached_storage_settings().storage_v2;
+        let reader_txn_tracker = self.reader_txn_tracker.clone();
+        self.tx.commit()?;
+
+        if storage_v2 {
+            if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
+                reader_txn_tracker.wait_for_pre_commit_readers();
+            }
+
+            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            for batch in batches {
+                self.rocksdb_provider.commit_batch(batch)?;
+            }
+        }
+
+        self.static_file_provider.commit()?;
+        Ok(())
+    }
+
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -353,7 +395,7 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new_rw_inner(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -382,11 +424,12 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            reader_txn_tracker: None,
         }
     }
 
     /// Creates a provider with an inner read-write transaction using normal commit order.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -415,7 +458,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 
     /// Creates a provider with an inner read-write transaction using unwind commit order.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_unwind_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -979,7 +1022,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -1007,6 +1050,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            reader_txn_tracker: None,
         }
     }
 
@@ -1558,14 +1602,6 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::StorageChangeSets>()?)
-        }
-    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1619,16 +1655,6 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .walk_range(to_range(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
-        }
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        // check if account changesets are in static files, otherwise just count the changeset
-        // entries in the DB
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changeset_count()
-        } else {
-            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
         }
     }
 }
@@ -3818,19 +3844,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         skip_all
     )]
     fn commit(self) -> ProviderResult<()> {
-        // For unwinding it makes more sense to commit the database first, since if
-        // it is interrupted before the static files commit, we can just
-        // truncate the static files according to the
-        // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
-            self.tx.commit()?;
-
-            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
-
-            self.static_file_provider.commit()?;
+            self.commit_unwind()?;
         } else {
             // Normal path: finalize() will call sync_all() if not already synced
             let mut timings = metrics::CommitTimings::default();
@@ -3898,15 +3913,18 @@ mod tests {
         U256,
     };
     use reth_chain_state::ExecutedBlock;
+    use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
+    use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
+    use std::{sync::mpsc, time::Duration};
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -3918,6 +3936,32 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn unwind_commit_waits_for_pre_commit_readers() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let reader = factory.provider().unwrap();
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-wait-test", vec![1]).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let result = provider_rw.commit();
+            done_tx.send(result).unwrap();
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "unwind commit should wait while an older read transaction is still open"
+        );
+
+        drop(reader);
+
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+        handle.join().unwrap();
     }
 
     #[test]

@@ -848,6 +848,7 @@ where
         storage_key: alloy_primitives::B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
@@ -866,6 +867,7 @@ where
                 storage_key,
                 block_number,
                 lowest_available_block_number,
+                visible_tip,
             ),
         }
     }
@@ -893,6 +895,7 @@ where
         address: Address,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
@@ -906,9 +909,12 @@ where
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => {
-                snapshot.account_history_info(address, block_number, lowest_available_block_number)
-            }
+            Self::RocksDB(snapshot) => snapshot.account_history_info(
+                address,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
+            ),
         }
     }
 }
@@ -1438,12 +1444,12 @@ mod rocksdb_tests {
                     PhantomData,
                 );
             let mdbx_result = mdbx_reader
-                .account_history_info(address, query.block_number, query.lowest_available)
+                .account_history_info(address, query.block_number, query.lowest_available, u64::MAX)
                 .unwrap();
 
             // RocksDB query via EitherReader — reuse snapshot for consistent view
             let rocks_result = rocks_snapshot
-                .account_history_info(address, query.block_number, query.lowest_available)
+                .account_history_info(address, query.block_number, query.lowest_available, u64::MAX)
                 .unwrap();
 
             // Assert both backends produce identical results
@@ -1532,6 +1538,7 @@ mod rocksdb_tests {
                     storage_key,
                     query.block_number,
                     query.lowest_available,
+                    u64::MAX,
                 )
                 .unwrap();
 
@@ -1542,6 +1549,7 @@ mod rocksdb_tests {
                     storage_key,
                     query.block_number,
                     query.lowest_available,
+                    u64::MAX,
                 )
                 .unwrap();
 

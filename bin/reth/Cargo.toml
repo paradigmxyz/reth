@@ -127,7 +127,7 @@ jemalloc = [
     "reth-provider/jemalloc",
 ]
 jemalloc-prof = [
-    "reth-cli-util/jemalloc",
+    "jemalloc",
     "reth-cli-util/jemalloc-prof",
     "reth-ethereum-cli/jemalloc-prof",
     "reth-node-metrics/jemalloc-prof",
@@ -135,12 +135,6 @@ jemalloc-prof = [
 jemalloc-symbols = [
     "jemalloc-prof",
     "reth-ethereum-cli/jemalloc-symbols",
-]
-jemalloc-unprefixed = [
-    "reth-cli-util/jemalloc-unprefixed",
-    "reth-node-core/jemalloc",
-    "reth-node-metrics/jemalloc",
-    "reth-ethereum-cli/jemalloc",
 ]
 tracy-allocator = [
     "reth-cli-util/tracy-allocator",

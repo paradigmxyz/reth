@@ -11,10 +11,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, HegotaPayloadFields,
-    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
-    ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, HegotaPayloadFields, PayloadId,
     PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
@@ -255,38 +255,6 @@ where
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        Ok(res?)
-    }
-
-    /// TODO: Update Link
-    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
-    pub async fn new_payload_v5(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            PayloadT::ExecutionData,
-            PayloadT::PayloadAttributes,
-        >::from_execution_payload(&payload);
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V7, payload_or_attrs)?;
-
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
-    }
-
-    /// Metrics version of `new_payload_v5`
-    pub async fn new_payload_v5_metered(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
-        let start = Instant::now();
-
-        let res = Self::new_payload_v5(self, payload).await;
-
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.new_payload_v5.record(elapsed);
         Ok(res?)
     }
 
@@ -855,8 +823,7 @@ where
             //
             // NOTE: This also applies to cancun/shanghai-specific payload attributes.
             if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
                 if fcu_res.is_invalid() || fcu_res.payload_status.is_syncing() {
                     return Ok(fcu_res)
                 }
@@ -864,7 +831,7 @@ where
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Returns reference to supported capabilities.
@@ -1107,8 +1074,7 @@ where
     }
 
     /// Handler for `engine_newPayloadV5`
-    /// TODO(focil): Update link
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/hegota.md#engine_newpayloadv5>
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
         _payload: ExecutionPayloadV4,

@@ -57,14 +57,9 @@ tokio.workspace = true
 # misc
 auto_impl.workspace = true
 dyn-clone.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
-op = [
-    "reth-evm/op",
-    "reth-primitives-traits/op",
-    "reth-rpc-convert/op",
-    "alloy-evm/op",
-]

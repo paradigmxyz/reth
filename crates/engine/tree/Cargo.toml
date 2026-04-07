@@ -17,6 +17,7 @@ reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
 reth-db.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
+reth-execution-cache.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
@@ -52,7 +53,6 @@ revm-primitives.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
-fixed-cache.workspace = true
 moka = { workspace = true, features = ["sync"] }
 
 # metrics
@@ -132,6 +132,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
+    "reth-execution-cache/test-utils",
 ]
 trie-debug = [
     "reth-trie-sparse/trie-debug",
