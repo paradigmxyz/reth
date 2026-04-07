@@ -7596,7 +7596,6 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-chain-state",
- "reth-ethereum-primitives",
  "reth-execution-cache",
  "reth-metrics",
  "reth-payload-builder",

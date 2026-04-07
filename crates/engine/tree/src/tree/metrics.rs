@@ -568,7 +568,7 @@ impl BlockValidationMetrics {
 /// EIP-7805 Execution Metrics
 #[derive(Metrics)]
 #[metrics(scope = "ef_execution")]
-pub struct EfExecutionMetrics {
+pub(crate) struct EfExecutionMetrics {
     /// Total number of inclusion list transactions included into block
     pub(crate) inclusion_list_block_validation_transactions_included_total: Counter,
     /// Time taken to validate a block against its inclusion list (histogram, seconds)

@@ -104,6 +104,9 @@ impl PrometheusRecorder {
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install() -> eyre::Result<Self> {
+        // Register custom histogram buckets before building the recorder
+        crate::buckets::register_default_histogram_buckets();
+
         let mut builder = PrometheusBuilder::new();
 
         // Apply all registered bucket configurations
