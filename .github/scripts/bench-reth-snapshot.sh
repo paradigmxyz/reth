@@ -77,8 +77,11 @@ trap 'rm -f -- "$MANIFEST_TMP"' EXIT
 echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
-# Prepare mount
-mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+# Prepare mount – unmount first if a previous run left the volume mounted
+if mountpoint -q "$SCHELK_MOUNT"; then
+  sudo umount -l "$SCHELK_MOUNT" || true
+  sudo schelk recover -y || true
+fi
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"
