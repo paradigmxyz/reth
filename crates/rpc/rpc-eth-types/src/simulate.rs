@@ -306,7 +306,7 @@ where
         let call = match result {
             ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -322,7 +322,7 @@ where
             }
             ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
@@ -338,7 +338,7 @@ where
             }
             ExecutionResult::Success { output, gas, logs, .. } =>
             {
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: output.into_data(),
                     error: None,

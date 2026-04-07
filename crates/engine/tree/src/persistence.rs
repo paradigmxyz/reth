@@ -374,10 +374,15 @@ impl Drop for ServiceGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B256, U256};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{
+        providers::{ProviderFactoryBuilder, ReadOnlyConfig},
+        test_utils::{create_test_provider_factory, MockNodeTypes},
+        AccountReader, ChainSpecProvider, HeaderProvider, StorageSettingsCache,
+        TryIntoHistoricalStateProvider,
+    };
     use reth_prune::Pruner;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -508,5 +513,188 @@ mod tests {
         let entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
         let expected: Vec<u64> = (15..25).collect();
         assert_eq!(entries, expected, "new entries 20..25 must survive pruning");
+    }
+
+    #[test]
+    fn test_read_only_consistency_across_reorg() {
+        reth_tracing::init_test_tracing();
+
+        // Allow opening the same MDBX env twice in-process
+        reth_db::test_utils::enable_legacy_multiopen();
+
+        let provider_factory = create_test_provider_factory();
+        provider_factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+
+        // Open the secondary provider concurrently with the primary.
+        let secondary = ProviderFactoryBuilder::<MockNodeTypes>::default()
+            .open_read_only(
+                provider_factory.chain_spec(),
+                ReadOnlyConfig::from_datadir(provider_factory.db_ref().path()),
+                reth_tasks::Runtime::test(),
+            )
+            .expect("failed to open read-only provider factory");
+        secondary.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+
+        // --- Phase 1: Write blocks 0..3 via the primary ---
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let signer = test_block_builder.signer;
+        let blocks_a: Vec<_> = test_block_builder.get_executed_blocks(0..3).collect();
+        let hash_a1 = blocks_a[1].recovered_block().hash();
+        let hash_a2 = blocks_a[2].recovered_block().hash();
+
+        // Compute expected signer state after each block from tx counts.
+        let single_cost = TestBlockBuilder::<EthPrimitives>::single_tx_cost();
+        let initial_balance = U256::from(10).pow(U256::from(18));
+        let txs_in_block0 = blocks_a[0].recovered_block().body().transactions.len() as u64;
+        let txs_in_block1 = blocks_a[1].recovered_block().body().transactions.len() as u64;
+
+        let balance_after_block0 = initial_balance - single_cost * U256::from(txs_in_block0);
+        let nonce_after_block0 = txs_in_block0;
+        let balance_after_block1 = balance_after_block0 - single_cost * U256::from(txs_in_block1);
+        let nonce_after_block1 = nonce_after_block0 + txs_in_block1;
+
+        {
+            let provider_rw = provider_factory.database_provider_rw().unwrap();
+            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Secondary catches up and sees all 3 blocks.
+        // Hold this provider (and its MDBX RO tx) across the reorg to test snapshot isolation.
+        let pre_reorg_provider = secondary.provider().unwrap();
+        assert_eq!(
+            pre_reorg_provider.sealed_header(2).unwrap().as_ref().map(|h| h.hash()),
+            Some(hash_a2),
+            "secondary must see block 2 after initial append"
+        );
+
+        // Check the primary can read its own historical state.
+        {
+            let primary_state_at_1 = provider_factory.history_by_block_number(1).unwrap();
+            let primary_account = primary_state_at_1.basic_account(&signer).unwrap();
+            assert!(primary_account.is_some(), "primary: signer must exist at block 1");
+        }
+
+        // Verify historical state at block 1 is accessible via changesets on the secondary.
+        {
+            let state_at_1 = secondary.history_by_block_number(1).unwrap();
+            let account_at_1 = state_at_1.basic_account(&signer).unwrap();
+            assert!(account_at_1.is_some(), "signer account must exist at block 1");
+            let account_at_1 = account_at_1.unwrap();
+            assert_eq!(account_at_1.balance, balance_after_block1, "signer balance at block 1");
+            assert_eq!(account_at_1.nonce, nonce_after_block1, "signer nonce at block 1");
+        }
+
+        // --- Phase 2: Reorg — remove block 2 and append a different block 2 ---
+        // Build the reorg block before starting the commit so we can write it in the
+        // same thread after the unwind.
+        let block_b2 = test_block_builder.get_executed_block_with_number(2, hash_a1);
+        let hash_b2 = block_b2.recovered_block().hash();
+        let txs_in_block_b2 = block_b2.recovered_block().body().transactions.len() as u64;
+        assert_ne!(hash_a2, hash_b2, "reorg block must differ");
+
+        // Expected signer state after the reorged block 2.
+        let balance_after_reorg_block2 =
+            balance_after_block1 - single_cost * U256::from(txs_in_block_b2);
+        let nonce_after_reorg_block2 = nonce_after_block1 + txs_in_block_b2;
+
+        // Spawn the reorg on a background thread because `commit_unwind` calls
+        // `wait_for_pre_commit_readers()` which blocks until the secondary's held
+        // RO tx is dropped.
+        //
+        // We want to keep provider factory around, otherwise it's gonna drop mdbx env before the
+        // reorg thread is on
+        #[expect(clippy::redundant_clone)]
+        let pf = provider_factory.clone();
+        let reorg_handle = std::thread::spawn(move || {
+            let provider_rw = pf.database_provider_rw().unwrap();
+            provider_rw.remove_block_and_execution_above(1).unwrap();
+            provider_rw.commit().unwrap();
+
+            let provider_rw = pf.database_provider_rw().unwrap();
+            provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+        });
+
+        // Give the reorg thread time to start and block on wait_for_pre_commit_readers.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // The pre-reorg provider still holds its MDBX snapshot — it must still see
+        // the OLD block 2 from before the reorg.
+        assert_eq!(
+            pre_reorg_provider.sealed_header(2).unwrap().as_ref().map(|h| h.hash()),
+            Some(hash_a2),
+            "pre-reorg provider must still see the original block 2"
+        );
+        assert_eq!(
+            pre_reorg_provider.sealed_header(1).unwrap().as_ref().map(|h| h.hash()),
+            Some(hash_a1),
+            "pre-reorg provider must still see block 1"
+        );
+
+        // The held RO tx must still be able to read historical state at block 1 via
+        // changesets, even though the reorg thread is about to rewrite block 2's data.
+        // Consuming pre_reorg_provider here also unblocks the reorg commit.
+        let state_at_1 = pre_reorg_provider.try_into_history_at_block(1).unwrap();
+        let account = state_at_1.basic_account(&signer).unwrap();
+        assert!(
+            account.is_some(),
+            "pre-reorg RO tx must still read signer at block 1 during reorg"
+        );
+        let account = account.unwrap();
+        assert_eq!(
+            account.balance, balance_after_block1,
+            "pre-reorg RO tx: signer balance at block 1 during reorg"
+        );
+        assert_eq!(
+            account.nonce, nonce_after_block1,
+            "pre-reorg RO tx: signer nonce at block 1 during reorg"
+        );
+        drop(state_at_1);
+        reorg_handle.join().expect("reorg thread panicked");
+
+        // A new provider catches up and sees the reorged chain.
+        let obs_header = secondary.provider().unwrap().sealed_header(2).unwrap();
+        assert_eq!(
+            obs_header.as_ref().map(|h| h.hash()),
+            Some(hash_b2),
+            "secondary must see the reorged block 2, not the old one"
+        );
+
+        // Block 1 should still be the original.
+        let obs_header = secondary.provider().unwrap().sealed_header(1).unwrap();
+        assert_eq!(
+            obs_header.as_ref().map(|h| h.hash()),
+            Some(hash_a1),
+            "secondary must still see block 1"
+        );
+
+        // Verify historical state at block 1 is still accessible after the reorg.
+        let state_at_1 = secondary.history_by_block_number(1).unwrap();
+        let account_at_1 = state_at_1.basic_account(&signer).unwrap();
+        assert!(account_at_1.is_some(), "signer account must exist at block 1 after reorg");
+        let account_at_1 = account_at_1.unwrap();
+        assert_eq!(
+            account_at_1.balance, balance_after_block1,
+            "signer balance at block 1 must survive reorg"
+        );
+        assert_eq!(
+            account_at_1.nonce, nonce_after_block1,
+            "signer nonce at block 1 must survive reorg"
+        );
+
+        // Verify the latest state (at block 2) reflects the reorged execution.
+        let state_at_2 = secondary.history_by_block_number(2).unwrap();
+        let account_at_2 = state_at_2.basic_account(&signer).unwrap();
+        assert!(account_at_2.is_some(), "signer account must exist at block 2 after reorg");
+        let account_at_2 = account_at_2.unwrap();
+        assert_eq!(
+            account_at_2.balance, balance_after_reorg_block2,
+            "signer balance at block 2 must reflect reorged execution"
+        );
+        assert_eq!(
+            account_at_2.nonce, nonce_after_reorg_block2,
+            "signer nonce at block 2 must reflect reorged execution"
+        );
     }
 }

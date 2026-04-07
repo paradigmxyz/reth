@@ -1936,7 +1936,7 @@ impl ParallelSparseTrie {
         // upper trie then apply them to the top-level set.
         if let Some(mut update_actions_buf) = update_actions_buf {
             self.apply_subtrie_update_actions(
-                #[allow(clippy::iter_with_drain)]
+                #[expect(clippy::iter_with_drain)]
                 update_actions_buf.drain(..),
             );
             self.update_actions_buffers.push(update_actions_buf);
@@ -2177,7 +2177,7 @@ impl ParallelSparseTrie {
         for ChangedSubtrie { index, subtrie, update_actions_buf, .. } in changed_subtries {
             if let Some(mut update_actions_buf) = update_actions_buf {
                 self.apply_subtrie_update_actions(
-                    #[allow(clippy::iter_with_drain)]
+                    #[expect(clippy::iter_with_drain)]
                     update_actions_buf.drain(..),
                 );
                 self.update_actions_buffers.push(update_actions_buf);
