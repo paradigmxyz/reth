@@ -18,7 +18,7 @@ pub enum ExecutionWitnessMode {
     ///     - Avoids including empty nodes (i.e. 0x80).
     ///     - Compared to legacy, it does not include storage trie root nodes if no storae is
     ///       accessed.
-    ///     - It contains the minimum amount of sibilings for post-state root calculation, since it
+    ///     - It contains the minimum amount of siblings for post-state root calculation, since it
     ///       does updates/insertions first and then deletions. Compared to legacy which does the
     ///       post-state calculation with removals and then insertions/updates, which results in
     ///       more siblings.
