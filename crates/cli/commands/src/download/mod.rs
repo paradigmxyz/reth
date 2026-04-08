@@ -392,11 +392,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         };
 
         let total_archives = all_downloads.len();
-        let total_size: u64 = selections
+        let total_compressed: u64 = selections
             .iter()
             .map(|(ty, sel)| match sel {
                 ComponentSelection::All => manifest.size_for_distance(*ty, None),
                 ComponentSelection::Distance(d) => manifest.size_for_distance(*ty, Some(*d)),
+                ComponentSelection::None => 0,
+            })
+            .sum();
+        let total_size: u64 = selections
+            .iter()
+            .map(|(ty, sel)| match sel {
+                ComponentSelection::All => manifest.extracted_size_for_distance(*ty, None),
+                ComponentSelection::Distance(d) => {
+                    manifest.extracted_size_for_distance(*ty, Some(*d))
+                }
                 ComponentSelection::None => 0,
             })
             .sum();
@@ -410,6 +420,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli",
             archives = total_archives,
+            compressed = %DownloadProgress::format_size(total_compressed),
             total = %DownloadProgress::format_size(total_size),
             "Downloading all archives"
         );
@@ -861,6 +872,7 @@ impl DownloadProgress {
 /// aggregated progress line.
 struct SharedProgress {
     downloaded: AtomicU64,
+    extracted: AtomicU64,
     total_size: u64,
     total_archives: u64,
     archives_done: AtomicU64,
@@ -872,6 +884,7 @@ impl SharedProgress {
     fn new(total_size: u64, total_archives: u64, cancel_token: CancellationToken) -> Arc<Self> {
         Arc::new(Self {
             downloaded: AtomicU64::new(0),
+            extracted: AtomicU64::new(0),
             total_size,
             total_archives,
             archives_done: AtomicU64::new(0),
@@ -884,8 +897,12 @@ impl SharedProgress {
         self.cancel_token.is_cancelled()
     }
 
-    fn add(&self, bytes: u64) {
+    fn add_downloaded(&self, bytes: u64) {
         self.downloaded.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    fn add_extracted(&self, bytes: u64) {
+        self.extracted.fetch_add(bytes, Ordering::Relaxed);
     }
 
     fn archive_done(&self) {
@@ -907,61 +924,57 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
                 break;
             }
 
-            let downloaded = progress.downloaded.load(Ordering::Relaxed);
             let total = progress.total_size;
             if total == 0 {
                 continue;
             }
 
+            let downloaded = progress.downloaded.load(Ordering::Relaxed);
+            let extracted = progress.extracted.load(Ordering::Relaxed).min(total);
+
             let done = progress.archives_done.load(Ordering::Relaxed);
             let all = progress.total_archives;
-            let pct = (downloaded as f64 / total as f64) * 100.0;
+            let pct = (extracted as f64 / total as f64) * 100.0;
             let dl = DownloadProgress::format_size(downloaded);
+            let ext = DownloadProgress::format_size(extracted);
             let tot = DownloadProgress::format_size(total);
 
             let elapsed = started_at.elapsed();
-            let remaining = total.saturating_sub(downloaded);
+            let remaining = total.saturating_sub(extracted);
 
-            if remaining == 0 {
-                // Downloads done, waiting for extraction
-                info!(target: "reth::cli",
-                    archives = format_args!("{done}/{all}"),
-                    downloaded = %dl,
-                    "Extracting remaining archives"
-                );
-            } else {
-                let eta = if downloaded > 0 {
-                    let speed = downloaded as f64 / elapsed.as_secs_f64();
-                    if speed > 0.0 {
-                        DownloadProgress::format_duration(Duration::from_secs_f64(
-                            remaining as f64 / speed,
-                        ))
-                    } else {
-                        "??".to_string()
-                    }
+            let eta = if extracted > 0 {
+                let speed = extracted as f64 / elapsed.as_secs_f64();
+                if speed > 0.0 {
+                    DownloadProgress::format_duration(Duration::from_secs_f64(
+                        remaining as f64 / speed,
+                    ))
                 } else {
                     "??".to_string()
-                };
+                }
+            } else {
+                "??".to_string()
+            };
 
-                info!(target: "reth::cli",
-                    archives = format_args!("{done}/{all}"),
-                    progress = format_args!("{pct:.1}%"),
-                    downloaded = %dl,
-                    total = %tot,
-                    eta = %eta,
-                    "Downloading"
-                );
-            }
+            info!(target: "reth::cli",
+                archives = format_args!("{done}/{all}"),
+                progress = format_args!("{pct:.1}%"),
+                downloaded = %dl,
+                extracted = format_args!("{ext} / {tot}"),
+                eta = %eta,
+                "Downloading"
+            );
         }
 
         // Final line
         let downloaded = progress.downloaded.load(Ordering::Relaxed);
+        let extracted = progress.extracted.load(Ordering::Relaxed);
         let dl = DownloadProgress::format_size(downloaded);
+        let ext = DownloadProgress::format_size(extracted);
         let tot = DownloadProgress::format_size(progress.total_size);
         let elapsed = DownloadProgress::format_duration(started_at.elapsed());
         info!(target: "reth::cli",
             downloaded = %dl,
-            total = %tot,
+            extracted = format_args!("{ext} / {tot}"),
             elapsed = %elapsed,
             "Downloads complete"
         );
@@ -1047,17 +1060,30 @@ fn extract_archive<R: Read>(
     Ok(())
 }
 
-/// Extracts a compressed tar archive without progress tracking.
+/// Extracts a compressed tar archive.
+///
+/// When `shared` is provided, counts decompressed bytes into `extracted`.
 fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
+    shared: Option<&Arc<SharedProgress>>,
 ) -> Result<()> {
-    match format {
-        CompressionFormat::Lz4 => {
+    match (format, shared) {
+        (CompressionFormat::Lz4, Some(sp)) => {
+            let decoder = Decoder::new(reader)?;
+            let counting = ExtractedProgressReader { inner: decoder, progress: Arc::clone(sp) };
+            Archive::new(counting).unpack(target_dir)?;
+        }
+        (CompressionFormat::Lz4, None) => {
             Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
         }
-        CompressionFormat::Zstd => {
+        (CompressionFormat::Zstd, Some(sp)) => {
+            let decoder = ZstdDecoder::new(reader)?;
+            let counting = ExtractedProgressReader { inner: decoder, progress: Arc::clone(sp) };
+            Archive::new(counting).unpack(target_dir)?;
+        }
+        (CompressionFormat::Zstd, None) => {
             Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
         }
     }
@@ -1122,7 +1148,7 @@ impl<W: Write> Write for SharedProgressWriter<W> {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let n = self.inner.write(buf)?;
-        self.progress.add(n as u64);
+        self.progress.add_downloaded(n as u64);
         Ok(n)
     }
 
@@ -1144,7 +1170,24 @@ impl<R: Read> Read for SharedProgressReader<R> {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "download cancelled"));
         }
         let n = self.inner.read(buf)?;
-        self.progress.add(n as u64);
+        self.progress.add_downloaded(n as u64);
+        Ok(n)
+    }
+}
+
+/// Wrapper that counts decompressed bytes read during extraction.
+///
+/// Counts bytes read from the decompressor output (including tar headers/padding),
+/// so it may slightly overcount actual file content.
+struct ExtractedProgressReader<R> {
+    inner: R,
+    progress: Arc<SharedProgress>,
+}
+
+impl<R: Read> Read for ExtractedProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.progress.add_extracted(n as u64);
         Ok(n)
     }
 }
@@ -1273,7 +1316,7 @@ fn resumable_download(
         if let Some(sp) = shared {
             // Parallel path: bump shared atomic counter
             if start_offset > 0 {
-                sp.add(start_offset);
+                sp.add_downloaded(start_offset);
             }
             let mut writer =
                 SharedProgressWriter { inner: BufWriter::new(file), progress: Arc::clone(sp) };
@@ -1368,7 +1411,7 @@ fn streaming_download_and_extract(
 
         let result = if let Some(sp) = shared {
             let reader = SharedProgressReader { inner: response, progress: Arc::clone(sp) };
-            extract_archive_raw(reader, format, target_dir)
+            extract_archive_raw(reader, format, target_dir, Some(sp))
         } else {
             let total_size = response.content_length().unwrap_or(0);
             extract_archive(response, total_size, format, target_dir, cancel_token.clone())
@@ -1424,8 +1467,7 @@ fn download_and_extract(
     let file = fs::open(&downloaded_path)?;
 
     if quiet {
-        // Skip progress tracking for extraction in parallel mode
-        extract_archive_raw(file, format, target_dir)?;
+        extract_archive_raw(file, format, target_dir, shared)?;
     } else {
         extract_archive(file, total_size, format, target_dir, cancel_token)?;
         info!(target: "reth::cli",
@@ -1543,7 +1585,8 @@ fn blocking_process_modular_archive(
     let archive = &planned.archive;
     if verify_output_files(target_dir, &archive.output_files)? {
         if let Some(sp) = &shared {
-            sp.add(archive.size);
+            let output_size: u64 = archive.output_files.iter().map(|f| f.size).sum();
+            sp.add_extracted(output_size);
             sp.archive_done();
         }
         info!(target: "reth::cli", file = %archive.file_name, component = %planned.component, "Skipping already verified plain files");
@@ -1563,7 +1606,7 @@ fn blocking_process_modular_archive(
                 resumable_download(&archive.url, cache_dir, shared.as_ref(), cancel_token.clone())
                     .and_then(|(downloaded_path, _)| {
                         let file = fs::open(&downloaded_path)?;
-                        extract_archive_raw(file, format, target_dir)
+                        extract_archive_raw(file, format, target_dir, shared.as_ref())
                     });
             let _ = fs::remove_file(&archive_path);
             let _ = fs::remove_file(&part_path);

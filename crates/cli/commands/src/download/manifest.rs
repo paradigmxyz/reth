@@ -394,6 +394,39 @@ impl SnapshotManifest {
         }
     }
 
+    /// Returns the total **extracted** (decompressed) size in bytes for the selected
+    /// distance, by summing plain file sizes from [`OutputFileChecksum`] entries.
+    pub fn extracted_size_for_distance(
+        &self,
+        ty: SnapshotComponentType,
+        distance: Option<u64>,
+    ) -> u64 {
+        let Some(component) = self.component(ty) else {
+            return 0;
+        };
+        match component {
+            ComponentManifest::Single(s) => s.output_files.iter().map(|f| f.size).sum(),
+            ComponentManifest::Chunked(chunked) => {
+                if chunked.chunk_output_files.is_empty() {
+                    return 0;
+                }
+                let num_chunks = chunked.chunk_output_files.len() as u64;
+                let start_chunk = match distance {
+                    Some(dist) => {
+                        let needed = dist.min(chunked.total_blocks);
+                        let needed_chunks = needed.div_ceil(chunked.blocks_per_file);
+                        num_chunks.saturating_sub(needed_chunks)
+                    }
+                    None => 0,
+                };
+                chunked.chunk_output_files[start_chunk as usize..]
+                    .iter()
+                    .flat_map(|files| files.iter().map(|f| f.size))
+                    .sum()
+            }
+        }
+    }
+
     /// Returns the number of chunks that would be downloaded for a given distance.
     pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
         let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
