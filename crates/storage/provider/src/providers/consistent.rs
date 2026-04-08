@@ -1458,7 +1458,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             changesets.extend(db_changesets);
         }
 
-        changesets.sort_unstable_by_key(|(block_address, _)| block_address.block_number());
+        // Preserve intra-block ordering for repeated storage touches when callers keep the first
+        // revert they see for a given slot.
+        changesets.sort_by_key(|(block_address, _)| block_address.block_number());
 
         Ok(changesets)
     }
@@ -1606,7 +1608,9 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             changesets.extend(db_changesets);
         }
 
-        changesets.sort_unstable_by_key(|(block_num, _)| *block_num);
+        // Preserve intra-block ordering for repeated account touches when callers keep the first
+        // revert they see for a given account.
+        changesets.sort_by_key(|(block_num, _)| *block_num);
 
         Ok(changesets)
     }

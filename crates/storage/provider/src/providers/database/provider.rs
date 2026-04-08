@@ -3203,7 +3203,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                 (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();
-        hashed_storages.sort_unstable_by_key(|(ha, hk, _)| (*ha, *hk));
+        // Reverse iteration below relies on stable duplicate ordering so the oldest revert wins.
+        hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_storage_keys: B256Map<BTreeSet<B256>> =
