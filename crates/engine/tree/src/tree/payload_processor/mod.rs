@@ -796,9 +796,9 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
-    /// Returns a state hook to be used to send state updates to this task.
+    /// Returns a state hook to stream execution state updates to the [`SparseTrieCacheTask`].
     ///
-    /// If a multiproof task is spawned the hook will notify it about new states.
+    /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
