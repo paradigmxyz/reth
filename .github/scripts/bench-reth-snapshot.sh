@@ -78,7 +78,7 @@ echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
 # Prepare mount. If a previous run left the volume mounted, recover first.
-sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk recover -y --kill || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"

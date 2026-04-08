@@ -58,7 +58,7 @@ jobs:
 
       - name: Mount snapshot
         run: |
-          sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+          sudo schelk recover -y --kill || true
           sudo schelk mount -y
           sync
           sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'

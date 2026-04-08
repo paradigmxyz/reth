@@ -87,7 +87,7 @@ trap cleanup EXIT
 # Stop any leftover reth process in the scope, then recover schelk state.
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
 sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
-sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+sudo schelk recover -y --kill || true
 
 # Mount
 sudo schelk mount -y
