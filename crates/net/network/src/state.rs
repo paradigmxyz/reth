@@ -13,11 +13,12 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
-    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, NewBlockPayload, UnifiedStatus,
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, GetReceipts70,
+    NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
+use reth_network_p2p::receipts::client::ReceiptsResponse;
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
@@ -154,9 +155,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
-        // find the corresponding block number
-        let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
+        // Use the block number from the peer's status (eth/69+) if available,
+        // otherwise fall back to a local lookup by hash.
+        let block_number = status.latest_block.unwrap_or_else(|| {
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default()
+        });
         self.state_fetcher.new_active_peer(
             peer,
             status.blockhash,
@@ -382,8 +385,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ///
     /// Caution: this will replace an already pending response. It's the responsibility of the
     /// caller to select the peer.
-    fn handle_block_request(&mut self, peer: PeerId, request: BlockRequest) {
-        if let Some(ref mut peer) = self.active_peers.get_mut(&peer) {
+    fn handle_block_request(&mut self, peer_id: PeerId, request: BlockRequest) {
+        if let Some(ref mut peer) = self.active_peers.get_mut(&peer_id) {
             let (request, response) = match request {
                 BlockRequest::GetBlockHeaders(request) => {
                     let (response, rx) = oneshot::channel();
@@ -396,6 +399,30 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     let request = PeerRequest::GetBlockBodies { request, response };
                     let response = PeerResponse::BlockBodies { response: rx };
                     (request, response)
+                }
+                BlockRequest::GetReceipts(request) => {
+                    if peer.capabilities.supports_eth_v70() {
+                        let (response, rx) = oneshot::channel();
+                        let request = PeerRequest::GetReceipts70 {
+                            request: GetReceipts70 {
+                                first_block_receipt_index: 0,
+                                block_hashes: request.0,
+                            },
+                            response,
+                        };
+                        let response = PeerResponse::Receipts70 { response: rx };
+                        (request, response)
+                    } else if peer.capabilities.supports_eth_v69() {
+                        let (response, rx) = oneshot::channel();
+                        let request = PeerRequest::GetReceipts69 { request, response };
+                        let response = PeerResponse::Receipts69 { response: rx };
+                        (request, response)
+                    } else {
+                        let (response, rx) = oneshot::channel();
+                        let request = PeerRequest::GetReceipts { request, response };
+                        let response = PeerResponse::Receipts { response: rx };
+                        (request, response)
+                    }
                 }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
@@ -427,6 +454,27 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             }
             PeerResponseResult::BlockBodies(res) => {
                 self.state_fetcher.on_block_bodies_response(peer, res)
+            }
+            PeerResponseResult::Receipts(res) => {
+                // Legacy eth/66-68: strip bloom filters and wrap in ReceiptsResponse
+                let normalized = res.map(|blocks| {
+                    let receipts = blocks
+                        .into_iter()
+                        .map(|block_receipts| {
+                            block_receipts.into_iter().map(|rwb| rwb.receipt).collect()
+                        })
+                        .collect();
+                    ReceiptsResponse::new(receipts)
+                });
+                self.state_fetcher.on_receipts_response(peer, normalized)
+            }
+            PeerResponseResult::Receipts69(res) => {
+                let normalized = res.map(ReceiptsResponse::new);
+                self.state_fetcher.on_receipts_response(peer, normalized)
+            }
+            PeerResponseResult::Receipts70(res) => {
+                let normalized = res.map(ReceiptsResponse::from);
+                self.state_fetcher.on_receipts_response(peer, normalized)
             }
             _ => None,
         };
@@ -525,7 +573,6 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
-    #[expect(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,

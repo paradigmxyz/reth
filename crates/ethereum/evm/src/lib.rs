@@ -28,7 +28,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnv,
+    NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
@@ -127,7 +127,7 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
@@ -192,7 +192,7 @@ where
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
-            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+            withdrawals: block.body().withdrawals.as_ref().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: block.header().extra_data.clone(),
         })
     }
@@ -207,7 +207,7 @@ where
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
-            withdrawals: attributes.withdrawals.map(Cow::Owned),
+            withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
             extra_data: attributes.extra_data,
         })
     }
@@ -218,7 +218,7 @@ impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSp
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
@@ -273,6 +273,7 @@ where
             gas_limit: payload.payload.gas_limit(),
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
+            slot_num: 0,
         };
 
         Ok(EvmEnv { cfg_env, block_env })
@@ -287,7 +288,7 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            withdrawals: payload.payload.withdrawals().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
         })
     }

@@ -119,14 +119,13 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
+      --storage.v2 [<V2>]
+          Enable V2 (hot/cold) storage layout for new databases.
 
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
+          When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
 
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
+          [default: true]
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -142,7 +141,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

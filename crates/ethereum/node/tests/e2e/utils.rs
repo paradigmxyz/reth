@@ -11,35 +11,32 @@ use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::IndexedRandom, Rng};
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
-use reth_ethereum_engine_primitives::EthPayloadBuilderAttributes;
 use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::FullProvider;
 
 /// Helper function to create a new eth payload attributes
-pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {
-    let attributes = PayloadAttributes {
+pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
+    PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+    }
 }
 
 /// Helper function to create pre-Cancun (Shanghai) payload attributes.
 /// No `parent_beacon_block_root` field.
-pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> EthPayloadBuilderAttributes {
-    let attributes = PayloadAttributes {
+pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
+    PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: None,
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+    }
 }
 
 /// Advances node by producing blocks with random transactions.

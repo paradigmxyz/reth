@@ -70,8 +70,8 @@ impl ExecutionWitnessRecord {
                 }
             }
         }
-        // BTreeMap keys are ordered, so the first key is the smallest
-        self.lowest_block_number = statedb.block_hashes.keys().next().copied()
+        self.lowest_block_number =
+            statedb.block_hashes.lowest().map(|(block_number, _)| block_number)
     }
 
     /// Creates the record from the state after execution.
@@ -79,5 +79,45 @@ impl ExecutionWitnessRecord {
         let mut record = Self::default();
         record.record_executed_state(state);
         record
+    }
+
+    /// Converts this record into a complete [`alloy_rpc_types_debug::ExecutionWitness`] by
+    /// generating state proofs and fetching ancestor block headers.
+    ///
+    /// The `block_number` is the number of the block being witnessed. Ancestor headers are
+    /// included based on the lowest block number referenced by BLOCKHASH opcodes during
+    /// execution, or just the parent header if BLOCKHASH was not called.
+    #[cfg(feature = "witness")]
+    pub fn into_execution_witness<SP, HP>(
+        self,
+        state_provider: &SP,
+        headers_provider: &HP,
+        block_number: u64,
+    ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
+    where
+        SP: reth_storage_api::StateProofProvider + ?Sized,
+        HP: reth_storage_api::HeaderProvider + ?Sized,
+        HP::Header: alloy_rlp::Encodable,
+    {
+        let Self { hashed_state, codes, keys, lowest_block_number } = self;
+
+        let state = state_provider.witness(Default::default(), hashed_state)?;
+        let mut exec_witness =
+            alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() };
+
+        let smallest = lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
+        let range = smallest..block_number;
+
+        exec_witness.headers = headers_provider
+            .headers_range(range)?
+            .into_iter()
+            .map(|header| {
+                let mut buf = Vec::new();
+                alloy_rlp::Encodable::encode(&header, &mut buf);
+                buf.into()
+            })
+            .collect();
+
+        Ok(exec_witness)
     }
 }

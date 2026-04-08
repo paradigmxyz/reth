@@ -478,22 +478,24 @@ where
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
 
-                // Get header - from cached block if available, otherwise from provider
-                let header = if let Some(block) = &maybe_block {
-                    block.header().clone()
+                // Read number and timestamp from cached block or provider header
+                let (block_number, block_timestamp) = if let Some(block) = &maybe_block {
+                    (block.header().number(), block.header().timestamp())
                 } else {
-                    self.provider()
+                    let header = self
+                        .provider()
                         .header_by_hash_or_number(block_hash.into())?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+                    (header.number(), header.timestamp())
                 };
 
                 // Check if the block has been pruned (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
-                if header.number() < earliest_block {
+                if block_number < earliest_block {
                     return Err(EthApiError::PrunedHistoryUnavailable.into());
                 }
 
-                let block_num_hash = BlockNumHash::new(header.number(), block_hash);
+                let block_num_hash = BlockNumHash::new(block_number, block_hash);
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
@@ -505,7 +507,7 @@ where
                     block_num_hash,
                     &receipts,
                     false,
-                    header.timestamp(),
+                    block_timestamp,
                 )?;
 
                 Ok(all_logs)
@@ -638,11 +640,11 @@ where
 
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        self.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let res =
                 this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
             let _ = tx.send(res);
-        }));
+        });
 
         rx.await.map_err(|_| EthFilterError::InternalError)?
     }

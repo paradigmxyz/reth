@@ -2,8 +2,11 @@ use clap::Parser;
 use reth_cli_util::{parse_duration_from_secs, parse_socket_address};
 use std::{net::SocketAddr, time::Duration};
 
+/// Default push gateway interval in seconds.
+const DEFAULT_PUSH_GATEWAY_INTERVAL_SECS: u64 = 5;
+
 /// Metrics configuration.
-#[derive(Debug, Clone, Default, Parser)]
+#[derive(Debug, Clone, Parser)]
 pub struct MetricArgs {
     /// Enable Prometheus metrics.
     ///
@@ -32,4 +35,14 @@ pub struct MetricArgs {
         help_heading = "Metrics"
     )]
     pub push_gateway_interval: Duration,
+}
+
+impl Default for MetricArgs {
+    fn default() -> Self {
+        Self {
+            prometheus: None,
+            push_gateway_url: None,
+            push_gateway_interval: Duration::from_secs(DEFAULT_PUSH_GATEWAY_INTERVAL_SECS),
+        }
+    }
 }

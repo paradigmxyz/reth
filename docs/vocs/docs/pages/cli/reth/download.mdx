@@ -112,26 +112,83 @@ Static Files:
           Number of blocks per file for the storage changesets segment
 
 Storage:
-      --storage.v2
-          Enable v2 storage defaults (static files + `RocksDB` routing).
+      --storage.v2 [<V2>]
+          Enable V2 (hot/cold) storage layout for new databases.
 
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
+          When set, new databases will be initialized with the V2 storage layout that separates hot and cold data. Existing databases always use the settings persisted in their metadata regardless of this flag.
 
-          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
-
-          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
+          [default: true]
+          [possible values: true, false]
 
   -u, --url <URL>
           Specify a snapshot URL or let the command propose a default one.
 
+          Browse available snapshots at https://snapshots.reth.rs
+          or use --list-snapshots to see them from the CLI.
+
           Available snapshot sources:
-          - https://www.merkle.io/snapshots (default, mainnet archive)
+          - https://snapshots.reth.rs (default)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest archive snapshot for the selected chain
-          will be proposed for download from https://downloads.merkle.io.
+          will be proposed for download from https://snapshots-r2.reth.rs.
 
           Local file:// URLs are also supported for extracting snapshots from disk.
+
+      --manifest-url <URL>
+          URL to a snapshot manifest.json for modular component downloads.
+
+          When provided, fetches this manifest instead of discovering it from the default base URL. Useful for testing with custom or local manifests.
+
+      --manifest-path <PATH>
+          Local path to a snapshot manifest.json for modular component downloads
+
+      --with-txs
+          Include transaction static files
+
+      --with-receipts
+          Include receipt static files
+
+      --with-state-history
+          Include account and storage history static files
+
+      --with-senders
+          Include transaction sender static files. Requires `--with-txs`
+
+      --with-rocksdb
+          Include RocksDB index files
+
+      --archive
+          Download all available components (archive node, no pruning)
+
+      --minimal
+          Download the minimal component set (same default as --non-interactive)
+
+      --full
+          Download the full node component set (matches default full prune settings)
+
+      --without-rocksdb
+          Skip optional RocksDB indices even when archive components are selected.
+
+          This affects `--archive`/`--all` and TUI archive preset (`a`).
+
+  -y, --non-interactive
+          Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
+
+      --resumable
+          Use resumable two-phase downloads (download to disk first, then extract).
+
+          Archives are downloaded to a .part file with HTTP Range resume support before extraction. Slower but tolerates network interruptions without restarting. By default, archives stream directly into the extractor.
+
+      --download-concurrency <DOWNLOAD_CONCURRENCY>
+          Maximum number of concurrent modular archive workers
+
+          [default: 8]
+
+      --list
+          List available snapshots and exit.
+
+          Queries the snapshots API and prints all available snapshots for the selected chain, including block number, size, and manifest URL.
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -147,7 +204,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
 
-          [default: ]
+          [default: ""]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

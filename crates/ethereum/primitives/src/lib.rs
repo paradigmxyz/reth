@@ -30,12 +30,6 @@ pub type TransactionSigned = alloy_consensus::EthereumTxEnvelope<TxEip4844>;
 pub type PooledTransactionVariant =
     alloy_consensus::EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>;
 
-/// Bincode-compatible serde implementations.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
-pub mod serde_bincode_compat {
-    pub use alloy_consensus::serde_bincode_compat::{transaction::*, EthereumReceipt as Receipt};
-}
-
 /// Type alias for the ethereum block
 pub type Block = alloy_consensus::Block<TransactionSigned>;
 

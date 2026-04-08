@@ -10,6 +10,7 @@ use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableIm
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
+use reth_node_api::HeaderTy;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
@@ -41,7 +42,7 @@ where
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::Headers, _>(
+        tx.import_table_with_range::<tables::Headers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,
@@ -127,12 +128,14 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     AccountHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;
     StorageHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
+        commit_entries: u64::MAX,
         etl_config: EtlConfig::default(),
     }
     .execute(&provider, execute_input)?;

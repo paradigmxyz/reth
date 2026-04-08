@@ -63,7 +63,7 @@ async fn remote_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthP
 
 // ANCHOR: snippet
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
+    reth::cli::Cli::parse_args().run(async move |builder, _| {
         let notifications = Arc::new(broadcast::channel(1).0);
 
         let server = Server::builder()
@@ -74,7 +74,7 @@ fn main() -> eyre::Result<()> {
 
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("remote-exex", |ctx| async move { Ok(remote_exex(ctx, notifications)) })
+            .install_exex("remote-exex", async move |ctx| { Ok(remote_exex(ctx, notifications)) })
             .launch_with_debug_capabilities()
             .await?;
 

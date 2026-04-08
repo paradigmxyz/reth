@@ -533,12 +533,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                 });
 
                             let AllPoolTransactions { pending, queued } = pool.all_transactions();
-                            for tx in pending
-                                .into_iter()
-                                .chain(queued)
-                                .filter(|tx| tx.transaction.is_eip4844())
+                            for tx in pending.into_iter().chain(queued).filter(|tx| tx.is_eip4844())
                             {
-                                let tx_hash = *tx.transaction.hash();
+                                let tx_hash = *tx.hash();
 
                                 // Fetch sidecar from the pool
                                 let Ok(Some(sidecar)) = pool.get_blob(tx_hash) else {

@@ -6,6 +6,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
+    sync::OnceLock,
 };
 
 use crate::version::version_metadata;
@@ -44,6 +45,169 @@ use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
 
+/// Global static network defaults
+static NETWORK_DEFAULTS: OnceLock<DefaultNetworkArgs> = OnceLock::new();
+
+/// Default values for network CLI arguments that can be customized.
+///
+/// Global defaults can be set via [`DefaultNetworkArgs::try_init`].
+#[derive(Debug, Clone)]
+pub struct DefaultNetworkArgs {
+    /// Default DNS retries.
+    pub dns_retries: usize,
+    /// Default NAT resolver.
+    pub nat: NatResolver,
+    /// Default network listening address.
+    pub addr: IpAddr,
+    /// Default network listening port.
+    pub port: u16,
+    /// Default max concurrent `GetPooledTransactions` requests.
+    pub max_concurrent_tx_requests: u32,
+    /// Default max concurrent `GetPooledTransactions` requests per peer.
+    pub max_concurrent_tx_requests_per_peer: u8,
+    /// Default max number of seen transactions to remember per peer.
+    pub max_seen_tx_history: u32,
+    /// Default max number of transactions to import concurrently.
+    pub max_pending_pool_imports: usize,
+    /// Default max accumulated byte size of transactions to pack in one response.
+    pub soft_limit_byte_size_pooled_transactions_response: usize,
+    /// Default max accumulated byte size of transactions to request in one request.
+    pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    /// Default max capacity of cache of hashes for transactions pending fetch.
+    pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Default transaction propagation policy.
+    pub tx_propagation_policy: TransactionPropagationKind,
+    /// Default transaction ingress policy.
+    pub tx_ingress_policy: TransactionIngressPolicy,
+    /// Default transaction propagation mode.
+    pub propagation_mode: TransactionPropagationMode,
+}
+
+impl DefaultNetworkArgs {
+    /// Initialize the global network defaults with this configuration.
+    pub fn try_init(self) -> Result<(), Self> {
+        NETWORK_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global network defaults.
+    pub fn get_global() -> &'static Self {
+        NETWORK_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the default DNS retries.
+    pub const fn with_dns_retries(mut self, v: usize) -> Self {
+        self.dns_retries = v;
+        self
+    }
+
+    /// Set the default NAT resolver.
+    pub fn with_nat(mut self, v: NatResolver) -> Self {
+        self.nat = v;
+        self
+    }
+
+    /// Set the default network listening address.
+    pub const fn with_addr(mut self, v: IpAddr) -> Self {
+        self.addr = v;
+        self
+    }
+
+    /// Set the default network listening port.
+    pub const fn with_port(mut self, v: u16) -> Self {
+        self.port = v;
+        self
+    }
+
+    /// Set the default max concurrent `GetPooledTransactions` requests.
+    pub const fn with_max_concurrent_tx_requests(mut self, v: u32) -> Self {
+        self.max_concurrent_tx_requests = v;
+        self
+    }
+
+    /// Set the default max concurrent `GetPooledTransactions` requests per peer.
+    pub const fn with_max_concurrent_tx_requests_per_peer(mut self, v: u8) -> Self {
+        self.max_concurrent_tx_requests_per_peer = v;
+        self
+    }
+
+    /// Set the default max number of seen transactions to remember per peer.
+    pub const fn with_max_seen_tx_history(mut self, v: u32) -> Self {
+        self.max_seen_tx_history = v;
+        self
+    }
+
+    /// Set the default max number of transactions to import concurrently.
+    pub const fn with_max_pending_pool_imports(mut self, v: usize) -> Self {
+        self.max_pending_pool_imports = v;
+        self
+    }
+
+    /// Set the default max accumulated byte size of transactions to pack in one response.
+    pub const fn with_soft_limit_byte_size_pooled_transactions_response(
+        mut self,
+        v: usize,
+    ) -> Self {
+        self.soft_limit_byte_size_pooled_transactions_response = v;
+        self
+    }
+
+    /// Set the default max accumulated byte size of transactions to request in one request.
+    pub const fn with_soft_limit_byte_size_pooled_transactions_response_on_pack_request(
+        mut self,
+        v: usize,
+    ) -> Self {
+        self.soft_limit_byte_size_pooled_transactions_response_on_pack_request = v;
+        self
+    }
+
+    /// Set the default max capacity of cache of hashes for transactions pending fetch.
+    pub const fn with_max_capacity_cache_txns_pending_fetch(mut self, v: u32) -> Self {
+        self.max_capacity_cache_txns_pending_fetch = v;
+        self
+    }
+
+    /// Set the default transaction propagation policy.
+    pub const fn with_tx_propagation_policy(mut self, v: TransactionPropagationKind) -> Self {
+        self.tx_propagation_policy = v;
+        self
+    }
+
+    /// Set the default transaction ingress policy.
+    pub const fn with_tx_ingress_policy(mut self, v: TransactionIngressPolicy) -> Self {
+        self.tx_ingress_policy = v;
+        self
+    }
+
+    /// Set the default transaction propagation mode.
+    pub const fn with_propagation_mode(mut self, v: TransactionPropagationMode) -> Self {
+        self.propagation_mode = v;
+        self
+    }
+}
+
+impl Default for DefaultNetworkArgs {
+    fn default() -> Self {
+        Self {
+            dns_retries: 0,
+            nat: NatResolver::Any,
+            addr: DEFAULT_DISCOVERY_ADDR,
+            port: DEFAULT_DISCOVERY_PORT,
+            max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+            max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            soft_limit_byte_size_pooled_transactions_response:
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request:
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            tx_propagation_policy: TransactionPropagationKind::default(),
+            tx_ingress_policy: TransactionIngressPolicy::default(),
+            propagation_mode: TransactionPropagationMode::Sqrt,
+        }
+    }
+}
+
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Networking")]
@@ -70,7 +234,7 @@ pub struct NetworkArgs {
     pub bootnodes: Option<Vec<TrustedPeer>>,
 
     /// Amount of DNS resolution requests retries to perform when peering.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().dns_retries)]
     pub dns_retries: usize,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
@@ -101,15 +265,15 @@ pub struct NetworkArgs {
     pub no_persist_peers: bool,
 
     /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
-    #[arg(long, default_value = "any")]
+    #[arg(long, default_value_t = DefaultNetworkArgs::get_global().nat.clone())]
     pub nat: NatResolver,
 
     /// Network listening address
-    #[arg(long = "addr", value_name = "ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
+    #[arg(long = "addr", value_name = "ADDR", default_value_t = DefaultNetworkArgs::get_global().addr)]
     pub addr: IpAddr,
 
     /// Network listening port
-    #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
+    #[arg(long = "port", value_name = "PORT", default_value_t = DefaultNetworkArgs::get_global().port)]
     pub port: u16,
 
     /// Maximum number of outbound peers. default: 100
@@ -133,27 +297,27 @@ pub struct NetworkArgs {
     pub max_peers: Option<usize>,
 
     /// Max concurrent `GetPooledTransactions` requests.
-    #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
+    #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_concurrent_tx_requests, verbatim_doc_comment)]
     pub max_concurrent_tx_requests: u32,
 
     /// Max concurrent `GetPooledTransactions` requests per peer.
-    #[arg(long = "max-tx-reqs-peer", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER, verbatim_doc_comment)]
+    #[arg(long = "max-tx-reqs-peer", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_concurrent_tx_requests_per_peer, verbatim_doc_comment)]
     pub max_concurrent_tx_requests_per_peer: u8,
 
     /// Max number of seen transactions to remember per peer.
     ///
     /// Default is 320 transaction hashes.
-    #[arg(long = "max-seen-tx-history", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    #[arg(long = "max-seen-tx-history", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_seen_tx_history, verbatim_doc_comment)]
     pub max_seen_tx_history: u32,
 
-    #[arg(long = "max-pending-imports", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    #[arg(long = "max-pending-imports", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_pending_pool_imports, verbatim_doc_comment)]
     /// Max number of transactions to import concurrently.
     pub max_pending_pool_imports: usize,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
-    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, verbatim_doc_comment)]
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().soft_limit_byte_size_pooled_transactions_response, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions to
@@ -167,11 +331,11 @@ pub struct NetworkArgs {
     /// more, up to 2 MiB, a node will answer with more than 128 KiB.
     ///
     /// Default is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().soft_limit_byte_size_pooled_transactions_response_on_pack_request, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 
     /// Max capacity of cache of hashes for transactions pending fetch.
-    #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, verbatim_doc_comment)]
+    #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
     /// Name of network interface used to communicate with peers.
@@ -183,13 +347,13 @@ pub struct NetworkArgs {
     /// Transaction Propagation Policy
     ///
     /// The policy determines which peers transactions are gossiped to.
-    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
+    #[arg(long = "tx-propagation-policy", default_value_t = DefaultNetworkArgs::get_global().tx_propagation_policy)]
     pub tx_propagation_policy: TransactionPropagationKind,
 
     /// Transaction ingress policy
     ///
     /// Determines which peers' transactions are accepted over P2P.
-    #[arg(long = "tx-ingress-policy", default_value_t = TransactionIngressPolicy::All)]
+    #[arg(long = "tx-ingress-policy", default_value_t = DefaultNetworkArgs::get_global().tx_ingress_policy)]
     pub tx_ingress_policy: TransactionIngressPolicy,
 
     /// Disable transaction pool gossip
@@ -205,7 +369,7 @@ pub struct NetworkArgs {
     /// Examples: sqrt, all, max:10
     #[arg(
         long = "tx-propagation-mode",
-        default_value = "sqrt",
+        default_value_t = DefaultNetworkArgs::get_global().propagation_mode,
         help = "Transaction propagation mode (sqrt, all, max:<number>)"
     )]
     pub propagation_mode: TransactionPropagationMode,
@@ -469,36 +633,51 @@ impl NetworkArgs {
 
 impl Default for NetworkArgs {
     fn default() -> Self {
+        let DefaultNetworkArgs {
+            dns_retries,
+            nat,
+            addr,
+            port,
+            max_concurrent_tx_requests,
+            max_concurrent_tx_requests_per_peer,
+            max_seen_tx_history,
+            max_pending_pool_imports,
+            soft_limit_byte_size_pooled_transactions_response,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            max_capacity_cache_txns_pending_fetch,
+            tx_propagation_policy,
+            tx_ingress_policy,
+            propagation_mode,
+        } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
-            dns_retries: 0,
+            dns_retries,
             peers_file: None,
             identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
             p2p_secret_key_hex: None,
             no_persist_peers: false,
-            nat: NatResolver::Any,
-            addr: DEFAULT_DISCOVERY_ADDR,
-            port: DEFAULT_DISCOVERY_PORT,
+            nat,
+            addr,
+            port,
             max_outbound_peers: None,
             max_inbound_peers: None,
             max_peers: None,
-            max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-            max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
-            soft_limit_byte_size_pooled_transactions_response:
-                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-            soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-            max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-            max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-            max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            max_concurrent_tx_requests,
+            max_concurrent_tx_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            max_pending_pool_imports,
+            max_seen_tx_history,
+            max_capacity_cache_txns_pending_fetch,
             net_if: None,
-            tx_propagation_policy: TransactionPropagationKind::default(),
-            tx_ingress_policy: TransactionIngressPolicy::default(),
+            tx_propagation_policy,
+            tx_ingress_policy,
             disable_tx_gossip: false,
-            propagation_mode: TransactionPropagationMode::Sqrt,
+            propagation_mode,
             required_block_hashes: vec![],
             network_id: None,
             netrestrict: None,
@@ -557,7 +736,7 @@ pub struct DiscoveryArgs {
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
-    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
 
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
@@ -626,6 +805,8 @@ impl DiscoveryArgs {
             ..
         } = self;
 
+        let has_discv5_addr_args = discv5_addr.is_some() || discv5_addr_ipv6.is_some();
+
         // Use rlpx address if none given
         let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
             SocketAddr::V4(addr) => Some(*addr.ip()),
@@ -636,14 +817,18 @@ impl DiscoveryArgs {
             SocketAddr::V6(addr) => Some(*addr.ip()),
         });
 
+        let mut discv5_config_builder =
+            reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
+                discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
+            ));
+
+        if has_discv5_addr_args || self.disable_nat {
+            // disable native enr update if addresses manually set or nat disabled
+            discv5_config_builder.disable_enr_update();
+        }
         reth_discv5::Config::builder(rlpx_tcp_socket)
-            .discv5_config(
-                reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
-                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
-                ))
-                .build(),
-            )
+            .discv5_config(discv5_config_builder.build())
             .add_unsigned_boot_nodes(boot_nodes)
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
