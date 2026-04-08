@@ -3343,7 +3343,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
+        storage_changesets.sort_unstable_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storage_v2 {
             let batch =
