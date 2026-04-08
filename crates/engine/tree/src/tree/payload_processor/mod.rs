@@ -274,6 +274,7 @@ where
             halve_workers,
             config,
         );
+        let install_state_hook = bal.is_none();
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -284,6 +285,7 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
+            install_state_hook,
             prewarm_handle,
             transactions: execution_rx,
             _span: span,
@@ -309,6 +311,7 @@ where
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal);
         PayloadHandle {
             state_root_handle: None,
+            install_state_hook: false,
             prewarm_handle,
             transactions: execution_rx,
             _span: Span::current(),
@@ -755,6 +758,8 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
+    /// Whether main execution should stream per-tx state updates into the sparse trie task.
+    install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
@@ -795,7 +800,9 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
-        self.state_root_handle.as_ref().map(|handle| handle.state_hook())
+        self.install_state_hook
+            .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
+            .flatten()
     }
 
     /// Returns a clone of the caches used by prewarming
