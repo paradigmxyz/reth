@@ -233,6 +233,7 @@ jobs:
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
+      RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ""
       BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
@@ -446,6 +447,8 @@ jobs:
 
       - name: Pre-flight cleanup
         run: |
+          sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+          sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
           sudo pkill -9 reth || true
           sleep 1
           if mountpoint -q "$SCHELK_MOUNT"; then

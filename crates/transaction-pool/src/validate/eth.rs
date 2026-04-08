@@ -181,6 +181,11 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         &self.fork_tracker
     }
 
+    /// Returns the EVM config used for transaction validation.
+    pub const fn evm_config(&self) -> &Evm {
+        &self.evm_config
+    }
+
     /// Returns if there are EIP-2718 type transactions
     pub const fn eip2718(&self) -> bool {
         self.eip2718
