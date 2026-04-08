@@ -796,7 +796,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
-    /// Returns a state hook to stream execution state updates to the [`SparseTrieCacheTask`].
+    /// Returns a state hook to stream execution state updates to the sparse trie cache task.
     ///
     /// Returns `None` when execution should not send state updates, such as BAL-driven execution.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
