@@ -3203,7 +3203,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                 (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();
-        // Reverse iteration below relies on stable duplicate ordering so the oldest revert wins.
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
@@ -3344,7 +3343,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_unstable_by_key(|(address, key, _)| (*address, *key));
+        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storage_v2 {
             let batch =

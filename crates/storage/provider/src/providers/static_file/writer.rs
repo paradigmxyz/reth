@@ -1342,8 +1342,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
 
-        // Preserve duplicate-key order so binary-searched reads return the earliest intra-block
-        // revert for an account.
+        // first sort the changeset by address
         changeset.sort_by_key(|change| change.address);
 
         let mut count: u64 = 0;
@@ -1379,8 +1378,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
 
-        // Preserve duplicate-key order so binary-searched reads return the earliest intra-block
-        // revert for a storage slot.
+        // sort by address + storage key
         changeset.sort_by_key(|change| (change.address, change.key));
 
         let mut count: u64 = 0;
