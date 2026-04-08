@@ -28,6 +28,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
     StageCheckpointWriter,
@@ -40,7 +41,7 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+use std::{any::Any, net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 

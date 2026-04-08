@@ -45,7 +45,6 @@ pub fn increase_thread_priority() {
 /// Should be called once after tracing is initialized.
 ///
 /// No-op on non-Linux platforms.
-#[allow(clippy::missing_const_for_fn)]
 pub fn deprioritize_background_threads() {
     #[cfg(target_os = "linux")]
     _deprioritize_background_threads();

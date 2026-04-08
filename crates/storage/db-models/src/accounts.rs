@@ -53,3 +53,6 @@ impl reth_codecs::Compact for AccountBeforeTx {
         (Self { address, info }, buf)
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(AccountBeforeTx);

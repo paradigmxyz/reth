@@ -51,14 +51,6 @@ pub use reth_provider::init::{
 /// Default is 1 GB.
 pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
 
-/// Approximate number of accounts per 1 GB of state dump file. One account is approximately 3.5 KB
-///
-/// Approximate is 285 228 accounts.
-//
-// (14.05 GB OP mainnet state dump at Bedrock block / 4 007 565 accounts in file > 3.5 KB per
-// account)
-pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
-
 /// Soft limit for the number of flushed updates after which to log progress summary.
 const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 
@@ -599,14 +591,6 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if !collector.is_empty() &&
-            collector.len().is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)
-        {
-            info!(target: "reth::cli",
-                parsed_new_accounts=collector.len(),
-            );
-        }
-
         line.clear();
     }
 
@@ -632,17 +616,19 @@ where
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();
-    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
+    let mut accounts = Vec::new();
     let mut total_inserted_accounts = 0;
+    let mut chunk_byte_size = 0;
 
     for (index, entry) in collector.iter()?.enumerate() {
         let (address, account) = entry?;
+        chunk_byte_size += address.len() + account.len();
         let (address, _) = Address::from_compact(address.as_slice(), address.len());
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
 
         accounts.push((address, account));
 
-        if (index > 0 && index.is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)) ||
+        if chunk_byte_size >= DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK ||
             index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
@@ -672,6 +658,7 @@ where
             )?;
 
             accounts.clear();
+            chunk_byte_size = 0;
         }
     }
     Ok(())

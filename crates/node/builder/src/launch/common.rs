@@ -1012,7 +1012,7 @@ where
     }
 
     /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub async fn launch_exex(
         &self,
         installed_exex: Vec<(
@@ -1034,7 +1034,7 @@ where
     ///     .launch()
     ///     .await
     /// ```
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn exex_launcher(
         &self,
         installed_exex: Vec<(

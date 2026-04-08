@@ -9,9 +9,7 @@ use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
-};
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
@@ -81,11 +79,8 @@ impl EthereumNode {
                 Primitives = EthPrimitives,
             >,
         >,
-        <Node::Types as NodeTypes>::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
+        <Node::Types as NodeTypes>::Payload:
+            PayloadTypes<BuiltPayload = EthBuiltPayload, PayloadAttributes = EthPayloadAttributes>,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -567,10 +562,7 @@ where
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(
-            EthBeaconConsensus::new(ctx.chain_spec())
-                .with_skip_gas_limit_ramp_check(ctx.config().rpc.testing_skip_gas_limit_ramp_check),
-        ))
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
     }
 }
 

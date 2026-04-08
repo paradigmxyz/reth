@@ -3,7 +3,6 @@
 
 use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
@@ -27,8 +26,6 @@ pub(crate) struct BenchContext {
     pub(crate) benchmark_mode: BenchMode,
     /// The next block to fetch.
     pub(crate) next_block: u64,
-    /// Whether the chain is an OP rollup.
-    pub(crate) is_optimism: bool,
     /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     pub(crate) use_reth_namespace: bool,
     /// Whether to fetch and replay RLP-encoded blocks.
@@ -69,12 +66,6 @@ impl BenchContext {
             .layer(RetryBackoffLayer::new_with_policy(max_retries, 800, u64::MAX, retry_policy))
             .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
-
-        // Check if this is an OP chain by checking code at a predeploy address.
-        let is_optimism = !block_provider
-            .get_code_at(address!("0x420000000000000000000000000000000000000F"))
-            .await?
-            .is_empty();
 
         // construct the authenticated provider
         let auth_jwt = bench_args
@@ -175,7 +166,6 @@ impl BenchContext {
             block_provider,
             benchmark_mode,
             next_block,
-            is_optimism,
             use_reth_namespace,
             rlp_blocks,
             wait_for_persistence,

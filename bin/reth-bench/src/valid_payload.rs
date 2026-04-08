@@ -2,15 +2,14 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
-use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Bytes, B256};
+use alloy_consensus::TxEnvelope;
+use alloy_primitives::Bytes;
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
     ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use alloy_transport::TransportResult;
-use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
@@ -173,7 +172,6 @@ where
 /// `reth_newPayload` on a per-block basis.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
-    is_optimism: bool,
     rlp: Option<Bytes>,
     reth_new_payload: bool,
     wait_for_persistence: WaitForPersistence,
@@ -192,19 +190,16 @@ pub(crate) fn block_to_new_payload(
             ))?,
         ));
     }
+
     let block = block
         .into_inner()
         .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-        .try_map_transactions(|tx| {
-            // try to convert unknowns into op type so that we can also support optimism
-            tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+        .try_map_transactions(|tx| -> eyre::Result<TxEnvelope> {
+            tx.try_into().map_err(|_| eyre::eyre!("unsupported tx type"))
         })?
         .into_consensus();
-
-    // Convert to execution payload
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    let (version, params, execution_data) =
-        payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
+    let (version, params, execution_data) = payload_to_new_payload(payload, sidecar, None)?;
 
     if reth_new_payload {
         Ok((
@@ -227,46 +222,28 @@ pub(crate) fn block_to_new_payload(
 pub(crate) fn payload_to_new_payload(
     payload: ExecutionPayload,
     sidecar: ExecutionPayloadSidecar,
-    is_optimism: bool,
-    withdrawals_root: Option<B256>,
     target_version: Option<EngineApiMessageVersion>,
 ) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value, ExecutionData)> {
     let execution_data = ExecutionData { payload: payload.clone(), sidecar: sidecar.clone() };
 
     let (version, params) = match payload {
         ExecutionPayload::V3(payload) => {
-            let cancun = sidecar.cancun().unwrap();
+            let cancun = sidecar
+                .cancun()
+                .ok_or_else(|| eyre::eyre!("missing cancun sidecar for V3 payload"))?;
 
             if let Some(prague) = sidecar.prague() {
-                // Use target version if provided (for Osaka), otherwise default to V4
                 let version = target_version.unwrap_or(EngineApiMessageVersion::V4);
-
-                if is_optimism {
-                    let withdrawals_root = withdrawals_root.ok_or_else(|| {
-                        eyre::eyre!("Missing withdrawals root for Optimism payload")
-                    })?;
-                    (
-                        version,
-                        serde_json::to_value((
-                            OpExecutionPayloadV4 { payload_inner: payload, withdrawals_root },
-                            cancun.versioned_hashes.clone(),
-                            cancun.parent_beacon_block_root,
-                            Requests::default(),
-                        ))?,
-                    )
-                } else {
-                    // Preserve the original RequestsOrHash payload for engine_newPayloadV4.
-                    let requests = prague.requests.clone();
-                    (
-                        version,
-                        serde_json::to_value((
-                            payload,
-                            cancun.versioned_hashes.clone(),
-                            cancun.parent_beacon_block_root,
-                            requests,
-                        ))?,
-                    )
-                }
+                let requests = prague.requests.clone();
+                (
+                    version,
+                    serde_json::to_value((
+                        payload,
+                        cancun.versioned_hashes.clone(),
+                        cancun.parent_beacon_block_root,
+                        requests,
+                    ))?,
+                )
             } else {
                 (
                     EngineApiMessageVersion::V3,
@@ -294,7 +271,7 @@ pub(crate) fn payload_to_new_payload(
     Ok((version, params, execution_data))
 }
 
-/// Calls the correct `engine_newPayload` method depending on the given [`ExecutionPayload`] and its
+/// Calls the correct `engine_newPayload` method depending on the given execution payload and its
 /// versioned variant. Returns the [`EngineApiMessageVersion`] depending on the payload's version.
 ///
 /// # Panics
@@ -313,7 +290,7 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
 struct RethPayloadStatus {
     latency_us: u64,
     #[serde(default)]
-    persistence_wait_us: Option<u64>,
+    persistence_wait_us: u64,
     #[serde(default)]
     execution_cache_wait_us: u64,
     #[serde(default)]
@@ -325,8 +302,8 @@ struct RethPayloadStatus {
 pub(crate) struct NewPayloadTimingBreakdown {
     /// Server-side execution latency.
     pub(crate) latency: Duration,
-    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
-    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence (backpressure + explicit wait).
+    pub(crate) persistence_wait: Duration,
     /// Time spent waiting for execution cache lock.
     pub(crate) execution_cache_wait: Duration,
     /// Time spent waiting for sparse trie lock.
@@ -374,7 +351,7 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
 
     Ok(Some(NewPayloadTimingBreakdown {
         latency: Duration::from_micros(resp.latency_us),
-        persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+        persistence_wait: Duration::from_micros(resp.persistence_wait_us),
         execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
         sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
     }))

@@ -3,6 +3,7 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
+        generate_big_block::BigBlockPayload,
         helpers::parse_duration,
         metrics_scraper::MetricsScraper,
         output::{
@@ -21,6 +22,7 @@ use alloy_rpc_types_engine::{
 use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
+use reth_engine_primitives::BigBlockData;
 use reth_node_api::EngineApiMessageVersion;
 use reth_node_core::args::WaitForPersistence;
 use reth_rpc_api::RethNewPayloadInput;
@@ -58,8 +60,7 @@ pub struct Command {
     #[arg(long, value_name = "SKIP", default_value = "0")]
     skip: usize,
 
-    /// Deprecated: gas ramp is no longer needed. Use `--testing.skip-gas-limit-ramp-check`
-    /// and `--testing.gas-limit` on the reth node instead. This flag is accepted but ignored.
+    /// Deprecated: gas ramp is no longer needed. This flag is accepted but ignored.
     #[arg(long, value_name = "GAS_RAMP_DIR", hide = true)]
     gas_ramp_dir: Option<PathBuf>,
 
@@ -119,10 +120,12 @@ pub struct Command {
 struct LoadedPayload {
     /// The index (from filename).
     index: u64,
-    /// The payload envelope.
-    envelope: ExecutionPayloadEnvelopeV4,
+    /// The execution data for the block.
+    execution_data: ExecutionData,
     /// The block hash.
     block_hash: B256,
+    /// Big block data containing environment switches and prior block hashes.
+    big_block_data: BigBlockData<ExecutionData>,
 }
 
 impl Command {
@@ -132,7 +135,7 @@ impl Command {
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms minimum interval between blocks", duration.as_millis());
         }
         if self.reth_new_payload {
             info!("Using reth_newPayload and reth_forkchoiceUpdated endpoints");
@@ -171,8 +174,7 @@ impl Command {
         if self.gas_ramp_dir.is_some() {
             warn!(
                 target: "reth-bench",
-                "--gas-ramp-dir is deprecated and ignored. Use --testing.skip-gas-limit-ramp-check \
-                 and --testing.gas-limit on the reth node instead."
+                "--gas-ramp-dir is deprecated and ignored."
             );
         }
 
@@ -183,22 +185,33 @@ impl Command {
         }
         info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
+        // If any payload has env_switches but we're not using reth_newPayload, warn the user
+        if !self.reth_new_payload {
+            let has_env_switches =
+                payloads.iter().any(|p| !p.big_block_data.env_switches.is_empty());
+            if has_env_switches {
+                warn!(
+                    target: "reth-bench",
+                    "Payloads contain env_switches but --reth-new-payload is not set. \
+                     env_switches are only supported with reth_newPayload and will be ignored."
+                );
+            }
+        }
+
         let mut parent_hash = initial_parent_hash;
 
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
 
         for (i, payload) in payloads.iter().enumerate() {
-            let envelope = &payload.envelope;
+            let execution_data = &payload.execution_data;
             let block_hash = payload.block_hash;
-            let execution_payload = &envelope.envelope_inner.execution_payload;
-            let inner_payload = &execution_payload.payload_inner.payload_inner;
+            let v1 = execution_data.payload.as_v1();
 
-            let gas_used = inner_payload.gas_used;
-            let gas_limit = inner_payload.gas_limit;
-            let block_number = inner_payload.block_number;
-            let transaction_count =
-                execution_payload.payload_inner.payload_inner.transactions.len() as u64;
+            let gas_used = v1.gas_used;
+            let gas_limit = v1.gas_limit;
+            let block_number = v1.block_number;
+            let transaction_count = v1.transactions.len() as u64;
 
             debug!(
                 target: "reth-bench",
@@ -218,40 +231,37 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let use_reth = self.reth_new_payload;
-            let (version, params) = if use_reth {
+            let (version, params) = if self.reth_new_payload {
+                let big_block_data_param = if payload.big_block_data.env_switches.is_empty() &&
+                    payload.big_block_data.prior_block_hashes.is_empty()
+                {
+                    None
+                } else {
+                    Some(payload.big_block_data.clone())
+                };
                 let wait_for_persistence = self
                     .wait_for_persistence
                     .unwrap_or(WaitForPersistence::Never)
                     .rpc_value(block_number);
-                let reth_data = ExecutionData {
-                    payload: execution_payload.clone().into(),
-                    sidecar: ExecutionPayloadSidecar::v4(
-                        CancunPayloadFields {
-                            versioned_hashes: Vec::new(),
-                            parent_beacon_block_root: B256::ZERO,
-                        },
-                        PraguePayloadFields {
-                            requests: envelope.execution_requests.clone().into(),
-                        },
-                    ),
-                };
                 (
                     None,
                     serde_json::to_value((
-                        RethNewPayloadInput::ExecutionData(reth_data),
+                        RethNewPayloadInput::ExecutionData(execution_data.clone()),
                         wait_for_persistence,
                         self.no_wait_for_caches.then_some(false),
+                        big_block_data_param,
                     ))?,
                 )
             } else {
+                let requests =
+                    execution_data.sidecar.requests().cloned().unwrap_or_default().to_vec();
                 (
                     Some(EngineApiMessageVersion::V4),
                     serde_json::to_value((
-                        execution_payload.clone(),
+                        execution_data.payload.clone(),
                         Vec::<B256>::new(),
                         B256::ZERO,
-                        envelope.execution_requests.to_vec(),
+                        requests,
                     ))?,
                 )
             };
@@ -264,7 +274,10 @@ impl Command {
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
-                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                persistence_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.persistence_wait)
+                    .unwrap_or_default(),
                 execution_cache_wait: server_timings
                     .as_ref()
                     .map(|t| t.execution_cache_wait)
@@ -307,6 +320,13 @@ impl Command {
                 tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
 
+            if let Some(wait_time) = self.wait_time {
+                let remaining = wait_time.saturating_sub(start.elapsed());
+                if !remaining.is_zero() {
+                    tokio::time::sleep(remaining).await;
+                }
+            }
+
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
@@ -342,28 +362,42 @@ impl Command {
     }
 
     /// Load and parse all payload files from the directory.
+    ///
+    /// Tries to load each file as a [`BigBlockPayload`] first (which includes `env_switches`),
+    /// falling back to [`ExecutionPayloadEnvelopeV4`] for backwards compatibility.
     fn load_payloads(&self) -> eyre::Result<Vec<LoadedPayload>> {
         let mut payloads = Vec::new();
 
-        // Read directory entries
+        // Read directory entries — match both legacy "payload_block_*.json" and new
+        // "big_block_*.json" formats
         let entries: Vec<_> = std::fs::read_dir(&self.payload_dir)
             .wrap_err_with(|| format!("Failed to read directory {:?}", self.payload_dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
+                let name = e.file_name();
+                let name_str = name.to_string_lossy();
                 e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                    (name_str.starts_with("payload_block_") ||
+                        name_str.starts_with("big_block_"))
             })
             .collect();
 
-        // Parse filenames to get indices and sort
+        // Parse filenames to get indices and sort.
+        // Supports "payload_block_N.json" and "big_block_FROM_to_TO.json" naming.
         let mut indexed_paths: Vec<(u64, PathBuf)> = entries
             .into_iter()
             .filter_map(|e| {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
-                // Extract index from "payload_NNN.json"
-                let index_str = name_str.strip_prefix("payload_block_")?.strip_suffix(".json")?;
-                let index: u64 = index_str.parse().ok()?;
+                let index = if let Some(rest) = name_str.strip_prefix("payload_block_") {
+                    rest.strip_suffix(".json")?.parse::<u64>().ok()?
+                } else if let Some(rest) = name_str.strip_prefix("big_block_") {
+                    // "big_block_FROM_to_TO.json" — use FROM as the index
+                    let rest = rest.strip_suffix(".json")?;
+                    rest.split("_to_").next()?.parse::<u64>().ok()?
+                } else {
+                    return None;
+                };
                 Some((index, e.path()))
             })
             .collect();
@@ -381,21 +415,42 @@ impl Command {
         for (index, path) in indexed_paths {
             let content = std::fs::read_to_string(&path)
                 .wrap_err_with(|| format!("Failed to read {:?}", path))?;
-            let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
-                .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
 
-            let block_hash =
-                envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
+            // Try BigBlockPayload first, then fall back to legacy ExecutionPayloadEnvelopeV4
+            let (execution_data, big_block_data) =
+                if let Ok(big_block) = serde_json::from_str::<BigBlockPayload>(&content) {
+                    (big_block.execution_data, big_block.big_block_data)
+                } else {
+                    let envelope: ExecutionPayloadEnvelopeV4 = serde_json::from_str(&content)
+                        .wrap_err_with(|| format!("Failed to parse {:?}", path))?;
+                    let execution_data = ExecutionData {
+                        payload: envelope.envelope_inner.execution_payload.clone().into(),
+                        sidecar: ExecutionPayloadSidecar::v4(
+                            CancunPayloadFields {
+                                versioned_hashes: Vec::new(),
+                                parent_beacon_block_root: B256::ZERO,
+                            },
+                            PraguePayloadFields {
+                                requests: envelope.execution_requests.clone().into(),
+                            },
+                        ),
+                    };
+                    (execution_data, BigBlockData::default())
+                };
+
+            let block_hash = execution_data.payload.as_v1().block_hash;
 
             debug!(
                 target: "reth-bench",
                 index = index,
                 block_hash = %block_hash,
+                env_switches = big_block_data.env_switches.len(),
+                prior_block_hashes = big_block_data.prior_block_hashes.len(),
                 path = %path.display(),
                 "Loaded payload"
             );
 
-            payloads.push(LoadedPayload { index, envelope, block_hash });
+            payloads.push(LoadedPayload { index, execution_data, block_hash, big_block_data });
         }
 
         Ok(payloads)
