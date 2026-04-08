@@ -876,7 +876,7 @@ jobs:
           sleep 1
           if mountpoint -q "$SCHELK_MOUNT"; then
             sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
+            sudo schelk recover -y --kill || true
           fi
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"

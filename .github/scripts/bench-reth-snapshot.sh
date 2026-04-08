@@ -79,7 +79,7 @@ echo "$MANIFEST_CONTENT" \
 
 # Prepare mount. If a previous run left the volume mounted, let schelk recover
 # it in place so dm-era can restore only the changed blocks.
-mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y --kill || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"

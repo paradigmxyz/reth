@@ -405,7 +405,7 @@ sudo pkill -9 reth 2>/dev/null || true
 sleep 1
 if mountpoint -q "$SCHELK_MOUNT" 2>/dev/null; then
   sudo umount -l "$SCHELK_MOUNT" 2>/dev/null || true
-  sudo schelk recover -y 2>/dev/null || true
+  sudo schelk recover -y --kill 2>/dev/null || true
 fi
 echo
 

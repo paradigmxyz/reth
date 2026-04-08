@@ -62,7 +62,7 @@ jobs:
           sleep 1
           if mountpoint -q "$SCHELK_MOUNT"; then
             sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
+            sudo schelk recover -y --kill || true
           fi
           sudo schelk mount -y
           sync
@@ -103,5 +103,5 @@ jobs:
         run: |
           if mountpoint -q "$SCHELK_MOUNT"; then
             sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
+            sudo schelk recover -y --kill || true
           fi
