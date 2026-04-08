@@ -47,15 +47,13 @@ impl ExecutionWitnessRecord {
                 )
                 .collect(),
             ExecutionWitnessMode::Canonical => {
-                let mut accessed_codes = B256Map::default();
-                for code in statedb.cache.contracts.values() {
-                    let code = code.original_bytes();
-                    if code.is_empty() {
-                        continue;
-                    }
-                    accessed_codes.entry(keccak256(&code)).or_insert(code);
-                }
-                let mut codes: Vec<_> = accessed_codes.into_values().collect();
+                let mut codes: Vec<_> = statedb
+                    .cache
+                    .contracts
+                    .values()
+                    .map(|c| c.original_bytes())
+                    .filter(|code| !code.is_empty())
+                    .collect();
                 codes.sort_unstable();
                 codes
             }
