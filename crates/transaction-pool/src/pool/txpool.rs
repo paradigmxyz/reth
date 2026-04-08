@@ -965,7 +965,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
                 // Ensure authority does not exceed the configured inflight delegation slot limit.
-                if self.all_transactions.txs_iter(*sender_id).nth(self.config.max_inflight_delegated_slot_limit).is_some() {
+                if self
+                    .all_transactions
+                    .txs_iter(*sender_id)
+                    .nth(self.config.max_inflight_delegated_slot_limit)
+                    .is_some()
+                {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
