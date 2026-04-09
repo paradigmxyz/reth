@@ -5,7 +5,9 @@ use crate::{
     LazyLock, OpChainSpec,
 };
 use alloc::sync::Arc;
-use reth_mantle_forks::{MANTLE_MAINNET_LIMB_TIMESTAMP, MANTLE_MAINNET_SKADI_TIMESTAMP};
+use reth_mantle_forks::{
+    MANTLE_MAINNET_ARSIA_TIMESTAMP, MANTLE_MAINNET_LIMB_TIMESTAMP, MANTLE_MAINNET_SKADI_TIMESTAMP,
+};
 use reth_primitives_traits::SealedHeader;
 
 /// Mantle Mainnet genesis hash
@@ -151,7 +153,7 @@ fn create_mantle_mainnet_genesis() -> alloy_genesis::Genesis {
         MantleGenesisInfo {
             mantle_skadi_time: Some(MANTLE_MAINNET_SKADI_TIMESTAMP),
             mantle_limb_time: Some(MANTLE_MAINNET_LIMB_TIMESTAMP),
-            mantle_arsia_time: None,
+            mantle_arsia_time: Some(MANTLE_MAINNET_ARSIA_TIMESTAMP),
         },
     );
 
@@ -165,6 +167,7 @@ mod tests {
     use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, EthereumHardforks};
     use reth_ethereum_forks::EthereumHardfork;
     use reth_mantle_forks::{MantleHardfork, MantleHardforks};
+    use reth_optimism_forks::{OpHardfork, OpHardforks};
 
     #[test]
     fn verify_mantle_mainnet_chain_id() {
@@ -194,6 +197,17 @@ mod tests {
     }
 
     #[test]
+    fn verify_arsia_is_configured() {
+        let spec = MANTLE_MAINNET.clone();
+
+        // Arsia should be active at the hardcoded timestamp
+        assert!(spec.is_arsia_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+
+        // Arsia should not be active before the timestamp
+        assert!(!spec.is_arsia_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP - 1));
+    }
+
+    #[test]
     fn verify_hardfork_timestamps() {
         let spec = MANTLE_MAINNET.clone();
 
@@ -204,6 +218,18 @@ mod tests {
 
         // Verify that Osaka is mapped to Limb timestamp
         assert!(spec.is_osaka_active_at_timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP));
+
+        // Verify all 7 OP-layer forks are aligned to Arsia timestamp
+        assert!(spec.is_canyon_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_ecotone_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_fjord_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_granite_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_holocene_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_isthmus_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(spec.is_jovian_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP));
+        assert!(!spec.is_canyon_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP - 1));
+        assert!(!spec.is_holocene_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP - 1));
+        assert!(!spec.is_jovian_active_at_timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP - 1));
     }
 
     #[test]
@@ -230,5 +256,7 @@ mod tests {
         assert_eq!(builtin.fork(MantleHardfork::Skadi), expected.fork(MantleHardfork::Skadi));
         assert_eq!(builtin.fork(MantleHardfork::Limb), expected.fork(MantleHardfork::Limb));
         assert_eq!(builtin.fork(MantleHardfork::Arsia), expected.fork(MantleHardfork::Arsia));
+        assert_eq!(builtin.fork(OpHardfork::Holocene), expected.fork(OpHardfork::Holocene));
+        assert_eq!(builtin.fork(OpHardfork::Jovian), expected.fork(OpHardfork::Jovian));
     }
 }

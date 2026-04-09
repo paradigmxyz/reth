@@ -65,6 +65,9 @@ pub const MANTLE_MAINNET_SKADI_TIMESTAMP: u64 = 1_756_278_000; // Wed Aug 27 202
 /// Limb upgrade timestamp for Mantle mainnet
 pub const MANTLE_MAINNET_LIMB_TIMESTAMP: u64 = 1_768_374_000; // Wed Jan 14 2026 15:00:00 GMT+0800
 
+/// Arsia upgrade timestamp for Mantle mainnet
+pub const MANTLE_MAINNET_ARSIA_TIMESTAMP: u64 = 1_776_841_200; // Wed Apr 22 2026 15:00:00 GMT+0800
+
 /// Skadi upgrade timestamp for Mantle Sepolia testnet
 pub const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200; // Wed Jul 16 2025 15:00:00 GMT+0800
 
@@ -117,7 +120,10 @@ impl MantleHardfork {
                 if timestamp < MANTLE_MAINNET_LIMB_TIMESTAMP {
                     return Some(Self::Skadi);
                 }
-                Some(Self::Limb)
+                if timestamp < MANTLE_MAINNET_ARSIA_TIMESTAMP {
+                    return Some(Self::Limb);
+                }
+                Some(Self::Arsia)
             }
             NamedChain::MantleSepolia => {
                 if timestamp < MANTLE_SEPOLIA_SKADI_TIMESTAMP {
@@ -140,6 +146,7 @@ impl MantleHardfork {
         vec![
             (Self::Skadi, ForkCondition::Timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP)),
             (Self::Limb, ForkCondition::Timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP)),
+            (Self::Arsia, ForkCondition::Timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP)),
         ]
     }
 
@@ -363,6 +370,10 @@ mod tests {
             mantle_mainnet_forks[Limb],
             ForkCondition::Timestamp(MANTLE_MAINNET_LIMB_TIMESTAMP)
         );
+        assert_eq!(
+            mantle_mainnet_forks[Arsia],
+            ForkCondition::Timestamp(MANTLE_MAINNET_ARSIA_TIMESTAMP)
+        );
     }
 
     #[test]
@@ -461,6 +472,29 @@ mod tests {
                 MANTLE_MAINNET_LIMB_TIMESTAMP - 1
             ),
             Some(MantleHardfork::Skadi)
+        );
+    }
+
+    #[test]
+    fn test_reverse_lookup_mainnet_arsia_hardfork() {
+        let mantle_mainnet_chain = Chain::from_id(MANTLE_MAINNET_CHAIN_ID);
+
+        // Arsia should be active at its timestamp
+        assert_eq!(
+            MantleHardfork::from_chain_and_timestamp(
+                mantle_mainnet_chain,
+                MANTLE_MAINNET_ARSIA_TIMESTAMP
+            ),
+            Some(MantleHardfork::Arsia)
+        );
+
+        // One second before Arsia: still Limb
+        assert_eq!(
+            MantleHardfork::from_chain_and_timestamp(
+                mantle_mainnet_chain,
+                MANTLE_MAINNET_ARSIA_TIMESTAMP - 1
+            ),
+            Some(MantleHardfork::Limb)
         );
     }
 
