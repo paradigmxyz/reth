@@ -762,7 +762,6 @@ jobs:
             const changes = summary.changes || {};
             const mode = process.env.BENCH_MODE || 'nightly';
             const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
-            const hasSignificant = Object.values(changes).some(c => c.sig === 'good' || c.sig === 'bad');
 
             // Hourly mode: only notify on regressions
             if (mode === 'hourly' && !hasRegression) {
@@ -770,11 +769,7 @@ jobs:
               return;
             }
 
-            // Nightly mode: notify on any significant change (regression or improvement)
-            if (!hasSignificant) {
-              core.info('No significant changes detected, skipping nightly Slack notification');
-              return;
-            }
+            // Nightly mode: always notify (report every run regardless of significance)
 
             const SLACK_VERDICT = {
               '⚠️': ':warning:',
