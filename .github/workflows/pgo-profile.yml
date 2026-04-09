@@ -58,12 +58,7 @@ jobs:
 
       - name: Mount snapshot
         run: |
-          sudo pkill -9 reth || true
-          sleep 1
-          if mountpoint -q "$SCHELK_MOUNT"; then
-            sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
-          fi
+          sudo schelk recover -y --kill || true
           sudo schelk mount -y
           sync
           sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
@@ -101,7 +96,4 @@ jobs:
       - name: Recover snapshot
         if: always()
         run: |
-          if mountpoint -q "$SCHELK_MOUNT"; then
-            sudo umount -l "$SCHELK_MOUNT" || true
-            sudo schelk recover -y || true
-          fi
+          sudo schelk recover -y --kill || true

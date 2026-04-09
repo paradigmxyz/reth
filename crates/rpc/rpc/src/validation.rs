@@ -589,7 +589,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
 /// insertion order, then computes a SHA256 hash of the concatenated addresses.
 fn hash_disallow_list(disallow: &AddressSet) -> String {
     let mut sorted: Vec<_> = disallow.iter().collect();
-    sorted.sort(); // sort for deterministic hashing
+    sorted.sort_unstable(); // sort for deterministic hashing
 
     let mut hasher = Sha256::new();
     for addr in sorted {
