@@ -73,7 +73,7 @@ case "$MODE" in
     mkdir -p "${SOURCE_DIR}/target/profiling"
 
     CACHE_VALID=false
-    if $MC stat "${BUCKET}/${NODE_BIN}" &>/dev/null; then
+    if $MC stat --no-list "${BUCKET}/${NODE_BIN}" &>/dev/null; then
       echo "Cache hit for baseline (${COMMIT}), downloading ${NODE_BIN}..."
       if $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
          chmod +x "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
@@ -105,7 +105,7 @@ case "$MODE" in
     BUCKET="minio/reth-binaries/${BRANCH_SHA}${BUILD_SUFFIX}"
 
     CACHE_VALID=false
-    if $MC stat "${BUCKET}/${NODE_BIN}" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
+    if $MC stat --no-list "${BUCKET}/${NODE_BIN}" &>/dev/null && $MC stat --no-list "${BUCKET}/reth-bench" &>/dev/null; then
       echo "Cache hit for ${BRANCH_SHA}, downloading binaries..."
       mkdir -p "${SOURCE_DIR}/target/profiling"
       if $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
