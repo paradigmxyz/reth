@@ -16,7 +16,7 @@
 #
 # Required: mc (MinIO client) with a configured alias
 # Optional env: BENCH_BIG_BLOCKS (true/false) — build reth-bb instead of reth
-set -euo pipefail
+set -euxo pipefail
 
 MC="mc"
 MODE="$1"

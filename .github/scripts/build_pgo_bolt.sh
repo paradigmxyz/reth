@@ -25,7 +25,7 @@
 #
 # Output:
 #   target/$PROFILE_DIR/reth  — final optimized binary
-set -euo pipefail
+set -euxo pipefail
 
 gha_section_start() {
     local title="$1"
