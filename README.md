@@ -13,7 +13,6 @@
 | [User Docs](https://reth.rs)
 | [Developer Docs](./docs)
 | [Crate Docs](https://reth.rs/docs)
-| [2.0 Blog Post](https://www.paradigm.xyz/2026/04/releasing-reth-2-0)
 
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/unit.yml
 [gh-lint]: https://github.com/paradigmxyz/reth/actions/workflows/lint.yml
