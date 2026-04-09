@@ -50,7 +50,7 @@ rand_08.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
 [features]
-default = ["std"]
+default = ["std", "reth-codec"]
 std = [
     "reth-primitives-traits/std",
     "reth-codecs?/std",
