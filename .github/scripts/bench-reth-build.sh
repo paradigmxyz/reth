@@ -75,12 +75,12 @@ case "$MODE" in
     CACHE_VALID=false
     if $MC stat "${BUCKET}/${NODE_BIN}" &>/dev/null; then
       echo "Cache hit for baseline (${COMMIT}), downloading ${NODE_BIN}..."
-      $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}"
-      chmod +x "${SOURCE_DIR}/target/profiling/${NODE_BIN}"
-      if verify_binary "${SOURCE_DIR}/target/profiling/${NODE_BIN}" "${COMMIT}"; then
+      if $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
+         chmod +x "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
+         verify_binary "${SOURCE_DIR}/target/profiling/${NODE_BIN}" "${COMMIT}"; then
         CACHE_VALID=true
       else
-        echo "Cached baseline binary is stale, rebuilding..."
+        echo "Cached baseline binary is stale or download failed, rebuilding..."
       fi
     fi
     if [ "$CACHE_VALID" = false ]; then
@@ -108,13 +108,13 @@ case "$MODE" in
     if $MC stat "${BUCKET}/${NODE_BIN}" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
       echo "Cache hit for ${BRANCH_SHA}, downloading binaries..."
       mkdir -p "${SOURCE_DIR}/target/profiling"
-      $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}"
-      $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
-      chmod +x "${SOURCE_DIR}/target/profiling/${NODE_BIN}" /home/ubuntu/.cargo/bin/reth-bench
-      if verify_binary "${SOURCE_DIR}/target/profiling/${NODE_BIN}" "${COMMIT}"; then
+      if $MC cp "${BUCKET}/${NODE_BIN}" "${SOURCE_DIR}/target/profiling/${NODE_BIN}" && \
+         $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench && \
+         chmod +x "${SOURCE_DIR}/target/profiling/${NODE_BIN}" /home/ubuntu/.cargo/bin/reth-bench && \
+         verify_binary "${SOURCE_DIR}/target/profiling/${NODE_BIN}" "${COMMIT}"; then
         CACHE_VALID=true
       else
-        echo "Cached feature binary is stale, rebuilding..."
+        echo "Cached feature binary is stale or download failed, rebuilding..."
       fi
     fi
     if [ "$CACHE_VALID" = false ]; then
