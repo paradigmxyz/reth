@@ -513,7 +513,7 @@ where
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        self.pool.add_transactions(origin, validated.into_iter())
+        self.pool.add_transactions(origin, validated)
     }
 
     async fn add_transactions_with_origins(

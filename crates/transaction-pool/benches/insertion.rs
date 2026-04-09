@@ -17,7 +17,7 @@ fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockT
     for sender_idx in 0..num_senders {
         // Create a unique sender address
         let sender_bytes = sender_idx.to_be_bytes();
-        let addr_slice = [0u8; 12].into_iter().chain(sender_bytes.into_iter()).collect::<Vec<_>>();
+        let addr_slice = [0u8; 12].into_iter().chain(sender_bytes).collect::<Vec<_>>();
         let sender = Address::from_slice(&addr_slice);
 
         // Generate transactions for this sender

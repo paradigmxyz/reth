@@ -76,6 +76,8 @@ std = [
     "miniz_oxide?/std",
     "thiserror?/std",
     "op-alloy-consensus/std",
+    "alloy-serde/std",
+    "reth-mantle-forks/std",
 ]
 serde = [
     "alloy-chains/serde",
@@ -91,4 +93,5 @@ serde = [
     "reth-primitives-traits/serde",
     "op-alloy-consensus/serde",
     "alloy-op-hardforks/serde",
+    "reth-mantle-forks/serde",
 ]

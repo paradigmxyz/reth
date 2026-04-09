@@ -1924,8 +1924,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // delete previous value
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
+                    .as_ref()
+                    .is_some_and(|s| s.key == *storage_key)
                 {
                     plain_storage_cursor.delete_current()?
                 }
@@ -2022,8 +2022,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // delete previous value
                 if plain_storage_cursor
                     .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
+                    .as_ref()
+                    .is_some_and(|s| s.key == *storage_key)
                 {
                     plain_storage_cursor.delete_current()?
                 }
@@ -2536,8 +2536,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
 
             if hashed_storage
                 .seek_by_key_subkey(hashed_address, key)?
-                .filter(|entry| entry.key == key)
-                .is_some()
+                .as_ref()
+                .is_some_and(|entry| entry.key == key)
             {
                 hashed_storage.delete_current()?;
             }
@@ -2588,8 +2588,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             storage.into_iter().try_for_each(|(key, value)| -> ProviderResult<()> {
                 if hashed_storage_cursor
                     .seek_by_key_subkey(hashed_address, key)?
-                    .filter(|entry| entry.key == key)
-                    .is_some()
+                    .as_ref()
+                    .is_some_and(|entry| entry.key == key)
                 {
                     hashed_storage_cursor.delete_current()?;
                 }
@@ -2823,7 +2823,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 
-        let mut next_tx_num = self
+        let next_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
             .last()?
@@ -2835,7 +2835,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
+        for (next_tx_num, (transaction, sender)) in
+            (first_tx_num..).zip(block.body().transactions_iter().zip(block.senders_iter()))
+        {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
@@ -2845,7 +2847,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
                 self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
             }
-            next_tx_num += 1;
         }
 
         self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;

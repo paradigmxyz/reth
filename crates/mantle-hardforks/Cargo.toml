@@ -39,10 +39,28 @@ tracing = { workspace = true, optional = true }
 
 [features]
 default = ["std", "serde"]
-std = []
+std = [
+    "alloy-chains/std",
+    "alloy-op-evm/std",
+    "alloy-primitives?/std",
+    "op-revm/std",
+    "reth-optimism-forks/std",
+    "reth-primitives-traits?/std",
+    "revm?/std",
+    "serde?/std",
+    "tracing?/std",
+]
 serde = [
     "alloy-hardforks/serde",
     "dep:serde",
+    "alloy-chains/serde",
+    "alloy-primitives?/serde",
+    "op-revm/serde",
+    "reth-optimism-forks/serde",
+    "reth-primitives-traits?/serde",
+    "reth-trie?/serde",
+    "reth-trie-db?/serde",
+    "revm?/serde",
 ]
 # Debug: export full state on state root mismatch (dev/troubleshooting only, not for production)
 state-export = [

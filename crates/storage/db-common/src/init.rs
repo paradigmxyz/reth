@@ -796,8 +796,8 @@ where
 
         if hashed_storage_cursor
             .seek_by_key_subkey(hashed_address, hashed_key)?
-            .filter(|entry| entry.key == hashed_key)
-            .is_some()
+            .as_ref()
+            .is_some_and(|entry| entry.key == hashed_key)
         {
             hashed_storage_cursor.delete_current()?;
         }

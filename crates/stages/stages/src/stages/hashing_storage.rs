@@ -528,8 +528,8 @@ mod tests {
 
                     if storage_cursor
                         .seek_by_key_subkey(bn_address.address(), entry.key)?
-                        .filter(|e| e.key == entry.key)
-                        .is_some()
+                        .as_ref()
+                        .is_some_and(|e| e.key == entry.key)
                     {
                         storage_cursor.delete_current()?;
                     }

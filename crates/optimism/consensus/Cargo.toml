@@ -74,4 +74,5 @@ std = [
     "thiserror/std",
     "reth-execution-types/std",
     "op-alloy-consensus/std",
+    "reth-mantle-forks/std",
 ]

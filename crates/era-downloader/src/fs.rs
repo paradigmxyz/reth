@@ -43,7 +43,7 @@ pub fn read_dir(
         .collect::<eyre::Result<Vec<_>>>()?;
     let mut checksums = checksums.ok_or_eyre("Missing file `checksums.txt` in the `dir`")?;
 
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    entries.sort_by_key(|(left, _)| *left);
 
     Ok(stream::iter(entries.into_iter().skip(start_from as usize / BLOCKS_PER_FILE).map(
         move |(_, path)| {

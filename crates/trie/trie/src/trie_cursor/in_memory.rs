@@ -637,7 +637,7 @@ mod tests {
                     .into_iter()
                     .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })
@@ -659,7 +659,7 @@ mod tests {
                     .into_iter()
                     .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })

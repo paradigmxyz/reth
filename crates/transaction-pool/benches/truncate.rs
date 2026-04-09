@@ -77,7 +77,7 @@ fn generate_many_transactions(
         let idx_slice = idx.to_be_bytes();
 
         // pad with 12 bytes of zeros before rest
-        let addr_slice = [0u8; 12].into_iter().chain(idx_slice.into_iter()).collect::<Vec<_>>();
+        let addr_slice = [0u8; 12].into_iter().chain(idx_slice).collect::<Vec<_>>();
 
         let sender = Address::from_slice(&addr_slice);
         txs.extend(create_transactions_for_sender(&mut runner, sender, depth, only_eip4844));
