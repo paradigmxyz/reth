@@ -1177,7 +1177,7 @@ fn resumable_download(
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
 
     let mut total_size: Option<u64> = None;
-    let mut last_error: Option<eyre::Error> = None;
+    let mut retries: u32 = 0;
 
     let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
         fs::rename(&part_path, &final_path)?;
@@ -1187,7 +1187,7 @@ fn resumable_download(
         Ok((final_path.clone(), size))
     };
 
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+    loop {
         let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
 
         if let Some(total) = total_size &&
@@ -1196,18 +1196,18 @@ fn resumable_download(
             return finalize_download(total);
         }
 
-        if attempt > 1 {
+        if retries > 0 {
             info!(target: "reth::cli",
                 file = %file_name,
-                "Retry attempt {}/{} - resuming from {} bytes",
-                attempt, MAX_DOWNLOAD_RETRIES, existing_size
+                retries,
+                "Resuming download from {} bytes", existing_size
             );
         }
 
         let mut request = client.get(url);
         if existing_size > 0 {
             request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if !quiet && attempt == 1 {
+            if !quiet && retries == 0 {
                 info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
             }
         }
@@ -1215,14 +1215,16 @@ fn resumable_download(
         let response = match request.send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    info!(target: "reth::cli",
-                        file = %file_name,
-                        "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
-                    );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                retries += 1;
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
                 }
+                warn!(target: "reth::cli",
+                    file = %file_name,
+                    %e,
+                    "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                );
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 continue;
             }
         };
@@ -1293,23 +1295,33 @@ fn resumable_download(
             println!();
         }
 
-        if let Err(e) = copy_result.and(flush_result) {
-            last_error = Some(e.into());
-            if attempt < MAX_DOWNLOAD_RETRIES {
-                info!(target: "reth::cli",
+        match copy_result.and(flush_result) {
+            Err(e) => {
+                // Check if any new data was written since we started this attempt.
+                // If so, the connection was productive — reset the consecutive failure
+                // counter so transient mid-stream errors don't exhaust retries.
+                let new_size = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+                if new_size > existing_size {
+                    retries = 0;
+                } else {
+                    retries += 1;
+                }
+
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
+                }
+
+                warn!(target: "reth::cli",
                     file = %file_name,
+                    %e,
                     "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
                 );
                 std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                continue;
             }
-            continue;
+            Ok(_) => return finalize_download(current_total),
         }
-
-        return finalize_download(current_total);
     }
-
-    Err(last_error
-        .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
 }
 
 /// Streams a remote archive directly into the extractor without writing to disk.
