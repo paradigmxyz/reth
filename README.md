@@ -37,7 +37,7 @@ Reth (short for Rust Ethereum, [pronunciation](https://x.com/kelvinfichter/statu
 
 Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime services. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
 
-- **Reth 2.0** released April 2026. See the [release notes](https://github.com/paradigmxyz/reth/releases/tag/v2.0.0).
+- **Reth 2.0** released April 2026. See the [release notes](https://github.com/paradigmxyz/reth/releases/tag/v2.0.0) and [blog post](https://www.paradigm.xyz/2026/04/releasing-reth-2-0).
 - **Reth 1.0** released June 2024. Audited by [Sigma Prime](https://sigmaprime.io/) ([report](./audit/sigma_prime_audit_v2.pdf)). Revm audited by [Guido Vranken](https://x.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)).
 
 ### Storage compatibility
