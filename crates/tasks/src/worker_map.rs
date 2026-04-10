@@ -5,7 +5,7 @@
 //! named task, like a 1-thread thread pool keyed by name.
 
 use dashmap::DashMap;
-use std::thread;
+use std::{panic::AssertUnwindSafe, thread};
 use tokio::sync::{mpsc, oneshot};
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
@@ -26,7 +26,7 @@ impl WorkerThread {
             .name(name.to_string())
             .spawn(move || {
                 while let Some(task) = rx.blocking_recv() {
-                    task();
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
                 }
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));

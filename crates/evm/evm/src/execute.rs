@@ -358,9 +358,14 @@ pub trait BlockBuilder {
     }
 
     /// Completes the block building process and returns the [`BlockBuilderOutcome`].
+    ///
+    /// When `state_root_precomputed` is `None`, the state root is computed internally via
+    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
+    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
         state_provider: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
@@ -477,6 +482,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -484,11 +490,13 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        let (state_root, trie_updates) = match state_root_precomputed {
+            Some(precomputed) => precomputed,
+            None => state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?,
+        };
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
@@ -535,8 +543,7 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = State::builder().with_database(db).with_bundle_update().build();
         Self { strategy_factory, db }
     }
 }

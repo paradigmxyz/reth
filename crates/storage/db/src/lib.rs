@@ -140,6 +140,18 @@ pub mod test_utils {
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
         }
+
+        fn path(&self) -> std::path::PathBuf {
+            self.db().path()
+        }
+
+        fn oldest_reader_txnid(&self) -> Option<u64> {
+            self.db().oldest_reader_txnid()
+        }
+
+        fn last_txnid(&self) -> Option<u64> {
+            self.db().last_txnid()
+        }
     }
 
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
@@ -218,6 +230,27 @@ pub mod test_utils {
         let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
         Arc::new(TempDatabase::new(db, path))
     }
+
+    /// Enables MDBX legacy multi-open mode, allowing the same database to be opened
+    /// multiple times within a single process. This is needed for tests that simulate
+    /// concurrent primary + read-only secondary provider scenarios.
+    ///
+    /// Must be called before any MDBX environment is opened.
+    ///
+    /// # Safety
+    ///
+    /// This uses `MDBX_DBG_LEGACY_MULTIOPEN` which recovers POSIX file locks on close.
+    /// It may cause unexpected pauses and does not perfectly mirror multi-process behavior.
+    /// Use only in tests.
+    pub fn enable_legacy_multiopen() {
+        unsafe {
+            reth_libmdbx::ffi::mdbx_setup_debug(
+                reth_libmdbx::ffi::MDBX_LOG_DONTCHANGE,
+                reth_libmdbx::ffi::MDBX_DBG_LEGACY_MULTIOPEN as reth_libmdbx::ffi::MDBX_debug_flags,
+                None,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -241,7 +274,7 @@ mod tests {
         // Test that TempDatabase properly cleans up its directory when dropped
         let temp_path = {
             let db = crate::test_utils::create_test_rw_db();
-            let path = db.path().to_path_buf();
+            let path = db.path();
             assert!(path.exists(), "Database directory should exist while TempDatabase is alive");
             path
             // TempDatabase dropped here

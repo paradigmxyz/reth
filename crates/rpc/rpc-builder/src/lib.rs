@@ -32,15 +32,17 @@ use jsonrpsee::{
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
-use reth_engine_primitives::ConsensusEngineEvent;
+use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
+use reth_rpc_engine_api::RethEngineApi;
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
@@ -327,12 +329,13 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
-    pub fn build_with_auth_server<EthApi>(
+    pub fn build_with_auth_server<EthApi, Payload>(
         self,
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -340,12 +343,13 @@ where
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
         let mut registry = self.into_registry(config, eth, engine_events);
         let modules = registry.create_transport_rpc_modules(module_config);
-        let auth_module = registry.create_auth_module(engine);
+        let auth_module = registry.create_auth_module(engine, beacon_engine_handle);
 
         (modules, auth_module, registry)
     }
@@ -390,20 +394,13 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
-        let mut modules = TransportRpcModules::default();
-
-        if !module_config.is_empty() {
-            let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
-
-            let mut registry = self.into_registry(config.unwrap_or_default(), eth, engine_events);
-
-            modules.config = module_config;
-            modules.http = registry.maybe_module(http.as_ref());
-            modules.ws = registry.maybe_module(ws.as_ref());
-            modules.ipc = registry.maybe_module(ipc.as_ref());
+        if module_config.is_empty() {
+            TransportRpcModules::default()
+        } else {
+            let config = module_config.config.clone().unwrap_or_default();
+            let mut registry = self.into_registry(config, eth, engine_events);
+            registry.create_transport_rpc_modules(module_config)
         }
-
-        modules
     }
 }
 
@@ -847,8 +844,13 @@ where
     }
 
     /// Instantiates `RethApi`
-    pub fn reth_api(&self) -> RethApi<Provider> {
-        RethApi::new(self.provider.clone(), self.executor.clone())
+    pub fn reth_api(&self) -> RethApi<Provider, EvmConfig> {
+        RethApi::new(
+            self.provider.clone(),
+            self.evm_config.clone(),
+            self.blocking_pool_guard.clone(),
+            self.executor.clone(),
+        )
     }
 }
 
@@ -870,11 +872,25 @@ where
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
+    ///   * `reth_` namespace
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module(&self, engine_api: impl IntoEngineApiRpcModule) -> AuthRpcModule {
+    pub fn create_auth_module<Payload>(
+        &self,
+        engine_api: impl IntoEngineApiRpcModule,
+        beacon_engine_handle: ConsensusEngineHandle<Payload>,
+    ) -> AuthRpcModule
+    where
+        Payload: PayloadTypes,
+    {
         let mut module = engine_api.into_rpc_module();
+
+        // Merge reth_* endpoints
+        let reth_engine_api = RethEngineApi::new(beacon_engine_handle);
+        module
+            .merge(RethEngineApiServer::into_rpc(reth_engine_api).remove_context())
+            .expect("No conflicting methods");
 
         // also merge a subset of `eth_` handlers
         let eth_handlers = self.eth_handlers();
@@ -1001,11 +1017,14 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Reth => RethApi::new(
+                            self.provider.clone(),
+                            self.evm_config.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.executor.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())

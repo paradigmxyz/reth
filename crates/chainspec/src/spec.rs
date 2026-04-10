@@ -275,7 +275,7 @@ pub fn create_chain_config(
     // Check if DAO fork is supported (it has an activation block)
     let dao_fork_support = hardforks.fork(EthereumHardfork::Dao) != ForkCondition::Never;
 
-    #[allow(clippy::needless_update)]
+    #[expect(clippy::needless_update)]
     ChainConfig {
         chain_id: chain.map(|c| c.id()).unwrap_or(0),
         homestead_block: block_num(EthereumHardfork::Homestead),
@@ -855,15 +855,9 @@ impl From<Genesis> for ChainSpec {
                             // those networks we use the activation
                             // blocks of those networks
                             match genesis.config.chain_id {
-                                1 => {
-                                    if ttd == MAINNET_PARIS_TTD {
-                                        return Some(MAINNET_PARIS_BLOCK)
-                                    }
-                                }
-                                11155111 => {
-                                    if ttd == SEPOLIA_PARIS_TTD {
-                                        return Some(SEPOLIA_PARIS_BLOCK)
-                                    }
+                                1 if ttd == MAINNET_PARIS_TTD => return Some(MAINNET_PARIS_BLOCK),
+                                11155111 if ttd == SEPOLIA_PARIS_TTD => {
+                                    return Some(SEPOLIA_PARIS_BLOCK)
                                 }
                                 _ => {}
                             };

@@ -16,7 +16,18 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    DerefMut,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -31,12 +42,7 @@ pub struct NewBlockHashes(
 impl NewBlockHashes {
     /// Returns the latest block in the list of blocks.
     pub fn latest(&self) -> Option<&BlockHashNumber> {
-        self.0.iter().fold(None, |latest, block| {
-            if let Some(latest) = latest {
-                return if latest.number > block.number { Some(latest) } else { Some(block) }
-            }
-            Some(block)
-        })
+        self.iter().max_by_key(|b| b.number)
     }
 }
 
@@ -99,7 +105,17 @@ generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBloc
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 10)]
@@ -111,7 +127,7 @@ pub struct Transactions<T = TransactionSigned>(
 impl<T: SignedTransaction> Transactions<T> {
     /// Returns `true` if the list of transactions contains any blob transactions.
     pub fn has_eip4844(&self) -> bool {
-        self.0.iter().any(|tx| tx.is_eip4844())
+        self.iter().any(|tx| tx.is_eip4844())
     }
 }
 
@@ -131,7 +147,9 @@ impl<T> From<Transactions<T>> for Vec<T> {
 ///
 /// The list of transactions is constructed on per-peers basis, but the underlying transaction
 /// objects are shared.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Deref, IntoIterator,
+)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp, 20)]
 pub struct SharedTransactions<T = TransactionSigned>(
@@ -180,7 +198,7 @@ impl NewPooledTransactionHashes {
     /// Returns an iterator over all transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &B256> + '_ {
         match self {
-            Self::Eth66(msg) => msg.0.iter(),
+            Self::Eth66(msg) => msg.iter(),
             Self::Eth68(msg) => msg.hashes.iter(),
         }
     }
@@ -212,7 +230,7 @@ impl NewPooledTransactionHashes {
     /// Returns an iterator over all transaction hashes.
     pub fn into_iter_hashes(self) -> impl Iterator<Item = B256> {
         match self {
-            Self::Eth66(msg) => msg.0.into_iter(),
+            Self::Eth66(msg) => msg.into_iter(),
             Self::Eth68(msg) => msg.hashes.into_iter(),
         }
     }
@@ -221,7 +239,7 @@ impl NewPooledTransactionHashes {
     /// the rest. If `len` is greater than the number of hashes, this has no effect.
     pub fn truncate(&mut self, len: usize) {
         match self {
-            Self::Eth66(msg) => msg.0.truncate(len),
+            Self::Eth66(msg) => msg.truncate(len),
             Self::Eth68(msg) => {
                 msg.types.truncate(len);
                 msg.sizes.truncate(len);
@@ -246,7 +264,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an immutable reference to the inner type if this an eth68 announcement.
+    /// Returns an immutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -254,7 +272,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth68 announcement.
     pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -262,7 +280,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    /// Returns a mutable reference to the inner type if this is an eth66 announcement.
     pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
@@ -270,7 +288,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth68 announcement.
+    /// Returns the inner type if this is an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
@@ -278,7 +296,7 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns the inner type if this an eth66 announcement.
+    /// Returns the inner type if this is an eth66 announcement.
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(mem::take(msg)),
@@ -310,7 +328,18 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    Deref,
+    DerefMut,
+    IntoIterator,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -838,8 +867,8 @@ mod tests {
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 0);
 
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 100 });
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 2 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 100 });
+        blocks.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
     }

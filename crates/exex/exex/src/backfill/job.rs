@@ -376,7 +376,7 @@ mod tests {
         );
 
         for (i, ((pipeline_block, pipeline_output), (backfill_block, mut backfill_output))) in
-            pipeline_results.iter().zip(backfill_results.into_iter()).enumerate()
+            pipeline_results.iter().zip(backfill_results).enumerate()
         {
             backfill_output.state.reverts.sort();
 

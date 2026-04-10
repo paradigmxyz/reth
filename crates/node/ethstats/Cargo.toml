@@ -21,7 +21,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 tokio.workspace = true
-tokio-tungstenite.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 futures-util.workspace = true
 tokio-stream.workspace = true
 

@@ -255,6 +255,52 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Tests that the sparse trie pipeline can be shared with the payload builder.
+///
+/// Enables both `share_execution_cache_with_payload_builder` and
+/// `share_sparse_trie_with_payload_builder`, then advances multiple blocks with random
+/// transactions. Each FCU spawns a `StateRootHandle` that the payload builder uses for
+/// incremental state root computation instead of blocking `state_root_with_updates()`.
+///
+/// The test validates that all blocks are successfully built and their state roots are
+/// accepted by the engine (newPayload returns VALID).
+#[tokio::test]
+async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let tree_config = TreeConfig::default()
+        .with_legacy_state_root(false)
+        .with_share_execution_cache_with_payload_builder(true)
+        .with_share_sparse_trie_with_payload_builder(true);
+
+    let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .prague_activated()
+                .build(),
+        ),
+        false,
+        tree_config,
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+    let mut rng = rand::rng();
+
+    let num_blocks = 5;
+    advance_with_random_transactions(&mut node, num_blocks, &mut rng, true).await?;
+
+    let best_block = node.inner.provider.best_block_number()?;
+    assert_eq!(best_block, num_blocks as u64, "Expected {} blocks, got {}", num_blocks, best_block);
+
+    Ok(())
+}
+
 /// Tests that sparse trie allocation reuse works correctly across consecutive blocks.
 ///
 /// This test exercises the sparse trie allocation reuse path by:
@@ -273,7 +319,7 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     let tree_config = TreeConfig::default()
         .with_legacy_state_root(false)
         .with_sparse_trie_prune_depth(2)
-        .with_sparse_trie_max_storage_tries(100);
+        .with_sparse_trie_max_hot_slots(100);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,

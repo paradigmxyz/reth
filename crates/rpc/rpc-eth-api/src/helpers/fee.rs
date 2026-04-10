@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::Future;
+use futures::{Future, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
@@ -73,6 +73,17 @@ pub trait EthFees:
                 return Err(EthApiError::InvalidRewardPercentiles.into())
             }
 
+            // If reward percentiles were specified, we
+            // need to validate that they are monotonically
+            // increasing and 0 <= p <= 100
+            // Note: The types used ensure that the percentiles are never < 0
+            if let Some(percentiles) = &reward_percentiles &&
+                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
+                    percentiles.windows(2).any(|w| w[0] > w[1]))
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
+            }
+
             // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
             let max_fee_history = if reward_percentiles.is_none() {
                 self.gas_oracle().config().max_header_history
@@ -118,17 +129,6 @@ pub trait EthFees:
                 block_count = end_block_plus;
             }
 
-            // If reward percentiles were specified, we
-            // need to validate that they are monotonically
-            // increasing and 0 <= p <= 100
-            // Note: The types used ensure that the percentiles are never < 0
-            if let Some(percentiles) = &reward_percentiles &&
-                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
-                    percentiles.windows(2).any(|w| w[0] > w[1]))
-            {
-                return Err(EthApiError::InvalidRewardPercentiles.into())
-            }
-
             // Fetch the headers and ensure we got all of them
             //
             // Treat a request for 1 block as a request for `newest_block..=newest_block`,
@@ -137,13 +137,18 @@ pub trait EthFees:
             let start_block = end_block_plus - block_count;
 
             // Collect base fees, gas usage ratios and (optionally) reward percentile data
-            let mut base_fee_per_gas: Vec<u128> = Vec::new();
-            let mut gas_used_ratio: Vec<f64> = Vec::new();
+            // Pre-allocate capacity: base_fee and blob_fee need +1 for the next block's fee
+            let mut base_fee_per_gas: Vec<u128> = Vec::with_capacity(block_count as usize + 1);
+            let mut gas_used_ratio: Vec<f64> = Vec::with_capacity(block_count as usize);
 
-            let mut base_fee_per_blob_gas: Vec<u128> = Vec::new();
-            let mut blob_gas_used_ratio: Vec<f64> = Vec::new();
+            let mut base_fee_per_blob_gas: Vec<u128> = Vec::with_capacity(block_count as usize + 1);
+            let mut blob_gas_used_ratio: Vec<f64> = Vec::with_capacity(block_count as usize);
 
-            let mut rewards: Vec<Vec<u128>> = Vec::new();
+            let mut rewards: Vec<Vec<u128>> = if reward_percentiles.is_some() {
+                Vec::with_capacity(block_count as usize)
+            } else {
+                Vec::new()
+            };
 
             // Check if the requested range is within the cache bounds
             let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
@@ -199,18 +204,23 @@ pub trait EthFees:
                         .unwrap_or_else(BlobParams::cancun);
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
-                    blob_gas_used_ratio.push(
-                        checked_blob_gas_used_ratio(
-                            header.blob_gas_used().unwrap_or_default(),
-                            blob_params.max_blob_gas_per_block(),
-                        )
-                    );
+                    blob_gas_used_ratio.push(checked_blob_gas_used_ratio(
+                        header.blob_gas_used().unwrap_or_default(),
+                        blob_params.max_blob_gas_per_block(),
+                    ));
+                }
 
-                    // Percentiles were specified, so we need to collect reward percentile info
-                    if let Some(percentiles) = &reward_percentiles {
-                        let (block, receipts) = self.cache()
-                            .get_block_and_receipts(header.hash())
-                            .await
+                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
+                    let hashes: Vec<_> = headers.iter().map(|h| h.hash()).collect();
+                    let mut stream =
+                        futures::stream::iter(hashes)
+                            .map(|hash| self.cache().get_block_and_receipts(hash))
+                            .buffered(4);
+                    let mut header_idx = 0;
+                    while let Some(result) = stream.next().await {
+                        let header = &headers[header_idx];
+                        header_idx += 1;
+                        let (block, receipts) = result
                             .map_err(Self::Error::from_eth_err)?
                             .ok_or(EthApiError::InvalidBlockRange)?;
                         rewards.push(
@@ -324,16 +334,20 @@ where
             let base_fee = match base_fee {
                 Some(base_fee) => base_fee,
                 None => {
-                    // fetch pending base fee
-                    let base_fee = self
-                        .recovered_block(BlockNumberOrTag::Pending.into())
-                        .await?
-                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
-                        .base_fee_per_gas()
+                    // Derive the pending base fee from the latest header
+                    let latest = self
+                        .provider()
+                        .latest_header()
+                        .map_err(Self::Error::from_eth_err)?
+                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                    let pending_base_fee = self
+                        .provider()
+                        .chain_spec()
+                        .next_block_base_fee(&latest, latest.timestamp())
                         .ok_or(EthApiError::InvalidTransaction(
                             RpcInvalidTransactionError::TxTypeNotSupported,
                         ))?;
-                    U256::from(base_fee)
+                    U256::from(pending_base_fee)
                 }
             };
 

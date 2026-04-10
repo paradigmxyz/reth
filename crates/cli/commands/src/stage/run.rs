@@ -28,6 +28,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
     StageCheckpointWriter,
@@ -40,7 +41,7 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+use std::{any::Any, net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -107,7 +108,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        // Quit early if the stages requires a commit and `--commit` is not provided.
+        // Quit early if the stage requires a commit and `--commit` is not provided.
         if self.requires_commit() && !self.commit {
             return Err(eyre::eyre!(
                 "The stage {} requires overwriting existing static files and must commit, but `--commit` was not provided. Please pass `--commit` and try again.",
@@ -282,14 +283,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::AccountHashing => (
                     Box::new(AccountHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::StorageHashing => (
                     Box::new(StorageHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
                         etl_config,
                     )),
                     None,

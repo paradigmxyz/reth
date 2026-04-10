@@ -1,7 +1,7 @@
 *                           @gakonst
 crates/chain-state/         @fgimenez @mattsse
 crates/chainspec/           @Rjected @joshieDo @mattsse
-crates/cli/                 @mattsse
+crates/cli/                 @mattsse @Rjected
 crates/config/              @shekhirin @mattsse @Rjected 
 crates/consensus/           @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez

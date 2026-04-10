@@ -14,8 +14,12 @@ mod rpc;
 pub mod transaction;
 
 pub use rpc::*;
-pub use transaction::{
-    RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx, TxInfoMapper,
-};
+pub use transaction::{RpcConvert, RpcConverter, TransactionConversionError};
 
 pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};
+
+// Re-export traits from reth-rpc-traits
+pub use reth_rpc_traits::{
+    FromConsensusHeader, FromConsensusTx, SignTxRequestError, SignableTxRequest, TryIntoSimTx,
+    TxInfoMapper,
+};

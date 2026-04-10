@@ -49,6 +49,7 @@ std = [
     "reth-primitives-traits/std",
     "bytes?/std",
     "serde?/std",
+    "reth-codecs?/std",
 ]
 serde = [
     "dep:serde",

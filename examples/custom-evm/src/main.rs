@@ -64,7 +64,7 @@ impl EvmFactory for MyEvmFactory {
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::new(spec).precompiles));
 
         if spec == SpecId::PRAGUE {
             evm = evm.with_precompiles(PrecompilesMap::from_static(prague_custom()));
