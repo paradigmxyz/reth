@@ -237,9 +237,9 @@ where
             return Err(internal_rpc_err("block is not full"));
         };
 
-        // Crop page
-        let page_end = tx_len.saturating_sub(page_number * page_size);
-        let page_start = page_end.saturating_sub(page_size);
+        // Crop page (page 0 is the first `page_size` txs in block order; see Otterscan ots API).
+        let page_start = page_number.saturating_mul(page_size).min(tx_len);
+        let page_end = page_start.saturating_add(page_size).min(tx_len);
 
         // Crop transactions
         *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
