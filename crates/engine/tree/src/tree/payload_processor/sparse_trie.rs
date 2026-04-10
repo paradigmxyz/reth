@@ -252,7 +252,7 @@ where
     /// This concludes once the last state update has been received and processed.
     #[instrument(
         name = "SparseTrieCacheTask::run",
-        level = "trace",
+        level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
@@ -667,7 +667,7 @@ where
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let _enter = trace_span!(
+            let _enter = debug_span!(
                 target: "engine::tree::payload_processor::sparse_trie",
                 parent: &parent_span,
                 "storage_root",
