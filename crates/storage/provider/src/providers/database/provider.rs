@@ -1160,7 +1160,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        let len = range.end().saturating_sub(*range.start()) as usize;
+        let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
