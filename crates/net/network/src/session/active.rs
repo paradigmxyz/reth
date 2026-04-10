@@ -175,6 +175,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) terminate_message:
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
     /// The eth69 range info for the remote peer.
+    /// This is `None` for peers negotiating versions below `eth/69`.
     pub(crate) range_info: Option<BlockRangeInfo>,
     /// The eth69 range info for the local node (this node).
     /// This represents the range of blocks that this node can serve to other peers.
