@@ -363,6 +363,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
+                } else {
+                    self.range_info =
+                        Some(BlockRangeInfo::new(msg.earliest, msg.latest, msg.latest_hash));
                 }
 
                 OnIncomingMessageOutcome::Ok
