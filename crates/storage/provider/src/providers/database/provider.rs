@@ -1160,7 +1160,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        let len = range.end().saturating_sub(*range.start()) as usize;
+        let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
@@ -3343,7 +3343,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
+        storage_changesets.sort_unstable_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storage_v2 {
             let batch =

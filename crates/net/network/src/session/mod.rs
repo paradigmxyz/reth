@@ -553,6 +553,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // the `SessionManager` always has an accurate view of total buffered broadcast
                 // pressure for a peer.
                 let broadcast_items = BroadcastItemCounter::new();
+                let remote_range_info = status.block_range_update().map(|update| {
+                    BlockRangeInfo::new(update.earliest, update.latest, update.latest_hash)
+                });
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -579,7 +582,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
-                    range_info: None,
+                    range_info: remote_range_info.clone(),
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
@@ -619,7 +622,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
-                    range_info: None,
+                    range_info: remote_range_info,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {

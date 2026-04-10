@@ -1,11 +1,13 @@
-# Scheduled regression benchmarks (nightly + hourly).
+# Scheduled regression benchmarks (nightly + hourly + release).
 #
-# Two modes:
+# Three modes:
 #   nightly — Compares the previous nightly Docker build against the current one.
 #             Runs daily after docker.yml produces a new nightly image.
 #   hourly  — Compares main HEAD against the last benchmarked commit to catch
 #             regressions quickly. Falls back to HEAD~1 on first run.
 #             Skips if no new commits or if a previous run is still in progress.
+#   release — Compares the latest GitHub release tag against the current nightly
+#             Docker build. Runs daily to track nightly vs release performance.
 #
 # State is persisted between runs via the decofe/reth-bench-charts repo: each
 # successful run saves the feature commit SHA so the next run knows what to
@@ -17,6 +19,8 @@ on:
     - cron: "30 5 * * *"
     # Hourly: compares main HEAD vs last benchmarked commit, skips if no new commits
     - cron: "0 * * * *"
+    # Release: compares latest GitHub release tag vs current nightly Docker build
+    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -37,6 +41,7 @@ on:
         options:
           - nightly
           - hourly
+          - release
 
 env:
   CARGO_TERM_COLOR: always
@@ -64,6 +69,7 @@ jobs:
       stale-age-hours: ${{ steps.refs.outputs.stale-age-hours }}
       nightly-created: ${{ steps.refs.outputs.nightly-created }}
       long-running: ${{ steps.refs.outputs.long-running }}
+      release-tag: ${{ steps.refs.outputs.release-tag }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -79,6 +85,8 @@ jobs:
             MODE="${{ inputs.mode || 'nightly' }}"
           elif [ "${{ github.event.schedule }}" = "30 5 * * *" ]; then
             MODE="nightly"
+          elif [ "${{ github.event.schedule }}" = "0 9 * * *" ]; then
+            MODE="release"
           else
             MODE="hourly"
           fi
@@ -338,12 +346,19 @@ jobs:
 
       - name: Resolve display names
         id: refs
+        env:
+          RELEASE_TAG: ${{ needs.resolve-refs.outputs.release-tag }}
         run: |
-          BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
           FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
-          echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
+          if [ "$BENCH_MODE" = "release" ] && [ -n "$RELEASE_TAG" ]; then
+            echo "baseline-name=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "baseline-ref=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
+            echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
+            echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+          fi
           echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Check if snapshot needs update
@@ -559,11 +574,12 @@ jobs:
         env:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+          BASELINE_REF_DISPLAY: ${{ steps.refs.outputs.baseline-ref }}
         run: |
           SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
           SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
           SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF_DISPLAY}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
@@ -590,7 +606,11 @@ jobs:
           CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
         run: |
-          WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
+          if [ "$BENCH_MODE" = "release" ]; then
+            WORKFLOW_NAME="workflows-release-regression-${{ github.run_id }}"
+          else
+            WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
+          fi
           DIFF_URL="https://github.com/${{ github.repository }}/compare/${BASELINE_REF}...${FEATURE_REF}"
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           JOB_URL="${BENCH_JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
@@ -633,7 +653,7 @@ jobs:
         if: success() && env.BENCH_MODE != 'hourly'
         run: |
           RUN_ID=${{ github.run_id }}
-          CHART_DIR="nightly/${RUN_ID}"
+          CHART_DIR="${BENCH_MODE}/${RUN_ID}"
           CHARTS_REPO="https://x-access-token:${{ secrets.DEREK_TOKEN }}@github.com/decofe/reth-bench-charts.git"
 
           TMP_DIR=$(mktemp -d)
@@ -762,7 +782,6 @@ jobs:
             const changes = summary.changes || {};
             const mode = process.env.BENCH_MODE || 'nightly';
             const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
-            const hasSignificant = Object.values(changes).some(c => c.sig === 'good' || c.sig === 'bad');
 
             // Hourly mode: only notify on regressions
             if (mode === 'hourly' && !hasRegression) {
@@ -770,11 +789,7 @@ jobs:
               return;
             }
 
-            // Nightly mode: notify on any significant change (regression or improvement)
-            if (!hasSignificant) {
-              core.info('No significant changes detected, skipping nightly Slack notification');
-              return;
-            }
+            // Nightly mode: always notify (report every run regardless of significance)
 
             const SLACK_VERDICT = {
               '⚠️': ':warning:',
@@ -794,7 +809,7 @@ jobs:
 
             function cell(text) { return { type: 'raw_text', text: String(text) || ' ' }; }
 
-            const modeLabel = mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
+            const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
               `*${modeLabel}*`,
               '',
@@ -911,7 +926,7 @@ jobs:
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
 
             const mode = process.env.BENCH_MODE || 'nightly';
-            const modeLabel = mode === 'hourly' ? 'Hourly' : 'Nightly';
+            const modeLabel = mode === 'release' ? 'Release' : mode === 'hourly' ? 'Hourly' : 'Nightly';
 
             const blocks = [
               {

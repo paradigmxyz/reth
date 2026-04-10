@@ -12,14 +12,15 @@
 //!
 //! # Message Flow
 //!
-//! 1. The multiproof task prepares a storage or account job and hands it to `ProofWorkerHandle`.
-//!    The job carries a `ProofResultContext` so the worker knows how to send the result back.
+//! 1. The `SparseTrieCacheTask` prepares a storage or account job and hands it to
+//!    `ProofWorkerHandle`. The job carries a `ProofResultContext` so the worker knows how to send
+//!    the result back.
 //! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
 //!    provided `ProofResultSender`.
-//! 3. The multiproof task receives the message and proceeds with its state-root logic.
+//! 3. The `SparseTrieCacheTask` receives the message and proceeds with its state-root logic.
 //!
-//! Each job gets its own direct channel so results go straight back to the multiproof task. That
-//! keeps ordering decisions in one place and lets workers run independently.
+//! Each job gets its own direct channel so results go straight back to the `SparseTrieCacheTask`.
+//! That keeps ordering decisions in one place and lets workers run independently.
 //!
 //! ```text
 //! SparseTrieCacheTask -> ProofWorkerHandle -> Storage/Account Worker
@@ -565,15 +566,16 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
 }
 
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
-/// `MultiProofTask`.
+/// `SparseTrieCacheTask`.
 ///
-/// Workers use this sender to deliver proof results directly to `MultiProofTask`.
+/// Workers use this sender to deliver proof results directly to `SparseTrieCacheTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
-/// `MultiProofTask`.
+/// `SparseTrieCacheTask`.
 ///
-/// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
+/// This type enables workers to send proof results directly to the `SparseTrieCacheTask` event
+/// loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
     /// The proof calculation result
@@ -584,7 +586,7 @@ pub struct ProofResultMessage {
     pub state: HashedPostState,
 }
 
-/// Context for sending proof calculation results back to `MultiProofTask`.
+/// Context for sending proof calculation results back to `SparseTrieCacheTask`.
 ///
 /// This struct contains all context needed to send and track proof calculation results.
 /// Workers use this to deliver completed proofs back to the main event loop.
@@ -1212,7 +1214,7 @@ where
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
 
-        // Send result to MultiProofTask
+        // Send result to SparseTrieCacheTask
         if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
             trace!(
                 target: "trie::proof_task",
