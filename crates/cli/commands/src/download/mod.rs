@@ -261,12 +261,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-    /// Use resumable two-phase downloads (download to disk first, then extract).
+    /// Enable resumable two-phase downloads (download to disk first, then extract).
     ///
-    /// Archives are downloaded to a .part file with HTTP Range resume support
-    /// before extraction. Slower but tolerates network interruptions without
-    /// restarting. By default, archives stream directly into the extractor.
-    #[arg(long)]
+    /// Archives are downloaded to a `.part` file with HTTP Range resume support
+    /// before extraction. This is enabled by default because it tolerates
+    /// network interruptions without restarting. Pass `--resumable=false` to
+    /// stream archives directly into the extractor instead.
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true")]
     resumable: bool,
 
     /// Maximum number of concurrent modular archive workers.
@@ -1901,8 +1902,16 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::{Args, Parser};
     use manifest::{ComponentManifest, SingleArchive};
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
+
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -1988,6 +1997,36 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_download_resumable_defaults_to_true() {
+        let args =
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(["reth"]).args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_implicit_true() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable",
+        ])
+        .args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_explicit_false() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable=false",
+        ])
+        .args;
+
+        assert!(!args.resumable);
     }
 
     #[test]
