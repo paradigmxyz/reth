@@ -49,7 +49,7 @@ jsonrpsee-types.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
+reqwest.workspace = true
 
 # metrics
 metrics.workspace = true

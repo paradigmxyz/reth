@@ -58,8 +58,6 @@ There are many tables within the node, all used to store different types of data
 - HashedStorages
 - AccountsTrie
 - StoragesTrie
-- AccountsTrieChangeSets
-- StoragesTrieChangeSets
 - TransactionSenders
 - StageCheckpoints
 - StageCheckpointProgresses

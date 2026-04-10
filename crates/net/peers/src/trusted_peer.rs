@@ -1,11 +1,10 @@
 //! `NodeRecord` type that uses a domain instead of an IP.
 
-use crate::{NodeRecord, PeerId};
-use alloc::string::{String, ToString};
+use crate::{NodeRecord, NodeRecordParseError, PeerId};
+use alloc::string::ToString;
 use core::{
     fmt::{self, Write},
     net::IpAddr,
-    num::ParseIntError,
     str::FromStr,
 };
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -111,20 +110,6 @@ impl fmt::Display for TrustedPeer {
 
         Ok(())
     }
-}
-
-/// Possible error types when parsing a [`NodeRecord`]
-#[derive(Debug, thiserror::Error)]
-pub enum NodeRecordParseError {
-    /// Invalid url
-    #[error("Failed to parse url: {0}")]
-    InvalidUrl(String),
-    /// Invalid id
-    #[error("Failed to parse id")]
-    InvalidId(String),
-    /// Invalid discport
-    #[error("Failed to discport query: {0}")]
-    Discport(ParseIntError),
 }
 
 impl FromStr for TrustedPeer {

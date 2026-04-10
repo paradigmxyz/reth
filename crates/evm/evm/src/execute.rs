@@ -6,7 +6,7 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTx},
+    block::{CommitChanges, ExecutableTxParts},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
@@ -75,9 +75,11 @@ pub trait Executor<DB: Database>: Sized {
     where
         I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     {
-        let mut results = Vec::new();
+        let blocks_iter = blocks.into_iter();
+        let capacity = blocks_iter.size_hint().0;
+        let mut results = Vec::with_capacity(capacity);
         let mut first_block = None;
-        for block in blocks {
+        for block in blocks_iter {
             if first_block.is_none() {
                 first_block = Some(block.header().number());
             }
@@ -356,9 +358,14 @@ pub trait BlockBuilder {
     }
 
     /// Completes the block building process and returns the [`BlockBuilderOutcome`].
+    ///
+    /// When `state_root_precomputed` is `None`, the state root is computed internally via
+    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
+    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
         state_provider: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
@@ -401,49 +408,31 @@ where
 
 /// Conversions for executable transactions.
 pub trait ExecutorTx<Executor: BlockExecutor> {
-    /// Converts the transaction into [`ExecutableTx`].
-    fn as_executable(&self) -> impl ExecutableTx<Executor>;
-
-    /// Converts the transaction into [`Recovered`].
-    fn into_recovered(self) -> Recovered<Executor::Transaction>;
+    /// Converts the transaction into a tuple of [`TxEnvFor`] and [`Recovered`].
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for WithEncoded<Recovered<Executor::Transaction>>
 {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
-    }
-
-    fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        self.1
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        (self.to_tx_env(), self.1)
     }
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
-    }
-
-    fn into_recovered(self) -> Self {
-        self
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Self) {
+        (self.to_tx_env(), self)
     }
 }
 
-impl<T, Executor> ExecutorTx<Executor>
-    for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
+impl<Executor> ExecutorTx<Executor>
+    for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
 where
-    T: ExecutorTx<Executor> + Clone,
-    Executor: BlockExecutor,
-    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
-    Self: RecoveredTx<Executor::Transaction>,
+    Executor: BlockExecutor<Transaction: Clone>,
 {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
-    }
-
-    fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        Arc::unwrap_or_clone(self.tx).into_recovered()
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        (self.tx_env, Arc::unwrap_or_clone(self.tx))
     }
 }
 
@@ -479,10 +468,11 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
+        let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition(tx.as_executable(), f)?
+            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
-            self.transactions.push(tx.into_recovered());
+            self.transactions.push(tx);
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -492,6 +482,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -499,11 +490,13 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        let (state_root, trie_updates) = match state_root_precomputed {
+            Some(precomputed) => precomputed,
+            None => state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?,
+        };
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
@@ -550,8 +543,7 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = State::builder().with_database(db).with_bundle_update().build();
         Self { strategy_factory, db }
     }
 }
@@ -609,25 +601,31 @@ where
     }
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
-/// executor.
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTxParts`] for
+/// block executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
-    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+    ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
-    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+    T: ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 /// A container for a transaction and a transaction environment.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
     pub tx: Arc<T>,
+}
+
+impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {
+    fn clone(&self) -> Self {
+        Self { tx_env: self.tx_env.clone(), tx: self.tx.clone() }
+    }
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
@@ -640,9 +638,11 @@ impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
     }
 }
 
-impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
-    fn to_tx_env(&self) -> TxEnv {
-        self.tx_env.clone()
+impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<TxEnv, T> {
+    type Recovered = Arc<T>;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        (self.tx_env, self.tx)
     }
 }
 

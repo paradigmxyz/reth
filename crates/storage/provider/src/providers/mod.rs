@@ -32,13 +32,12 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
-// RocksDB currently only supported on Unix platforms
-// Windows support is planned for future releases
-#[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]
-#[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
 pub(crate) mod rocksdb;
 
-pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
+pub use rocksdb::{
+    PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider,
+    RocksDBRawIter, RocksDBStats, RocksDBTableStats, RocksReadSnapshot, RocksTx,
+};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].

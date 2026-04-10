@@ -2,7 +2,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
@@ -23,7 +23,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
-    /// Returns a EIP-2718 binary-encoded transaction.
+    /// Returns an EIP-2718 binary-encoded transaction.
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
     #[method(name = "getRawTransaction")]
@@ -288,7 +288,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<B256>>;
 
     /// Returns detailed runtime memory statistics.
     #[method(name = "memStats")]
@@ -325,7 +325,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Sets the current head of the local chain by block number. Note, this is a destructive action
     /// and may severely damage your chain. Use with extreme caution.
     #[method(name = "setHead")]
-    async fn debug_set_head(&self, number: u64) -> RpcResult<()>;
+    async fn debug_set_head(&self, number: U64) -> RpcResult<()>;
 
     /// Sets the rate of mutex profiling.
     #[method(name = "setMutexProfileFraction")]
@@ -404,7 +404,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// Sets the logging verbosity ceiling. Log messages with level up to and including the given
     /// level will be printed.

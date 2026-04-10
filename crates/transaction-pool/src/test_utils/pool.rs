@@ -8,12 +8,9 @@ use crate::{
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{map::AddressMap, Address, U256};
 use rand::Rng;
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 /// A wrapped `TxPool` with additional helpers for testing
 pub(crate) struct MockPool<T: TransactionOrdering = MockOrdering> {
@@ -64,19 +61,19 @@ pub(crate) struct MockTransactionSimulator<R: Rng> {
     /// Generator for transactions
     tx_generator: MockTransactionDistribution,
     /// represents the on chain balance of a sender.
-    balances: HashMap<Address, U256>,
+    balances: AddressMap<U256>,
     /// represents the on chain nonce of a sender.
-    nonces: HashMap<Address, u64>,
+    nonces: AddressMap<u64>,
     /// A set of addresses to use as senders.
     senders: Vec<Address>,
     /// What scenarios to execute.
     scenarios: Vec<ScenarioType>,
     /// All previous scenarios executed by a sender.
-    executed: HashMap<Address, ExecutedScenarios>,
+    executed: AddressMap<ExecutedScenarios>,
     /// "Validates" generated transactions.
     validator: MockTransactionFactory,
     /// Represents the gaps in nonces for each sender.
-    nonce_gaps: HashMap<Address, u64>,
+    nonce_gaps: AddressMap<u64>,
     /// The rng instance used to select senders and scenarios.
     rng: R,
 }

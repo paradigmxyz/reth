@@ -12,6 +12,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// Utility functions for initializing the database.
+pub mod init;
+
 /// Various provider traits.
 mod traits;
 pub use traits::*;
@@ -21,8 +24,8 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder, StaticFileWriteCtx,
-    StaticFileWriter,
+    PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
+    StaticFileWriteCtx, StaticFileWriter,
 };
 
 pub mod changeset_walker;

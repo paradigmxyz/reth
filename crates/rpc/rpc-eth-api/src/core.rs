@@ -5,6 +5,7 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
@@ -18,8 +19,10 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::FillTransaction;
+use reth_rpc_eth_types::{EthApiError, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use serde_json::Value;
+use std::collections::HashMap;
 use tracing::trace;
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
@@ -135,7 +138,7 @@ pub trait EthApi<
 
     /// Returns the EIP-2718 encoded transaction if it exists.
     ///
-    /// If this is a EIP-4844 transaction that is in the pool it will include the sidecar.
+    /// If this is an EIP-4844 transaction that is in the pool, it will include the sidecar.
     #[method(name = "getRawTransactionByHash")]
     async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
 
@@ -200,6 +203,14 @@ pub trait EthApi<
         index: JsonStorageKey,
         block_number: Option<BlockId>,
     ) -> RpcResult<B256>;
+
+    /// Returns values from multiple storage positions across multiple addresses.
+    #[method(name = "getStorageValues")]
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>>;
 
     /// Returns the number of transactions sent from an address at given block number.
     #[method(name = "getTransactionCount")]
@@ -394,6 +405,21 @@ pub trait EthApi<
         address: Address,
         block: BlockId,
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
+
+    /// Returns the EIP-7928 block access list for a block by hash.
+    #[method(name = "getBlockAccessListByBlockHash")]
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list for a block by number.
+    #[method(name = "getBlockAccessListByBlockNumber")]
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Value>>;
+
+    /// Returns the EIP-7928 block access list bytes for a block by number.
+    #[method(name = "getBlockAccessListRaw")]
+    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> RpcResult<Option<Bytes>>;
 }
 
 #[async_trait::async_trait]
@@ -640,6 +666,16 @@ where
         Ok(EthState::storage_at(self, address, index, block_number).await?)
     }
 
+    /// Handler for: `eth_getStorageValues`
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getStorageValues");
+        Ok(EthState::storage_values(self, requests, block_number).await?)
+    }
+
     /// Handler for: `eth_getTransactionCount`
     async fn transaction_count(
         &self,
@@ -880,5 +916,36 @@ where
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
+    }
+
+    /// Handler for: `eth_getBlockAccessListByBlockHash`
+    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
+
+        let bal = self.get_block_access_list(block_hash.into()).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+    /// Handler for: `eth_getBlockAccessListByBlockNumber`
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Value>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
+
+        let bal = self.get_block_access_list(number.into()).await?;
+        let json = serde_json::to_value(&bal)
+            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
+
+        Ok(Some(json))
+    }
+    /// Handler for: `eth_getBlockAccessListRaw`
+    async fn block_access_list_raw(&self, number: BlockNumberOrTag) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListRaw");
+
+        let bal = self.get_block_access_list(number.into()).await?;
+        Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
     }
 }

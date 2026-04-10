@@ -3,7 +3,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
 use async_compression::tokio::bufread::GzipDecoder;
 use futures::Future;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -83,6 +83,28 @@ impl From<&'static str> for FileClientError {
 }
 
 impl<B: FullBlock> FileClient<B> {
+    /// Create a new file client from a slice of sealed blocks.
+    pub fn from_blocks(blocks: impl IntoIterator<Item = SealedBlock<B>>) -> Self {
+        let blocks: Vec<_> = blocks.into_iter().collect();
+        let capacity = blocks.len();
+
+        let mut headers = HashMap::with_capacity(capacity);
+        let mut hash_to_number = HashMap::with_capacity(capacity);
+        let mut bodies = HashMap::with_capacity(capacity);
+
+        for block in blocks {
+            let number = block.number();
+            let hash = block.hash();
+            let (header, body) = block.split_sealed_header_body();
+
+            headers.insert(number, header.into_header());
+            hash_to_number.insert(hash, number);
+            bodies.insert(hash, body);
+        }
+
+        Self { headers, hash_to_number, bodies }
+    }
+
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
         path: P,
@@ -141,17 +163,9 @@ impl<B: FullBlock> FileClient<B> {
         if self.headers.is_empty() {
             return true
         }
-        let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
-        nums.sort_unstable();
-        let mut iter = nums.into_iter();
-        let mut lowest = iter.next().expect("not empty");
-        for next in iter {
-            if next != lowest + 1 {
-                return false
-            }
-            lowest = next;
-        }
-        true
+        let (min, max) = self.headers.keys().minmax().into_option().expect("not empty");
+        // Contiguous range from min to max means no gaps
+        *max - *min + 1 == self.headers.len() as u64
     }
 
     /// Use the provided bodies as the file client's block body buffer.
@@ -682,7 +696,7 @@ mod tests {
             FileClient::from_file(file.into(), NoopConsensus::arc())
                 .await
                 .unwrap()
-                .with_bodies(bodies.clone()),
+                .with_bodies(bodies.clone().into_iter().collect()),
         );
         let mut downloader = BodiesDownloaderBuilder::default().build::<Block, _, _>(
             client.clone(),

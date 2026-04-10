@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory};
+use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader, StorageSettingsCache};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -402,9 +402,35 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
+}
 
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
+#[cfg(feature = "db-api")]
+impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
+        Ok(Vec::default())
     }
 }
 
@@ -660,4 +686,13 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Ok(self.clone())
     }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvider<ChainSpec, N> {
+    fn cached_storage_settings(&self) -> reth_db_api::models::StorageSettings {
+        reth_db_api::models::StorageSettings::default()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: reth_db_api::models::StorageSettings) {}
 }

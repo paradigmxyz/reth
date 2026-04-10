@@ -177,7 +177,7 @@ where
                 self.env().txn_manager().remove_active_read_transaction(txn);
 
                 let mut latency = CommitLatency::new();
-                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) })
+                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdbx_commit_latency()) })
                     .map(|v| (v, latency))
             } else {
                 let (sender, rx) = sync_channel(0);
@@ -223,12 +223,16 @@ where
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, ptr::null_mut()))
+                // `mdbx_dbi_flags_ex` requires `status` to be a non-NULL ptr, otherwise it will
+                // return an EINVAL and panic below, so we just provide a placeholder variable
+                // which we discard immediately.
+                let mut _status: c_uint = 0;
+                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, &mut _status))
             })??;
         }
 
         // The types are not the same on Windows. Great!
-        #[cfg_attr(not(windows), allow(clippy::useless_conversion))]
+        #[cfg_attr(not(windows), expect(clippy::useless_conversion))]
         Ok(DatabaseFlags::from_bits_truncate(flags.try_into().unwrap()))
     }
 
@@ -242,7 +246,7 @@ where
         unsafe {
             let mut stat = Stat::new();
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>()))
+                mdbx_result(ffi::mdbx_dbi_stat(txn, dbi, stat.mdbx_stat(), size_of::<Stat>()))
             })??;
             Ok(stat)
         }
@@ -335,26 +339,32 @@ where
     fn drop(&mut self) {
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        self.txn
-            .txn_execute_renew_on_timeout(|txn| {
-                if !self.has_committed() {
-                    if K::IS_READ_ONLY {
-                        #[cfg(feature = "read-tx-timeouts")]
-                        self.env.txn_manager().remove_active_read_transaction(txn);
+        //
+        // We intentionally ignore errors here because Drop should never panic.
+        // MDBX can return errors (e.g., MDBX_PANIC) during abort if the environment
+        // is in a fatal state, but panicking in Drop can cause double-panics during
+        // unwinding which terminates the process.
+        let _ = self.txn.txn_execute_renew_on_timeout(|txn| {
+            if !self.has_committed() {
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env.txn_manager().remove_active_read_transaction(txn);
 
-                        unsafe {
-                            ffi::mdbx_txn_abort(txn);
-                        }
-                    } else {
-                        let (sender, rx) = sync_channel(0);
-                        self.env
-                            .txn_manager()
-                            .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
-                        rx.recv().unwrap().unwrap();
+                    // Reset and return the handle to the pool for lock-free reuse.
+                    // pool.put() calls mdbx_txn_reset internally and falls back to
+                    // mdbx_txn_abort if the reset fails or the pool is full.
+                    self.env.ro_txn_pool().push(txn);
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                    if let Ok(Err(e)) = rx.recv() {
+                        tracing::error!(target: "libmdbx", %e, "failed to abort transaction in drop");
                     }
                 }
-            })
-            .unwrap();
+            }
+        });
     }
 }
 
@@ -408,8 +418,16 @@ impl Transaction<RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
-    #[allow(clippy::mut_from_ref)]
-    pub fn reserve(
+    ///
+    /// This should not be used on dupsort tables.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the returned buffer is not used after the transaction is
+    /// committed or aborted, or if another value is inserted. To be clear: the second call to
+    /// this function is not permitted while the returned slice is reachable.
+    #[expect(clippy::mut_from_ref)]
+    pub unsafe fn reserve(
         &self,
         dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
@@ -630,7 +648,7 @@ impl CommitLatency {
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
-    pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+    pub(crate) const fn mdbx_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
     }
 }

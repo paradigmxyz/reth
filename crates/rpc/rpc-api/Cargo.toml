@@ -39,6 +39,7 @@ alloy-genesis.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
 [features]
@@ -49,6 +50,5 @@ client = [
 ]
 
 [dev-dependencies]
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }

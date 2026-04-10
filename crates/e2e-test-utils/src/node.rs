@@ -9,13 +9,10 @@ use futures_util::Future;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{
-    Block, BlockBody, BlockTy, EngineApiMessageVersion, FullNodeComponents, PayloadTypes,
-    PrimitivesTy,
-};
+use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
     HeaderProvider, StageCheckpointReader,
@@ -58,7 +55,7 @@ where
     /// Creates a new test node
     pub async fn new(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Payload::PayloadBuilderAttributes + Send + Sync + 'static,
+        attributes_generator: impl Fn(u64) -> Payload::PayloadAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             inner: node.clone(),
@@ -106,17 +103,50 @@ where
         Ok(chain)
     }
 
+    /// Returns the current forkchoice state of the node.
+    pub fn current_forkchoice_state(&self) -> eyre::Result<ForkchoiceState> {
+        let latest_header =
+            self.inner.provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
+
+        if latest_header.number() == 0 {
+            return Ok(ForkchoiceState::same_hash(latest_header.hash()));
+        }
+
+        Ok(ForkchoiceState {
+            head_block_hash: latest_header.hash(),
+            safe_block_hash: self
+                .inner
+                .provider
+                .sealed_header_by_number_or_tag(BlockNumberOrTag::Safe)?
+                .unwrap()
+                .hash(),
+            finalized_block_hash: self
+                .inner
+                .provider
+                .sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized)?
+                .unwrap()
+                .hash(),
+        })
+    }
+
     /// Creates a new payload from given attributes generator
     /// expects a payload attribute event and waits until the payload is built.
     ///
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload().await.unwrap();
+        let eth_attr = self.payload.next_attributes();
+        let payload_id = self
+            .inner
+            .add_ons_handle
+            .beacon_engine_handle
+            .fork_choice_updated(self.current_forkchoice_state()?, Some(eth_attr.clone()))
+            .await?
+            .payload_id
+            .unwrap();
         // first event is the payload attributes
-        self.payload.expect_attr_event(eth_attr.clone()).await?;
+        self.payload.expect_attr_event(eth_attr).await?;
         // wait for the payload builder to have finished building
-        self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
+        self.payload.wait_for_built_payload(payload_id).await;
         // ensure we're also receiving the built payload as event
         Ok(self.payload.expect_built_payload().await?)
     }
@@ -265,7 +295,6 @@ where
                     finalized_block_hash: current_head,
                 },
                 None,
-                EngineApiMessageVersion::default(),
             )
             .await?;
 

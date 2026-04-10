@@ -13,26 +13,32 @@ workspace = true
 
 [dependencies]
 alloy-primitives.workspace = true
+tracing = { workspace = true, optional = true }
 
 clap = { workspace = true, features = ["derive"], optional = true }
 fixed-map.workspace = true
 derive_more.workspace = true
 serde = { workspace = true, features = ["alloc", "derive"] }
+reth-stages-types.workspace = true
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 reth-nippy-jar.workspace = true
 serde_json.workspace = true
 insta.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["std"]
 std = [
     "alloy-primitives/std",
     "derive_more/std",
+    "reth-stages-types/std",
     "serde/std",
     "strum/std",
     "serde_json/std",
     "fixed-map/std",
+    "dep:tracing",
+    "tracing?/std",
 ]
 clap = ["dep:clap"]

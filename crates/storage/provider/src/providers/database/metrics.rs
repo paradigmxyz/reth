@@ -1,6 +1,7 @@
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
-use std::time::{Duration, Instant};
+use reth_primitives_traits::FastInstant as Instant;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub(crate) struct DurationsRecorder<'a> {
@@ -89,13 +90,41 @@ pub(crate) struct DatabaseProviderMetrics {
     /// Duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages: Histogram,
     /// Number of blocks per `save_blocks` call
-    save_blocks_block_count: Histogram,
+    save_blocks_batch_size: Histogram,
     /// Duration of MDBX commit in `save_blocks`
     save_blocks_commit_mdbx: Histogram,
     /// Duration of static file commit in `save_blocks`
     save_blocks_commit_sf: Histogram,
     /// Duration of `RocksDB` commit in `save_blocks`
     save_blocks_commit_rocksdb: Histogram,
+    /// Last duration of `save_blocks`
+    save_blocks_total_last: Gauge,
+    /// Last duration of MDBX work in `save_blocks`
+    save_blocks_mdbx_last: Gauge,
+    /// Last duration of static file work in `save_blocks`
+    save_blocks_sf_last: Gauge,
+    /// Last duration of `RocksDB` work in `save_blocks`
+    save_blocks_rocksdb_last: Gauge,
+    /// Last duration of `insert_block` in `save_blocks`
+    save_blocks_insert_block_last: Gauge,
+    /// Last duration of `write_state` in `save_blocks`
+    save_blocks_write_state_last: Gauge,
+    /// Last duration of `write_hashed_state` in `save_blocks`
+    save_blocks_write_hashed_state_last: Gauge,
+    /// Last duration of `write_trie_updates` in `save_blocks`
+    save_blocks_write_trie_updates_last: Gauge,
+    /// Last duration of `update_history_indices` in `save_blocks`
+    save_blocks_update_history_indices_last: Gauge,
+    /// Last duration of `update_pipeline_stages` in `save_blocks`
+    save_blocks_update_pipeline_stages_last: Gauge,
+    /// Last number of blocks per `save_blocks` call
+    save_blocks_batch_size_last: Gauge,
+    /// Last duration of MDBX commit in `save_blocks`
+    save_blocks_commit_mdbx_last: Gauge,
+    /// Last duration of static file commit in `save_blocks`
+    save_blocks_commit_sf_last: Gauge,
+    /// Last duration of `RocksDB` commit in `save_blocks`
+    save_blocks_commit_rocksdb_last: Gauge,
 }
 
 /// Timings collected during a `save_blocks` call.
@@ -111,7 +140,7 @@ pub(crate) struct SaveBlocksTimings {
     pub write_trie_updates: Duration,
     pub update_history_indices: Duration,
     pub update_pipeline_stages: Duration,
-    pub block_count: u64,
+    pub batch_size: u64,
 }
 
 /// Timings collected during a `commit` call.
@@ -153,7 +182,21 @@ impl DatabaseProviderMetrics {
         self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
         self.save_blocks_update_history_indices.record(timings.update_history_indices);
         self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);
-        self.save_blocks_block_count.record(timings.block_count as f64);
+        self.save_blocks_batch_size.record(timings.batch_size as f64);
+
+        self.save_blocks_total_last.set(timings.total.as_secs_f64());
+        self.save_blocks_mdbx_last.set(timings.mdbx.as_secs_f64());
+        self.save_blocks_sf_last.set(timings.sf.as_secs_f64());
+        self.save_blocks_rocksdb_last.set(timings.rocksdb.as_secs_f64());
+        self.save_blocks_insert_block_last.set(timings.insert_block.as_secs_f64());
+        self.save_blocks_write_state_last.set(timings.write_state.as_secs_f64());
+        self.save_blocks_write_hashed_state_last.set(timings.write_hashed_state.as_secs_f64());
+        self.save_blocks_write_trie_updates_last.set(timings.write_trie_updates.as_secs_f64());
+        self.save_blocks_update_history_indices_last
+            .set(timings.update_history_indices.as_secs_f64());
+        self.save_blocks_update_pipeline_stages_last
+            .set(timings.update_pipeline_stages.as_secs_f64());
+        self.save_blocks_batch_size_last.set(timings.batch_size as f64);
     }
 
     /// Records all commit timings.
@@ -161,5 +204,9 @@ impl DatabaseProviderMetrics {
         self.save_blocks_commit_mdbx.record(timings.mdbx);
         self.save_blocks_commit_sf.record(timings.sf);
         self.save_blocks_commit_rocksdb.record(timings.rocksdb);
+
+        self.save_blocks_commit_mdbx_last.set(timings.mdbx.as_secs_f64());
+        self.save_blocks_commit_sf_last.set(timings.sf.as_secs_f64());
+        self.save_blocks_commit_rocksdb_last.set(timings.rocksdb.as_secs_f64());
     }
 }

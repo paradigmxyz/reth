@@ -1,7 +1,4 @@
 //! Helper builder entrypoint to instantiate a [`ProviderFactory`].
-//!
-//! This also includes general purpose staging types that provide builder style functions that lead
-//! up to the intended build target.
 
 use crate::{
     providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
@@ -11,9 +8,7 @@ use reth_db::{
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
     open_db_read_only, DatabaseEnv,
 };
-use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
-use reth_storage_errors::provider::ProviderResult;
+use reth_node_types::NodeTypesWithDBAdapter;
 use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -22,26 +17,16 @@ use std::{
 
 /// Helper type to create a [`ProviderFactory`].
 ///
-/// This type is the entry point for a stage based builder.
-///
-/// The intended staging is:
-///  1. Configure the database: [`ProviderFactoryBuilder::db`]
-///  2. Configure the chainspec: `chainspec`
-///  3. Configure the [`StaticFileProvider`]: `static_file`
+/// See [`ProviderFactoryBuilder::open_read_only`] for usage examples.
 #[derive(Debug)]
 pub struct ProviderFactoryBuilder<N> {
     _types: PhantomData<N>,
 }
 
 impl<N> ProviderFactoryBuilder<N> {
-    /// Maps the [`NodeTypes`] of this builder.
+    /// Maps the [`reth_node_types::NodeTypes`] of this builder.
     pub fn types<T>(self) -> ProviderFactoryBuilder<T> {
         ProviderFactoryBuilder::default()
-    }
-
-    /// Configures the database.
-    pub fn db<DB>(self, db: DB) -> TypesAnd1<N, DB> {
-        TypesAnd1::new(db)
     }
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
@@ -54,24 +39,32 @@ impl<N> ProviderFactoryBuilder<N> {
     /// use reth_chainspec::MAINNET;
     /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder};
     ///
-    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>(
+    ///     runtime: reth_tasks::Runtime,
+    /// ) {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
-    ///         .open_read_only(MAINNET.clone(), "datadir")
+    ///         .open_read_only(MAINNET.clone(), "datadir", runtime)
     ///         .unwrap();
     /// }
     /// ```
     ///
     /// # Open an unmonitored instance
     ///
-    /// This is recommended when no changes to the static files are expected (e.g. no active node)
+    /// This is recommended when no changes to the database are expected (e.g. no active node)
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
     /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>(
+    ///     runtime: reth_tasks::Runtime,
+    /// ) {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
-    ///         .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").no_watch())
+    ///         .open_read_only(
+    ///             MAINNET.clone(),
+    ///             ReadOnlyConfig::from_datadir("datadir").no_watch(),
+    ///             runtime,
+    ///         )
     ///         .unwrap();
     /// }
     /// ```
@@ -87,11 +80,14 @@ impl<N> ProviderFactoryBuilder<N> {
     /// use reth_chainspec::MAINNET;
     /// use reth_provider::providers::{NodeTypesForProvider, ProviderFactoryBuilder, ReadOnlyConfig};
     ///
-    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>() {
+    /// fn demo<N: NodeTypesForProvider<ChainSpec = reth_chainspec::ChainSpec>>(
+    ///     runtime: reth_tasks::Runtime,
+    /// ) {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(
     ///             MAINNET.clone(),
     ///             ReadOnlyConfig::from_datadir("datadir").disable_long_read_transaction_safety(),
+    ///             runtime,
     ///         )
     ///         .unwrap();
     /// }
@@ -100,18 +96,23 @@ impl<N> ProviderFactoryBuilder<N> {
         self,
         chainspec: Arc<N::ChainSpec>,
         config: impl Into<ReadOnlyConfig>,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch_static_files } =
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch } =
             config.into();
-        self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
-            .chainspec(chainspec)
-            .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
-            .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)
-            .build_provider_factory()
-            .map_err(Into::into)
+        let db = open_db_read_only(db_dir, db_args)?;
+        let static_file_provider = StaticFileProvider::read_only(static_files_dir)?;
+        let rocksdb_provider = RocksDBProvider::builder(&rocksdb_dir)
+            .with_default_tables()
+            .with_read_only(true)
+            .build()?;
+        let factory =
+            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
+                .with_read_only_sync(watch);
+        Ok(factory)
     }
 }
 
@@ -135,8 +136,8 @@ pub struct ReadOnlyConfig {
     pub static_files_dir: PathBuf,
     /// The path to the `RocksDB` directory
     pub rocksdb_dir: PathBuf,
-    /// Whether the static files should be watched for changes.
-    pub watch_static_files: bool,
+    /// Whether to watch the MDBX directory for changes and eagerly sync providers.
+    pub watch: bool,
 }
 
 impl ReadOnlyConfig {
@@ -151,8 +152,8 @@ impl ReadOnlyConfig {
     ///    |__static_files
     /// ```
     ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
+    /// By default this watches the static files directory for changes, see also
+    /// [`ProviderFactory::with_read_only_sync`]
     pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
         let datadir = datadir.as_ref();
         Self {
@@ -160,7 +161,7 @@ impl ReadOnlyConfig {
             db_args: Default::default(),
             static_files_dir: datadir.join("static_files"),
             rocksdb_dir: datadir.join("rocksdb"),
-            watch_static_files: true,
+            watch: true,
         }
     }
 
@@ -183,9 +184,6 @@ impl ReadOnlyConfig {
     ///    - static_files
     /// ```
     ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
-    ///
     /// # Panics
     ///
     /// If the path does not exist
@@ -199,9 +197,8 @@ impl ReadOnlyConfig {
 
     /// Creates the config for the given paths.
     ///
-    ///
-    /// By default this watches the static file directory for changes, see also
-    /// [`StaticFileProvider::read_only`]
+    /// By default this watches the static files directory for changes, see also
+    /// [`ProviderFactory::with_read_only_sync`]
     pub fn from_dirs(
         db_dir: impl AsRef<Path>,
         static_files_dir: impl AsRef<Path>,
@@ -212,7 +209,7 @@ impl ReadOnlyConfig {
             db_args: Default::default(),
             static_files_dir: static_files_dir.as_ref().into(),
             rocksdb_dir: rocksdb_dir.as_ref().into(),
-            watch_static_files: true,
+            watch: true,
         }
     }
 
@@ -234,18 +231,12 @@ impl ReadOnlyConfig {
         self
     }
 
-    /// Whether the static file directory should be watches for changes, see also
-    /// [`StaticFileProvider::read_only`]
-    pub const fn set_watch_static_files(&mut self, watch_static_files: bool) {
-        self.watch_static_files = watch_static_files;
-    }
-
-    /// Don't watch the static files for changes.
+    /// Don't watch the static files directory for changes.
     ///
     /// This is only recommended if this is used without a running node instance that modifies
-    /// static files.
+    /// the database.
     pub const fn no_watch(mut self) -> Self {
-        self.set_watch_static_files(false);
+        self.watch = false;
         self
     }
 }
@@ -256,120 +247,5 @@ where
 {
     fn from(value: T) -> Self {
         Self::from_datadir(value.as_ref())
-    }
-}
-
-/// This is staging type that contains the configured types and _one_ value.
-#[derive(Debug)]
-pub struct TypesAnd1<N, Val1> {
-    _types: PhantomData<N>,
-    val_1: Val1,
-}
-
-impl<N, Val1> TypesAnd1<N, Val1> {
-    /// Creates a new instance with the given types and one value.
-    pub fn new(val_1: Val1) -> Self {
-        Self { _types: Default::default(), val_1 }
-    }
-
-    /// Configures the chainspec.
-    pub fn chainspec<C>(self, chainspec: Arc<C>) -> TypesAnd2<N, Val1, Arc<C>> {
-        TypesAnd2::new(self.val_1, chainspec)
-    }
-}
-
-/// This is staging type that contains the configured types and _two_ values.
-#[derive(Debug)]
-pub struct TypesAnd2<N, Val1, Val2> {
-    _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-}
-
-impl<N, Val1, Val2> TypesAnd2<N, Val1, Val2> {
-    /// Creates a new instance with the given types and two values.
-    pub fn new(val_1: Val1, val_2: Val2) -> Self {
-        Self { _types: Default::default(), val_1, val_2 }
-    }
-
-    /// Returns the first value.
-    pub const fn val_1(&self) -> &Val1 {
-        &self.val_1
-    }
-
-    /// Returns the second value.
-    pub const fn val_2(&self) -> &Val2 {
-        &self.val_2
-    }
-
-    /// Configures the [`StaticFileProvider`].
-    pub fn static_file(
-        self,
-        static_file_provider: StaticFileProvider<N::Primitives>,
-    ) -> TypesAnd3<N, Val1, Val2, StaticFileProvider<N::Primitives>>
-    where
-        N: NodeTypes,
-    {
-        TypesAnd3::new(self.val_1, self.val_2, static_file_provider)
-    }
-}
-
-/// This is staging type that contains the configured types and _three_ values.
-#[derive(Debug)]
-pub struct TypesAnd3<N, Val1, Val2, Val3> {
-    _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-    val_3: Val3,
-}
-
-impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
-    /// Creates a new instance with the given types and three values.
-    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3) -> Self {
-        Self { _types: Default::default(), val_1, val_2, val_3 }
-    }
-}
-
-impl<N, DB, C> TypesAnd3<N, DB, Arc<C>, StaticFileProvider<N::Primitives>>
-where
-    N: NodeTypes,
-{
-    /// Configures the `RocksDB` provider.
-    pub fn rocksdb_provider(
-        self,
-        rocksdb_provider: RocksDBProvider,
-    ) -> TypesAnd4<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider> {
-        TypesAnd4::new(self.val_1, self.val_2, self.val_3, rocksdb_provider)
-    }
-}
-
-/// This is staging type that contains the configured types and _four_ values.
-#[derive(Debug)]
-pub struct TypesAnd4<N, Val1, Val2, Val3, Val4> {
-    _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-    val_3: Val3,
-    val_4: Val4,
-}
-
-impl<N, Val1, Val2, Val3, Val4> TypesAnd4<N, Val1, Val2, Val3, Val4> {
-    /// Creates a new instance with the given types and four values.
-    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4) -> Self {
-        Self { _types: Default::default(), val_1, val_2, val_3, val_4 }
-    }
-}
-
-impl<N, DB> TypesAnd4<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider>
-where
-    N: NodeTypesForProvider,
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-{
-    /// Creates the [`ProviderFactory`].
-    pub fn build_provider_factory(
-        self,
-    ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
-        let Self { _types, val_1, val_2, val_3, val_4 } = self;
-        ProviderFactory::new(val_1, val_2, val_3, val_4)
     }
 }

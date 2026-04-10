@@ -1,7 +1,11 @@
 use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{
+    logs_bloom,
+    map::{AddressMap, B256Map, HashMap},
+    Address, BlockNumber, Bloom, Log, B256, U256,
+};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
@@ -10,14 +14,13 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
+pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -408,7 +411,7 @@ impl ExecutionOutcome {
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::calculate_receipt_root_no_memo,
         )
     }
 }
@@ -423,8 +426,8 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::BlockNumber;
-    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    use alloy_primitives::{BlockNumber, Bytes};
+    use reth_primitives_traits::Receipt;
     use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -434,33 +437,28 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_execution_types::{serde_bincode_compat, ExecutionOutcome};
-    /// ///
-    /// use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
-    ///     #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
-    ///     chain: ExecutionOutcome<T>,
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_>")]
+    ///     chain: ExecutionOutcome,
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct ExecutionOutcome<'a, T>
-    where
-        T: SerdeBincodeCompat + core::fmt::Debug,
-    {
+    pub struct ExecutionOutcome<'a> {
         bundle: Cow<'a, BundleState>,
-        receipts: Vec<Vec<T::BincodeRepr<'a>>>,
+        receipts: Vec<Vec<Bytes>>,
         first_block: BlockNumber,
         #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
     }
 
-    impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a, T>
+    impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a>
     where
-        T: SerdeBincodeCompat + core::fmt::Debug,
+        T: Receipt,
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
@@ -468,7 +466,9 @@ pub(super) mod serde_bincode_compat {
                 receipts: value
                     .receipts
                     .iter()
-                    .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
+                    .map(|vec| {
+                        vec.iter().map(|receipt| Bytes::from(alloy_rlp::encode(receipt))).collect()
+                    })
                     .collect(),
                 first_block: value.first_block,
                 requests: Cow::Borrowed(&value.requests),
@@ -476,17 +476,24 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a, T> From<ExecutionOutcome<'a, T>> for super::ExecutionOutcome<T>
+    impl<T> From<ExecutionOutcome<'_>> for super::ExecutionOutcome<T>
     where
-        T: SerdeBincodeCompat + core::fmt::Debug,
+        T: Receipt,
     {
-        fn from(value: ExecutionOutcome<'a, T>) -> Self {
+        fn from(value: ExecutionOutcome<'_>) -> Self {
             Self {
                 bundle: value.bundle.into_owned(),
                 receipts: value
                     .receipts
                     .into_iter()
-                    .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                    .map(|vec| {
+                        vec.into_iter()
+                            .map(|rlp| {
+                                T::decode(&mut rlp.as_ref())
+                                    .expect("invalid RLP for receipt in serde_bincode_compat")
+                            })
+                            .collect()
+                    })
                     .collect(),
                 first_block: value.first_block,
                 requests: value.requests.into_owned(),
@@ -494,9 +501,9 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<T> SerializeAs<super::ExecutionOutcome<T>> for ExecutionOutcome<'_, T>
+    impl<T> SerializeAs<super::ExecutionOutcome<T>> for ExecutionOutcome<'_>
     where
-        T: SerdeBincodeCompat + core::fmt::Debug,
+        T: Receipt,
     {
         fn serialize_as<S>(
             source: &super::ExecutionOutcome<T>,
@@ -509,9 +516,9 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, T> DeserializeAs<'de, super::ExecutionOutcome<T>> for ExecutionOutcome<'de, T>
+    impl<'de, T> DeserializeAs<'de, super::ExecutionOutcome<T>> for ExecutionOutcome<'de>
     where
-        T: SerdeBincodeCompat + core::fmt::Debug,
+        T: Receipt,
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::ExecutionOutcome<T>, D::Error>
         where
@@ -521,24 +528,11 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<T: SerdeBincodeCompat + core::fmt::Debug> SerdeBincodeCompat for super::ExecutionOutcome<T> {
-        type BincodeRepr<'a> = ExecutionOutcome<'a, T>;
-
-        fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            self.into()
-        }
-
-        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            repr.into()
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, ExecutionOutcome};
         use rand::Rng;
         use reth_ethereum_primitives::Receipt;
-        use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -546,8 +540,8 @@ pub(super) mod serde_bincode_compat {
         fn test_chain_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-            struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
-                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+            struct Data<T: reth_primitives_traits::Receipt> {
+                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_>")]
                 data: ExecutionOutcome<T>,
             }
 
@@ -614,12 +608,12 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::default();
+        let mut state_init: BundleStateInit = AddressMap::default();
         state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 
-        // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
+        // Create an AddressMap for account reverts and insert initial data
+        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
         revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data

@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_rlp::Decodable;
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
@@ -14,9 +15,7 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
-use reth_primitives_traits::{
-    serde_bincode_compat, FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader,
-};
+use reth_primitives_traits::{FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider,
     StaticFileProviderFactory,
@@ -56,7 +55,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     sync_gap: Option<HeaderSyncGap<Downloader::Header>>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
-    /// ETL collector with `BlockNumber` -> `BincodeSealedHeader`
+    /// ETL collector with `BlockNumber` -> `RLP-encoded SealedHeader`
     header_collector: Collector<BlockNumber, Bytes>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,
@@ -84,6 +83,14 @@ where
             header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
             is_etl_ready: false,
         }
+    }
+
+    /// Clear all ETL state. Called on error paths to prevent buffer pollution on retry.
+    fn clear_etl_state(&mut self) {
+        self.sync_gap = None;
+        self.hash_collector.clear();
+        self.header_collector.clear();
+        self.is_etl_ready = false;
     }
 
     /// Write downloaded headers to storage from ETL.
@@ -119,10 +126,10 @@ where
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
-            let sealed_header: SealedHeader<Downloader::Header> =
-                bincode::deserialize::<serde_bincode_compat::SealedHeader<'_, _>>(&header_buf)
-                    .map_err(|err| StageError::Fatal(Box::new(err)))?
-                    .into();
+            let sealed_header: SealedHeader<Downloader::Header> = SealedHeader::new_unhashed(
+                Decodable::decode(&mut header_buf.as_slice())
+                    .map_err(|err| StageError::Fatal(Box::new(err)))?,
+            );
 
             let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
@@ -238,15 +245,8 @@ where
                         let header_number = header.number();
 
                         self.hash_collector.insert(header.hash(), header_number)?;
-                        self.header_collector.insert(
-                            header_number,
-                            Bytes::from(
-                                bincode::serialize(&serde_bincode_compat::SealedHeader::from(
-                                    &header,
-                                ))
-                                .map_err(|err| StageError::Fatal(Box::new(err)))?,
-                            ),
-                        )?;
+                        self.header_collector
+                            .insert(header_number, Bytes::from(alloy_rlp::encode(&*header)))?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
@@ -258,7 +258,7 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    self.sync_gap = None;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::DetachedHead {
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
@@ -266,7 +266,7 @@ where
                     }))
                 }
                 None => {
-                    self.sync_gap = None;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::ChannelClosed))
                 }
             }
@@ -324,7 +324,7 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.sync_gap.take();
+        self.clear_etl_state();
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders

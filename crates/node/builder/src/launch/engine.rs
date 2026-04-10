@@ -9,12 +9,12 @@ use crate::{
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use futures::{stream_select, FutureExt, StreamExt};
+use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
-    chain::FromOrchestrator,
-    engine::{EngineApiRequest, EngineRequestHandler},
+    chain::{ChainEvent, FromOrchestrator},
+    engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
+    launch::build_engine_orchestrator,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -32,7 +32,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, MetadataProvider,
+    BlockNumReader, StorageSettingsCache,
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -41,7 +41,6 @@ use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::warn;
 
 /// The engine node launcher.
 #[derive(Debug)]
@@ -82,6 +81,7 @@ impl EngineNodeLauncher {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
+            rocksdb_provider,
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
@@ -103,25 +103,9 @@ impl EngineNodeLauncher {
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory with changeset cache
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone()).await?
-            .inspect(|ctx| {
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone(), rocksdb_provider).await?
+            .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
-                match ctx.provider_factory().storage_settings() {
-                    Ok(settings) => {
-                        info!(
-                            target: "reth::cli",
-                            ?settings,
-                            "Storage settings"
-                        );
-                    },
-                    Err(err) => {
-                        warn!(
-                            target: "reth::cli",
-                            ?err,
-                            "Failed to get storage settings"
-                        );
-                    },
-                }
             })
             .with_prometheus_server().await?
             .inspect(|this| {
@@ -130,6 +114,8 @@ impl EngineNodeLauncher {
             .with_genesis()?
             .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
+                let settings = this.provider_factory().cached_storage_settings();
+                info!(target: "reth::cli", ?settings, "Loaded storage settings");
             })
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
@@ -234,13 +220,19 @@ impl EngineNodeLauncher {
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
-        let mut engine_service = EngineService::new(
+        let engine_kind = if ctx.chain_spec().is_optimism() {
+            EngineApiKind::OpStack
+        } else {
+            EngineApiKind::Ethereum
+        };
+
+        let mut orchestrator = build_engine_orchestrator(
+            engine_kind,
             consensus.clone(),
-            ctx.chain_spec(),
             network_client.clone(),
             Box::pin(consensus_engine_stream),
             pipeline,
-            Box::new(ctx.task_executor().clone()),
+            ctx.task_executor().clone(),
             ctx.provider_factory().clone(),
             ctx.blockchain_db().clone(),
             pruner,
@@ -250,11 +242,12 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            ctx.task_executor().clone(),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        #[allow(clippy::needless_continue)]
+        #[expect(clippy::needless_continue)]
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
@@ -263,13 +256,13 @@ impl EngineNodeLauncher {
             static_file_producer_events.map(Into::into),
         );
 
-        ctx.task_executor().spawn_critical(
+        ctx.task_executor().spawn_critical_task(
             "events task",
-            Box::pin(node::handle_events(
+            node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            )),
+            ),
         );
 
         let RpcHandle {
@@ -301,11 +294,11 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        let consensus_engine = async move {
+        let consensus_engine = move |mut on_graceful_shutdown| async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 // network_handle's sync state is already initialized at Syncing
-                engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+                orchestrator.start_backfill_sync(initial_target);
             } else if startup_sync_state_idle {
                 network_handle.update_sync_state(SyncState::Idle);
             }
@@ -318,21 +311,7 @@ impl EngineNodeLauncher {
             // the CL
             loop {
                 tokio::select! {
-                    shutdown_req = &mut shutdown_rx => {
-                        if let Ok(req) = shutdown_req {
-                            debug!(target: "reth::cli", "received engine shutdown request");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
-                            );
-                        }
-                    }
-                    payload = built_payloads.select_next_some() => {
-                        if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
-                        }
-                    }
-                    event = engine_service.next() => {
+                    event = orchestrator.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
                         match event {
@@ -379,12 +358,39 @@ impl EngineNodeLauncher {
                             }
                         }
                     }
+                    payload = built_payloads.select_next_some(), if !built_payloads.is_terminated() => {
+                        if let Some(executed_block) = payload.executed_block() {
+                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                            orchestrator.handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
+                        }
+                    }
+                    shutdown_req = &mut shutdown_rx => {
+                        if let Ok(req) = shutdown_req {
+                            debug!(target: "reth::cli", "received engine shutdown request");
+                            orchestrator.handler_mut().handler_mut().on_event(
+                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                            );
+                        }
+                    }
+                    _guard = &mut on_graceful_shutdown => {
+                        // Shutdown signal received.
+                        // Send Terminate so the engine OS thread can exit cleanly before we
+                        // drop the orchestrator.
+                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
+                        let (done_tx, done_rx) = oneshot::channel();
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                        let _ = done_rx.await;
+                        break;
+                    }
                 }
             }
 
             let _ = exit.send(res);
         };
-        ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
+        ctx.task_executor()
+            .spawn_critical_with_graceful_shutdown_signal("consensus engine", consensus_engine);
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
@@ -411,10 +417,7 @@ impl EngineNodeLauncher {
         ctx.spawn_ethstats(engine_events_for_ethstats).await?;
 
         let handle = NodeHandle {
-            node_exit_future: NodeExitFuture::new(
-                async { rx.await? },
-                full_node.config.debug.terminate,
-            ),
+            node_exit_future: NodeExitFuture::new(async { rx.await? }),
             node: full_node,
         };
 

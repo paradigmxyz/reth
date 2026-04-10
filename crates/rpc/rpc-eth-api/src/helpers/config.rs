@@ -79,7 +79,7 @@ where
             blob_schedule: chain_spec
                 .blob_params_at_timestamp(timestamp)
                 // no blob support, so we set this to original cancun values as defined in eip-4844
-                .unwrap_or(BlobParams::cancun()),
+                .unwrap_or_else(BlobParams::cancun),
             chain_id: chain_spec.chain().id(),
             fork_id,
             precompiles,
@@ -104,11 +104,16 @@ where
         fork_timestamps.sort_unstable();
         fork_timestamps.dedup();
 
-        let (current_fork_idx, current_fork_timestamp) = fork_timestamps
-            .iter()
-            .position(|ts| &latest.timestamp() < ts)
-            .and_then(|idx| idx.checked_sub(1))
-            .or_else(|| fork_timestamps.len().checked_sub(1))
+        let current_fork_idx = match fork_timestamps.iter().position(|ts| &latest.timestamp() < ts)
+        {
+            // All forks are in the past, use the last one.
+            None => fork_timestamps.len().checked_sub(1),
+            // First fork hasn't activated yet — no active timestamp fork.
+            Some(0) => None,
+            // Found a future fork; current is the one right before it.
+            Some(idx) => Some(idx - 1),
+        };
+        let (current_fork_idx, current_fork_timestamp) = current_fork_idx
             .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
             .ok_or_else(|| RethError::msg("no active timestamp fork found"))?;
 

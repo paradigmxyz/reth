@@ -12,15 +12,16 @@
 extern crate alloc;
 
 mod payload;
-pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{BlobSidecars, EthBuiltPayload};
 
 mod error;
 pub use error::*;
 
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
+    PayloadAttributes as EthPayloadAttributes,
 };
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -45,16 +46,13 @@ impl<
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
-    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        T::block_to_payload(block)
     }
 }
 
@@ -66,13 +64,15 @@ where
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<ExecutionPayloadEnvelopeV3>
         + TryInto<ExecutionPayloadEnvelopeV4>
-        + TryInto<ExecutionPayloadEnvelopeV5>,
+        + TryInto<ExecutionPayloadEnvelopeV5>
+        + TryInto<ExecutionPayloadEnvelopeV6>,
 {
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// A default payload type for [`EthEngineTypes`]
@@ -83,7 +83,6 @@ pub struct EthPayloadTypes;
 impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
-    type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
     type ExecutionData = ExecutionData;
 
     fn block_to_payload(

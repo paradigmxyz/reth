@@ -20,6 +20,7 @@ use reth_era::{
     },
 };
 use reth_fs_util as fs;
+use reth_primitives_traits::Block;
 use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use std::{
     path::PathBuf,
@@ -295,9 +296,11 @@ where
         return Err(eyre!("Expected block {expected_block_number}, got {actual_block_number}"));
     }
 
+    // CompressedBody must contain the block *body* (rlp(body)), not the full block (rlp(block)).
     let body = provider
         .block_by_number(actual_block_number)?
-        .ok_or_else(|| eyre!("Block body not found for block {}", actual_block_number))?;
+        .ok_or_else(|| eyre!("Block not found for block {}", actual_block_number))?
+        .into_body();
 
     let receipts = provider
         .receipts_by_block(actual_block_number.into())?

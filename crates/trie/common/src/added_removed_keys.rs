@@ -15,7 +15,7 @@ pub struct MultiAddedRemovedKeys {
 
 /// Returns [`AddedRemovedKeys`] with default parameters. This is necessary while we are not yet
 /// tracking added keys.
-fn default_added_removed_keys() -> AddedRemovedKeys {
+pub fn default_added_removed_keys() -> AddedRemovedKeys {
     AddedRemovedKeys::default().with_assume_added(true)
 }
 

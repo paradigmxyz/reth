@@ -202,11 +202,14 @@ pub enum EthApiError {
     CallManyError {
         /// Bundle index where the error occurred
         bundle_index: usize,
-        /// Transaction index within the bundle where the error occurred  
+        /// Transaction index within the bundle where the error occurred
         tx_index: usize,
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Error thrown when trying to access block access list for blocks before Amsterdam
+    #[error("Block access list not available for pre-Amsterdam blocks")]
+    BlockAccessListNotAvailablePreAmsterdam,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -345,6 +348,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     error.data(),
                 )
             }
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
+                rpc_error_with_code(4445, error.to_string())
+            }
         }
     }
 }
@@ -453,6 +459,8 @@ where
             DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
+            #[allow(unreachable_patterns)]
+            _ => Self::Unsupported("unsupported tracer error"),
         }
     }
 }
@@ -507,6 +515,7 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
+            ProviderError::BlockExpired { .. } => Self::PrunedHistoryUnavailable,
             err => Self::Internal(err.into()),
         }
     }

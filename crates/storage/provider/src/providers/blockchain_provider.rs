@@ -182,9 +182,12 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
         self.database.rocksdb_provider()
     }
 
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::set_pending_rocksdb_batch instead")
+    }
+
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
     }
 }
 
@@ -552,7 +555,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         let provider = self.consistent_provider()?;
-        provider.ensure_canonical_block(block_number)?;
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -711,6 +713,22 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changeset(block_number)
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        self.consistent_provider()?.get_storage_before_block(block_number, address, storage_key)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        self.consistent_provider()?.storage_changesets_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -734,10 +752,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.account_changeset_count()
     }
 }
 
@@ -1677,14 +1691,11 @@ mod tests {
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, None, Some(account.into()), Default::default())
                     }),
-                    database_changesets
-                        .iter()
-                        .map(|block_changesets| {
-                            block_changesets.iter().map(|(address, account, _)| {
-                                (*address, Some(Some((*account).into())), [])
-                            })
+                    database_changesets.iter().map(|block_changesets| {
+                        block_changesets.iter().map(|(address, account, _)| {
+                            (*address, Some(Some((*account).into())), [])
                         })
-                        .collect::<Vec<_>>(),
+                    }),
                     Vec::new(),
                 ),
                 first_block: first_database_block,

@@ -21,8 +21,8 @@ use crate::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, BlockNumberHashedAddress, ClientVersion, CompactU256, IntegerList,
-        ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
+        StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
 };
@@ -33,7 +33,8 @@ use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
-    BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
+    BranchNodeCompact, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -492,20 +493,6 @@ tables! {
         type SubKey = StoredNibblesSubKey;
     }
 
-    /// Stores the state of a node in the accounts trie prior to a particular block being executed.
-    table AccountsTrieChangeSets {
-        type Key = BlockNumber;
-        type Value = TrieChangeSetsEntry;
-        type SubKey = StoredNibblesSubKey;
-    }
-
-    /// Stores the state of a node in a storage trie prior to a particular block being executed.
-    table StoragesTrieChangeSets {
-        type Key = BlockNumberHashedAddress;
-        type Value = TrieChangeSetsEntry;
-        type SubKey = StoredNibblesSubKey;
-    }
-
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
@@ -550,6 +537,38 @@ tables! {
         type Key = String;
         type Value = Vec<u8>;
     }
+}
+
+/// Packed-encoding view of the [`AccountsTrie`] table.
+///
+/// Uses [`PackedStoredNibbles`] (33-byte) keys instead of [`StoredNibbles`] (65-byte).
+/// Shares the same underlying MDBX table — this is a type-level view for storage v2.
+#[derive(Debug)]
+pub struct PackedAccountsTrie;
+
+impl Table for PackedAccountsTrie {
+    const NAME: &'static str = <AccountsTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = PackedStoredNibbles;
+    type Value = BranchNodeCompact;
+}
+
+/// Packed-encoding view of the [`StoragesTrie`] table.
+///
+/// Uses [`PackedStoredNibblesSubKey`] (33-byte) subkeys instead of [`StoredNibblesSubKey`]
+/// (65-byte). Shares the same underlying MDBX table — this is a type-level view for storage v2.
+#[derive(Debug)]
+pub struct PackedStoragesTrie;
+
+impl Table for PackedStoragesTrie {
+    const NAME: &'static str = <StoragesTrie as Table>::NAME;
+    const DUPSORT: bool = true;
+    type Key = B256;
+    type Value = PackedStorageTrieEntry;
+}
+
+impl DupSort for PackedStoragesTrie {
+    type SubKey = PackedStoredNibblesSubKey;
 }
 
 /// Keys for the `ChainState` table.

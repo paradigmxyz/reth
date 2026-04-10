@@ -114,7 +114,7 @@ impl SessionError for EthStreamError {
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
             Self::EthHandshakeError(err) => {
-                #[allow(clippy::match_same_arms)]
+                #[expect(clippy::match_same_arms)]
                 match err {
                     EthHandshakeError::NoResponse => {
                         // this happens when the conn simply stalled
@@ -160,7 +160,7 @@ impl SessionError for EthStreamError {
                 )
             }
             Self::EthHandshakeError(err) => {
-                #[allow(clippy::match_same_arms)]
+                #[expect(clippy::match_same_arms)]
                 match err {
                     EthHandshakeError::NoResponse => {
                         // this happens when the conn simply stalled

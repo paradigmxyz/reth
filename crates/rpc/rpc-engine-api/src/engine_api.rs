@@ -10,8 +10,9 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
     PraguePayloadFields,
 };
 use async_trait::async_trait;
@@ -27,7 +28,7 @@ use reth_payload_primitives::{
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
@@ -90,7 +91,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -531,7 +532,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
                 return;
@@ -573,7 +574,7 @@ where
                 };
             }
             tx.send(Ok(result)).ok();
-        }));
+        });
 
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
@@ -612,6 +613,34 @@ where
         res
     }
 
+    /// Returns the execution payload bodies by the range (V2).
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    pub async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            block_access_list: None,
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_range_v2`
+    pub async fn get_payload_bodies_by_range_v2_metered(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        let start_time = Instant::now();
+        let res = Self::get_payload_bodies_by_range_v2(self, start, count).await;
+        self.inner.metrics.latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
+        res
+    }
+
     /// Called to retrieve execution payload bodies by hashes.
     pub async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
@@ -630,7 +659,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             let mut result = Vec::with_capacity(hashes.len());
             for hash in hashes {
                 let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
@@ -645,7 +674,7 @@ where
                 }
             }
             tx.send(Ok(result)).ok();
-        }));
+        });
 
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
@@ -670,6 +699,32 @@ where
         let start = Instant::now();
         let res = Self::get_payload_bodies_by_hash_v1(self, hashes).await;
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        res
+    }
+
+    /// Called to retrieve execution payload bodies by hashes (V2).
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    pub async fn get_payload_bodies_by_hash_v2(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            block_access_list: None,
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_hash_v2`
+    pub async fn get_payload_bodies_by_hash_v2_metered(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        let start = Instant::now();
+        let res = Self::get_payload_bodies_by_hash_v2(self, hashes).await;
+        self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
         res
     }
 
@@ -704,24 +759,17 @@ where
             // MUST NOT begin a payload build process. In such an event, the forkchoiceState
             // update MUST NOT be rolled back.
             //
-            // NOTE: This will also apply to the validation result for the cancun or
-            // shanghai-specific fields provided in the payload attributes.
-            //
-            // To do this, we set the payload attrs to `None` if attribute validation failed, but
-            // we still apply the forkchoice update.
+            // NOTE: This also applies to cancun/shanghai-specific payload attributes.
             if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
-                // TODO: decide if we want this branch - the FCU INVALID response might be more
-                // useful than the payload attributes INVALID response
-                if fcu_res.is_invalid() {
+                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                if fcu_res.is_invalid() || fcu_res.payload_status.is_syncing() {
                     return Ok(fcu_res)
                 }
                 return Err(err.into())
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Returns reference to supported capabilities.
@@ -963,6 +1011,24 @@ where
         Ok(self.new_payload_v4_metered(payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    async fn new_payload_v5(
+        &self,
+        _payload: ExecutionPayloadV4,
+        _versioned_hashes: Vec<B256>,
+        _parent_beacon_block_root: B256,
+        _execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1086,6 +1152,21 @@ where
         Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    async fn get_payload_v6(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -1094,6 +1175,19 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(self.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
+    }
+
+    /// Handler for `engine_getPayloadBodiesByHashV2`
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
+        Ok(self.get_payload_bodies_by_hash_v2_metered(block_hashes).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -1119,6 +1213,20 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(self.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+    }
+
+    /// Handler for `engine_getPayloadBodiesByRangeV2`
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
+        Ok(self.get_payload_bodies_by_range_v2_metered(start.to(), count.to()).await?)
     }
 
     /// Handler for `engine_getClientVersionV1`
@@ -1166,33 +1274,6 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
-
-    /// Handler for `engine_getBALsByHashV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_hash_v1(
-        &self,
-        _block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
-    }
-
-    /// Handler for `engine_getBALsByRangeV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_range_v1(
-        &self,
-        _start: U64,
-        _count: U64,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
-    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1202,7 +1283,7 @@ where
     Self: EngineApiServer<EngineT>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
-        self.into_rpc().remove_context()
+        EngineApiServer::<EngineT>::into_rpc(self).remove_context()
     }
 }
 
@@ -1237,7 +1318,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// The type that can communicate with the payload service to retrieve payloads.
     payload_store: PayloadStore<PayloadT>,
     /// For spawning and executing async tasks
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
     /// Identification of the execution client used by the consensus client
@@ -1256,10 +1337,13 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_engine::{
+        ClientCode, ClientVersionV1, PayloadAttributes, PayloadStatusEnum,
+    };
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-    use reth_engine_primitives::BeaconEngineMessage;
+    use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::Block;
     use reth_network_api::{
@@ -1268,7 +1352,7 @@ mod tests {
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -1293,7 +1377,7 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
-        let task_executor = Box::<TokioTaskExecutor>::default();
+        let task_executor = Runtime::test();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
@@ -1400,7 +1484,7 @@ mod tests {
             ConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             NoopTransactionPool::default(),
-            Box::<TokioTaskExecutor>::default(),
+            Runtime::test(),
             ClientVersionV1 {
                 code: ClientCode::RH,
                 name: "Reth".to_string(),
@@ -1415,6 +1499,117 @@ mod tests {
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
         assert_matches!(res, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_syncing_precedes_invalid_payload_attributes_validation() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x11; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
+            parent_beacon_block_root: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "FCU for syncing state should be evaluated before payload attributes"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx.send(Ok(OnForkChoiceUpdated::syncing())).expect("send syncing response");
+
+        let response = api_task
+            .await
+            .expect("api task should not panic")
+            .expect("forkchoiceUpdatedV3 should return a syncing response");
+        assert!(response.payload_status.is_syncing());
+        assert!(response.payload_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn fcu_v3_valid_forkchoice_missing_beacon_root_returns_invalid_attributes() {
+        let (mut handle, api) = setup_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x22; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: None,
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+        });
+
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "when attrs are invalid, API should first evaluate forkchoice without attrs"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let response = api_task.await.expect("api task should not panic");
+        assert_matches!(
+            response,
+            Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::PayloadAttributes(_)
+            ))
+        );
+
+        match tokio::time::timeout(std::time::Duration::from_millis(100), handle.from_api.recv())
+            .await
+        {
+            Err(_) | Ok(None) => {}
+            Ok(Some(BeaconEngineMessage::ForkchoiceUpdated { .. })) => {
+                panic!("no second forkchoiceUpdated call should be sent when attrs are invalid")
+            }
+            Ok(Some(other)) => panic!("unexpected engine message: {other:?}"),
+        }
     }
 
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`

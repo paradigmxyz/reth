@@ -44,9 +44,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-
-[features]
-edge = ["reth-db-api/edge", "reth-provider/rocksdb"]
+reth-tasks.workspace = true
 
 [lints]
 workspace = true

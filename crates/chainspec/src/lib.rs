@@ -25,6 +25,7 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
+pub use alloy_evm::EvmLimitParams;
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
@@ -34,15 +35,6 @@ pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
-
-use reth_primitives_traits::sync::OnceLock;
-
-/// Simple utility to create a thread-safe sync cell with a value set.
-pub fn once_cell_set<T>(value: T) -> OnceLock<T> {
-    let once = OnceLock::new();
-    let _ = once.set(value);
-    once
-}
 
 #[cfg(test)]
 mod tests {

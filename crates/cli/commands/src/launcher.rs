@@ -2,7 +2,7 @@ use futures::Future;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 /// A trait for launching a reth node with custom configuration strategies.
 ///
@@ -30,7 +30,7 @@ where
     /// * `builder_args` - Extension arguments for configuration
     fn entrypoint(
         self,
-        builder: WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        builder: WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
         builder_args: Ext,
     ) -> impl Future<Output = eyre::Result<()>>;
 }
@@ -58,7 +58,7 @@ impl<F> FnLauncher<F> {
     where
         C: ChainSpecParser,
         F: AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> eyre::Result<()>,
     {
@@ -77,13 +77,13 @@ where
     C: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
     F: AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
         Ext,
     ) -> eyre::Result<()>,
 {
     fn entrypoint(
         self,
-        builder: WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        builder: WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
         builder_args: Ext,
     ) -> impl Future<Output = eyre::Result<()>> {
         (self.func)(builder, builder_args)

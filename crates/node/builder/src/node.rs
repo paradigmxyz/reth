@@ -218,9 +218,9 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> DerefMut for FullNode<N
 }
 
 /// Helper type alias to define [`FullNode`] for a given [`Node`].
-pub type FullNodeFor<N, DB = Arc<DatabaseEnv>> =
+pub type FullNodeFor<N, DB = DatabaseEnv> =
     FullNode<NodeAdapter<RethFullAdapter<DB, N>>, <N as Node<RethFullAdapter<DB, N>>>::AddOns>;
 
 /// Helper type alias to define [`NodeHandle`] for a given [`Node`].
-pub type NodeHandleFor<N, DB = Arc<DatabaseEnv>> =
+pub type NodeHandleFor<N, DB = DatabaseEnv> =
     NodeHandle<NodeAdapter<RethFullAdapter<DB, N>>, <N as Node<RethFullAdapter<DB, N>>>::AddOns>;

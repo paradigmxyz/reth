@@ -1,5 +1,6 @@
 //! Utilities for end-to-end tests.
 
+use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
@@ -11,7 +12,6 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_tasks::TaskManager;
 use std::sync::Arc;
 use wallet::Wallet;
 
@@ -49,8 +49,12 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
+) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)>
 where
     N: NodeBuilderHelper,
 {
@@ -66,10 +70,13 @@ pub async fn setup_engine<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where
@@ -92,18 +99,24 @@ pub async fn setup_engine_with_connection<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
+        + Send
+        + Sync
+        + Copy
+        + 'static,
     connect_nodes: bool,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where
     N: NodeBuilderHelper,
 {
     E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
-        .with_tree_config_modifier(move |_| tree_config.clone())
+        .with_tree_config_modifier(move |base| {
+            // Apply caller's tree_config but preserve the small cache size from base
+            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
+        })
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(connect_nodes)
         .build()
@@ -133,11 +146,8 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider<
-            Payload: PayloadTypes<
-                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
-            >,
-        > + Node<
+        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
@@ -158,11 +168,8 @@ where
 
 impl<T> NodeBuilderHelper for T where
     Self: Default
-        + NodeTypesForProvider<
-            Payload: PayloadTypes<
-                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
-            >,
-        > + Node<
+        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,

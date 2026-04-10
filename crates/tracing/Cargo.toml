@@ -23,7 +23,7 @@ tracing-journald.workspace = true
 tracing-logfmt.workspace = true
 tracing-samply.workspace = true
 tracing-tracy = { workspace = true, optional = true }
-tracy-client = { workspace = true, optional = true, features = ["demangle"] }
+tracy-client = { workspace = true, optional = true }
 
 # misc
 clap = { workspace = true, features = ["derive"] }
