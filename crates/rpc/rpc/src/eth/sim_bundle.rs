@@ -415,7 +415,9 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate payout value based on ORIGINAL refundable value
+                        // Calculate allocated refundable value (payout value) based on ORIGINAL
+                        // refundable value. This ensures all refund_percent values are
+                        // calculated from the same base.
                         let payout_value = original_refundable_value * U256::from(refund_percent) /
                             U256::from(100);
 
