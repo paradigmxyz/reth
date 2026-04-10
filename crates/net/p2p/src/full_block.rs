@@ -1,5 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{
+    block_access_lists::client::BlockAccessListsClient,
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
     error::PeerRequestResult,
@@ -11,7 +12,9 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
 use core::marker::PhantomData;
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
+use reth_eth_wire_types::{
+    BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
+};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{
@@ -50,6 +53,38 @@ where
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
         Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
+    }
+}
+
+impl<Client> FullBlockClient<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    /// Returns a future that fetches the [`SealedBlock`] and its [`BlockAccessLists`] for the given
+    /// hash.
+    ///
+    /// Note: this future is cancel safe
+    ///
+    /// Caution: This does no validation of body (transactions) response but guarantees that the
+    /// [`SealedHeader`] matches the requested hash.
+    pub fn get_full_block_with_access_lists(
+        &self,
+        hash: B256,
+    ) -> FetchFullBlockWithBALFuture<Client> {
+        let client = self.client.clone();
+        FetchFullBlockWithBALFuture {
+            hash,
+            consensus: self.consensus.clone(),
+            request: FullBlockWithBALRequest {
+                header: Some(client.get_header(hash.into())),
+                body: Some(client.get_block_body(hash)),
+                bal: Some(client.get_block_access_lists(vec![hash])),
+            },
+            client,
+            header: None,
+            body: None,
+            bal: None,
+        }
     }
 }
 
@@ -310,6 +345,223 @@ enum BodyResponse<B> {
     /// Still needs to be validated against header
     PendingValidation(WithPeerId<B>),
 }
+
+/// A future that downloads a full block and its block access lists from the network.
+///
+/// This will attempt to fetch the header, body, and block access lists for the given block hash at
+/// the same time. When all requests succeed, the future will yield the full block and its access
+/// lists.
+#[must_use = "futures do nothing unless polled"]
+pub struct FetchFullBlockWithBALFuture<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    client: Client,
+    consensus: Arc<dyn Consensus<Client::Block>>,
+    hash: B256,
+    request: FullBlockWithBALRequest<Client>,
+    header: Option<SealedHeader<Client::Header>>,
+    body: Option<BodyResponse<Client::Body>>,
+    bal: Option<BlockAccessLists>,
+}
+
+impl<Client> FetchFullBlockWithBALFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader> + BlockAccessListsClient,
+{
+    /// Returns the hash of the block being requested.
+    pub const fn hash(&self) -> &B256 {
+        &self.hash
+    }
+
+    /// If the header request is already complete, this returns the block number
+    pub fn block_number(&self) -> Option<u64> {
+        self.header.as_ref().map(|h| h.number())
+    }
+
+    /// Returns the [`SealedBlock`] and [`BlockAccessLists`] if the request is complete and valid.
+    fn take_block_and_bal(&mut self) -> Option<(SealedBlock<Client::Block>, BlockAccessLists)> {
+        if self.header.is_none() || self.body.is_none() || self.bal.is_none() {
+            return None
+        }
+
+        let header = self.header.take().unwrap();
+        let resp = self.body.take().unwrap();
+        let bal = self.bal.take().unwrap();
+        match resp {
+            BodyResponse::Validated(body) => {
+                Some((SealedBlock::from_sealed_parts(header, body), bal))
+            }
+            BodyResponse::PendingValidation(resp) => {
+                // ensure the block is valid, else retry
+                if let Err(err) = self.consensus.validate_body_against_header(resp.data(), &header)
+                {
+                    debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
+                    self.client.report_bad_message(resp.peer_id());
+                    self.header = Some(header);
+                    self.bal = Some(bal);
+                    self.request.body = Some(self.client.get_block_body(self.hash));
+                    return None
+                }
+                Some((SealedBlock::from_sealed_parts(header, resp.into_data()), bal))
+            }
+        }
+    }
+
+    fn on_block_response(&mut self, resp: WithPeerId<Client::Body>) {
+        if let Some(ref header) = self.header {
+            if let Err(err) = self.consensus.validate_body_against_header(resp.data(), header) {
+                debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
+                self.client.report_bad_message(resp.peer_id());
+                return
+            }
+            self.body = Some(BodyResponse::Validated(resp.into_data()));
+            return
+        }
+        self.body = Some(BodyResponse::PendingValidation(resp));
+    }
+}
+
+impl<Client> Future for FetchFullBlockWithBALFuture<Client>
+where
+    Client: BlockClient<Header: BlockHeader + Sealable> + BlockAccessListsClient + 'static,
+{
+    type Output = (SealedBlock<Client::Block>, BlockAccessLists);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let mut budget = 4;
+
+        loop {
+            match ready!(this.request.poll(cx)) {
+                ResponseResultWithBAL::Header(res) => {
+                    match res {
+                        Ok(maybe_header) => {
+                            let (peer, maybe_header) =
+                                maybe_header.map(|h| h.map(SealedHeader::seal_slow)).split();
+                            if let Some(header) = maybe_header {
+                                if header.hash() == this.hash {
+                                    this.header = Some(header);
+                                } else {
+                                    debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
+                                    this.client.report_bad_message(peer)
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            debug!(target: "downloaders", %err, ?this.hash, "Header download failed")
+                        }
+                    }
+                    if this.header.is_none() {
+                        this.request.header = Some(this.client.get_header(this.hash.into()));
+                    }
+                }
+                ResponseResultWithBAL::Body(res) => {
+                    match res {
+                        Ok(maybe_body) => {
+                            if let Some(body) = maybe_body.transpose() {
+                                this.on_block_response(body);
+                            }
+                        }
+                        Err(err) => {
+                            debug!(target: "downloaders", %err, ?this.hash, "Body download failed")
+                        }
+                    }
+                    if this.body.is_none() {
+                        this.request.body = Some(this.client.get_block_body(this.hash));
+                    }
+                }
+                ResponseResultWithBAL::Bal(res) => {
+                    match res {
+                        Ok(bal_resp) => {
+                            this.bal = Some(bal_resp.into_data());
+                        }
+                        Err(err) => {
+                            debug!(target: "downloaders", %err, ?this.hash, "BAL download failed")
+                        }
+                    }
+                    if this.bal.is_none() {
+                        this.request.bal =
+                            Some(this.client.get_block_access_lists(vec![this.hash]));
+                    }
+                }
+            }
+
+            if let Some(res) = this.take_block_and_bal() {
+                return Poll::Ready(res)
+            }
+
+            budget -= 1;
+            if budget == 0 {
+                cx.waker().wake_by_ref();
+                return Poll::Pending
+            }
+        }
+    }
+}
+
+impl<Client> Debug for FetchFullBlockWithBALFuture<Client>
+where
+    Client: BlockClient<Header: Debug, Body: Debug> + BlockAccessListsClient,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FetchFullBlockWithBALFuture")
+            .field("hash", &self.hash)
+            .field("header", &self.header)
+            .field("body", &self.body)
+            .field("bal", &self.bal)
+            .finish()
+    }
+}
+
+struct FullBlockWithBALRequest<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    header: Option<SingleHeaderRequest<<Client as HeadersClient>::Output>>,
+    body: Option<SingleBodyRequest<<Client as BodiesClient>::Output>>,
+    bal: Option<<Client as BlockAccessListsClient>::Output>,
+}
+
+impl<Client> FullBlockWithBALRequest<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<ResponseResultWithBAL<Client::Header, Client::Body>> {
+        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
+            if let Poll::Ready(res) = fut.poll(cx) {
+                self.header = None;
+                return Poll::Ready(ResponseResultWithBAL::Header(res))
+            }
+        }
+
+        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
+            if let Poll::Ready(res) = fut.poll(cx) {
+                self.body = None;
+                return Poll::Ready(ResponseResultWithBAL::Body(res))
+            }
+        }
+
+        if let Some(fut) = Pin::new(&mut self.bal).as_pin_mut() {
+            if let Poll::Ready(res) = fut.poll(cx) {
+                self.bal = None;
+                return Poll::Ready(ResponseResultWithBAL::Bal(res))
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
+enum ResponseResultWithBAL<H, B> {
+    Header(PeerRequestResult<Option<H>>),
+    Body(PeerRequestResult<Option<B>>),
+    Bal(PeerRequestResult<BlockAccessLists>),
+}
+
 /// A future that downloads a range of full blocks from the network.
 ///
 /// This first fetches the headers for the given range using the inner `Client`. Once the request
