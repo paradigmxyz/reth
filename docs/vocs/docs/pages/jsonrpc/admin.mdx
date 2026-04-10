@@ -164,6 +164,10 @@ Clears all transactions from the transaction pool. Returns the number of removed
 
 ## `admin_peerEvents`, `admin_peerEvents_unsubscribe`
 
+:::warning
+`admin_peerEvents` is not yet implemented. Calling this method returns an error.
+:::
+
 Subscribe to events received by peers over the network. This creates a subscription that emits notifications about peer connections and disconnections.
 
 The events provide information about peer activities such as when peers connect, disconnect, or experience errors. Each event contains details about the affected peer, including its enode URL, IP address, and the reason for the event.
