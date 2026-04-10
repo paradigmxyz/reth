@@ -38,6 +38,9 @@ pub struct SnapshotManifest {
     /// When omitted, downloaders should derive the base URL from the manifest URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Reth version that produced this snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reth_version: Option<String>,
     /// Available snapshot components.
     pub components: BTreeMap<String, ComponentManifest>,
 }
@@ -553,6 +556,7 @@ pub fn generate_manifest(
         storage_version: 2,
         timestamp,
         base_url: base_url.map(str::to_owned),
+        reth_version: Some(reth_node_core::version::version_metadata().short_version.to_string()),
         components,
     })
 }
@@ -834,6 +838,7 @@ mod tests {
             storage_version: 2,
             timestamp: 0,
             base_url: Some("https://example.com".to_string()),
+            reth_version: None,
             components,
         }
     }
@@ -884,6 +889,7 @@ mod tests {
             storage_version: 2,
             timestamp: 0,
             base_url: Some("https://example.com".to_string()),
+            reth_version: None,
             components,
         };
 
@@ -953,6 +959,7 @@ mod tests {
             storage_version: 2,
             timestamp: 0,
             base_url: Some("https://example.com".to_string()),
+            reth_version: None,
             components,
         };
         let urls = m.archive_urls(SnapshotComponentType::StorageChangesets);
@@ -1028,6 +1035,7 @@ mod tests {
             storage_version: 2,
             timestamp: 0,
             base_url: Some("https://example.com".to_string()),
+            reth_version: None,
             components,
         };
 

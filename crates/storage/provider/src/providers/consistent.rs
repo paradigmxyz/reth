@@ -600,21 +600,23 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self,
         block_hash: BlockHash,
     ) -> ProviderResult<StateProviderBox> {
+        // Resolve block number and verify it's canonical before destructuring self
+        let block_number =
+            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        self.ensure_canonical_block(block_number)?;
+
         let Self { storage_provider, head_block, .. } = self;
-        let into_history_at_block_hash = |block_hash| -> ProviderResult<StateProviderBox> {
-            let block_number = storage_provider
-                .block_number(block_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-            storage_provider.try_into_history_at_block(block_number)
-        };
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let anchor_hash = block_state.anchor().hash;
-            let latest_historical = into_history_at_block_hash(anchor_hash)?;
+            let block_number = storage_provider
+                .block_number(anchor_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
+            let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-        into_history_at_block_hash(block_hash)
+        storage_provider.try_into_history_at_block(block_number)
     }
 }
 
@@ -1097,7 +1099,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             range,
             |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
             |index_range, block_state| {
-                Ok(block_state.executed_block_receipts().drain(index_range).collect())
+                Ok(block_state.executed_block_receipts_ref()[index_range].to_vec())
             },
         )
     }
@@ -1287,7 +1289,9 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(hash.block_hash)?.map(SealedHeader::seal_slow),
+            BlockId::Hash(hash) => self
+                .header(hash.block_hash)?
+                .map(|header| SealedHeader::new(header, hash.block_hash)),
         })
     }
 
@@ -1312,7 +1316,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1366,7 +1369,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .storage
                 .into_iter()
@@ -1419,7 +1421,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .storage
                     .into_iter()
@@ -1461,30 +1462,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
         Ok(changesets)
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        let mut count = 0;
-        if let Some(head_block) = &self.head_block {
-            for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .storage
-                    .into_iter()
-                    .flatten()
-                    .map(|revert: PlainStorageRevert| revert.storage_revert.len())
-                    .sum::<usize>();
-            }
-        }
-
-        count += self.storage_provider.storage_changeset_count()?;
-
-        Ok(count)
-    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
@@ -1500,7 +1477,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1546,7 +1522,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .execution_output
                 .state
                 .reverts
-                .clone()
                 .to_plain_state_reverts()
                 .accounts
                 .into_iter()
@@ -1599,7 +1574,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .execution_output
                     .state
                     .reverts
-                    .clone()
                     .to_plain_state_reverts()
                     .accounts
                     .into_iter()
@@ -1635,29 +1609,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         changesets.sort_by_key(|(block_num, _)| *block_num);
 
         Ok(changesets)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        // Count changesets from in-memory state
-        let mut count = 0;
-        if let Some(head_block) = &self.head_block {
-            for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .accounts
-                    .len();
-            }
-        }
-
-        // Add changesets from storage provider
-        count += self.storage_provider.account_changeset_count()?;
-
-        Ok(count)
     }
 }
 

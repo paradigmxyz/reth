@@ -74,6 +74,11 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.get(&hash)
     }
 
+    /// Returns `true` if a block with the given hash exists in memory.
+    pub fn contains_hash(&self, hash: &B256) -> bool {
+        self.blocks_by_hash.contains_key(hash)
+    }
+
     /// Returns the sealed block header by hash.
     pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
         self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())

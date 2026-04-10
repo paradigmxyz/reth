@@ -2,7 +2,7 @@
 
 pub use thread_priority::{self, *};
 
-/// Runs the given expression exactly once per call site.
+/// Runs the given closure exactly once per call site.
 ///
 /// Each invocation expands to its own `static Once`, so two `once!` calls in the same function
 /// are independent. Useful for one-time thread setup (priority, affinity) on threads that may
@@ -11,7 +11,7 @@ pub use thread_priority::{self, *};
 macro_rules! once {
     ($e:expr) => {{
         static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| $e);
+        ONCE.call_once($e);
     }};
 }
 
@@ -45,7 +45,6 @@ pub fn increase_thread_priority() {
 /// Should be called once after tracing is initialized.
 ///
 /// No-op on non-Linux platforms.
-#[allow(clippy::missing_const_for_fn)]
 pub fn deprioritize_background_threads() {
     #[cfg(target_os = "linux")]
     _deprioritize_background_threads();

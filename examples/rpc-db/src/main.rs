@@ -53,7 +53,7 @@ async fn main() -> eyre::Result<()> {
     let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
         db.clone(),
         spec.clone(),
-        StaticFileProvider::read_only(db_path.join("static_files"), true)?,
+        StaticFileProvider::read_only(db_path.join("static_files"))?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
         runtime.clone(),
     )?;

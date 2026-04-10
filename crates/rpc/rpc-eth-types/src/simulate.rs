@@ -47,6 +47,9 @@ pub enum EthSimulateError {
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Number of simulated blocks exceeds the configured client limit.
+    #[error("too many blocks")]
+    TooManyBlocks,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
@@ -116,7 +119,7 @@ impl EthSimulateError {
             Self::BlockTimestampInvalid { .. } => -38021,
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
-            Self::GasLimitReached => -38026,
+            Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::NotAPrecompile(_) => -32000,
         }
     }
@@ -200,7 +203,7 @@ where
     }
 
     // Pass noop provider to skip state root calculations.
-    let result = builder.finish(NoopProvider::default())?;
+    let result = builder.finish(NoopProvider::default(), None)?;
 
     Ok((result, results))
 }
@@ -303,7 +306,7 @@ where
         let call = match result {
             ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -319,7 +322,7 @@ where
             }
             ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
@@ -335,7 +338,7 @@ where
             }
             ExecutionResult::Success { output, gas, logs, .. } =>
             {
-                #[allow(clippy::needless_update)]
+                #[expect(clippy::needless_update)]
                 SimCallResult {
                     return_data: output.into_data(),
                     error: None,

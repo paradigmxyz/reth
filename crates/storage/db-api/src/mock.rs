@@ -54,6 +54,14 @@ impl Database for DatabaseMock {
     fn path(&self) -> PathBuf {
         PathBuf::default()
     }
+
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        None
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl DatabaseMetrics for DatabaseMock {}

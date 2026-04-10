@@ -7,6 +7,8 @@
 //   BENCH_PR               – PR number (may be empty)
 //   BENCH_ACTOR            – GitHub user who triggered the bench
 //   BENCH_JOB_URL          – URL to the Actions job page
+//   BENCH_BASELINE_ARGS    – Extra CLI args for the baseline reth node
+//   BENCH_FEATURE_ARGS     – Extra CLI args for the feature reth node
 //   BENCH_SAMPLY           – 'true' if samply profiling was enabled
 //
 // Usage from actions/github-script:
@@ -16,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows } = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -59,41 +62,17 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
+// Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
+const SLACK_VERDICT = {
+  '⚠️': ':warning:',
+  '❌': ':x:',
+  '✅': ':white_check_mark:',
+  '⚪': ':white_circle:',
+};
+
 function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
-  const b = summary.baseline.stats;
-  const f = summary.feature.stats;
-  const c = summary.changes;
-
-  const sigEmoji = { good: '\u2705', bad: '\u274c', neutral: '\u26aa' };
-
-  function fmtMs(v) { return v.toFixed(2) + 'ms'; }
-  function fmtMgas(v) { return v.toFixed(2); }
-  function fmtS(v) { return v.toFixed(2) + 's'; }
-  function fmtChange(ch) {
-    if (!ch.pct && !ch.ci_pct) return ' ';
-    const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
-    const ciStr = ch.ci_pct ? ` (\u00b1${ch.ci_pct.toFixed(2)}%)` : '';
-    return `${pctStr}${ciStr} ${sigEmoji[ch.sig]}`;
-  }
-
-  // Overall result for header
-  const vals = Object.values(c);
-  const hasBad = vals.some(v => v.sig === 'bad');
-  const hasGood = vals.some(v => v.sig === 'good');
-  let headerEmoji, headerResult;
-  if (hasBad && hasGood) {
-    headerEmoji = ':warning:';
-    headerResult = 'Mixed Results';
-  } else if (hasBad) {
-    headerEmoji = ':x:';
-    headerResult = 'Regression';
-  } else if (hasGood) {
-    headerEmoji = ':white_check_mark:';
-    headerResult = 'Improvement';
-  } else {
-    headerEmoji = ':white_circle:';
-    headerResult = 'No Difference';
-  }
+  const { emoji, label } = verdict(summary.changes);
+  const headerEmoji = SLACK_VERDICT[emoji] || emoji;
 
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
   const commitUrl = `https://github.com/${repo}/commit`;
@@ -118,15 +97,15 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
   if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
 
-  const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
-  const cores = process.env.BENCH_CORES || '0';
-  const countsParts = [];
-  if (warmup) countsParts.push(`*Warmup:* ${warmup}`);
-  countsParts.push(`*Blocks:* ${summary.blocks}`);
-  if (cores !== '0') countsParts.push(`*Cores:* ${cores}`);
-  const countsLine = countsParts.join(' | ');
+  const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
 
-  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, countsLine].join('\n');
+  const baselineArgs = process.env.BENCH_BASELINE_ARGS || '';
+  const featureArgs = process.env.BENCH_FEATURE_ARGS || '';
+  const argsLines = [];
+  if (baselineArgs) argsLines.push(`*Baseline Args:* \`${baselineArgs}\``);
+  if (featureArgs) argsLines.push(`*Feature Args:* \`${featureArgs}\``);
+
+  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, ...argsLines, countsLine].join('\n');
 
   // Action buttons
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -145,10 +124,17 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
     },
   ];
 
+  // Build table rows from shared metricRows
+  const rows = metricRows(summary);
+  const tableRows = [
+    [cell('Metric'), cell('Baseline'), cell('Feature'), cell('Change')],
+    ...rows.map(r => [cell(r.label), cell(r.baseline), cell(r.feature), cell(r.change || ' ')]),
+  ];
+
   const blocks = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: `${headerEmoji} ${headerResult}`, emoji: true },
+      text: { type: 'plain_text', text: `${headerEmoji} ${label}`, emoji: true },
     },
     {
       type: 'section',
@@ -162,16 +148,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
         { align: 'right' },
         { align: 'right' },
       ],
-      rows: [
-        [cell('Metric'),  cell('Baseline'), cell('Feature'), cell('Change')],
-        [cell('Mean'),     cell(fmtMs(b.mean_ms)),      cell(fmtMs(f.mean_ms)),      cell(fmtChange(c.mean))],
-        [cell('StdDev'),   cell(fmtMs(b.stddev_ms)),    cell(fmtMs(f.stddev_ms)),    cell(' ')],
-        [cell('P50'),      cell(fmtMs(b.p50_ms)),       cell(fmtMs(f.p50_ms)),       cell(fmtChange(c.p50))],
-        [cell('P90'),      cell(fmtMs(b.p90_ms)),       cell(fmtMs(f.p90_ms)),       cell(fmtChange(c.p90))],
-        [cell('P99'),      cell(fmtMs(b.p99_ms)),       cell(fmtMs(f.p99_ms)),       cell(fmtChange(c.p99))],
-        [cell('Mgas/s'),   cell(fmtMgas(b.mean_mgas_s)), cell(fmtMgas(f.mean_mgas_s)), cell(fmtChange(c.mgas_s))],
-        [cell('Wall Clock'), cell(fmtS(b.wall_clock_s)), cell(fmtS(f.wall_clock_s)), cell(fmtChange(c.wall_clock))],
-      ],
+      rows: tableRows,
     },
     {
       type: 'actions',
@@ -181,16 +158,12 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   // Wait times as a separate table block (sent as threaded reply due to Slack one-table limit)
   const threadBlocks = [];
-  const waitTimes = summary.wait_times || {};
-  const waitKeys = Object.keys(waitTimes);
-  if (waitKeys.length > 0) {
-    const waitRows = [
+  const wtRows = waitTimeRows(summary);
+  if (wtRows.length > 0) {
+    const waitTableRows = [
       [cell('Wait Time'), cell('Baseline'), cell('Feature')],
+      ...wtRows.map(r => [cell(r.title), cell(r.baseline), cell(r.feature)]),
     ];
-    for (const key of waitKeys) {
-      const wt = waitTimes[key];
-      waitRows.push([cell(wt.title), cell(fmtMs(wt.baseline.mean_ms)), cell(fmtMs(wt.feature.mean_ms))]);
-    }
     threadBlocks.push({
       type: 'table',
       column_settings: [
@@ -198,7 +171,7 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
         { align: 'right' },
         { align: 'right' },
       ],
-      rows: waitRows,
+      rows: waitTableRows,
     });
   }
 
@@ -260,16 +233,7 @@ async function success({ core, context }) {
   const jobUrl = process.env.BENCH_JOB_URL ||
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-  // Load samply profile URLs (files exist when samply profiling was enabled)
-  const samplyUrls = {};
-  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
-    try {
-      const url = fs.readFileSync(
-        path.join(process.env.BENCH_WORK_DIR, run, 'samply-profile-url.txt'), 'utf8'
-      ).trim();
-      if (url) samplyUrls[run] = url;
-    } catch {}
-  }
+  const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
 
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];

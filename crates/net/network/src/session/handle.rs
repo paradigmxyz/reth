@@ -2,7 +2,7 @@
 
 use crate::{
     message::PeerMessage,
-    session::{conn::EthRlpxConnection, Direction, SessionId},
+    session::{active::BroadcastItemCounter, conn::EthRlpxConnection, Direction, SessionId},
     PendingSessionHandshakeError,
 };
 use reth_ecies::ECIESError;
@@ -18,6 +18,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
 };
+use tracing::trace;
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
 /// message which exchanges the `capabilities` of the peer.
@@ -65,8 +66,8 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     pub(crate) established: Instant,
     /// Announced capabilities of the peer.
     pub(crate) capabilities: Arc<Capabilities>,
-    /// Sender half of the command channel used send commands _to_ the spawned session
-    pub(crate) commands_to_session: mpsc::Sender<SessionCommand<N>>,
+    /// Sender for commands to the spawned session with broadcast-aware backpressure.
+    pub(crate) commands: SessionCommandSender<N>,
     /// The client's name and version
     pub(crate) client_version: Arc<str>,
     /// The address we're connected to
@@ -82,17 +83,15 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
 impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
     /// Sends a disconnect command to the session.
     pub fn disconnect(&self, reason: Option<DisconnectReason>) {
-        // Note: we clone the sender which ensures the channel has capacity to send the message
-        let _ = self.commands_to_session.clone().try_send(SessionCommand::Disconnect { reason });
+        self.commands.disconnect(reason);
     }
 
-    /// Sends a disconnect command to the session, awaiting the command channel for available
-    /// capacity.
-    pub async fn try_disconnect(
+    /// Sends a disconnect command to the session via the unbounded channel.
+    pub fn try_disconnect(
         &self,
         reason: Option<DisconnectReason>,
     ) -> Result<(), SendError<SessionCommand<N>>> {
-        self.commands_to_session.clone().send(SessionCommand::Disconnect { reason }).await
+        self.commands.try_disconnect(reason)
     }
 
     /// Returns the direction of the active session (inbound or outbound).
@@ -135,6 +134,11 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
         self.remote_addr
     }
 
+    /// Returns the current number of in-flight broadcast items.
+    pub fn queued_broadcast_items(&self) -> usize {
+        self.commands.queued_broadcast_items()
+    }
+
     /// Extracts the [`PeerInfo`] from the session handle.
     pub(crate) fn peer_info(&self, record: &NodeRecord, kind: PeerKind) -> PeerInfo {
         PeerInfo {
@@ -151,6 +155,108 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
             session_established: self.established,
             kind,
         }
+    }
+}
+
+/// Sender half of the session command channel with broadcast-aware backpressure.
+///
+/// Commands are first sent through a bounded channel. If the bounded channel is full and the
+/// message is a broadcast with room under the broadcast item limit, it overflows to a dedicated
+/// unbounded channel that the session task drains alongside the bounded one.
+///
+/// The shared `broadcast_items` counter tracks items across **all** buffers (bounded channel,
+/// overflow channel, and the session's outgoing queue), so the
+/// [`SessionManager`](super::SessionManager) has an accurate view of total in-flight broadcast
+/// pressure.
+#[derive(Debug)]
+pub(crate) struct SessionCommandSender<N: NetworkPrimitives> {
+    /// Bounded channel for all commands (primary path).
+    tx: mpsc::Sender<SessionCommand<N>>,
+    /// Unbounded channel used for broadcasts that overflow the bounded channel, and for
+    /// disconnect commands (which must never be dropped due to backpressure).
+    unbounded_tx: mpsc::UnboundedSender<SessionCommand<N>>,
+    /// Shared counter of in-flight broadcast items (channels + outgoing queue).
+    broadcast_items: BroadcastItemCounter,
+}
+
+impl<N: NetworkPrimitives> SessionCommandSender<N> {
+    /// Creates a new sender with the given bounded channel, unbounded channel, and shared counter.
+    pub(crate) const fn new(
+        tx: mpsc::Sender<SessionCommand<N>>,
+        unbounded_tx: mpsc::UnboundedSender<SessionCommand<N>>,
+        broadcast_items: BroadcastItemCounter,
+    ) -> Self {
+        Self { tx, unbounded_tx, broadcast_items }
+    }
+
+    /// Sends a disconnect command via the unbounded channel so it is never dropped due to
+    /// backpressure.
+    pub(crate) fn disconnect(&self, reason: Option<DisconnectReason>) {
+        let _ = self.unbounded_tx.send(SessionCommand::Disconnect { reason });
+    }
+
+    /// Sends a disconnect command via the unbounded channel.
+    ///
+    /// This is infallible from a capacity standpoint (unbounded), but will fail if the
+    /// receiver has been dropped (session closed).
+    pub(crate) fn try_disconnect(
+        &self,
+        reason: Option<DisconnectReason>,
+    ) -> Result<(), SendError<SessionCommand<N>>> {
+        self.unbounded_tx.send(SessionCommand::Disconnect { reason }).map_err(|e| SendError(e.0))
+    }
+
+    /// Sends a message to the session with broadcast-aware backpressure.
+    ///
+    /// For broadcast messages, the broadcast item counter is incremented **before** the message
+    /// enters any channel, ensuring the counter always reflects the true in-flight count.
+    /// If the bounded channel is full, broadcasts overflow to the unbounded channel (up to the
+    /// item limit). Non-broadcast messages that cannot fit in the bounded channel are dropped.
+    ///
+    /// Returns `true` if the message was accepted, `false` if it was dropped.
+    pub(crate) fn send_message(&self, msg: PeerMessage<N>) -> bool {
+        if msg.is_broadcast() {
+            let items = msg.message_item_count();
+
+            // Check + increment atomically (optimistic)
+            if !self.broadcast_items.try_add(items) {
+                return false;
+            }
+
+            // Try bounded channel first
+            match self.tx.try_send(SessionCommand::Message(msg)) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(cmd)) => {
+                    // Overflow to unbounded channel (counter already incremented)
+                    let _ = self.unbounded_tx.send(cmd);
+                    true
+                }
+                Err(_) => {
+                    // Channel closed, undo increment
+                    self.broadcast_items.sub(items);
+                    false
+                }
+            }
+        } else {
+            // Non-broadcast: bounded channel only
+            match self.tx.try_send(SessionCommand::Message(msg)) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(SessionCommand::Message(msg))) => {
+                    trace!(
+                        target: "net::session",
+                        msg_kind = msg.message_kind(),
+                        "session command buffer full, dropping non-broadcast message"
+                    );
+                    false
+                }
+                Err(_) => false,
+            }
+        }
+    }
+
+    /// Returns the current number of in-flight broadcast items.
+    pub(crate) fn queued_broadcast_items(&self) -> usize {
+        self.broadcast_items.get()
     }
 }
 

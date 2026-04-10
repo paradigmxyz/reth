@@ -155,9 +155,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
-        // find the corresponding block number
-        let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
+        // Use the block number from the peer's status (eth/69+) if available,
+        // otherwise fall back to a local lookup by hash.
+        let block_number = status.latest_block.unwrap_or_else(|| {
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default()
+        });
         self.state_fetcher.new_active_peer(
             peer,
             status.blockhash,
@@ -398,6 +400,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     let response = PeerResponse::BlockBodies { response: rx };
                     (request, response)
                 }
+                BlockRequest::GetBlockAccessLists(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetBlockAccessLists { request, response };
+                    let response = PeerResponse::BlockAccessLists { response: rx };
+                    (request, response)
+                }
                 BlockRequest::GetReceipts(request) => {
                     if peer.capabilities.supports_eth_v70() {
                         let (response, rx) = oneshot::channel();
@@ -473,6 +481,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::Receipts70(res) => {
                 let normalized = res.map(ReceiptsResponse::from);
                 self.state_fetcher.on_receipts_response(peer, normalized)
+            }
+            PeerResponseResult::BlockAccessLists(res) => {
+                self.state_fetcher.on_block_access_lists_response(peer, res)
             }
             _ => None,
         };

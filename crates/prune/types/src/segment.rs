@@ -46,7 +46,7 @@ pub enum PruneSegment {
 }
 
 #[cfg(test)]
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for PruneSegment {
     fn default() -> Self {
         Self::SenderRecovery

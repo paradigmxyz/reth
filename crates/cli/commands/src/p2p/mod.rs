@@ -193,11 +193,15 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         let default_secret_key_path = data_dir.p2p_secret();
         let p2p_secret_key = self.network.secret_key(default_secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
-        let boot_nodes = self.chain.bootnodes().unwrap_or_default();
+        let boot_nodes = self
+            .network
+            .resolved_bootnodes()
+            .unwrap_or_else(|| self.chain.bootnodes().unwrap_or_default());
 
         let net =
             NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key, Runtime::test())
                 .peer_config(config.peers_config_with_basic_nodes_from_file(None))
+                .sessions_config(config.sessions)
                 .external_ip_resolver(self.network.nat.clone())
                 .network_id(self.network.network_id)
                 .boot_nodes(boot_nodes.clone())
