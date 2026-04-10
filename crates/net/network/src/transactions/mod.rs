@@ -1050,7 +1050,7 @@ where
                 continue
             }
             // determine whether to send full tx objects or hashes.
-            let mut builder = if peer_idx > max_num_full {
+            let mut builder = if peer_idx >= max_num_full {
                 PropagateTransactionsBuilder::pooled(peer.version)
             } else {
                 PropagateTransactionsBuilder::full(peer.version)
