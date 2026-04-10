@@ -586,6 +586,16 @@ mod tests {
         }
     }
 
+    fn create_bundle_with_body(bundle_body: Vec<BundleItem>) -> MevSendBundle {
+        MevSendBundle {
+            bundle_body,
+            inclusion: Inclusion { block: 1, max_block: None },
+            validity: None,
+            privacy: None,
+            protocol_version: ProtocolVersion::V0_1,
+        }
+    }
+
     fn create_bundle_logs(log_counts: &[usize]) -> Vec<Vec<Log>> {
         log_counts.iter().map(|count| vec![Log::default(); *count]).collect()
     }
@@ -608,6 +618,14 @@ mod tests {
         assert!(result[0].tx_logs.is_some());
         assert!(result[0].bundle_logs.is_none());
         assert_eq!(result[0].tx_logs.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_build_bundle_logs_empty_bundle() {
+        let bundle = create_test_bundle(vec![]);
+        let result = EthSimBundle::<()>::build_bundle_logs(&bundle, &[]).unwrap();
+
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -662,6 +680,60 @@ mod tests {
         let nested_logs = result[1].bundle_logs.as_ref().unwrap();
         assert_eq!(nested_logs.len(), 1);
         assert_eq!(nested_logs[0].tx_logs.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_build_bundle_logs_root_with_only_nested_bundles() {
+        let first_nested = create_test_bundle(vec![Bytes::from(vec![0x01])]);
+        let second_nested =
+            create_test_bundle(vec![Bytes::from(vec![0x02]), Bytes::from(vec![0x03])]);
+        let bundle = create_bundle_with_body(vec![
+            BundleItem::Bundle { bundle: first_nested },
+            BundleItem::Bundle { bundle: second_nested },
+        ]);
+        let result =
+            EthSimBundle::<()>::build_bundle_logs(&bundle, &create_bundle_logs(&[1, 1, 2]))
+                .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result[0].tx_logs.is_none());
+        assert!(result[1].tx_logs.is_none());
+
+        let first_nested_logs = result[0].bundle_logs.as_ref().unwrap();
+        assert_eq!(first_nested_logs.len(), 1);
+        assert_eq!(first_nested_logs[0].tx_logs.as_ref().unwrap().len(), 1);
+
+        let second_nested_logs = result[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(second_nested_logs.len(), 2);
+        assert_eq!(second_nested_logs[0].tx_logs.as_ref().unwrap().len(), 1);
+        assert_eq!(second_nested_logs[1].tx_logs.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_build_bundle_logs_deeply_nested_bundle() {
+        let leaf_bundle = create_test_bundle(vec![Bytes::from(vec![0x03])]);
+        let middle_bundle = create_bundle_with_body(vec![
+            BundleItem::Tx { tx: Bytes::from(vec![0x02]), can_revert: false },
+            BundleItem::Bundle { bundle: leaf_bundle },
+        ]);
+        let root_bundle = create_bundle_with_body(vec![
+            BundleItem::Tx { tx: Bytes::from(vec![0x01]), can_revert: false },
+            BundleItem::Bundle { bundle: middle_bundle },
+        ]);
+        let result =
+            EthSimBundle::<()>::build_bundle_logs(&root_bundle, &create_bundle_logs(&[1, 2, 3]))
+                .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].tx_logs.as_ref().unwrap().len(), 1);
+
+        let middle_logs = result[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(middle_logs.len(), 2);
+        assert_eq!(middle_logs[0].tx_logs.as_ref().unwrap().len(), 2);
+
+        let leaf_logs = middle_logs[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(leaf_logs.len(), 1);
+        assert_eq!(leaf_logs[0].tx_logs.as_ref().unwrap().len(), 3);
     }
 
     #[test]
