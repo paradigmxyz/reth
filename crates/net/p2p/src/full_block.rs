@@ -531,22 +531,22 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<ResponseResultWithBAL<Client::Header, Client::Body>> {
-        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut()
-            && let Poll::Ready(res) = fut.poll(cx)
+        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
         {
             self.header = None;
             return Poll::Ready(ResponseResultWithBAL::Header(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut()
-            && let Poll::Ready(res) = fut.poll(cx)
+        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
         {
             self.body = None;
             return Poll::Ready(ResponseResultWithBAL::Body(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.bal).as_pin_mut()
-            && let Poll::Ready(res) = fut.poll(cx)
+        if let Some(fut) = Pin::new(&mut self.bal).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
         {
             self.bal = None;
             return Poll::Ready(ResponseResultWithBAL::Bal(res))
