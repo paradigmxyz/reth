@@ -15,18 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-reth-stable:
+  build-reth:
     uses: ./.github/workflows/docker-test.yml
     with:
-      hive_target: hive-stable
-      artifact_name: "reth-stable"
-    secrets: inherit
-
-  build-reth-edge:
-    uses: ./.github/workflows/docker-test.yml
-    with:
-      hive_target: hive-edge
-      artifact_name: "reth-edge"
+      hive_target: hive
+      artifact_name: "reth"
     secrets: inherit
 
   prepare-hive:
@@ -75,7 +68,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hive_assets
           path: ./hive_assets
@@ -84,7 +77,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        storage: [stable, edge]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -184,10 +176,9 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
     needs:
-      - build-reth-stable
-      - build-reth-edge
+      - build-reth
       - prepare-hive
-    name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    name: ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
@@ -198,15 +189,15 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
-          name: reth-${{ matrix.storage }}
+          name: reth
           path: /tmp
 
       - name: Load Docker images

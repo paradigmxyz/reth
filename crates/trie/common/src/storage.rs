@@ -43,6 +43,9 @@ impl reth_codecs::Compact for StorageTrieEntry {
     }
 }
 
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(StorageTrieEntry);
+
 /// Account storage trie node with packed nibble encoding (storage v2).
 ///
 /// Same as [`StorageTrieEntry`] but uses [`PackedStoredNibblesSubKey`] (33 bytes)
@@ -81,3 +84,6 @@ impl reth_codecs::Compact for PackedStorageTrieEntry {
         (Self { nibbles, node }, buf)
     }
 }
+
+#[cfg(any(test, feature = "reth-codec"))]
+reth_codecs::impl_compression_for_compact!(PackedStorageTrieEntry);

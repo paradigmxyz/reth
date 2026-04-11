@@ -22,7 +22,6 @@
 //!   and leak detection functionality. See [jemalloc's opt.prof](https://jemalloc.net/jemalloc.3.html#opt.prof)
 //!   documentation for usage details. This is **not recommended on Windows**.
 //! - `jemalloc-symbols`: Enables jemalloc symbols for profiling. Includes `jemalloc-prof`.
-//! - `jemalloc-unprefixed`: Uses unprefixed jemalloc symbols.
 //! - `tracy-allocator`: Enables [Tracy](https://github.com/wolfpld/tracy) profiler allocator
 //!   integration for memory profiling.
 //! - `snmalloc`: Uses [snmalloc](https://github.com/microsoft/snmalloc) as the global allocator.

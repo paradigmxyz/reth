@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }} / ${{ matrix.storage }}
+    name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
@@ -30,7 +30,6 @@ jobs:
     strategy:
       matrix:
         network: ["ethereum"]
-        storage: ["stable", "edge"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +46,7 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
-            --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
 

@@ -70,7 +70,7 @@ build-%-reproducible:
 	LC_ALL=C \
 	TZ=UTC \
 	JEMALLOC_OVERRIDE=/usr/lib/x86_64-linux-gnu/libjemalloc.a \
-	cargo build --bin reth --features "$(FEATURES) jemalloc-unprefixed" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
@@ -95,6 +95,7 @@ build-native-%:
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+build-native-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std

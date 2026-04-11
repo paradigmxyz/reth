@@ -63,6 +63,6 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
-            --locked --features "edge" \
+            --locked \
             -p reth-e2e-test-utils \
             -E 'binary(rocksdb)'

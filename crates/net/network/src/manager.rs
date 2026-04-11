@@ -637,7 +637,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::NewBlockHashes(hashes) => {
                 self.within_pow_or_disconnect(peer_id, |this| {
                     // update peer's state, to track what blocks this peer has seen
-                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0.clone());
+                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.to_vec());
                     // start block import process for the hashes
                     this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
                 })

@@ -231,9 +231,13 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
                 );
             })
             .ok(),
-        NatResolver::ExternalAddr(domain) => {
-            domain.to_socket_addrs().ok().and_then(|mut addrs| addrs.next().map(|addr| addr.ip()))
-        }
+        NatResolver::ExternalAddr(domain) => tokio::net::lookup_host(format!("{domain}:0"))
+            .await
+            .inspect_err(|err| {
+                debug!(target: "net::nat", %err, %domain, "Failed to resolve external address");
+            })
+            .ok()
+            .and_then(|mut addrs| addrs.next().map(|addr| addr.ip())),
         NatResolver::None => None,
     }
 }

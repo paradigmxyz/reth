@@ -612,8 +612,11 @@ where
 
             tokio::spawn(async move {
                 loop {
-                    let conn_guard = conn_arc.read().await;
-                    if let Some(conn) = conn_guard.as_ref() {
+                    let conn_clone = {
+                        let conn_guard = conn_arc.read().await;
+                        conn_guard.as_ref().cloned()
+                    };
+                    if let Some(conn) = conn_clone {
                         match conn.read_json().await {
                             Ok(msg) => {
                                 if message_tx.send(msg).await.is_err() {
@@ -626,7 +629,6 @@ where
                                 }
                                 other => {
                                     debug!(target: "ethstats", "Read error: {}", other);
-                                    drop(conn_guard);
                                     if let Some(conn) = conn_arc.write().await.take() {
                                         let _ = conn.close().await;
                                     }

@@ -1,17 +1,16 @@
 //! E2E tests for `RocksDB` provider functionality.
 
-#![cfg(all(feature = "rocksdb", unix))]
-
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
-use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_eth::{Transaction, TransactionInput, TransactionReceipt, TransactionRequest};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
 use reth_node_ethereum::EthereumNode;
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
 use std::{sync::Arc, time::Duration};
 
@@ -84,15 +83,14 @@ fn test_chain_spec() -> Arc<ChainSpec> {
 }
 
 /// Returns test payload attributes for the given timestamp.
-fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
-    let attributes = alloy_rpc_types_engine::PayloadAttributes {
+const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
+    PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: alloy_primitives::Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+    }
 }
 
 /// Smoke test: node boots with `RocksDB` routing enabled.
@@ -572,6 +570,429 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let tx_final: Option<Transaction> =
         client.request("eth_getTransactionByHash", [tx_hash_final]).await?;
     assert!(tx_final.is_some(), "final tx should be in latest block");
+
+    Ok(())
+}
+
+/// Historical account queries: verifies that `eth_getBalance` and `eth_getTransactionCount`
+/// return correct values at past block numbers after the account state has changed.
+///
+/// This test exercises the database-backed historical state lookup path. After mining the
+/// blocks we care about (1-3), we mine additional blocks to advance the canonical head
+/// far enough that the engine tree's persistence + in-memory eviction cycle guarantees
+/// blocks 1-3 are no longer in the in-memory overlay. Historical queries for those blocks
+/// must then be served from `RocksDB` changesets.
+#[tokio::test]
+async fn test_rocksdb_historical_account_queries() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
+
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_storage_v2()
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .build()
+    .await?;
+
+    assert_eq!(nodes.len(), 1);
+
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+    let sender: Address = signer.address();
+    let client = nodes[0].rpc_client().expect("RPC client");
+
+    // Query the sender's balance and nonce at genesis (block 0)
+    let genesis_balance: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
+    let genesis_nonce: U256 = client.request("eth_getTransactionCount", (sender, "0x0")).await?;
+    assert!(genesis_balance > U256::ZERO, "Sender should have genesis balance");
+    assert_eq!(genesis_nonce, U256::ZERO, "Sender nonce should be 0 at genesis");
+
+    // Mine block 1 with a transfer (nonce 0)
+    let raw_tx1 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 0).await;
+    let tx_hash1 = nodes[0].rpc.inject_tx(raw_tx1).await?;
+    wait_for_pending_tx(&client, tx_hash1).await;
+
+    let payload1 = nodes[0].advance_block().await?;
+    assert_eq!(payload1.block().number(), 1);
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
+
+    // Record state after block 1
+    let balance_at_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
+    let nonce_at_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
+    assert!(balance_at_1 < genesis_balance, "Balance should decrease after transfer + gas");
+    assert_eq!(nonce_at_1, U256::from(1), "Nonce should be 1 after first tx");
+
+    // Mine block 2 with another transfer (nonce 1)
+    let raw_tx2 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await;
+    let tx_hash2 = nodes[0].rpc.inject_tx(raw_tx2).await?;
+    wait_for_pending_tx(&client, tx_hash2).await;
+
+    let payload2 = nodes[0].advance_block().await?;
+    assert_eq!(payload2.block().number(), 2);
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await;
+
+    let balance_at_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
+    let nonce_at_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
+    assert!(balance_at_2 < balance_at_1, "Balance should decrease further after second tx");
+    assert_eq!(nonce_at_2, U256::from(2), "Nonce should be 2 after second tx");
+
+    // Mine block 3 with a third transfer (nonce 2)
+    let raw_tx3 =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await;
+    let tx_hash3 = nodes[0].rpc.inject_tx(raw_tx3).await?;
+    wait_for_pending_tx(&client, tx_hash3).await;
+
+    let payload3 = nodes[0].advance_block().await?;
+    assert_eq!(payload3.block().number(), 3);
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
+
+    let balance_at_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
+    let nonce_at_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
+    assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
+    assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
+
+    // Mine additional blocks to push blocks 1-3 out of the in-memory overlay.
+    // With persistence_threshold=0 and memory_block_buffer_target=0, each new block
+    // triggers persistence up to `head` followed by in-memory eviction. Mining several
+    // more blocks ensures the engine loop has completed at least one full
+    // persist-then-evict cycle covering blocks 1-3.
+    // Each block needs a transaction because the payload builder requires non-empty payloads.
+    for nonce in 3..8u64 {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+        nodes[0].advance_block().await?;
+    }
+    // Allow the engine loop to process the persistence completions
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Historical queries — blocks 1-3 should now be served from the database.
+    let hist_balance_0: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
+    let hist_nonce_0: U256 = client.request("eth_getTransactionCount", (sender, "0x0")).await?;
+    assert_eq!(
+        hist_balance_0, genesis_balance,
+        "Historical balance at block 0 should match genesis"
+    );
+    assert_eq!(hist_nonce_0, U256::ZERO, "Historical nonce at block 0 should be 0");
+
+    let hist_balance_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
+    let hist_nonce_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
+    assert_eq!(hist_balance_1, balance_at_1, "Historical balance at block 1 should match");
+    assert_eq!(hist_nonce_1, U256::from(1), "Historical nonce at block 1 should be 1");
+
+    let hist_balance_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
+    let hist_nonce_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
+    assert_eq!(hist_balance_2, balance_at_2, "Historical balance at block 2 should match");
+    assert_eq!(hist_nonce_2, U256::from(2), "Historical nonce at block 2 should be 2");
+
+    let hist_balance_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
+    let hist_nonce_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
+    assert_eq!(hist_balance_3, balance_at_3, "Historical balance at block 3 should match");
+    assert_eq!(hist_nonce_3, U256::from(3), "Historical nonce at block 3 should be 3");
+
+    // "latest" should still match head
+    let latest_balance: U256 = client.request("eth_getBalance", (sender, "latest")).await?;
+    let latest_nonce: U256 = client.request("eth_getTransactionCount", (sender, "latest")).await?;
+    assert_eq!(
+        latest_nonce,
+        U256::from(8),
+        "Latest nonce should be 8 (3 original + 5 extra blocks)"
+    );
+    assert!(latest_balance < balance_at_3, "Latest balance should be less than block 3 balance");
+
+    Ok(())
+}
+
+/// Reproduces the race condition between `save_blocks` and `RocksDB` pruning described in
+/// <https://github.com/paradigmxyz/reth/pull/23081>.
+///
+/// Both `save_blocks` and the pruner push to `pending_rocksdb_batches` before a single
+/// `commit()`. The pruner reads committed (stale) state that doesn't include `save_blocks`'
+/// new entry, filters it, and pushes its own batch. On commit the pruner's batch overwrites
+/// `save_blocks`' batch for the same `ShardedKey(addr, u64::MAX)`. Every cycle the new
+/// block's history entry is silently lost. After enough cycles the shard is completely empty.
+///
+/// This test mines blocks with account-history pruning (`block_interval=1`,
+/// `minimum_distance=5`), waits for persistence, then reads the `AccountsHistory` shard
+/// directly from `RocksDB`. Without the fix the shard is empty — all entries were
+/// overwritten by the pruner's stale batches. With the fix, entries for the most recent
+/// blocks survive.
+#[tokio::test]
+async fn test_rocksdb_account_history_pruning() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
+
+    const PRUNE_DISTANCE: u64 = 5;
+    const TOTAL_BLOCKS: u64 = 20;
+
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_storage_v2()
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_node_config_modifier(|mut config| {
+        config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
+        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+        config.pruning.block_interval = Some(1);
+        config
+    })
+    .build()
+    .await?;
+
+    assert_eq!(nodes.len(), 1);
+
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+    let sender: Address = signer.address();
+    let client = nodes[0].rpc_client().expect("RPC client");
+
+    // Mine blocks one at a time with a delay so each save_blocks + pruner cycle
+    // completes independently. The race fires every cycle (the pruner reads stale
+    // committed state that doesn't include save_blocks' pending batch), but processing
+    // one block at a time makes the outcome deterministic.
+    let mut last_tx_hash = B256::ZERO;
+    for nonce in 0..TOTAL_BLOCKS {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+
+        let payload = nodes[0].advance_block().await?;
+        assert_eq!(payload.block().number(), nonce + 1);
+        last_tx_hash = tx_hash;
+
+        // Let the persistence cycle (save_blocks → pruner → commit) complete before
+        // producing the next block, so each cycle processes exactly one block.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // Wait for the last block to be fully persisted to RocksDB.
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, last_tx_hash).await;
+
+    // Read the AccountsHistory shard for `sender` directly from RocksDB.
+    // This is the data structure corrupted by the race.
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let shards = rocksdb.account_history_shards(sender).unwrap();
+    let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+
+    // The sender has a transfer in every block, so the shard should contain an entry
+    // for every block in the retention window: (TOTAL_BLOCKS - PRUNE_DISTANCE, TOTAL_BLOCKS].
+    //
+    // Without the fix: the pruner reads stale committed state each cycle, overwrites
+    // save_blocks' entry, and only the very last block survives (no subsequent pruner
+    // cycle to overwrite it). The shard ends up as just [TOTAL_BLOCKS].
+    //
+    // With the fix: save_blocks' batch is committed before the pruner reads, so the
+    // pruner sees the new entry and preserves it. All retained blocks are present.
+    let expected: Vec<u64> = ((TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS).collect();
+    assert_eq!(
+        all_entries, expected,
+        "AccountsHistory shard for sender doesn't match expected retention window. \
+         Expected {expected:?}, got {all_entries:?}. \
+         The pruner's stale batch overwrote save_blocks' entries \
+         (save_blocks/pruner race, see PR #23081)."
+    );
+
+    Ok(())
+}
+
+/// Mirrors [`test_rocksdb_account_history_pruning`] for the `StoragesHistory` table.
+///
+/// The same race condition between `save_blocks` and the pruner that affects
+/// `AccountsHistory` also affects `StoragesHistory`:
+///   - `write_storage_history` reads committed `RocksDB` state and pushes a batch.
+///   - `prune_storage_history_batch` also reads stale committed state and pushes its own batch.
+///   - On a single `commit()`, the pruner's batch overwrites `save_blocks`' batch for the same
+///     `StorageShardedKey(addr, slot, u64::MAX)`.
+///
+/// This test deploys a minimal contract that writes to storage slot 0 each block,
+/// then verifies that `StoragesHistory` contains entries for the full retention
+/// window. Without the fix the shard would be truncated — new entries silently
+/// lost every cycle.
+#[tokio::test]
+async fn test_rocksdb_storage_history_pruning() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
+
+    const PRUNE_DISTANCE: u64 = 5;
+    const TOTAL_BLOCKS: u64 = 20;
+
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_storage_v2()
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .with_node_config_modifier(|mut config| {
+        config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);
+        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+        config.pruning.block_interval = Some(1);
+        config
+    })
+    .build()
+    .await?;
+
+    assert_eq!(nodes.len(), 1);
+
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+    let client = nodes[0].rpc_client().expect("RPC client");
+
+    // Deploy a minimal contract that stores CALLDATA[0..32] into slot 0:
+    //   PUSH0         ; [0]
+    //   CALLDATALOAD  ; [calldata[0..32]]
+    //   PUSH0         ; [0, calldata[0..32]]
+    //   SSTORE        ; sstore(0, calldata[0..32])
+    //   STOP
+    // Bytecode: 5f355f5500
+    //
+    // Init code that deploys this runtime:
+    //   PUSH5 5f355f5500   ; push 5-byte runtime
+    //   PUSH0              ; offset 0 in memory
+    //   MSTORE             ; store at mem[0..32] (right-padded in 32 bytes)
+    //   PUSH1 0x05         ; size = 5
+    //   PUSH1 0x1b         ; offset = 27 (32 - 5)
+    //   PUSH0              ; destOffset = 0
+    //   CODECOPY           ; copy runtime to mem[0..5]
+    //   PUSH1 0x05         ; size = 5
+    //   PUSH0              ; offset = 0
+    //   RETURN             ; return mem[0..5]
+    //
+    // We can simplify: just use PUSH + MSTORE + RETURN pattern.
+    // Init code (hex):
+    //   645f355f5500  PUSH5 runtime_bytecode
+    //   5f            PUSH0 (memory offset for MSTORE, stores at 27..32)
+    //   52            MSTORE
+    //   6005          PUSH1 5 (size)
+    //   601b          PUSH1 27 (offset = 32-5)
+    //   f3            RETURN
+    let init_code = Bytes::from_static(&[
+        0x64, 0x5f, 0x35, 0x5f, 0x55, 0x00, // PUSH5 runtime
+        0x5f, // PUSH0
+        0x52, // MSTORE
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x1b, // PUSH1 27
+        0xf3, // RETURN
+    ]);
+
+    // Deploy in block 1 (nonce 0)
+    let deploy_tx = TransactionRequest {
+        nonce: Some(0),
+        value: Some(U256::ZERO),
+        to: Some(TxKind::Create),
+        gas: Some(100_000),
+        max_fee_per_gas: Some(1000e9 as u128),
+        max_priority_fee_per_gas: Some(20e9 as u128),
+        chain_id: Some(chain_id),
+        input: TransactionInput { input: None, data: Some(init_code) },
+        ..Default::default()
+    };
+    let signed_deploy = TransactionTestContext::sign_tx(signer.clone(), deploy_tx).await;
+    let deploy_bytes: Bytes = signed_deploy.encoded_2718().into();
+    let deploy_hash = nodes[0].rpc.inject_tx(deploy_bytes).await?;
+    wait_for_pending_tx(&client, deploy_hash).await;
+
+    let payload1 = nodes[0].advance_block().await?;
+    assert_eq!(payload1.block().number(), 1);
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await;
+
+    // Let the persistence cycle complete before the next block (same cadence as the loop below)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Get the deployed contract address from the receipt
+    let receipt: Option<TransactionReceipt> =
+        client.request("eth_getTransactionReceipt", [deploy_hash]).await?;
+    let contract_address = receipt
+        .expect("deploy receipt should exist")
+        .contract_address
+        .expect("deploy should create a contract");
+
+    // Sanity check: verify the runtime bytecode is what we expect
+    let code: Bytes = client.request("eth_getCode", (contract_address, "latest")).await?;
+    assert_eq!(
+        code,
+        Bytes::from_static(&[0x5f, 0x35, 0x5f, 0x55, 0x00]),
+        "Deployed runtime should be PUSH0 CALLDATALOAD PUSH0 SSTORE STOP"
+    );
+
+    // The storage slot we track: slot 0, encoded as B256
+    let storage_slot = B256::ZERO;
+
+    // Mine TOTAL_BLOCKS - 1 more blocks (block 2..=TOTAL_BLOCKS), each calling the
+    // contract to write a new value to slot 0. This creates a storage changeset entry
+    // per block for (contract_address, slot 0).
+    let mut last_tx_hash = deploy_hash;
+    for nonce in 1..TOTAL_BLOCKS {
+        // calldata = abi encode the block number so each write is unique
+        let block_num = nonce + 1;
+        let calldata = B256::from(U256::from(block_num));
+
+        let call_tx = TransactionRequest {
+            nonce: Some(nonce),
+            value: Some(U256::ZERO),
+            to: Some(TxKind::Call(contract_address)),
+            gas: Some(50_000),
+            max_fee_per_gas: Some(1000e9 as u128),
+            max_priority_fee_per_gas: Some(20e9 as u128),
+            chain_id: Some(chain_id),
+            input: TransactionInput { input: None, data: Some(Bytes::from(calldata.0)) },
+            ..Default::default()
+        };
+        let signed_call = TransactionTestContext::sign_tx(signer.clone(), call_tx).await;
+        let call_bytes: Bytes = signed_call.encoded_2718().into();
+        let tx_hash = nodes[0].rpc.inject_tx(call_bytes).await?;
+        wait_for_pending_tx(&client, tx_hash).await;
+
+        let payload = nodes[0].advance_block().await?;
+        assert_eq!(payload.block().number(), block_num);
+        last_tx_hash = tx_hash;
+
+        // Let the persistence cycle complete before the next block
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // Wait for the last block to be fully persisted to RocksDB
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, last_tx_hash).await;
+
+    // Read StoragesHistory shard for (contract_address, slot 0) directly from RocksDB
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let shards = rocksdb.storage_history_shards(contract_address, storage_slot).unwrap();
+    let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+
+    // The contract has a storage write in blocks 2..=TOTAL_BLOCKS (the deploy in block 1
+    // only executes init code — no SSTORE — so block 1 has no StoragesHistory entry for
+    // slot 0). With pruning distance=5, the retention window should be
+    // (TOTAL_BLOCKS - PRUNE_DISTANCE, TOTAL_BLOCKS] = blocks 16..=20.
+    //
+    // Without the fix: the pruner overwrites save_blocks' entries each cycle,
+    // leaving only the very last block (or empty).
+    //
+    // With the fix: all blocks in the retention window are present.
+    let expected: Vec<u64> = ((TOTAL_BLOCKS - PRUNE_DISTANCE + 1)..=TOTAL_BLOCKS).collect();
+    assert_eq!(
+        all_entries, expected,
+        "StoragesHistory shard for contract slot 0 doesn't match expected retention window. \
+         Expected {expected:?}, got {all_entries:?}. \
+         The pruner's stale batch overwrote save_blocks' entries \
+         (save_blocks/pruner race for StorageHistory, see PR #23081)."
+    );
 
     Ok(())
 }

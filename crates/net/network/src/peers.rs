@@ -142,6 +142,12 @@ impl PeersManager {
         }
 
         for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
+            // When enforce_enr_fork_id is enabled, skip persisted peers that don't have a
+            // confirmed fork ID. These were likely accumulated from a different network during
+            // a prior run without the flag.
+            if enforce_enr_fork_id && fork_id.is_none() {
+                continue
+            }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
             peers.entry(id).or_insert_with(|| {
                 let mut peer = Peer::with_kind(

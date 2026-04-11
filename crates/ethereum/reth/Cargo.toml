@@ -66,6 +66,7 @@ std = [
     "reth-evm-ethereum?/std",
     "reth-revm?/std",
     "alloy-rpc-types-engine?/std",
+    "reth-codecs?/std",
 ]
 arbitrary = [
     "std",
@@ -152,6 +153,7 @@ jemalloc = [
     "reth-cli-util?/jemalloc",
     "reth-ethereum-cli?/jemalloc",
     "reth-node-core?/jemalloc",
+    "reth-provider?/jemalloc",
 ]
 jemalloc-prof = [
     "jemalloc",

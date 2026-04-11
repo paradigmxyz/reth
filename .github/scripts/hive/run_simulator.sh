@@ -13,7 +13,13 @@ if [[ "${sim}" == *"eels"* ]]; then
 fi
 
 run_hive() {
-    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism "${parallelism}" --client reth 2>&1 | tee /tmp/log || true
+    hive \
+  --sim "${sim}" \
+  --sim.limit "${limit}" \
+  --sim.limit.exact=false \
+  --sim.parallelism "${parallelism}" \
+  --client reth \
+  2>&1 | tee /tmp/log || true
 }
 
 check_log() {

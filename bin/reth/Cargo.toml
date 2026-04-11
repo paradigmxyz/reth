@@ -89,7 +89,6 @@ default = [
     "keccak-cache-global",
     "asm-keccak",
     "min-debug-logs",
-    "rocksdb",
 ]
 
 otlp = [
@@ -125,9 +124,10 @@ jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
     "reth-ethereum-cli/jemalloc",
+    "reth-provider/jemalloc",
 ]
 jemalloc-prof = [
-    "reth-cli-util/jemalloc",
+    "jemalloc",
     "reth-cli-util/jemalloc-prof",
     "reth-ethereum-cli/jemalloc-prof",
     "reth-node-metrics/jemalloc-prof",
@@ -135,12 +135,6 @@ jemalloc-prof = [
 jemalloc-symbols = [
     "jemalloc-prof",
     "reth-ethereum-cli/jemalloc-symbols",
-]
-jemalloc-unprefixed = [
-    "reth-cli-util/jemalloc-unprefixed",
-    "reth-node-core/jemalloc",
-    "reth-node-metrics/jemalloc",
-    "reth-ethereum-cli/jemalloc",
 ]
 tracy-allocator = [
     "reth-cli-util/tracy-allocator",
@@ -191,8 +185,6 @@ min-trace-logs = [
 ]
 
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
-rocksdb = ["reth-ethereum-cli/rocksdb", "reth-node-core/rocksdb"]
-edge = ["rocksdb"]
 
 [[bin]]
 name = "reth"
