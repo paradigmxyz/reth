@@ -549,13 +549,7 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
-            .apply(|builder| {
-                if let Some(max_size) = self.eth_max_message_size {
-                    builder.eth_max_message_size(max_size.get())
-                } else {
-                    builder
-                }
-            })
+            .eth_max_message_size_opt(self.eth_max_message_size.map(NonZeroUsize::get))
             .network_id(self.network_id)
     }
 
@@ -1117,10 +1111,7 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(
-            args.eth_max_message_size,
-            Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap())
-        );
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(15 * 1024 * 1024).unwrap()));
     }
 
     #[test]
@@ -1139,10 +1130,7 @@ mod tests {
         ]);
         assert!(result.is_ok());
         let args = result.unwrap().args;
-        assert_eq!(
-            args.eth_max_message_size,
-            Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap())
-        );
+        assert_eq!(args.eth_max_message_size, Some(NonZeroUsize::new(16 * 1024 * 1024).unwrap()));
     }
 
     #[test]

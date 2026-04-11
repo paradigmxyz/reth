@@ -12,20 +12,18 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
-    errors::EthStreamError,
-    handshake::{EthHandshake, EthRlpxHandshake, UnauthEth},
+    handshake::{EthHandshake, EthRlpxHandshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
     UnifiedStatus,
 };
+use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
-use std::{
-    collections::HashSet, future::Future, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
-};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
 use crate::{
@@ -97,6 +95,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    pub eth_max_message_size: usize,
     /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
     pub required_block_hashes: Vec<BlockNumHash>,
@@ -219,6 +219,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    eth_max_message_size: usize,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
@@ -263,6 +265,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            eth_max_message_size: MAX_MESSAGE_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
         }
@@ -583,12 +586,20 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
-    /// Sets the maximum allowed ETH message size for post-handshake streams.
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams.
     ///
-    /// This wraps the current handshake, preserving its `handshake()` logic while overriding the
-    /// message size limit used by the ETH and snap streams.
-    pub fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
-        self.handshake = Arc::new(WithMaxMessageSize { inner: self.handshake, max_message_size });
+    /// This does not affect the initial status handshake, which continues to use
+    /// [`MAX_MESSAGE_SIZE`].
+    pub const fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
+        self.eth_max_message_size = max_message_size;
+        self
+    }
+
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams if present.
+    pub const fn eth_max_message_size_opt(mut self, max_message_size: Option<usize>) -> Self {
+        if let Some(max_message_size) = max_message_size {
+            self.eth_max_message_size = max_message_size;
+        }
         self
     }
 
@@ -630,6 +641,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
             network_id,
         } = self;
@@ -702,6 +714,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
         }
     }
@@ -731,30 +744,6 @@ impl NetworkMode {
     }
 }
 
-/// Wraps an [`EthRlpxHandshake`] implementation, overriding the stream-level message size limit
-/// while preserving the inner handshake logic.
-#[derive(Debug)]
-struct WithMaxMessageSize {
-    inner: Arc<dyn EthRlpxHandshake>,
-    max_message_size: usize,
-}
-
-impl EthRlpxHandshake for WithMaxMessageSize {
-    fn handshake<'a>(
-        &'a self,
-        unauth: &'a mut dyn UnauthEth,
-        status: UnifiedStatus,
-        fork_filter: ForkFilter,
-        timeout_limit: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
-        self.inner.handshake(unauth, status, fork_filter, timeout_limit)
-    }
-
-    fn max_message_size(&self) -> usize {
-        self.max_message_size
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +763,29 @@ mod tests {
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 
+    #[derive(Debug)]
+    struct TestHandshake;
+
+    impl EthRlpxHandshake for TestHandshake {
+        fn handshake<'a>(
+            &'a self,
+            _unauth: &'a mut dyn reth_eth_wire::handshake::UnauthEth,
+            _status: UnifiedStatus,
+            _fork_filter: ForkFilter,
+            _timeout_limit: std::time::Duration,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<UnifiedStatus, reth_eth_wire::errors::EthStreamError>,
+                    >
+                    + 'a
+                    + Send,
+            >,
+        > {
+            Box::pin(async move { unreachable!("test handshake should not be called") })
+        }
+    }
+
     #[test]
     fn test_network_dns_defaults() {
         let config = builder().build(NoopProvider::default());
@@ -784,6 +796,18 @@ mod tests {
             Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
         assert!(bootstrap_nodes.contains(&mainnet_dns));
         assert_eq!(bootstrap_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_eth_max_message_size_preserves_custom_handshake() {
+        let handshake: Arc<dyn EthRlpxHandshake> = Arc::new(TestHandshake);
+        let config = builder()
+            .eth_rlpx_handshake(handshake.clone())
+            .eth_max_message_size(15 * 1024 * 1024)
+            .build(NoopProvider::default());
+
+        assert!(Arc::ptr_eq(&config.handshake, &handshake));
+        assert_eq!(config.eth_max_message_size, 15 * 1024 * 1024);
     }
 
     #[test]

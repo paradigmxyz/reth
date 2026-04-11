@@ -118,6 +118,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     metrics: SessionManagerMetrics,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    eth_max_message_size: usize,
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
@@ -137,6 +139,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
+        eth_max_message_size: usize,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -171,6 +174,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
+            eth_max_message_size,
             local_range_info,
         }
     }
@@ -282,6 +286,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             pending_events.clone(),
             start_pending_incoming_session(
                 self.handshake.clone(),
+                self.eth_max_message_size,
                 disconnect_rx,
                 session_id,
                 stream,
@@ -324,6 +329,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 pending_events.clone(),
                 start_pending_outbound_session(
                     self.handshake.clone(),
+                    self.eth_max_message_size,
                     disconnect_rx,
                     pending_events,
                     session_id,
@@ -890,6 +896,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,
@@ -903,6 +910,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 ) {
     authenticate(
         handshake,
+        eth_max_message_size,
         disconnect_rx,
         events,
         stream,
@@ -923,6 +931,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
@@ -955,6 +964,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     };
     authenticate(
         handshake,
+        eth_max_message_size,
         disconnect_rx,
         events,
         stream,
@@ -974,6 +984,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 #[expect(clippy::too_many_arguments)]
 async fn authenticate<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
@@ -1006,6 +1017,7 @@ async fn authenticate<N: NetworkPrimitives>(
 
     let auth = authenticate_stream(
         handshake,
+        eth_max_message_size,
         unauthed,
         session_id,
         remote_addr,
@@ -1059,6 +1071,7 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 #[expect(clippy::too_many_arguments)]
 async fn authenticate_stream<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
+    eth_max_message_size: usize,
     stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -1126,7 +1139,6 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
     // Before trying status handshake, set up the version to negotiated shared version
     status.set_eth_version(eth_version);
-    let eth_max_message_size = handshake.max_message_size();
 
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
         // if the shared caps are 1, we know both support the eth version
@@ -1168,7 +1180,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream
-            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
             .await
         {
             Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),

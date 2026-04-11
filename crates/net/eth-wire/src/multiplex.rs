@@ -218,12 +218,12 @@ impl<St> RlpxProtocolMultiplexer<St> {
         status: UnifiedStatus,
         fork_filter: ForkFilter,
         handshake: Arc<dyn EthRlpxHandshake>,
+        eth_max_message_size: usize,
     ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, UnifiedStatus), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
         let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
-        let eth_max_message_size = handshake.max_message_size();
         self.into_satellite_stream_with_tuple_handshake(
             &Capability::eth(eth_cap),
             async move |proxy| {
@@ -780,6 +780,7 @@ mod tests {
     use super::*;
     use crate::{
         handshake::EthHandshake,
+        message::MAX_MESSAGE_SIZE,
         test_utils::{
             connect_passthrough, eth_handshake, eth_hello,
             proto::{test_hello, TestProtoMessage},
@@ -847,6 +848,7 @@ mod tests {
                     other_status,
                     other_fork_filter,
                     Arc::new(EthHandshake::default()),
+                    MAX_MESSAGE_SIZE,
                 )
                 .await
                 .unwrap();
@@ -882,6 +884,7 @@ mod tests {
                 status,
                 fork_filter,
                 Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
             )
             .await
             .unwrap();

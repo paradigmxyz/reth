@@ -1117,7 +1117,7 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream, UnifiedStatus,
     };
-    use reth_eth_wire_types::{EthMessageID, RawCapabilityMessage};
+    use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, EthMessageID, RawCapabilityMessage};
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -1193,6 +1193,7 @@ mod tests {
 
             tokio::task::spawn(start_pending_incoming_session(
                 Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
                 disconnect_rx,
                 session_id,
                 stream,

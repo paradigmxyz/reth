@@ -33,7 +33,6 @@ use tracing::{debug, trace};
 #[pin_project]
 #[derive(Debug)]
 pub struct UnauthedEthStream<S> {
-    max_message_size: usize,
     #[pin]
     inner: S,
 }
@@ -41,13 +40,7 @@ pub struct UnauthedEthStream<S> {
 impl<S> UnauthedEthStream<S> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
     pub const fn new(inner: S) -> Self {
-        Self { max_message_size: MAX_MESSAGE_SIZE, inner }
-    }
-
-    /// Sets the maximum allowed ETH message size for this stream.
-    pub const fn with_max_message_size(mut self, max_message_size: usize) -> Self {
-        self.max_message_size = max_message_size;
-        self
+        Self { inner }
     }
 
     /// Consumes the type and returns the wrapped stream
@@ -102,8 +95,7 @@ where
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake
-        let stream =
-            EthStream::with_max_message_size(status.version, self.inner, self.max_message_size);
+        let stream = EthStream::new(status.version, self.inner);
 
         Ok((stream, their_status))
     }
