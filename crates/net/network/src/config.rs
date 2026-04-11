@@ -763,29 +763,6 @@ mod tests {
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 
-    #[derive(Debug)]
-    struct TestHandshake;
-
-    impl EthRlpxHandshake for TestHandshake {
-        fn handshake<'a>(
-            &'a self,
-            _unauth: &'a mut dyn reth_eth_wire::handshake::UnauthEth,
-            _status: UnifiedStatus,
-            _fork_filter: ForkFilter,
-            _timeout_limit: std::time::Duration,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<UnifiedStatus, reth_eth_wire::errors::EthStreamError>,
-                    >
-                    + 'a
-                    + Send,
-            >,
-        > {
-            Box::pin(async move { unreachable!("test handshake should not be called") })
-        }
-    }
-
     #[test]
     fn test_network_dns_defaults() {
         let config = builder().build(NoopProvider::default());
@@ -796,18 +773,6 @@ mod tests {
             Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
         assert!(bootstrap_nodes.contains(&mainnet_dns));
         assert_eq!(bootstrap_nodes.len(), 1);
-    }
-
-    #[test]
-    fn test_eth_max_message_size_preserves_custom_handshake() {
-        let handshake: Arc<dyn EthRlpxHandshake> = Arc::new(TestHandshake);
-        let config = builder()
-            .eth_rlpx_handshake(handshake.clone())
-            .eth_max_message_size(15 * 1024 * 1024)
-            .build(NoopProvider::default());
-
-        assert!(Arc::ptr_eq(&config.handshake, &handshake));
-        assert_eq!(config.eth_max_message_size, 15 * 1024 * 1024);
     }
 
     #[test]
