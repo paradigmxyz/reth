@@ -667,13 +667,21 @@ where
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let _enter = debug_span!(
-                target: "engine::tree::payload_processor::sparse_trie",
-                parent: &parent_span,
-                "storage_root",
-                ?address
-            )
-            .entered();
+            let span = if tracing::enabled!(tracing::Level::TRACE) {
+                debug_span!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    parent: &parent_span,
+                    "storage_root",
+                    ?address
+                )
+            } else {
+                debug_span!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    parent: &parent_span,
+                    "storage_root",
+                )
+            };
+            let _enter = span.entered();
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;
             // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
