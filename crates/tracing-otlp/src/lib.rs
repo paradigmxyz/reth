@@ -65,7 +65,8 @@ where
     Ok(tracing_opentelemetry::layer()
         .with_tracer(tracer)
         .with_location(false)
-        .with_tracked_inactivity(false))
+        .with_tracked_inactivity(false)
+        .with_target(false))
 }
 
 /// Creates a tracing layer that exports logs to an OTLP endpoint.
