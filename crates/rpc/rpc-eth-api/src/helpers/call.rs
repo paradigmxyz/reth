@@ -142,9 +142,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.cfg_env.disable_nonce_check = true;
                         evm_env.cfg_env.disable_base_fee = true;
-                        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.inner_mut().basefee = 0;
                     }
+
+                    // Disable EIP-7825 transaction gas limit cap so the default per-call gas
+                    // allocation remains valid even when Osaka's per-tx cap is lower than the
+                    // block gas limit.
+                    evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 

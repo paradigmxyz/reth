@@ -118,3 +118,61 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_simulate_v1_validation_ignores_osaka_tx_gas_cap_for_default_gas() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .osaka_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
+    let to: Address = "0xc100000000000000000000000000000000000000".parse()?;
+
+    let tx = TransactionRequest::default()
+        .from(from)
+        .to(to)
+        .max_fee_per_gas(0)
+        .max_priority_fee_per_gas(0)
+        .value(U256::ZERO)
+        .input(Default::default());
+
+    let state_overrides =
+        StateOverridesBuilder::default().with_balance(from, U256::from(1u64)).build();
+
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides { base_fee: Some(U256::ZERO), ..Default::default() })
+        .with_state_overrides(state_overrides)
+        .call(tx);
+
+    let payload = SimulatePayload::default().with_validation().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 1, "expected exactly 1 simulated block");
+    assert_eq!(result[0].calls.len(), 1, "expected exactly 1 call result");
+    assert!(result[0].calls[0].status, "expected call to succeed");
+    assert!(result[0].calls[0].error.is_none(), "expected no error");
+
+    Ok(())
+}
