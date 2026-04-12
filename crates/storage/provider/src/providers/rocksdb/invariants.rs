@@ -273,7 +273,7 @@ impl RocksDBProvider {
                 .collect();
             let indices: Vec<_> = unique_keys.into_iter().collect();
 
-            if !indices.is_empty() && self.unwind_storage_history_indices(&indices)?.len() > 0 {
+            if !indices.is_empty() && !self.unwind_storage_history_indices(&indices)?.is_empty() {
                 tracing::info!(
                     target: "reth::providers::rocksdb",
                     checkpoint,
@@ -349,7 +349,7 @@ impl RocksDBProvider {
             let unwind_from = checkpoint + 1;
             let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
 
-            if !indices.is_empty() && self.unwind_account_history_indices(&indices)?.len() > 0 {
+            if !indices.is_empty() && !self.unwind_account_history_indices(&indices)?.is_empty() {
                 tracing::info!(
                     target: "reth::providers::rocksdb",
                     checkpoint,
@@ -431,7 +431,7 @@ impl RocksDBProvider {
             .alloc
             .keys()
             .copied()
-            .map(|address| ShardedKey::last(address))
+            .map(ShardedKey::last)
             .collect();
 
         let genesis_list = tables::BlockNumberList::new([0]).expect("single block always fits");
