@@ -2,13 +2,13 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Bytecode, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
@@ -46,6 +46,21 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Returns storage entries for `address` whose hashed slot is greater than
+    /// or equal to `key_start`, ordered by hashed slot, up to `limit` entries.
+    ///
+    /// Each entry is `(keccak256(slot), StorageEntry)` where [`StorageEntry`]
+    /// contains both the plain slot key and its value. Zero-valued slots are
+    /// excluded.
+    fn storage_range(
+        &self,
+        _address: Address,
+        _key_start: B256,
+        _limit: usize,
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
+        Ok(Vec::new())
+    }
 
     /// Get account code by its address.
     ///
