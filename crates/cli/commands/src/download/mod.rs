@@ -218,8 +218,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["url", "manifest_url"])]
     manifest_path: Option<PathBuf>,
 
-    /// Include transaction static files.
-    #[arg(long, conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include transaction static files for all transactions since chain genesis.
+    #[arg(long, conflicts_with_all = ["minimal", "archive"])]
     with_txs: bool,
 
     /// Include receipt static files.
@@ -230,8 +230,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, alias = "with-changesets", conflicts_with_all = ["minimal", "full", "archive"])]
     with_state_history: bool,
 
-    /// Include transaction sender static files. Requires `--with-txs`.
-    #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "full", "archive"])]
+    /// Include transaction sender static files for all senders since chain genesis. Requires `--with-txs`.
+    #[arg(long, requires = "with_txs", conflicts_with_all = ["minimal", "archive"])]
     with_senders: bool,
 
     /// Include RocksDB index files.
@@ -247,7 +247,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     minimal: bool,
 
     /// Download the full node component set (matches default full prune settings).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history", "with_senders", "with_rocksdb", "archive", "minimal"])]
+    #[arg(long, conflicts_with_all = ["with_receipts", "with_state_history", "with_rocksdb", "archive", "minimal"])]
     full: bool,
 
     /// Skip optional RocksDB indices even when archive components are selected.
@@ -634,7 +634,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 ComponentSelection::All
             }
             SnapshotComponentType::Transactions => {
-                if defaults.full_bodies_history_use_pre_merge {
+                if self.with_txs {
+                    ComponentSelection::All
+                } else if defaults.full_bodies_history_use_pre_merge {
                     match self
                         .env
                         .chain
@@ -664,7 +666,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 selection_from_prune_mode(defaults.full_prune_modes.storage_history, snapshot_block)
             }
             SnapshotComponentType::TransactionSenders => {
-                selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
+                if self.with_senders {
+                    ComponentSelection::All
+                } else {
+                    selection_from_prune_mode(defaults.full_prune_modes.sender_recovery, snapshot_block)
+                }
             }
             // Keep hidden by default in full mode; if users want indices they can use archive.
             SnapshotComponentType::RocksdbIndices => ComponentSelection::None,
@@ -2027,6 +2033,37 @@ mod tests {
         .args;
 
         assert!(!args.resumable);
+    }
+
+    #[test]
+    fn test_full_with_txs_accepted() {
+        // --full --with-txs was previously rejected by clap due to conflicts_with_all.
+        // Verify it is now accepted and both flags are set.
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--full",
+            "--with-txs",
+        ])
+        .args;
+
+        assert!(args.full);
+        assert!(args.with_txs);
+    }
+
+    #[test]
+    fn test_full_with_txs_and_senders_accepted() {
+        // --full --with-txs --with-senders should also be accepted.
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--full",
+            "--with-txs",
+            "--with-senders",
+        ])
+        .args;
+
+        assert!(args.full);
+        assert!(args.with_txs);
+        assert!(args.with_senders);
     }
 
     #[test]
