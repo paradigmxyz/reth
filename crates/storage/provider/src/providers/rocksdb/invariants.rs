@@ -425,14 +425,8 @@ impl RocksDBProvider {
     where
         Provider: ChainSpecProvider,
     {
-        let mut expected_keys: HashSet<_> = provider
-            .chain_spec()
-            .genesis()
-            .alloc
-            .keys()
-            .copied()
-            .map(ShardedKey::last)
-            .collect();
+        let mut expected_keys: HashSet<_> =
+            provider.chain_spec().genesis().alloc.keys().copied().map(ShardedKey::last).collect();
 
         let genesis_list = tables::BlockNumberList::new([0]).expect("single block always fits");
         for entry in self.iter::<tables::AccountsHistory>()? {
