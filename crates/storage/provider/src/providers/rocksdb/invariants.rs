@@ -88,6 +88,363 @@ impl RocksDBProvider {
         Ok(unwind_target)
     }
 
+    /// Checks `RocksDB` consistency without mutating data.
+    ///
+    /// This is intended for read-only CLI environments, where we still want to surface
+    /// inconsistencies but must not attempt the healing writes used in the read-write path.
+    pub fn check_consistency_read_only<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + StaticFileProviderFactory
+            + BlockBodyIndicesProvider
+            + StorageChangeSetReader
+            + ChangeSetReader
+            + TransactionsProvider<Transaction: Encodable2718>
+            + ChainSpecProvider,
+    {
+        let mut issue_target: Option<BlockNumber> = None;
+
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.check_transaction_hash_numbers_read_only(provider)?
+        {
+            issue_target = Some(issue_target.map_or(target, |t| t.min(target)));
+        }
+
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.check_storages_history_read_only(provider)?
+        {
+            issue_target = Some(issue_target.map_or(target, |t| t.min(target)));
+        }
+
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.check_accounts_history_read_only(provider)?
+        {
+            issue_target = Some(issue_target.map_or(target, |t| t.min(target)));
+        }
+
+        Ok(issue_target)
+    }
+
+    fn check_transaction_hash_numbers_read_only<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StaticFileProviderFactory
+            + BlockBodyIndicesProvider
+            + TransactionsProvider<Transaction: Encodable2718>,
+    {
+        let checkpoint = provider
+            .get_stage_checkpoint(StageId::TransactionLookup)?
+            .map(|cp| cp.block_number)
+            .unwrap_or(0);
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Transactions)
+            .unwrap_or(0);
+
+        if checkpoint == 0 {
+            if self.first::<tables::TransactionHashNumbers>()?.is_some() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "TransactionHashNumbers: stale data detected in read-only mode"
+                );
+                return Ok(Some(0));
+            }
+
+            return Ok(None);
+        }
+
+        if sf_tip < checkpoint {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "TransactionHashNumbers: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        let sf_tip_end_tx = provider
+            .static_file_provider()
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
+            .unwrap_or(0);
+
+        let checkpoint_next_tx = provider
+            .block_body_indices(checkpoint)?
+            .map(|indices| indices.next_tx_num())
+            .unwrap_or(0);
+
+        if sf_tip_end_tx < checkpoint_next_tx {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip_end_tx,
+                checkpoint_next_tx,
+                checkpoint,
+                sf_tip,
+                "TransactionHashNumbers: static file tx tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if self
+            .has_transaction_hash_numbers_in_range(provider, checkpoint_next_tx..=sf_tip_end_tx)?
+        {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                checkpoint,
+                sf_tip,
+                "TransactionHashNumbers: stale data detected in read-only mode"
+            );
+            return Ok(Some(checkpoint));
+        }
+
+        Ok(None)
+    }
+
+    fn check_storages_history_read_only<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StaticFileProviderFactory
+            + StorageChangeSetReader
+            + ChainSpecProvider,
+    {
+        let checkpoint = provider
+            .get_stage_checkpoint(StageId::IndexStorageHistory)?
+            .map(|cp| cp.block_number)
+            .unwrap_or(0);
+
+        if checkpoint == 0 {
+            if !self.storage_history_matches_genesis(provider)? {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "StoragesHistory: stale data detected in read-only mode"
+                );
+                return Ok(Some(0));
+            }
+
+            return Ok(None);
+        }
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap_or(0);
+
+        if sf_tip < checkpoint {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "StoragesHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        let mut batch_start = checkpoint + 1;
+        while batch_start <= sf_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+
+            let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
+
+            let unique_keys: HashSet<_> = changesets
+                .into_iter()
+                .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
+                .collect();
+            let indices: Vec<_> = unique_keys.into_iter().collect();
+
+            if !indices.is_empty() && self.unwind_storage_history_indices(&indices)?.len() > 0 {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    checkpoint,
+                    sf_tip,
+                    batch_start,
+                    batch_end,
+                    "StoragesHistory: stale data detected in read-only mode"
+                );
+                return Ok(Some(checkpoint));
+            }
+
+            batch_start = batch_end + 1;
+        }
+
+        Ok(None)
+    }
+
+    fn check_accounts_history_read_only<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StaticFileProviderFactory
+            + ChangeSetReader
+            + ChainSpecProvider,
+    {
+        let checkpoint = provider
+            .get_stage_checkpoint(StageId::IndexAccountHistory)?
+            .map(|cp| cp.block_number)
+            .unwrap_or(0);
+
+        if checkpoint == 0 {
+            if !self.accounts_history_matches_genesis(provider)? {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "AccountsHistory: stale data detected in read-only mode"
+                );
+                return Ok(Some(0));
+            }
+
+            return Ok(None);
+        }
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap_or(0);
+
+        if sf_tip < checkpoint {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "AccountsHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        let mut batch_start = checkpoint + 1;
+        while batch_start <= sf_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+
+            let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
+
+            let mut addresses = HashSet::with_capacity(changesets.len());
+            addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
+            let unwind_from = checkpoint + 1;
+            let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
+
+            if !indices.is_empty() && self.unwind_account_history_indices(&indices)?.len() > 0 {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    checkpoint,
+                    sf_tip,
+                    batch_start,
+                    batch_end,
+                    "AccountsHistory: stale data detected in read-only mode"
+                );
+                return Ok(Some(checkpoint));
+            }
+
+            batch_start = batch_end + 1;
+        }
+
+        Ok(None)
+    }
+
+    fn has_transaction_hash_numbers_in_range<Provider>(
+        &self,
+        provider: &Provider,
+        tx_range: std::ops::RangeInclusive<u64>,
+    ) -> ProviderResult<bool>
+    where
+        Provider: TransactionsProvider<Transaction: Encodable2718>,
+    {
+        if tx_range.is_empty() {
+            return Ok(false);
+        }
+
+        let hashes: Vec<_> = provider
+            .transactions_by_tx_range(tx_range)?
+            .into_par_iter()
+            .map(|tx| tx.trie_hash())
+            .collect();
+
+        for hash in hashes {
+            if self.get::<tables::TransactionHashNumbers>(hash)?.is_some() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn storage_history_matches_genesis<Provider>(&self, provider: &Provider) -> ProviderResult<bool>
+    where
+        Provider: ChainSpecProvider,
+    {
+        let mut expected_keys = HashSet::new();
+        for (address, account) in &provider.chain_spec().genesis().alloc {
+            if let Some(storage) = &account.storage {
+                for key in storage.keys() {
+                    expected_keys.insert(StorageShardedKey::last(*address, *key));
+                }
+            }
+        }
+
+        let genesis_list = tables::BlockNumberList::new([0]).expect("single block always fits");
+        for entry in self.iter::<tables::StoragesHistory>()? {
+            let (key, value) = entry?;
+            if value != genesis_list || !expected_keys.remove(&key) {
+                return Ok(false);
+            }
+        }
+
+        Ok(expected_keys.is_empty())
+    }
+
+    fn accounts_history_matches_genesis<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<bool>
+    where
+        Provider: ChainSpecProvider,
+    {
+        let mut expected_keys: HashSet<_> = provider
+            .chain_spec()
+            .genesis()
+            .alloc
+            .keys()
+            .copied()
+            .map(|address| ShardedKey::last(address))
+            .collect();
+
+        let genesis_list = tables::BlockNumberList::new([0]).expect("single block always fits");
+        for entry in self.iter::<tables::AccountsHistory>()? {
+            let (key, value) = entry?;
+            if value != genesis_list || !expected_keys.remove(&key) {
+                return Ok(false);
+            }
+        }
+
+        Ok(expected_keys.is_empty())
+    }
+
     /// Heals the `TransactionHashNumbers` table.
     ///
     /// - Fast path: if checkpoint == 0, clear any stale data and return
@@ -673,6 +1030,67 @@ mod tests {
                 "RocksDB should be empty after pruning"
             );
         }
+    }
+
+    #[test]
+    fn test_check_consistency_read_only_checkpoint_zero_with_stale_tx_hash_numbers_reports_issue() {
+        let temp_dir = TempDir::new().unwrap();
+        let rw_rocksdb =
+            RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        rw_rocksdb.put::<tables::TransactionHashNumbers>(B256::from([0x11; 32]), &0).unwrap();
+
+        let ro_rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(ro_rocksdb.check_consistency_read_only(&provider).unwrap(), Some(0));
+    }
+
+    #[test]
+    fn test_check_consistency_read_only_checkpoint_zero_with_genesis_history_is_ok(
+    ) -> eyre::Result<()> {
+        let mut chain_spec = MAINNET.clone();
+        Arc::make_mut(&mut chain_spec).genesis.alloc.first_entry().unwrap().get_mut().storage =
+            Some(From::from([(B256::random(), B256::random())]));
+
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let temp_dir = TempDir::new().unwrap();
+        let rw_rocksdb =
+            RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let genesis_list = BlockNumberList::new([0]).expect("single block always fits");
+
+        for (address, account) in &chain_spec.genesis().alloc {
+            rw_rocksdb.put::<tables::AccountsHistory>(ShardedKey::last(*address), &genesis_list)?;
+
+            if let Some(storage) = &account.storage {
+                for key in storage.keys() {
+                    rw_rocksdb.put::<tables::StoragesHistory>(
+                        StorageShardedKey::last(*address, *key),
+                        &genesis_list,
+                    )?;
+                }
+            }
+        }
+
+        let ro_rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(ro_rocksdb.check_consistency_read_only(&provider)?, None);
+
+        Ok(())
     }
 
     #[test]

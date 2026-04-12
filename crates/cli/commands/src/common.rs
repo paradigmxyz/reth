@@ -27,7 +27,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory, StorageSettings,
+    ProviderFactory, RocksDBProviderFactory, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -198,23 +198,50 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         )?
         .with_prune_modes(config.prune.segments.clone())
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
+        let factory = if !access.is_read_write() && !access.is_read_only_inconsistent() {
+            factory.with_read_only_sync(false)
+        } else {
+            factory
+        };
 
-        // Check for consistency between database and static files.
-        if !access.is_read_only_inconsistent() &&
-            let Some(unwind_target) =
-                factory.static_file_provider().check_consistency(&factory.provider()?)?
-        {
-            if factory.db_ref().is_read_only()? {
+        // Check for consistency across static files and RocksDB.
+        if access.is_read_only_inconsistent() {
+            return Ok(factory)
+        }
+
+        if !access.is_read_write() {
+            let provider = factory.provider()?;
+            let rocksdb_target =
+                factory.rocksdb_provider().check_consistency_read_only(&provider)?;
+            let static_file_target = factory
+                .static_file_provider()
+                .check_consistency(&provider)?
+                .map(|target| match target {
+                    PipelineTarget::Unwind(block) => block,
+                    PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+                });
+
+            if let Some(unwind_target) =
+                [rocksdb_target, static_file_target].into_iter().flatten().min()
+            {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
             }
+
+            return Ok(factory)
+        }
+
+        let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
+        if let Some(unwind_target) =
+            [rocksdb_unwind, static_file_unwind].into_iter().flatten().min()
+        {
+            let unwind_target = PipelineTarget::Unwind(unwind_target);
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
             assert_ne!(
                 unwind_target,
                 PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+                "A storage inconsistency was found that would trigger an unwind to block 0"
             );
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
