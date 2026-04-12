@@ -26,7 +26,7 @@
 #
 # The script delegates to the existing bench-reth-*.sh scripts in the reth
 # repo for the actual build, snapshot, and run steps.
-set -euo pipefail
+set -euxo pipefail
 
 # ── PATH ──────────────────────────────────────────────────────────────
 # Ensure cargo and user-local bins (mc, uv) are visible

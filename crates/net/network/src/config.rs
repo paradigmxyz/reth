@@ -16,6 +16,7 @@ use reth_eth_wire::{
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
     UnifiedStatus,
 };
+use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
@@ -94,6 +95,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    pub eth_max_message_size: usize,
     /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
     pub required_block_hashes: Vec<BlockNumHash>,
@@ -216,6 +219,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    eth_max_message_size: usize,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
@@ -260,6 +265,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            eth_max_message_size: MAX_MESSAGE_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
         }
@@ -580,6 +586,23 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    ///
+    /// This does not affect the initial status handshake, which continues to use
+    /// [`MAX_MESSAGE_SIZE`].
+    pub const fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
+        self.eth_max_message_size = max_message_size;
+        self
+    }
+
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams if present.
+    pub const fn eth_max_message_size_opt(mut self, max_message_size: Option<usize>) -> Self {
+        if let Some(max_message_size) = max_message_size {
+            self.eth_max_message_size = max_message_size;
+        }
+        self
+    }
+
     /// Set the optional network id.
     pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
         self.network_id = network_id;
@@ -618,6 +641,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
             network_id,
         } = self;
@@ -690,6 +714,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
         }
     }

@@ -44,7 +44,6 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-pub mod bal;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -214,20 +213,10 @@ where
     ///
     /// # Transaction prewarming task
     ///
-    /// Responsible for feeding state updates to the multi proof task.
+    /// Responsible for feeding state updates to the sparse trie task.
     ///
     /// This task runs until:
     ///  - externally cancelled (e.g. sequential block execution is complete)
-    ///
-    /// ## Multi proof task
-    ///
-    /// Responsible for preparing sparse trie messages for the sparse trie task.
-    /// A state update (e.g. tx output) is converted into a multiproof calculation that returns an
-    /// output back to this task.
-    ///
-    /// Receives updates from sequential execution.
-    /// This task runs until it receives a shutdown signal, which should be after the block
-    /// was fully executed.
     ///
     /// ## Sparse trie task
     ///
@@ -461,7 +450,7 @@ where
         (prewarm_rx, execute_rx)
     }
 
-    /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    /// Spawn prewarming optionally wired to the sparse trie task for target updates.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor",
@@ -473,7 +462,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<CrossbeamSender<StateRootMessage>>,
+        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
@@ -503,7 +492,7 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            to_multi_proof,
+            to_sparse_trie_task,
         );
 
         {

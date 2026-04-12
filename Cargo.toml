@@ -134,7 +134,6 @@ members = [
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",
-    "examples/migrate-trie-to-packed",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -559,7 +558,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 
 # tokio
-tokio = { version = "1.44.2", default-features = false }
+tokio = { version = "1.51.1", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.28.0"
 tokio-util = { version = "0.7.4", features = ["codec"] }
@@ -672,7 +671,6 @@ indexmap = "2"
 interprocess = "2.2.0"
 lz4_flex = { version = "0.12", default-features = false }
 memmap2 = "0.9.4"
-mev-share-sse = { version = "0.5.0", default-features = false }
 num-traits = "0.2.15"
 page_size = "0.6.0"
 plain_hasher = "0.2"

@@ -18,7 +18,7 @@
 #   BENCH_JOB_URL      – link to the Actions job
 #   BENCH_ACTOR        – user who triggered the benchmark
 #   BENCH_CONFIG       – config summary line
-set -euo pipefail
+set -euxo pipefail
 
 MC="mc"
 BUCKET="minio/reth-snapshots"
