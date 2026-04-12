@@ -39,9 +39,9 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
-        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage,
+        IndexTransactionHistoryStage, MerkleStage, PruneSenderRecoveryStage, PruneStage,
+        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -79,6 +79,7 @@ use tokio::sync::watch;
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
+/// - [`IndexTransactionHistoryStage`]
 /// - [`PruneStage`] (execute)
 /// - [`FinishStage`]
 #[derive(Debug)]
@@ -457,6 +458,7 @@ where
     TransactionLookupStage: Stage<Provider>,
     IndexStorageHistoryStage: Stage<Provider>,
     IndexAccountHistoryStage: Stage<Provider>,
+    IndexTransactionHistoryStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
@@ -474,6 +476,10 @@ where
                 self.stages_config.index_account_history,
                 self.stages_config.etl.clone(),
                 self.prune_modes.account_history,
+            ))
+            .add_stage(IndexTransactionHistoryStage::new(
+                self.stages_config.index_transaction_history,
+                self.stages_config.etl,
             ))
     }
 }

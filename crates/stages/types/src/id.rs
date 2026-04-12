@@ -29,6 +29,7 @@ pub enum StageId {
     TransactionLookup,
     IndexStorageHistory,
     IndexAccountHistory,
+    IndexTransactionHistory,
     Prune,
     Finish,
     /// Other custom stage with a provided string identifier.
@@ -43,7 +44,7 @@ static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Era,
         Self::Headers,
         Self::Bodies,
@@ -57,6 +58,7 @@ impl StageId {
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::IndexTransactionHistory,
         Self::Prune,
         Self::Finish,
     ];
@@ -93,6 +95,7 @@ impl StageId {
             Self::MerkleExecute => "MerkleExecute",
             Self::TransactionLookup => "TransactionLookup",
             Self::IndexAccountHistory => "IndexAccountHistory",
+            Self::IndexTransactionHistory => "IndexTransactionHistory",
             Self::IndexStorageHistory => "IndexStorageHistory",
             Self::Prune => "Prune",
             Self::Finish => "Finish",
@@ -157,6 +160,7 @@ mod tests {
         assert_eq!(StageId::StorageHashing.to_string(), "StorageHashing");
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
         assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
+        assert_eq!(StageId::IndexTransactionHistory.to_string(), "IndexTransactionHistory");
         assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");

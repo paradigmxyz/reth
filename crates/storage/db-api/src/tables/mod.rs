@@ -501,6 +501,24 @@ tables! {
         type Value = Address;
     }
 
+    /// Stores pointers to block numbers where an address appeared as a transaction sender.
+    ///
+    /// Used by `trace_filter` to quickly find blocks relevant to an address.
+    /// Sharding follows the same pattern as [`AccountsHistory`].
+    table CallTraceFromIndex {
+        type Key = ShardedKey<Address>;
+        type Value = BlockNumberList;
+    }
+
+    /// Stores pointers to block numbers where an address appeared as a transaction recipient.
+    ///
+    /// Used by `trace_filter` to quickly find blocks relevant to an address.
+    /// Sharding follows the same pattern as [`AccountsHistory`].
+    table CallTraceToIndex {
+        type Key = ShardedKey<Address>;
+        type Value = BlockNumberList;
+    }
+
     /// Stores the highest synced block number and stage-specific checkpoint of each stage.
     table StageCheckpoints {
         type Key = StageId;

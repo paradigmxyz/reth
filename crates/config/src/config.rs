@@ -128,6 +128,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Index Transaction History stage configuration.
+    pub index_transaction_history: IndexHistoryConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
 }
@@ -838,6 +840,9 @@ commit_threshold = 100000
 [stages.index_storage_history]
 commit_threshold = 100000
 
+[stages.index_transaction_history]
+commit_threshold = 100000
+
 [peers]
 refill_slots_interval = '1s'
 trusted_nodes = []
@@ -956,6 +961,9 @@ commit_threshold = 100000
 [stages.index_storage_history]
 commit_threshold = 100000
 
+[stages.index_transaction_history]
+commit_threshold = 100000
+
 [peers]
 refill_slots_interval = '5s'
 trusted_nodes = []
@@ -1047,6 +1055,9 @@ commit_threshold = 5000000
 commit_threshold = 100000
 
 [stages.index_storage_history]
+commit_threshold = 100000
+
+[stages.index_transaction_history]
 commit_threshold = 100000
 
 [peers]
