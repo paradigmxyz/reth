@@ -1,7 +1,7 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
-use alloc::{borrow::Cow, vec::Vec};
+use crate::{BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
+use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -464,6 +464,83 @@ impl DecodedMultiProofV2 {
     /// Returns true if there are no proofs
     pub fn is_empty(&self) -> bool {
         self.account_proofs.is_empty() && self.storage_proofs.is_empty()
+    }
+
+    /// Builds a `DecodedMultiProofV2` from a flat witness map (hash → RLP-encoded trie node).
+    ///
+    /// This performs a BFS traversal starting from `state_root`, decoding each witness entry
+    /// as a trie node and organizing them into account and storage proof vectors. This is the
+    /// inverse of witness generation — it reconstructs the structured multiproof from the flat
+    /// format used in `ExecutionWitness`.
+    pub fn from_witness(
+        state_root: B256,
+        witness: &B256Map<impl AsRef<[u8]>>,
+    ) -> Result<Self, alloy_rlp::Error> {
+        let mut account_nodes: Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)> = Vec::new();
+        let mut storage_nodes: B256Map<Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)>> =
+            B256Map::default();
+
+        let mut queue: VecDeque<(B256, Nibbles, Option<B256>)> =
+            VecDeque::from([(state_root, Nibbles::default(), None)]);
+
+        while let Some((hash, path, maybe_account)) = queue.pop_front() {
+            let Some(rlp_bytes) = witness.get(&hash) else { continue };
+            let trie_node = TrieNode::decode(&mut rlp_bytes.as_ref())?;
+
+            match &trie_node {
+                TrieNode::Branch(branch) => {
+                    for (idx, maybe_child) in branch.as_ref().children() {
+                        if let Some(child_hash) =
+                            maybe_child.and_then(alloy_trie::nodes::RlpNode::as_hash)
+                        {
+                            let mut child_path = path;
+                            child_path.push_unchecked(idx);
+                            queue.push_back((child_hash, child_path, maybe_account));
+                        }
+                    }
+                }
+                TrieNode::Extension(ext) => {
+                    if let Some(child_hash) = ext.child.as_hash() {
+                        let mut child_path = path;
+                        child_path.extend(&ext.key);
+                        queue.push_back((child_hash, child_path, maybe_account));
+                    }
+                }
+                TrieNode::Leaf(leaf) => {
+                    if maybe_account.is_none() {
+                        let mut full_path = path;
+                        full_path.extend(&leaf.key);
+                        let hashed_address = B256::from_slice(&full_path.pack());
+                        let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                        if account.storage_root != EMPTY_ROOT_HASH {
+                            queue.push_back((
+                                account.storage_root,
+                                Nibbles::default(),
+                                Some(hashed_address),
+                            ));
+                        }
+                    }
+                }
+                TrieNode::EmptyRoot => {}
+            }
+
+            if let Some(account) = maybe_account {
+                storage_nodes.entry(account).or_default().push((path, trie_node, None));
+            } else {
+                account_nodes.push((path, trie_node, None));
+            }
+        }
+
+        account_nodes.sort_by(|(a, _, _), (b, _, _)| b.cmp(a));
+        let account_proofs = ProofTrieNodeV2::from_sorted_trie_nodes(account_nodes);
+
+        let mut storage_proofs = B256Map::default();
+        for (account, mut nodes) in storage_nodes {
+            nodes.sort_by(|(a, _, _), (b, _, _)| b.cmp(a));
+            storage_proofs.insert(account, ProofTrieNodeV2::from_sorted_trie_nodes(nodes));
+        }
+
+        Ok(Self { account_proofs, storage_proofs })
     }
 
     /// Appends the given multiproof's data to this one.

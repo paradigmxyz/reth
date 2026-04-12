@@ -18,7 +18,7 @@
 #   BENCH_JOB_URL      – link to the Actions job
 #   BENCH_ACTOR        – user who triggered the benchmark
 #   BENCH_CONFIG       – config summary line
-set -euo pipefail
+set -euxo pipefail
 
 MC="mc"
 BUCKET="minio/reth-snapshots"
@@ -77,8 +77,8 @@ trap 'rm -f -- "$MANIFEST_TMP"' EXIT
 echo "$MANIFEST_CONTENT" \
   | jq --arg base "$BASE_URL" '.base_url = $base' > "$MANIFEST_TMP"
 
-# Prepare mount
-mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+# Prepare mount. If a previous run left the volume mounted, recover first.
+sudo schelk recover -y --kill || true
 sudo schelk mount -y
 sudo rm -rf "$DATADIR"
 sudo mkdir -p "$DATADIR"

@@ -13,7 +13,7 @@
 #               BENCH_OTLP_TRACES_ENDPOINT (OTLP HTTP endpoint for traces, e.g. https://host/insert/opentelemetry/v1/traces)
 #               BENCH_OTLP_LOGS_ENDPOINT (OTLP HTTP endpoint for logs, e.g. https://host/insert/opentelemetry/v1/logs)
 #               BENCH_OTLP_DISABLED (true to skip OTLP export even if endpoints are set)
-set -euo pipefail
+set -euxo pipefail
 
 LABEL="$1"
 BINARY="$2"
@@ -25,6 +25,8 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
+
+RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -46,7 +48,7 @@ cleanup() {
     fi
     wait "$TRACY_PID" 2>/dev/null || true
   fi
-  if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
+  if sudo systemctl is-active "$RETH_SCOPE" >/dev/null 2>&1; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
       # Send SIGINT to the inner reth process by exact name (not -f which
       # would also match samply's cmdline containing "reth"). Samply will
@@ -64,31 +66,28 @@ cleanup() {
         echo "Samply still running after 120s, sending SIGTERM..."
         sudo pkill -x samply 2>/dev/null || true
       fi
-    else
-      sudo kill "$RETH_PID"
-      for i in $(seq 1 30); do
-        sudo kill -0 "$RETH_PID" 2>/dev/null || break
-        sleep 1
-      done
     fi
-    sudo kill -9 "$RETH_PID" 2>/dev/null || true
+    # Stop the entire systemd scope — kills all processes in the cgroup.
+    # This is reliable regardless of process reparenting or PID wrapper issues.
+    sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
     sleep 1
   fi
+  sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
   # Fix ownership of reth-created files (reth runs as root)
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
-  if mountpoint -q "$SCHELK_MOUNT"; then
-    sudo umount -l "$SCHELK_MOUNT" || true
-    sudo schelk recover -y || true
-  fi
+  # Let schelk recover the mounted volume in place so dm-era can restore only
+  # the changed blocks and clean up its own state.
+  sudo schelk recover -y --kill || true
 }
 TAIL_PID=
 TRACY_PID=
 trap cleanup EXIT
 
-# Clean up stale schelk state from a previous cancelled run.
-# If schelk thinks it's still mounted (e.g. a cancelled run skipped cleanup),
-# recover first to reset state.
-sudo schelk recover -y -k || true
+# Clean up stale state from a previous cancelled run.
+# Stop any leftover reth process in the scope, then recover schelk state.
+sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+sudo schelk recover -y --kill || true
 
 # Mount
 sudo schelk mount -y
@@ -182,19 +181,19 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
   SAMPLY="$(which samply)"
-  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
+    -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 \
     "$SAMPLY" record --save-only --presymbolicate --rate 10000 \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 else
-  sudo systemd-run --scope -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
+  sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
+    -p MemoryMax="$MEM_LIMIT" -p AllowedCPUs="$RETH_CPUS" \
     env "${SUDO_ENV[@]}" nice -n -20 "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
 fi
-
-RETH_PID=$!
 stdbuf -oL tail -f "$LOG" | sed -u "s/^/[reth] /" &
 TAIL_PID=$!
 

@@ -353,7 +353,10 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
-            Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
+            Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => {
+                // local setting
+                false
+            }
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData { .. } => true,
             Self::Underpriced => {

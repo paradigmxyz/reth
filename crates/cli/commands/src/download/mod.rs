@@ -261,12 +261,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-    /// Use resumable two-phase downloads (download to disk first, then extract).
+    /// Enable resumable two-phase downloads (download to disk first, then extract).
     ///
-    /// Archives are downloaded to a .part file with HTTP Range resume support
-    /// before extraction. Slower but tolerates network interruptions without
-    /// restarting. By default, archives stream directly into the extractor.
-    #[arg(long)]
+    /// Archives are downloaded to a `.part` file with HTTP Range resume support
+    /// before extraction. This is enabled by default because it tolerates
+    /// network interruptions without restarting. Pass `--resumable=false` to
+    /// stream archives directly into the extractor instead.
+    #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true")]
     resumable: bool,
 
     /// Maximum number of concurrent modular archive workers.
@@ -898,6 +899,8 @@ impl SharedProgress {
 fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let started_at = Instant::now();
+        let mut prev_downloaded = 0u64;
+        let mut prev_time = started_at;
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await; // first tick is immediate, skip it
         loop {
@@ -919,7 +922,6 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);
 
-            let elapsed = started_at.elapsed();
             let remaining = total.saturating_sub(downloaded);
 
             if remaining == 0 {
@@ -930,15 +932,20 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
                     "Extracting remaining archives"
                 );
             } else {
-                let eta = if downloaded > 0 {
-                    let speed = downloaded as f64 / elapsed.as_secs_f64();
-                    if speed > 0.0 {
-                        DownloadProgress::format_duration(Duration::from_secs_f64(
-                            remaining as f64 / speed,
-                        ))
-                    } else {
-                        "??".to_string()
-                    }
+                let now = Instant::now();
+                let dt = now.duration_since(prev_time).as_secs_f64();
+                let speed = if dt > 0.0 {
+                    (downloaded.saturating_sub(prev_downloaded)) as f64 / dt
+                } else {
+                    0.0
+                };
+                prev_downloaded = downloaded;
+                prev_time = now;
+
+                let eta = if speed > 0.0 {
+                    DownloadProgress::format_duration(Duration::from_secs_f64(
+                        remaining as f64 / speed,
+                    ))
                 } else {
                     "??".to_string()
                 };
@@ -1177,7 +1184,7 @@ fn resumable_download(
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
 
     let mut total_size: Option<u64> = None;
-    let mut last_error: Option<eyre::Error> = None;
+    let mut retries: u32 = 0;
 
     let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
         fs::rename(&part_path, &final_path)?;
@@ -1187,7 +1194,7 @@ fn resumable_download(
         Ok((final_path.clone(), size))
     };
 
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+    loop {
         let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
 
         if let Some(total) = total_size &&
@@ -1196,18 +1203,18 @@ fn resumable_download(
             return finalize_download(total);
         }
 
-        if attempt > 1 {
+        if retries > 0 {
             info!(target: "reth::cli",
                 file = %file_name,
-                "Retry attempt {}/{} - resuming from {} bytes",
-                attempt, MAX_DOWNLOAD_RETRIES, existing_size
+                retries,
+                "Resuming download from {} bytes", existing_size
             );
         }
 
         let mut request = client.get(url);
         if existing_size > 0 {
             request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if !quiet && attempt == 1 {
+            if !quiet && retries == 0 {
                 info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
             }
         }
@@ -1215,14 +1222,16 @@ fn resumable_download(
         let response = match request.send().and_then(|r| r.error_for_status()) {
             Ok(r) => r,
             Err(e) => {
-                last_error = Some(e.into());
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    info!(target: "reth::cli",
-                        file = %file_name,
-                        "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
-                    );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                retries += 1;
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
                 }
+                warn!(target: "reth::cli",
+                    file = %file_name,
+                    %e,
+                    "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                );
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 continue;
             }
         };
@@ -1293,23 +1302,33 @@ fn resumable_download(
             println!();
         }
 
-        if let Err(e) = copy_result.and(flush_result) {
-            last_error = Some(e.into());
-            if attempt < MAX_DOWNLOAD_RETRIES {
-                info!(target: "reth::cli",
+        match copy_result.and(flush_result) {
+            Err(e) => {
+                // Check if any new data was written since we started this attempt.
+                // If so, the connection was productive — reset the consecutive failure
+                // counter so transient mid-stream errors don't exhaust retries.
+                let new_size = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+                if new_size > existing_size {
+                    retries = 0;
+                } else {
+                    retries += 1;
+                }
+
+                if retries >= MAX_DOWNLOAD_RETRIES {
+                    return Err(e.into());
+                }
+
+                warn!(target: "reth::cli",
                     file = %file_name,
+                    %e,
                     "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
                 );
                 std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                continue;
             }
-            continue;
+            Ok(_) => return finalize_download(current_total),
         }
-
-        return finalize_download(current_total);
     }
-
-    Err(last_error
-        .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
 }
 
 /// Streams a remote archive directly into the extractor without writing to disk.
@@ -1883,8 +1902,16 @@ fn resolve_manifest_base_url(manifest: &SnapshotManifest, source: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::{Args, Parser};
     use manifest::{ComponentManifest, SingleArchive};
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use tempfile::tempdir;
+
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -1970,6 +1997,36 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_download_resumable_defaults_to_true() {
+        let args =
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(["reth"]).args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_implicit_true() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable",
+        ])
+        .args;
+
+        assert!(args.resumable);
+    }
+
+    #[test]
+    fn test_download_resumable_explicit_false() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--resumable=false",
+        ])
+        .args;
+
+        assert!(!args.resumable);
     }
 
     #[test]

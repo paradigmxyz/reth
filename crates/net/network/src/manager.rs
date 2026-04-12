@@ -261,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
         } = config;
 
@@ -316,6 +317,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             fork_filter,
             extra_protocols,
             handshake,
+            eth_max_message_size,
         );
 
         let state = NetworkState::new(
