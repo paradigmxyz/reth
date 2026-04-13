@@ -52,7 +52,7 @@ impl PruneTimeLimit {
 
 impl PruneLimiter {
     /// Sets the limit on the number of deleted entries (rows in the database).
-    /// If the limit was already set, it will be overwritten.
+    /// If the limit was already set, it will be overwritten but the deleted count preserved.
     pub const fn set_deleted_entries_limit(mut self, limit: usize) -> Self {
         if let Some(deleted_entries_limit) = self.deleted_entries_limit.as_mut() {
             deleted_entries_limit.limit = limit;
@@ -233,18 +233,17 @@ mod tests {
     fn test_set_deleted_entries_limit_when_limit_is_reached() {
         let mut pruner = PruneLimiter::default().set_deleted_entries_limit(5);
         assert!(pruner.deleted_entries_limit.is_some());
-        let mut deleted_entries_limit = pruner.deleted_entries_limit.clone().unwrap();
 
-        // Simulate deletion of entries
-        deleted_entries_limit.deleted = 5;
-        assert!(deleted_entries_limit.is_limit_reached());
+        // Simulate deletion of entries on the actual limiter
+        pruner.increment_deleted_entries_count_by(5);
+        assert!(pruner.is_deleted_entries_limit_reached());
 
-        // Overwrite the limit and check if it resets correctly
+        // Overwrite the limit - deleted count is preserved (needed for cross-segment tracking)
         pruner = pruner.set_deleted_entries_limit(10);
-        deleted_entries_limit = pruner.deleted_entries_limit.unwrap();
+        let deleted_entries_limit = pruner.deleted_entries_limit.unwrap();
         assert_eq!(deleted_entries_limit.limit, 10);
-        // Deletion count should reset
-        assert_eq!(deleted_entries_limit.deleted, 0);
+        // Deleted count is preserved, not reset
+        assert_eq!(deleted_entries_limit.deleted, 5);
         assert!(!deleted_entries_limit.is_limit_reached());
     }
 

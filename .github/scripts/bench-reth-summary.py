@@ -351,6 +351,8 @@ def generate_comparison_table(
     feature_name: str,
     feature_sha: str,
     big_blocks: bool = False,
+    warmup_blocks: str | None = None,
+    wait_time: str | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
     n = paired["blocks"]
@@ -391,8 +393,13 @@ def generate_comparison_table(
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, lower_is_better=True)} |",
         "",
-        f"*{n} {'big blocks' if big_blocks else 'blocks'}*",
     ]
+    meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
+    if warmup_blocks:
+        meta_parts.append(f"{warmup_blocks} warmup")
+    if wait_time:
+        meta_parts.append(f"wait time: {wait_time}")
+    lines.append(f"*{', '.join(meta_parts)}*")
     return "\n".join(lines)
 
 
@@ -422,6 +429,7 @@ def generate_markdown(
     summary: dict, comparison_table: str,
     wait_time_tables: list[str] | None = None,
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
+    grafana_url: str | None = None,
 ) -> str:
     """Generate a markdown comment body."""
     lines = ["## Benchmark Results", ""]
@@ -441,6 +449,9 @@ def generate_markdown(
                 lines.append(table)
                 lines.append("")
         lines.append("</details>")
+    if grafana_url:
+        lines.append("")
+        lines.append(f"**[Grafana Dashboard]({grafana_url})**")
     return "\n".join(lines)
 
 
@@ -468,6 +479,9 @@ def main():
     parser.add_argument("--feature-ref", "--branch-sha", "--feature-sha", default=None, help="Feature commit SHA")
     parser.add_argument("--behind-baseline", "--behind-main", type=int, default=0, help="Commits behind baseline")
     parser.add_argument("--big-blocks", action="store_true", default=False, help="Big blocks mode")
+    parser.add_argument("--warmup-blocks", default=None, help="Number of warmup blocks")
+    parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
+    parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     args = parser.parse_args()
 
     if len(args.baseline_csv) != len(args.feature_csv):
@@ -517,6 +531,8 @@ def main():
         feature_name=feature_name,
         feature_sha=feature_sha,
         big_blocks=args.big_blocks,
+        warmup_blocks=args.warmup_blocks,
+        wait_time=args.wait_time,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
@@ -547,6 +563,9 @@ def main():
 
     summary = {
         "blocks": paired_stats["blocks"],
+        "big_blocks": args.big_blocks,
+        "warmup_blocks": args.warmup_blocks,
+        "wait_time": args.wait_time,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,
@@ -572,6 +591,7 @@ def main():
         repo=args.repo,
         baseline_ref=baseline_ref,
         baseline_name=baseline_name,
+        grafana_url=args.grafana_url,
     )
 
     with open(args.output_markdown, "w") as f:

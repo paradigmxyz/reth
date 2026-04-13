@@ -74,6 +74,18 @@ where
         Self { eth_snap: EthSnapStreamInner::new(eth_version), inner: stream }
     }
 
+    /// Create a new eth and snap protocol stream with a custom max message size.
+    pub const fn with_max_message_size(
+        stream: S,
+        eth_version: EthVersion,
+        max_message_size: usize,
+    ) -> Self {
+        Self {
+            eth_snap: EthSnapStreamInner::with_max_message_size(eth_version, max_message_size),
+            inner: stream,
+        }
+    }
+
     /// Returns the eth version
     #[inline]
     pub const fn eth_version(&self) -> EthVersion {
@@ -188,6 +200,8 @@ where
 struct EthSnapStreamInner<N> {
     /// Eth protocol version
     eth_version: EthVersion,
+    /// Maximum allowed ETH/Snap message size.
+    max_message_size: usize,
     /// Type marker
     _pd: PhantomData<N>,
 }
@@ -198,7 +212,12 @@ where
 {
     /// Create a new eth and snap protocol stream
     const fn new(eth_version: EthVersion) -> Self {
-        Self { eth_version, _pd: PhantomData }
+        Self::with_max_message_size(eth_version, MAX_MESSAGE_SIZE)
+    }
+
+    /// Create a new eth and snap protocol stream with a custom max message size.
+    const fn with_max_message_size(eth_version: EthVersion, max_message_size: usize) -> Self {
+        Self { eth_version, max_message_size, _pd: PhantomData }
     }
 
     #[inline]
@@ -208,8 +227,8 @@ where
 
     /// Decode a message from the stream
     fn decode_message(&self, bytes: BytesMut) -> Result<EthSnapMessage<N>, EthSnapStreamError> {
-        if bytes.len() > MAX_MESSAGE_SIZE {
-            return Err(EthSnapStreamError::MessageTooLarge(bytes.len(), MAX_MESSAGE_SIZE));
+        if bytes.len() > self.max_message_size {
+            return Err(EthSnapStreamError::MessageTooLarge(bytes.len(), self.max_message_size));
         }
 
         if bytes.is_empty() {

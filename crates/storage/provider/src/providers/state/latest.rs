@@ -11,11 +11,12 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::{masked::MaskedTrieCursorFactory, InMemoryTrieCursorFactory},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StateRoot, StorageMultiProof, StorageRoot, TrieInput, TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
@@ -218,27 +219,34 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         })
     }
 
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let nodes_sorted = input.nodes.into_sorted();
             let state_sorted = input.state.into_sorted();
-            Ok(TrieWitness::new(
-                MaskedTrieCursorFactory::new(
-                    InMemoryTrieCursorFactory::new(
-                        reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                        &nodes_sorted,
-                    ),
-                    input.prefix_sets.freeze(),
+            let witness = TrieWitness::new(
+                InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    &nodes_sorted,
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
                     &state_sorted,
                 ),
             )
-            .always_include_root_node()
-            .compute(target)?
-            .into_values()
-            .collect())
+            .with_prefix_sets_mut(input.prefix_sets)
+            .with_execution_witness_mode(mode);
+            let witness =
+                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+            let mut values: Vec<_> = witness.compute(target)?.into_values().collect();
+            if mode.is_canonical() {
+                values.sort_unstable();
+            }
+            Ok(values)
         })
     }
 }

@@ -261,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
         } = config;
 
@@ -316,6 +317,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             fork_filter,
             extra_protocols,
             handshake,
+            eth_max_message_size,
         );
 
         let state = NetworkState::new(
@@ -637,7 +639,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::NewBlockHashes(hashes) => {
                 self.within_pow_or_disconnect(peer_id, |this| {
                     // update peer's state, to track what blocks this peer has seen
-                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0.clone());
+                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.to_vec());
                     // start block import process for the hashes
                     this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
                 })

@@ -234,8 +234,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt)) => {
-                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                Some((tx, meta, receipt, all_receipts)) => {
+                    self.build_transaction_receipt(tx, meta, receipt, all_receipts).await.map(Some)
                 }
                 None => Ok(None),
             }
@@ -255,6 +255,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 Recovered<ProviderTx<Self::Provider>>,
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
+                Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
             )>,
             Self::Error,
         >,
@@ -269,13 +270,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let meta = cached.transaction_meta(hash);
 
                 // Best case: receipts are also cached.
-                if let Some(receipt) = cached.receipt().cloned() {
-                    return Ok(Some((tx, meta, receipt)));
+                if let Some(all_receipts) = cached.receipts.clone() &&
+                    let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
+                {
+                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
                 }
 
                 // Block still cached but receipts evicted — fetch via cache since
-                // the block is recent and `build_transaction_receipt` needs all
-                // receipts for gas accounting anyway.
+                // `build_transaction_receipt` needs all receipts for gas accounting
+                // anyway.
                 if let Some(receipts) = self
                     .cache()
                     .get_receipts(cached.block.hash())
@@ -283,7 +286,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(Self::Error::from_eth_err)? &&
                     let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt)));
+                    return Ok(Some((tx, meta, receipt, Some(receipts))));
                 }
             }
 
@@ -301,7 +304,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt)))
+                Ok(receipt.map(|receipt| (tx, meta, receipt, None)))
             })
             .await
         }
@@ -324,7 +327,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
@@ -400,7 +402,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
-                            #[allow(clippy::needless_update)]
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
@@ -460,7 +461,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
             // set nonce if not already set before
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 
@@ -502,17 +503,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
-            let from = match request.as_ref().from() {
-                Some(from) => from,
-                None => return Err(SignError::NoAccount.into_eth_err()),
-            };
-
             if request.as_ref().value().is_none() {
                 request.as_mut().set_value(U256::ZERO);
             }
 
             if request.as_ref().nonce().is_none() {
-                let nonce = self.next_available_nonce(from).await?;
+                let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
             }
 

@@ -6,6 +6,9 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
+/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
+
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
@@ -26,10 +29,15 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-/// Default maximum number of storage tries to keep after pruning.
+/// Default LFU hot-slot capacity for sparse trie pruning.
 ///
-/// Storage tries beyond this limit are cleared (but allocations preserved).
-pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+/// Limits the number of `(address, slot)` pairs retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
+
+/// Default LFU hot-account capacity for sparse trie pruning.
+///
+/// Limits the number of account addresses retained across prune cycles.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -38,6 +46,16 @@ const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn assert_backpressure_threshold_invariant(
+    persistence_threshold: u64,
+    persistence_backpressure_threshold: u64,
+) {
+    debug_assert!(
+        persistence_backpressure_threshold > persistence_threshold,
+        "persistence_backpressure_threshold must be greater than persistence_threshold",
+    );
+}
 
 const fn default_cross_block_cache_size() -> usize {
     if cfg!(test) {
@@ -77,6 +95,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
+    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
     block_buffer_limit: u32,
@@ -131,8 +151,14 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// Maximum number of storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
+    /// When set, blocks whose total processing time (execution + state reads + state root +
+    /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
+    /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
+    slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
@@ -140,13 +166,27 @@ pub struct TreeConfig {
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
+    /// Whether to share execution cache with the payload builder.
+    share_execution_cache_with_payload_builder: bool,
+    /// Whether to share sparse trie with the payload builder.
+    share_sparse_trie_with_payload_builder: bool,
+    /// Maximum random jitter applied before each proof computation (trie-debug only).
+    /// When set, each proof worker sleeps for a random duration up to this value
+    /// before starting a proof calculation.
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
 }
 
 impl Default for TreeConfig {
     fn default() -> Self {
+        assert_backpressure_threshold_invariant(
+            DEFAULT_PERSISTENCE_THRESHOLD,
+            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+        );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
@@ -165,9 +205,15 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            share_execution_cache_with_payload_builder: false,
+            share_sparse_trie_with_payload_builder: false,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 }
@@ -178,6 +224,7 @@ impl TreeConfig {
     pub const fn new(
         persistence_threshold: u64,
         memory_block_buffer_target: u64,
+        persistence_backpressure_threshold: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
@@ -196,12 +243,21 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_storage_tries: usize,
+        sparse_trie_max_hot_slots: usize,
+        sparse_trie_max_hot_accounts: usize,
+        slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
+        share_execution_cache_with_payload_builder: bool,
+        share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        assert_backpressure_threshold_invariant(
+            persistence_threshold,
+            persistence_backpressure_threshold,
+        );
         Self {
             persistence_threshold,
             memory_block_buffer_target,
+            persistence_backpressure_threshold,
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
@@ -220,9 +276,15 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
+            share_execution_cache_with_payload_builder,
+            share_sparse_trie_with_payload_builder,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter: None,
         }
     }
 
@@ -234,6 +296,11 @@ impl TreeConfig {
     /// Return the memory block buffer target.
     pub const fn memory_block_buffer_target(&self) -> u64 {
         self.memory_block_buffer_target
+    }
+
+    /// Return the persistence backpressure threshold.
+    pub const fn persistence_backpressure_threshold(&self) -> u64 {
+        self.persistence_backpressure_threshold
     }
 
     /// Return the block buffer limit.
@@ -332,6 +399,10 @@ impl TreeConfig {
     /// Setter for persistence threshold.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
+        assert_backpressure_threshold_invariant(
+            self.persistence_threshold,
+            self.persistence_backpressure_threshold,
+        );
         self
     }
 
@@ -341,6 +412,19 @@ impl TreeConfig {
         memory_block_buffer_target: u64,
     ) -> Self {
         self.memory_block_buffer_target = memory_block_buffer_target;
+        self
+    }
+
+    /// Setter for persistence backpressure threshold.
+    pub const fn with_persistence_backpressure_threshold(
+        mut self,
+        persistence_backpressure_threshold: u64,
+    ) -> Self {
+        self.persistence_backpressure_threshold = persistence_backpressure_threshold;
+        assert_backpressure_threshold_invariant(
+            self.persistence_threshold,
+            self.persistence_backpressure_threshold,
+        );
         self
     }
 
@@ -471,14 +555,43 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the maximum number of storage tries to retain after pruning.
-    pub const fn sparse_trie_max_storage_tries(&self) -> usize {
-        self.sparse_trie_max_storage_tries
+    /// Returns the LFU hot-slot capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
+        self.sparse_trie_max_hot_slots
     }
 
-    /// Setter for maximum storage tries to retain.
-    pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
-        self.sparse_trie_max_storage_tries = max_tries;
+    /// Setter for LFU hot-slot capacity.
+    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
+        self.sparse_trie_max_hot_slots = max_hot_slots;
+        self
+    }
+
+    /// Returns the LFU hot-account capacity for sparse trie pruning.
+    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
+        self.sparse_trie_max_hot_accounts
+    }
+
+    /// Setter for LFU hot-account capacity.
+    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
+        self.sparse_trie_max_hot_accounts = max_hot_accounts;
+        self
+    }
+
+    /// Returns the slow block threshold, if configured.
+    ///
+    /// When `Some`, blocks whose total processing time exceeds this duration emit a structured
+    /// warning with timing, state-operation, and cache-hit-rate details. `Duration::ZERO` logs
+    /// every block.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
         self
     }
 
@@ -502,5 +615,62 @@ impl TreeConfig {
     pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.state_root_task_timeout = timeout;
         self
+    }
+
+    /// Returns whether to share execution cache with the payload builder.
+    pub const fn share_execution_cache_with_payload_builder(&self) -> bool {
+        self.share_execution_cache_with_payload_builder
+    }
+
+    /// Returns whether to share sparse trie with the payload builder.
+    pub const fn share_sparse_trie_with_payload_builder(&self) -> bool {
+        self.share_sparse_trie_with_payload_builder
+    }
+
+    /// Setter for whether to share execution cache with the payload builder.
+    pub const fn with_share_execution_cache_with_payload_builder(
+        mut self,
+        share_execution_cache_with_payload_builder: bool,
+    ) -> Self {
+        self.share_execution_cache_with_payload_builder =
+            share_execution_cache_with_payload_builder;
+        self
+    }
+
+    /// Setter for whether to share sparse trie with the payload builder.
+    pub const fn with_share_sparse_trie_with_payload_builder(
+        mut self,
+        share_sparse_trie_with_payload_builder: bool,
+    ) -> Self {
+        self.share_sparse_trie_with_payload_builder = share_sparse_trie_with_payload_builder;
+        self
+    }
+
+    /// Returns the proof jitter duration, if configured (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn proof_jitter(&self) -> Option<Duration> {
+        self.proof_jitter
+    }
+
+    /// Setter for proof jitter (trie-debug only).
+    #[cfg(feature = "trie-debug")]
+    pub const fn with_proof_jitter(mut self, proof_jitter: Option<Duration>) -> Self {
+        self.proof_jitter = proof_jitter;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TreeConfig;
+
+    #[test]
+    #[should_panic(
+        expected = "persistence_backpressure_threshold must be greater than persistence_threshold"
+    )]
+    fn rejects_backpressure_threshold_at_or_below_persistence_threshold() {
+        let _ = TreeConfig::default()
+            .with_persistence_threshold(4)
+            .with_persistence_backpressure_threshold(4);
     }
 }

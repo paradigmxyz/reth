@@ -3,19 +3,13 @@
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
-    keccak256,
     map::{AddressMap, B256Map, HashMap},
     Address, B256, U256,
 };
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-    tables,
-    transaction::DbTxMut,
-    BlockNumberList, DatabaseError,
-};
+use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
 use reth_primitives_traits::{
@@ -23,17 +17,17 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
-    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, EitherWriter,
-    ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
+    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
     RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
     StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_trie::{
-    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
-    IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
+    prefix_set::TriePrefixSets, IntermediateStateRootState, StateRoot as StateRootComputer,
+    StateRootProgress,
 };
 use reth_trie_db::DatabaseStateRoot;
 
@@ -46,19 +40,16 @@ use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use tracing::{debug, error, info, trace, warn};
 
+pub use reth_provider::init::{
+    insert_account_history, insert_genesis_account_history, insert_genesis_history,
+    insert_genesis_storage_history, insert_history, insert_storage_history,
+};
+
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
 ///
 /// Default is 1 GB.
 pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
-
-/// Approximate number of accounts per 1 GB of state dump file. One account is approximately 3.5 KB
-///
-/// Approximate is 285 228 accounts.
-//
-// (14.05 GB OP mainnet state dump at Bedrock block / 4 007 565 accounts in file > 3.5 KB per
-// account)
-pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
 
 /// Soft limit for the number of flushed updates after which to log progress summary.
 const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
@@ -415,137 +406,6 @@ where
     Ok(())
 }
 
-/// Inserts history indices for genesis accounts and storage.
-///
-/// Writes to either MDBX or `RocksDB` based on storage settings configuration,
-/// using [`EitherWriter`] to abstract over the storage backend.
-pub fn insert_genesis_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + ChainSpecProvider
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    let genesis_block_number = provider.chain_spec().genesis_header().number();
-    insert_history(provider, alloc, genesis_block_number)
-}
-
-/// Inserts account history indices for genesis accounts.
-pub fn insert_genesis_account_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + ChainSpecProvider
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    let genesis_block_number = provider.chain_spec().genesis_header().number();
-    insert_account_history(provider, alloc, genesis_block_number)
-}
-
-/// Inserts storage history indices for genesis accounts.
-pub fn insert_genesis_storage_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + ChainSpecProvider
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    let genesis_block_number = provider.chain_spec().genesis_header().number();
-    insert_storage_history(provider, alloc, genesis_block_number)
-}
-
-/// Inserts history indices for genesis accounts and storage.
-///
-/// Writes to either MDBX or `RocksDB` based on storage settings configuration,
-/// using [`EitherWriter`] to abstract over the storage backend.
-pub fn insert_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
-    block: u64,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    insert_account_history(provider, alloc.clone(), block)?;
-    insert_storage_history(provider, alloc, block)?;
-    Ok(())
-}
-
-/// Inserts account history indices at the given block.
-pub fn insert_account_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-    block: u64,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    provider.with_rocksdb_batch(|batch| {
-        let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
-        let list = BlockNumberList::new([block]).expect("single block always fits");
-        for (addr, _) in alloc {
-            writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
-        }
-        trace!(target: "reth::cli", "Inserted account history");
-        Ok(((), writer.into_raw_rocksdb_batch()))
-    })?;
-
-    Ok(())
-}
-
-/// Inserts storage history indices at the given block.
-pub fn insert_storage_history<'a, 'b, Provider>(
-    provider: &Provider,
-    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-    block: u64,
-) -> ProviderResult<()>
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + HistoryWriter
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
-{
-    provider.with_rocksdb_batch(|batch| {
-        let mut writer = EitherWriter::new_storages_history(provider, batch)?;
-        let list = BlockNumberList::new([block]).expect("single block always fits");
-        for (addr, account) in alloc {
-            if let Some(storage) = &account.storage {
-                for key in storage.keys() {
-                    writer.upsert_storage_history(StorageShardedKey::last(*addr, *key), &list)?;
-                }
-            }
-        }
-        trace!(target: "reth::cli", "Inserted storage history");
-        Ok(((), writer.into_raw_rocksdb_batch()))
-    })?;
-
-    Ok(())
-}
-
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<Provider, Spec>(
     provider: &Provider,
@@ -633,7 +493,7 @@ where
         .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let header = provider_rw
         .header_by_number(block)?
-        .map(SealedHeader::seal_slow)
+        .map(|h| SealedHeader::new(h, hash))
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
 
     let expected_state_root = header.state_root();
@@ -663,14 +523,17 @@ where
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
 
-    // write state to db and collect prefix sets
-    let mut prefix_sets = TriePrefixSetsMut::default();
-    dump_state(collector, provider_rw, block, &mut prefix_sets)?;
+    // write state to db
+    dump_state(collector, provider_rw, block)?;
 
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
+    // clear trie tables so state root is computed from scratch
+    provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
+    provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(provider_rw, Some(prefix_sets.freeze()))?;
+    let computed_state_root = compute_state_root(provider_rw, None)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -728,14 +591,6 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if !collector.is_empty() &&
-            collector.len().is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)
-        {
-            info!(target: "reth::cli",
-                parsed_new_accounts=collector.len(),
-            );
-        }
-
         line.clear();
     }
 
@@ -747,7 +602,6 @@ fn dump_state<Provider>(
     mut collector: Collector<Address, GenesisAccount>,
     provider_rw: &Provider,
     block: u64,
-    prefix_sets: &mut TriePrefixSetsMut,
 ) -> Result<(), eyre::Error>
 where
     Provider: StaticFileProviderFactory
@@ -762,33 +616,19 @@ where
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();
-    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
+    let mut accounts = Vec::new();
     let mut total_inserted_accounts = 0;
+    let mut chunk_byte_size = 0;
 
     for (index, entry) in collector.iter()?.enumerate() {
         let (address, account) = entry?;
+        chunk_byte_size += address.len() + account.len();
         let (address, _) = Address::from_compact(address.as_slice(), address.len());
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
 
-        // Add to prefix sets
-        let hashed_address = keccak256(address);
-        prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-        // Add storage keys to prefix sets if storage exists
-        if let Some(ref storage) = account.storage {
-            for key in storage.keys() {
-                let hashed_key = keccak256(key);
-                prefix_sets
-                    .storage_prefix_sets
-                    .entry(hashed_address)
-                    .or_default()
-                    .insert(Nibbles::unpack(hashed_key));
-            }
-        }
-
         accounts.push((address, account));
 
-        if (index > 0 && index.is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)) ||
+        if chunk_byte_size >= DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK ||
             index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
@@ -818,6 +658,7 @@ where
             )?;
 
             accounts.clear();
+            chunk_byte_size = 0;
         }
     }
     Ok(())
@@ -1051,7 +892,6 @@ mod tests {
             )
         };
 
-        #[cfg(feature = "rocksdb")]
         {
             let settings = factory.cached_storage_settings();
             let rocksdb = factory.rocksdb_provider();
@@ -1076,13 +916,6 @@ mod tests {
             } else {
                 collect_from_mdbx(&factory)
             };
-            assert_eq!(accounts, expected_accounts);
-            assert_eq!(storages, expected_storages);
-        }
-
-        #[cfg(not(feature = "rocksdb"))]
-        {
-            let (accounts, storages) = collect_from_mdbx(&factory);
             assert_eq!(accounts, expected_accounts);
             assert_eq!(storages, expected_storages);
         }

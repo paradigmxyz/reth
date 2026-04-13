@@ -51,15 +51,12 @@ jobs:
       - name: Run execution stage
         run: |
           reth stage run execution --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run account-hashing stage
-        run: |
-          reth stage run account-hashing --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run storage hashing stage
-        run: |
-          reth stage run storage-hashing --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run hashing stage
-        run: |
-          reth stage run hashing --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      # NOTE: account-hashing, storage-hashing, and hashing stages are omitted.
+      # With storage v2 (now default), these stages are no-ops because the
+      # execution stage writes directly to HashedAccounts/HashedStorages.
+      # Running them here is harmful: `stage run` unwinds before executing,
+      # and the unwind reverts the hashed state that execution wrote, but
+      # the no-op execute never restores it — causing merkle to fail.
       - name: Run merkle stage
         run: |
           reth stage run merkle --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints

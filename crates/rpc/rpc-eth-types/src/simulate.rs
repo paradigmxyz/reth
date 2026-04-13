@@ -6,8 +6,8 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::precompiles::PrecompilesMap;
-use alloy_network::TransactionBuilder;
+use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
+use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
@@ -47,6 +47,9 @@ pub enum EthSimulateError {
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Number of simulated blocks exceeds the configured client limit.
+    #[error("too many blocks")]
+    TooManyBlocks,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
@@ -116,7 +119,7 @@ impl EthSimulateError {
             Self::BlockTimestampInvalid { .. } => -38021,
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
-            Self::GasLimitReached => -38026,
+            Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::NotAPrecompile(_) => -32000,
         }
     }
@@ -195,12 +198,13 @@ where
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
-        builder
-            .execute_transaction_with_result_closure(tx, |result| results.push(result.clone()))?;
+        builder.execute_transaction_with_result_closure(tx, |result| {
+            results.push(result.result().result.clone())
+        })?;
     }
 
     // Pass noop provider to skip state root calculations.
-    let result = builder.finish(NoopProvider::default())?;
+    let result = builder.finish(NoopProvider::default(), None)?;
 
     Ok((result, results))
 }
@@ -303,7 +307,6 @@ where
         let call = match result {
             ExecutionResult::Halt { reason, gas, .. } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
-                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -319,7 +322,6 @@ where
             }
             ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
-                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
@@ -333,33 +335,29 @@ where
                     ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas, logs, .. } =>
-            {
-                #[allow(clippy::needless_update)]
-                SimCallResult {
-                    return_data: output.into_data(),
-                    error: None,
-                    gas_used: gas.used(),
-                    logs: logs
-                        .into_iter()
-                        .map(|log| {
-                            log_index += 1;
-                            alloy_rpc_types_eth::Log {
-                                inner: log,
-                                log_index: Some(log_index - 1),
-                                transaction_index: Some(index as u64),
-                                transaction_hash: Some(*tx.tx_hash()),
-                                block_hash: Some(block.hash()),
-                                block_number: Some(block.header().number()),
-                                block_timestamp: Some(block.header().timestamp()),
-                                ..Default::default()
-                            }
-                        })
-                        .collect(),
-                    status: true,
-                    ..Default::default()
-                }
-            }
+            ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
+                return_data: output.into_data(),
+                error: None,
+                gas_used: gas.used(),
+                logs: logs
+                    .into_iter()
+                    .map(|log| {
+                        log_index += 1;
+                        alloy_rpc_types_eth::Log {
+                            inner: log,
+                            log_index: Some(log_index - 1),
+                            transaction_index: Some(index as u64),
+                            transaction_hash: Some(*tx.tx_hash()),
+                            block_hash: Some(block.hash()),
+                            block_number: Some(block.header().number()),
+                            block_timestamp: Some(block.header().timestamp()),
+                            ..Default::default()
+                        }
+                    })
+                    .collect(),
+                status: true,
+                ..Default::default()
+            },
         };
 
         calls.push(call);

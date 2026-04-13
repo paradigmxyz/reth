@@ -17,6 +17,8 @@ pub mod download;
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
+/// Traits for implementing P2P block access lists clients.
+pub mod block_access_lists;
 /// Traits for implementing P2P receipt clients.
 pub mod receipts;
 
@@ -52,6 +54,7 @@ pub mod snap;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use block_access_lists::client::BlockAccessListsClient;
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
 pub use receipts::client::ReceiptsClient;

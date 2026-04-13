@@ -8,15 +8,16 @@ use crate::{
     PayloadJob,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::BlockTimestamp;
+use alloy_primitives::{BlockTimestamp, B256};
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
+use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
-use reth_primitives_traits::NodePrimitives;
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
-    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -28,7 +29,7 @@ use tokio::sync::{
     watch,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, debug_span, info, trace, warn, Span};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
 
@@ -84,12 +85,7 @@ where
     ) -> Option<Result<u64, PayloadBuilderError>> {
         self.inner.payload_timestamp(id).await
     }
-}
 
-impl<T> PayloadStore<T>
-where
-    T: PayloadTypes,
-{
     /// Create a new instance
     pub fn new(inner: PayloadBuilderHandle<T>) -> Self {
         Self { inner: Arc::new(inner) }
@@ -128,10 +124,12 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Returns a receiver that will receive the payload id.
     pub fn send_new_payload(
         &self,
-        attr: T::PayloadBuilderAttributes,
+        input: BuildNewPayload<T::PayloadAttributes>,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
+        let span = debug_span!(parent: Span::current(), "payload_job");
+        let _ =
+            self.to_service.send(PayloadServiceCommand::BuildNewPayload(input.into(), span, tx));
         rx
     }
 
@@ -158,6 +156,17 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
             Ok(fut) => Some(fut.await),
             Err(e) => Some(Err(e.into())),
         }
+    }
+
+    /// Same as [`Self::resolve_kind`] but returns the underlying future.
+    pub async fn resolve_kind_fut(
+        &self,
+        id: PayloadId,
+        kind: PayloadKind,
+    ) -> Result<Option<PayloadFuture<T::BuiltPayload>>, PayloadBuilderError> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx))?;
+        rx.await.map_err(Into::into)
     }
 
     /// Sends a message to the service to subscribe to payload events.
@@ -204,12 +213,14 @@ pub struct PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
-    /// All active payload jobs.
-    payload_jobs: Vec<(Gen::Job, PayloadId)>,
+    /// All active payload jobs, each accompanied by its id and the caller's tracing span
+    /// propagated across the channel so that poll and resolve work appears as children of the
+    /// original Engine API request.
+    payload_jobs: Vec<(Gen::Job, PayloadId, Span)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.
@@ -235,7 +246,7 @@ impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [`PayloadBuilderHandle`] to interact
@@ -279,7 +290,7 @@ where
 
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
-        self.payload_jobs.iter().any(|(_, job_id)| *job_id == id)
+        self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id)
     }
 
     /// Returns the best payload for the given identifier that has been built so far.
@@ -287,8 +298,8 @@ where
         let res = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.best_payload().map(|p| p.into()));
+            .find(|(_, job_id, _)| *job_id == id)
+            .map(|(j, _, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
             self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
@@ -303,20 +314,22 @@ where
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
+        let start = Instant::now();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
         if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
             *cached == id
         {
+            self.metrics.resolve_duration_seconds.record(start.elapsed());
             return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
         }
 
-        let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
+        let job = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
         let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
 
         if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id) = self.payload_jobs.swap_remove(job);
+            let (_, id, _) = self.payload_jobs.swap_remove(job);
             debug!(target: "payload_builder", %id, "terminated resolved job");
         }
 
@@ -328,6 +341,7 @@ where
 
         let fut = async move {
             let res = fut.await;
+            resolved_metrics.resolve_duration_seconds.record(start.elapsed());
             if let Ok(payload) = &res {
                 if payload_events.receiver_count() > 0 {
                     payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
@@ -345,15 +359,7 @@ where
 
         Some(Box::pin(fut))
     }
-}
 
-impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
-where
-    T: PayloadTypes,
-    Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
-{
     /// Returns the payload timestamp for the given payload.
     fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
         if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow() &&
@@ -365,8 +371,8 @@ where
         let timestamp = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.payload_timestamp());
+            .find(|(_, job_id, _)| *job_id == id)
+            .map(|(j, _, _)| j.payload_timestamp());
 
         if timestamp.is_none() {
             trace!(target: "payload_builder", %id, "no matching payload job found to get timestamp for");
@@ -383,7 +389,7 @@ where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
+    Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
     type Output = ();
@@ -400,10 +406,14 @@ where
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
             for idx in (0..this.payload_jobs.len()).rev() {
-                let (mut job, id) = this.payload_jobs.swap_remove(idx);
+                let (mut job, id, job_span) = this.payload_jobs.swap_remove(idx);
 
-                // drain better payloads from the job
-                match job.poll_unpin(cx) {
+                let poll_result = {
+                    let _entered = job_span.enter();
+                    job.poll_unpin(cx)
+                };
+
+                match poll_result {
                     Poll::Ready(Ok(_)) => {
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                         trace!(target: "payload_builder", %id, "payload job finished");
@@ -414,8 +424,7 @@ where
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
                     Poll::Pending => {
-                        // still pending, put it back
-                        this.payload_jobs.push((job, id));
+                        this.payload_jobs.push((job, id, job_span));
                     }
                 }
             }
@@ -426,24 +435,45 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(attr, tx) => {
-                        let id = attr.payload_id();
+                    PayloadServiceCommand::BuildNewPayload(input, job_span, tx) => {
+                        let id = input.payload_id();
                         let mut res = Ok(id);
+                        let parent = input.parent_hash;
 
                         if this.contains_payload(id) {
-                            debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
+                            debug!(target: "payload_builder", %id, %parent, "Payload job already in progress, ignoring.");
                         } else {
-                            // no job for this payload yet, create one
-                            let parent = attr.parent();
-                            match this.generator.new_payload_job(attr.clone()) {
+                            let start = Instant::now();
+                            let attributes = input.attributes.clone();
+                            let job_result = {
+                                let _entered = job_span.enter();
+                                this.generator.new_payload_job(*input, id)
+                            };
+
+                            match job_result {
                                 Ok(job) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
                                     info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
-                                    this.payload_jobs.push((job, id));
-                                    this.payload_events.send(Events::Attributes(attr)).ok();
+                                    this.payload_jobs.push((job, id, job_span));
+                                    this.payload_events.send(Events::Attributes(attributes)).ok();
+
+                                    // Clear stale cached payload for this id so
+                                    // resolve() never returns an outdated result
+                                    // from a previous job with the same id.
+                                    if this
+                                        .cached_payload_rx
+                                        .borrow()
+                                        .as_ref()
+                                        .is_some_and(|(cached_id, _, _)| *cached_id == id)
+                                    {
+                                        trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
+                                        let _ = this.cached_payload_tx.send(None);
+                                    }
                                 }
                                 Err(err) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
                                     this.metrics.inc_failed_jobs();
                                     warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
                                     res = Err(err);
@@ -451,7 +481,6 @@ where
                             }
                         }
 
-                        // return the id of the payload
                         let _ = tx.send(res);
                     }
                     PayloadServiceCommand::BestPayload(id, tx) => {
@@ -479,10 +508,15 @@ where
 }
 
 /// Message type for the [`PayloadBuilderService`].
+#[derive(derive_more::Debug)]
 pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Start building a new payload.
+    ///
+    /// Carries the caller's [`Span`] so the service can parent payload-building work under the
+    /// originating Engine API trace.
     BuildNewPayload(
-        T::PayloadBuilderAttributes,
+        Box<BuildNewPayload<T::PayloadAttributes>>,
+        Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
     /// Get the best payload so far
@@ -493,29 +527,30 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     Resolve(
         PayloadId,
         /* kind: */ PayloadKind,
-        oneshot::Sender<Option<PayloadFuture<T::BuiltPayload>>>,
+        #[debug(skip)] oneshot::Sender<Option<PayloadFuture<T::BuiltPayload>>>,
     ),
     /// Payload service events
     Subscribe(oneshot::Sender<broadcast::Receiver<Events<T>>>),
 }
 
-impl<T> fmt::Debug for PayloadServiceCommand<T>
-where
-    T: PayloadTypes,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BuildNewPayload(f0, f1) => {
-                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
-            }
-            Self::BestPayload(f0, f1) => {
-                f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
-            }
-            Self::PayloadTimestamp(f0, f1) => {
-                f.debug_tuple("PayloadTimestamp").field(&f0).field(&f1).finish()
-            }
-            Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),
-            Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
-        }
+/// A request to build a new payload.
+#[derive(Debug)]
+pub struct BuildNewPayload<T> {
+    /// The attributes for the new payload
+    pub attributes: T,
+    /// The parent hash of the new payload
+    pub parent_hash: B256,
+    /// Optional execution cache to use for the payload.
+    ///
+    /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
+    pub cache: Option<SavedCache>,
+    /// Optional handle to a background sparse trie task.
+    pub trie_handle: Option<StateRootHandle>,
+}
+
+impl<T: PayloadAttributes> BuildNewPayload<T> {
+    /// Returns the payload id for the new payload.
+    pub fn payload_id(&self) -> PayloadId {
+        self.attributes.payload_id(&self.parent_hash)
     }
 }
